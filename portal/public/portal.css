@@ -440,6 +440,11 @@ input {
 .toolbox-card:hover .toolbox-card-arrow { gap: 8px; }
 
 /* Proxied toolbox sub-pages (undercut / company) */
+body.toolbox-proxied {
+    background: var(--bg);
+    color: var(--text);
+}
+
 body.toolbox-proxied .app {
     max-width: 920px;
     padding-top: 16px;
