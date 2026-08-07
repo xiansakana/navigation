@@ -3,6 +3,7 @@ import TaskItem from 'https://esm.sh/@tiptap/extension-task-item@2.11.5';
 import { ToggleBlock, insertToggleBlock } from './toggle-block.js';
 import { NotesCodeBlock, insertCodeBlock } from './code-block.js';
 import { NotesImage } from './image-block.js';
+import { openContextMenu } from './context-menu.js';
 
 const SLASH_COMMANDS = [
   { id: 'paragraph', label: '正文', hint: '普通文本段落', icon: '¶', keywords: ['text', '段落', '正文'] },
@@ -18,6 +19,15 @@ const SLASH_COMMANDS = [
   { id: 'image', label: '图片', hint: '上传或插入图片', icon: '🖼', keywords: ['image', '图片', 'photo'] },
   { id: 'hr', label: '分隔线', hint: '水平分割线', icon: '—', keywords: ['divider', '分割'] },
   { id: 'noteRef', label: '块引用', hint: '链接到其他笔记', icon: '🔗', keywords: ['link', '引用', 'ref'] }
+];
+
+const INSERT_MENU_ITEMS = [
+  { id: 'paragraph', label: '插入正文', icon: '¶' },
+  { id: 'h2', label: '插入标题', icon: 'H2' },
+  { id: 'codeBlock', label: '插入代码块', icon: '{ }' },
+  { id: 'image', label: '插入图片', icon: '🖼' },
+  { id: 'bulletList', label: '插入列表', icon: '•' },
+  { id: 'toggle', label: '插入折叠块', icon: '▸' }
 ];
 
 const BLOCK_ACTIONS = [
@@ -357,6 +367,75 @@ export function setupBlockEditor(editor, opts) {
     hideMention();
   }
 
+  function runBlockMenuAction(actionId, blockPos) {
+    if (actionId === 'duplicate') duplicateBlock(editor, blockPos);
+    else if (actionId === 'delete') deleteBlock(editor, blockPos);
+    else if (actionId === 'addBelow') addBlockBelow(editor, blockPos);
+    else {
+      editor.chain().focus().setTextSelection(blockPos + 1).run();
+      runBlockCommand(editor, actionId, opts);
+    }
+  }
+
+  function blockMenuContextItems() {
+    return BLOCK_ACTIONS.map(function(action) {
+      if (action.id === 'divider') return { divider: true };
+      return {
+        id: action.id,
+        label: action.label,
+        icon: action.icon,
+        danger: action.danger
+      };
+    });
+  }
+
+  function showEditorContextMenu(e) {
+    const target = e.target;
+    if (target.closest('.notes-context-menu') || target.closest('.notes-slash-menu')
+      || target.closest('.notes-mention-menu') || target.closest('.notes-block-menu')
+      || target.closest('.notes-block-handle')) return;
+
+    const inEditor = target.closest('.ProseMirror') || target.closest('.notes-editor-shell');
+    if (!inEditor) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const view = editor.view;
+    const coords = view.posAtCoords({ left: e.clientX, top: e.clientY });
+    const block = coords ? getTopLevelBlock(view, coords.pos) : null;
+    let items = [];
+    let blockPos = null;
+
+    if (block) {
+      blockPos = block.pos;
+      editor.chain().focus().setTextSelection(block.pos + 1).run();
+      items = blockMenuContextItems();
+    } else {
+      items = INSERT_MENU_ITEMS.slice();
+    }
+
+    const pageItems = opts.getPageMenuItems?.() || [];
+    if (pageItems.length) items = items.concat(pageItems);
+
+    openContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items: items,
+      onSelect: function(id) {
+        if (blockPos != null && BLOCK_ACTIONS.some(function(a) { return a.id === id; })) {
+          runBlockMenuAction(id, blockPos);
+          return;
+        }
+        if (INSERT_MENU_ITEMS.some(function(a) { return a.id === id; })) {
+          runBlockCommand(editor, id, opts);
+          return;
+        }
+        opts.onPageMenuAction?.(id);
+      }
+    });
+  }
+
   function showBlockMenu(blockPos, anchorRect) {
     blockMenuPos = blockPos;
     const list = blockMenuEl.querySelector('.notes-block-menu-list');
@@ -551,6 +630,7 @@ export function setupBlockEditor(editor, opts) {
 
   shell.addEventListener('pointermove', onPointerMove);
   shell.addEventListener('mouseleave', onShellLeave);
+  shell.addEventListener('contextmenu', showEditorContextMenu);
 
   document.addEventListener('mousedown', function(e) {
     if (!shell.contains(e.target)) {
@@ -636,6 +716,8 @@ export function setupBlockEditor(editor, opts) {
     editor.view.dom.removeEventListener('keydown', onMenuKeydown);
     shell.removeEventListener('pointermove', onPointerMove);
     shell.removeEventListener('mouseleave', onShellLeave);
+    shell.removeEventListener('contextmenu', showEditorContextMenu);
+    if (editor.view?.dom) editor.view.dom.removeEventListener('contextmenu', showEditorContextMenu);
     handleEl.remove();
     slashEl.remove();
     mentionEl.remove();

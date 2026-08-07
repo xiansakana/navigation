@@ -51,6 +51,40 @@ body {
   pointer-events: none;
 }
 
+.notes-app.notes-sidebar-collapsed .notes-sidebar-resizer {
+  display: none;
+}
+
+.notes-sidebar-resizer {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  position: relative;
+  z-index: 6;
+  margin-left: -2px;
+  touch-action: none;
+}
+
+.notes-sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 -3px;
+}
+
+.notes-sidebar-resizer:hover,
+.notes-sidebar-resizer.is-active {
+  background: rgba(91, 156, 255, 0.35);
+}
+
+body.notes-sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.notes-sidebar-resizing * {
+  cursor: col-resize !important;
+}
+
 .notes-main {
   flex: 1;
   min-width: 0;
@@ -469,13 +503,9 @@ body.has-navbar .notes-app {
   border-top: 1px solid var(--notes-border);
 }
 
-.notes-tree-label {
+.notes-tree-toolbar .notes-dropdown-host--grow {
   flex: 1;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--notes-muted);
+  min-width: 0;
 }
 
 .notes-select-sm {
