@@ -15,7 +15,10 @@ import {
     canViewService,
     canEditService,
     canViewAdmin,
-    hasPermission
+    hasPermission,
+    loadRbac,
+    getStockManagePrefs,
+    updateUserPrefs
 } from './rbac.js';
 import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket } from './proxy.js';
 import { handleAdminApi } from './admin-api.js';
@@ -124,13 +127,42 @@ function publicServices(session, userAgent) {
 
 async function handleApi(req, res, url, session) {
     if (req.method === 'GET' && url.pathname === '/api/me') {
+        var rbac = loadRbac(config);
+        var stockManagePrefs = getStockManagePrefs(rbac, session.userId);
         return json(res, 200, {
             ok: true,
             username: session.username,
             userId: session.userId,
             permissions: session.permissions,
-            canAdmin: canViewAdmin(session.permissions)
+            canAdmin: canViewAdmin(session.permissions),
+            prefs: { stockManage: stockManagePrefs }
         });
+    }
+
+    if (req.method === 'PUT' && url.pathname === '/api/me/prefs') {
+        if (!canViewService(session.permissions, 'stock-manage')) {
+            return json(res, 403, { ok: false, error: '无权保存偏好设置' });
+        }
+        try {
+            var body = await readJson(req);
+            var rbacData = loadRbac(config);
+            var patch = {};
+            if (body.stockManage && typeof body.stockManage === 'object') {
+                var sm = body.stockManage;
+                var stockPatch = {};
+                if (typeof sm.dashboardVisible === 'boolean') stockPatch.dashboardVisible = sm.dashboardVisible;
+                if (typeof sm.pnlVisible === 'boolean') stockPatch.pnlVisible = sm.pnlVisible;
+                if (sm.colVis && typeof sm.colVis === 'object') stockPatch.colVis = sm.colVis;
+                patch.stockManage = stockPatch;
+            }
+            updateUserPrefs(rbacData, session.userId, patch);
+            return json(res, 200, {
+                ok: true,
+                prefs: { stockManage: getStockManagePrefs(rbacData, session.userId) }
+            });
+        } catch (err) {
+            return json(res, 400, { ok: false, error: err.message });
+        }
     }
 
     if (req.method === 'GET' && url.pathname === '/api/services') {
@@ -177,6 +209,7 @@ async function handleLoginApi(req, res) {
 function isPortalApi(pathname, method) {
     if (pathname === '/api/login' && method === 'POST') return true;
     if (pathname === '/api/me' && method === 'GET') return true;
+    if (pathname === '/api/me/prefs' && method === 'PUT') return true;
     if (pathname === '/api/services' && method === 'GET') return true;
     if (pathname === '/api/menus' && method === 'GET') return true;
     if (pathname === '/api/logout' && method === 'POST') return true;

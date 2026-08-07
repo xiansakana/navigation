@@ -35,19 +35,26 @@ function canEdit(resource) {
 
 function buildPermissionPairs() {
     var map = {};
+    var singles = [];
     (state.rbac.permissions || []).forEach(function(perm) {
+        if (perm.feature) {
+            singles.push(perm);
+            return;
+        }
         var key = perm.serviceId
             ? 'service:' + perm.serviceId
             : (perm.resource || perm.id.replace(/:(view|edit)$/, ''));
         if (!map[key]) {
-            map[key] = { group: perm.group || '其他', title: '', view: null, edit: null };
+            map[key] = { group: perm.group || '其他', title: '', view: null, edit: null, single: false };
         }
         if (perm.action === 'view') {
             map[key].view = perm;
-            map[key].title = perm.name.replace(/^查看/, '').trim() || perm.name;
+            map[key].title = perm.name.replace(/^查看[「"]?/, '').replace(/[」"]?$/, '').trim() || perm.name;
         } else if (perm.action === 'edit') {
             map[key].edit = perm;
-            if (!map[key].title) map[key].title = perm.name.replace(/^编辑/, '').trim() || perm.name;
+            if (!map[key].title) {
+                map[key].title = perm.name.replace(/^编辑[「"]?/, '').replace(/[」"]?$/, '').trim() || perm.name;
+            }
         }
     });
     var groups = {};
@@ -55,6 +62,17 @@ function buildPermissionPairs() {
         var item = map[key];
         if (!groups[item.group]) groups[item.group] = [];
         groups[item.group].push(item);
+    });
+    singles.forEach(function(perm) {
+        var group = perm.group || '其他';
+        if (!groups[group]) groups[group] = [];
+        groups[group].push({
+            group: group,
+            title: perm.name,
+            view: perm.action === 'view' ? perm : null,
+            edit: perm.action === 'edit' ? perm : null,
+            single: true
+        });
     });
     return groups;
 }
@@ -200,9 +218,17 @@ function openRoleDialog(role) {
             var isAdminRole = role && role.id === 'role_admin';
             var viewChecked = isAdminRole || rolePerms.includes('*') || (item.view && rolePerms.includes(item.view.id));
             var editChecked = isAdminRole || rolePerms.includes('*') || (item.edit && rolePerms.includes(item.edit.id));
-            row.innerHTML = '<span class="admin-perm-pair-title">' + esc(item.title) + '</span>'
-                + (item.view ? '<label class="admin-check"><input type="checkbox" name="perm" value="' + esc(item.view.id) + '" ' + (viewChecked ? 'checked' : '') + (isAdminRole ? ' disabled' : '') + '> 查看</label>' : '')
-                + (item.edit ? '<label class="admin-check"><input type="checkbox" name="perm" value="' + esc(item.edit.id) + '" ' + (editChecked ? 'checked' : '') + (isAdminRole ? ' disabled' : '') + '> 编辑</label>' : '');
+            if (item.single && item.view && !item.edit) {
+                row.innerHTML = '<span class="admin-perm-pair-title">' + esc(item.title) + '</span>'
+                    + '<label class="admin-check"><input type="checkbox" name="perm" value="' + esc(item.view.id) + '" ' + (viewChecked ? 'checked' : '') + (isAdminRole ? ' disabled' : '') + '> 允许</label>';
+            } else if (item.single && item.edit && !item.view) {
+                row.innerHTML = '<span class="admin-perm-pair-title">' + esc(item.title) + '</span>'
+                    + '<label class="admin-check"><input type="checkbox" name="perm" value="' + esc(item.edit.id) + '" ' + (editChecked ? 'checked' : '') + (isAdminRole ? ' disabled' : '') + '> 允许</label>';
+            } else {
+                row.innerHTML = '<span class="admin-perm-pair-title">' + esc(item.title) + '</span>'
+                    + (item.view ? '<label class="admin-check"><input type="checkbox" name="perm" value="' + esc(item.view.id) + '" ' + (viewChecked ? 'checked' : '') + (isAdminRole ? ' disabled' : '') + '> 查看</label>' : '')
+                    + (item.edit ? '<label class="admin-check"><input type="checkbox" name="perm" value="' + esc(item.edit.id) + '" ' + (editChecked ? 'checked' : '') + (isAdminRole ? ' disabled' : '') + '> 编辑</label>' : '');
+            }
             box.appendChild(row);
         });
     });

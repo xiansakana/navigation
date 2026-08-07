@@ -6,6 +6,51 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RBAC_PATH = path.resolve(__dirname, '../data/rbac.json');
 
+var STOCK_MANAGE_SERVICE_ID = 'stock-manage';
+
+var STOCK_MANAGE_FEATURES = [
+    { feature: 'dashboard', name: '显示看板', action: 'view' },
+    { feature: 'pnl', name: '查询盈亏', action: 'view' },
+    { feature: 'pnl-toggle', name: '盈亏显隐', action: 'view' },
+    { feature: 'trades', name: '交易记录', action: 'view' },
+    { feature: 'columns', name: '列数据', action: 'view' },
+    { feature: 'export', name: '导出交易', action: 'view' },
+    { feature: 'import', name: '导入交易', action: 'edit' },
+    { feature: 'trade', name: '记一笔', action: 'edit' },
+    { feature: 'refresh', name: '刷新价格', action: 'edit' },
+    { feature: 'cash', name: '编辑现金', action: 'edit' },
+    { feature: 'meta', name: '编辑目标价/打分', action: 'edit' },
+    { feature: 'row-trade', name: '行内买卖/记录', action: 'edit' }
+];
+
+function stockManageFeaturePermissionId(feature, action) {
+    return 'service:' + STOCK_MANAGE_SERVICE_ID + ':' + feature + ':' + action;
+}
+
+function buildStockManagePermissions() {
+    return STOCK_MANAGE_FEATURES.map(function(item) {
+        return {
+            id: stockManageFeaturePermissionId(item.feature, item.action),
+            name: item.name,
+            group: '股票管理',
+            serviceId: STOCK_MANAGE_SERVICE_ID,
+            feature: item.feature,
+            action: item.action
+        };
+    });
+}
+
+function hasAnyStockManageFeaturePerm(userPerms) {
+    return (userPerms || []).some(function(p) {
+        if (!p.startsWith('service:' + STOCK_MANAGE_SERVICE_ID + ':')) return false;
+        if (p === serviceViewPermissionId(STOCK_MANAGE_SERVICE_ID)
+            || p === serviceEditPermissionId(STOCK_MANAGE_SERVICE_ID)) {
+            return false;
+        }
+        return /^service:stock-manage:[^:]+:(view|edit)$/.test(p);
+    });
+}
+
 var SYSTEM_PERMISSIONS = [
     { id: 'admin:access:view', name: '查看管理后台', group: '系统', action: 'view', resource: 'admin:access' },
     { id: 'admin:access:edit', name: '编辑管理后台', group: '系统', action: 'edit', resource: 'admin:access' },
@@ -149,6 +194,7 @@ function buildMenusFromServices(services, overrides) {
 
 function createDefaultRbac(config) {
     var servicePerms = buildServicePermissions(config.services);
+    var stockManagePerms = buildStockManagePermissions();
     var adminUser = config.auth || {};
     var pwd = createPasswordRecord(adminUser.password || 'change-me');
     return {
@@ -163,7 +209,8 @@ function createDefaultRbac(config) {
         }],
         roles: [defaultAdminRole(servicePerms), defaultUserRole()],
         menus: buildMenusFromServices(config.services, []),
-        permissions: SYSTEM_PERMISSIONS.concat(servicePerms)
+        permissions: SYSTEM_PERMISSIONS.concat(servicePerms).concat(stockManagePerms),
+        userPrefs: {}
     };
 }
 
@@ -204,8 +251,9 @@ function migrateRolePermissions(permissions) {
 
 export function syncRbacPermissions(data, config) {
     var servicePerms = buildServicePermissions(config.services);
+    var stockManagePerms = buildStockManagePermissions();
     var known = {};
-    SYSTEM_PERMISSIONS.concat(servicePerms).forEach(function(p) { known[p.id] = p; });
+    SYSTEM_PERMISSIONS.concat(servicePerms).concat(stockManagePerms).forEach(function(p) { known[p.id] = p; });
     (data.permissions || []).forEach(function(p) {
         if (!known[p.id]) known[p.id] = p;
     });
@@ -231,6 +279,7 @@ export function syncRbacPermissions(data, config) {
             if (!adminRole.permissions.includes(p.id)) adminRole.permissions.push(p.id);
         });
     }
+    if (!data.userPrefs) data.userPrefs = {};
     saveRbac(data);
     return data;
 }
@@ -330,6 +379,46 @@ export function canViewService(userPerms, serviceId) {
 
 export function canEditService(userPerms, serviceId) {
     return hasPermission(userPerms, serviceEditPermissionId(serviceId));
+}
+
+export function hasStockManageFeature(userPerms, feature, action) {
+    if (!feature) return true;
+    if ((userPerms || []).includes('*')) return true;
+    var fid = stockManageFeaturePermissionId(feature, action);
+    if (userPerms.includes(fid)) return true;
+    if (action === 'view') {
+        if (userPerms.includes(stockManageFeaturePermissionId(feature, 'edit'))) return true;
+    }
+    if (hasAnyStockManageFeaturePerm(userPerms)) return false;
+    if (action === 'edit' && canEditService(userPerms, STOCK_MANAGE_SERVICE_ID)) return true;
+    if (action === 'view' && canViewService(userPerms, STOCK_MANAGE_SERVICE_ID)) return true;
+    return false;
+}
+
+export function getStockManagePrefs(data, userId) {
+    var raw = ((data.userPrefs || {})[userId] || {}).stockManage || {};
+    return {
+        dashboardVisible: raw.dashboardVisible !== false,
+        colVis: raw.colVis && typeof raw.colVis === 'object' ? raw.colVis : null,
+        pnlVisible: raw.pnlVisible !== false
+    };
+}
+
+export function updateUserPrefs(data, userId, patch) {
+    if (!userId) throw new Error('无效用户');
+    if (!data.userPrefs) data.userPrefs = {};
+    var current = data.userPrefs[userId] || {};
+    var next = Object.assign({}, current);
+    Object.keys(patch || {}).forEach(function(key) {
+        if (patch[key] && typeof patch[key] === 'object' && !Array.isArray(patch[key])) {
+            next[key] = Object.assign({}, current[key] || {}, patch[key]);
+        } else {
+            next[key] = patch[key];
+        }
+    });
+    data.userPrefs[userId] = next;
+    saveRbac(data);
+    return next;
 }
 
 /** @deprecated use canViewService */
@@ -447,4 +536,11 @@ export function updateMenus(data, menus) {
     });
 }
 
-export { SYSTEM_PERMISSIONS, serviceViewPermissionId, serviceEditPermissionId, newId };
+export {
+    SYSTEM_PERMISSIONS,
+    STOCK_MANAGE_FEATURES,
+    serviceViewPermissionId,
+    serviceEditPermissionId,
+    stockManageFeaturePermissionId,
+    newId
+};

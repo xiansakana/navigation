@@ -9,7 +9,7 @@
 <body>
   <div class="sm-app" id="app">
 
-    <section class="sm-panel">
+    <section class="sm-panel" id="section-pnl">
       <div class="sm-panel-head sm-panel-head--pnl">
         <h2>查询盈亏</h2>
         <div class="sm-pnl-filter">
@@ -32,11 +32,17 @@
       <div id="pnl-chart"></div>
     </section>
 
-    <div class="sm-dashboard-block">
-      <label class="sm-toggle-row sm-dashboard-toggle">
-        <input type="checkbox" id="toggle-dashboard" checked>
-        <span>显示看板（总资产、市值、盈亏、当日盈亏、现金）</span>
-      </label>
+    <div class="sm-dashboard-block" id="section-dashboard">
+      <div class="sm-toggles">
+        <label class="sm-toggle-row sm-dashboard-toggle">
+          <input type="checkbox" id="toggle-dashboard" checked>
+          <span>显示看板（总资产、市值、盈亏、当日盈亏、现金）</span>
+        </label>
+        <label class="sm-toggle-row sm-pnl-visible-toggle">
+          <input type="checkbox" id="toggle-pnl-visible" checked>
+          <span>显示盈亏数据</span>
+        </label>
+      </div>
       <section id="dashboard" class="sm-dashboard"></section>
     </div>
 
