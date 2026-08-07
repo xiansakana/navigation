@@ -330,7 +330,7 @@ export function enrichHoldings(holdings, quotes, cash, meta = {}) {
   const totalAssets = totalMv + cash;
   rows.forEach((r) => {
     r.groupKey = (() => {
-      const manual = String(m[r.symbol]?.groupWith || '').trim().toUpperCase();
+      const manual = String(meta[r.symbol]?.groupWith || '').trim().toUpperCase();
       if (manual) return manual;
       const sym = String(r.symbol || '').trim().toUpperCase();
       if (r.type === 'option' || isOptionSymbol(sym)) {
@@ -339,7 +339,7 @@ export function enrichHoldings(holdings, quotes, cash, meta = {}) {
       }
       return sym;
     })();
-    r.groupWith = String(m[r.symbol]?.groupWith || '').trim();
+    r.groupWith = String(meta[r.symbol]?.groupWith || '').trim();
   });
   const groupSum = new Map();
   for (const r of rows) {
