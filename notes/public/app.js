@@ -670,7 +670,7 @@ function initEditor(content) {
     }
   });
 
-  codeLangBarCleanup = setupCodeLangBar($('note-editor-shell'), editor);
+  codeLangBarCleanup = setupCodeLangBar($('notes-toolbar'), editor);
 
   editor.view.dom.addEventListener('paste', onEditorPaste);
 
