@@ -44,6 +44,50 @@ let treeSortDropdown = null;
 let blockEditorCleanup = null;
 let noteTags = [];
 let sidebarCollapsed = localStorage.getItem('notes-sidebar-collapsed') === '1';
+let sidebarWidth = clampSidebarWidth(parseInt(localStorage.getItem('notes-sidebar-width') || '300', 10));
+
+function clampSidebarWidth(w) {
+  return Math.max(220, Math.min(480, w || 300));
+}
+
+function applySidebarWidth() {
+  document.documentElement.style.setProperty('--notes-sidebar-w', sidebarWidth + 'px');
+}
+
+function initSidebarResize() {
+  const resizer = $('sidebar-resizer');
+  if (!resizer) return;
+  let active = null;
+
+  function onPointerMove(e) {
+    if (!active) return;
+    const delta = e.clientX - active.startX;
+    sidebarWidth = clampSidebarWidth(active.startW + delta);
+    applySidebarWidth();
+  }
+
+  function onPointerUp(e) {
+    if (!active) return;
+    try { resizer.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    resizer.classList.remove('is-active');
+    document.body.classList.remove('notes-sidebar-resizing');
+    localStorage.setItem('notes-sidebar-width', String(sidebarWidth));
+    active = null;
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', onPointerUp);
+  }
+
+  resizer.addEventListener('pointerdown', function(e) {
+    if (e.button !== 0 || sidebarCollapsed) return;
+    e.preventDefault();
+    active = { startX: e.clientX, startW: sidebarWidth, pointerId: e.pointerId };
+    resizer.setPointerCapture(e.pointerId);
+    resizer.classList.add('is-active');
+    document.body.classList.add('notes-sidebar-resizing');
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
+  });
+}
 
 function collapsedStorageKey() {
   return 'notes-collapsed-' + (activeNotebookId || 'default');
@@ -338,7 +382,6 @@ function initDropdowns() {
   });
   treeSortDropdown = createDropdown($('tree-sort-dropdown'), {
     value: treeSort,
-    compact: true,
     items: [
       { value: 'updated', label: '最近更新' },
       { value: 'title', label: '按标题' }
@@ -603,7 +646,20 @@ function initEditor(content) {
         return n.notebookId === activeNotebookId && n.id !== activeNoteId;
       });
     },
-    insertNoteReference: insertNoteReference
+    insertNoteReference: insertNoteReference,
+    getPageMenuItems: function() {
+      if (!activeNoteId) return [];
+      return [
+        { divider: true },
+        { id: 'subpage', label: '新建子页面', icon: '📁' },
+        { id: 'duplicate', label: '复制页面', icon: '⎘' },
+        { id: 'export', label: '导出 Markdown', icon: '↓' },
+        { id: 'delete', label: '删除页面', icon: '🗑', danger: true }
+      ];
+    },
+    onPageMenuAction: function(id) {
+      runNoteMenuAction(id, activeNoteId);
+    }
   });
 
   editor.view.dom.addEventListener('paste', onEditorPaste);
@@ -1043,7 +1099,9 @@ window.addEventListener('beforeunload', function(e) {
 });
 
 initDropdowns();
+applySidebarWidth();
 applySidebarCollapsed();
+initSidebarResize();
 loadBootstrap().catch(function(err) {
   toastErr(err.message);
 });
