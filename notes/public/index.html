@@ -18,9 +18,9 @@
       </div>
 
       <div class="notes-sidebar-section">
-        <label class="notes-field-label" for="notebook-select">工作区</label>
+        <label class="notes-field-label">工作区</label>
         <div class="notes-notebook-row">
-          <select id="notebook-select" class="notes-select"></select>
+          <div id="notebook-dropdown" class="notes-dropdown-host"></div>
           <button type="button" id="btn-notebook-add" class="btn ghost notes-icon-btn" title="新建笔记本">+</button>
         </div>
         <div class="notes-notebook-actions">
@@ -35,9 +35,7 @@
           <input type="search" id="note-search" class="notes-search" placeholder="搜索笔记…">
         </div>
         <div class="notes-filter-row">
-          <select id="tag-filter" class="notes-select">
-            <option value="">全部标签</option>
-          </select>
+          <div id="tag-filter-dropdown" class="notes-dropdown-host notes-dropdown-host--grow"></div>
           <button type="button" id="btn-note-add" class="btn primary notes-btn-sm">新建</button>
           <button type="button" id="btn-import-md" class="btn ghost notes-btn-sm" title="导入 Markdown">导入</button>
           <input type="file" id="import-file" accept=".md,.markdown,.txt" hidden>
@@ -46,10 +44,7 @@
 
       <div class="notes-tree-toolbar">
         <span class="notes-tree-label">页面</span>
-        <select id="tree-sort" class="notes-select notes-select-sm" title="排序">
-          <option value="updated">最近更新</option>
-          <option value="title">按标题</option>
-        </select>
+        <div id="tree-sort-dropdown" class="notes-dropdown-host notes-dropdown-host--compact"></div>
         <button type="button" id="btn-tree-expand" class="btn ghost notes-icon-btn" title="全部展开">⤢</button>
         <button type="button" id="btn-tree-collapse" class="btn ghost notes-icon-btn" title="全部折叠">⤡</button>
       </div>
@@ -76,10 +71,13 @@
             <div class="notes-page-header">
               <input type="text" id="note-title" class="notes-title" placeholder="无标题" maxlength="200">
               <div class="notes-properties">
-                <label class="notes-property" for="note-tags">
+                <div class="notes-property notes-property--tags">
                   <span class="notes-property-label">标签</span>
-                  <input type="text" id="note-tags" class="notes-tags" placeholder="添加标签，逗号分隔">
-                </label>
+                  <div class="notes-tags-field" id="note-tags-field">
+                    <div id="note-tags-chips" class="notes-tags-chips"></div>
+                    <input type="text" id="note-tags-input" class="notes-tags-input" placeholder="添加标签，回车确认">
+                  </div>
+                </div>
                 <div id="save-status" class="notes-save-status">就绪</div>
               </div>
             </div>
@@ -102,6 +100,7 @@
                 <div class="notes-toolbar-group">
                   <button type="button" data-cmd="bulletList" class="btn ghost notes-tool" title="无序列表">•</button>
                   <button type="button" data-cmd="orderedList" class="btn ghost notes-tool" title="有序列表">1.</button>
+                  <button type="button" data-cmd="taskList" class="btn ghost notes-tool" title="待办清单">☑</button>
                   <button type="button" data-cmd="blockquote" class="btn ghost notes-tool" title="引用">❝</button>
                   <button type="button" data-cmd="codeBlock" class="btn ghost notes-tool" title="代码块">{ }</button>
                   <button type="button" data-cmd="hr" class="btn ghost notes-tool" title="分隔线">—</button>
@@ -123,7 +122,9 @@
             </div>
 
             <div class="notes-editor-body">
-              <div id="note-editor" class="notes-editor"></div>
+              <div class="notes-editor-shell" id="note-editor-shell">
+                <div id="note-editor" class="notes-editor"></div>
+              </div>
               <aside id="backlinks-panel" class="notes-backlinks hidden">
                 <h3>反向链接</h3>
                 <ul id="backlinks-list"></ul>
