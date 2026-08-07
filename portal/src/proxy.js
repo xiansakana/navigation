@@ -72,8 +72,8 @@ function injectPortalShell(html, service) {
     }
     var portalCss = '<link rel="stylesheet" href="/portal.css">';
     if (service.injectBar === false) {
-        if (!baseTag && !portalCss) return html;
-        return html.replace('<head>', '<head>' + baseTag + portalCss);
+        if (!baseTag) return html;
+        return html.replace('<head>', '<head>' + baseTag);
     }
     var title = service.title || '服务';
     var isToolbox = service.path.startsWith('/torn-toolbox/');
