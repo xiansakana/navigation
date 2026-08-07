@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, createStore, resolveDataPath } from './storage.js';
-import { normalizeNote, noteSummary, buildNoteTree } from './notes-util.js';
+import { normalizeNote, noteSummary, buildNoteTree, buildEnrichedContext, notebookStats, extractPlainText } from './notes-util.js';
 import { getBacklinksForNote } from './links.js';
 import { searchNotes, collectTags } from './search.js';
 import { tiptapToMarkdown, stripLeadingTitle, resolveRefsFromMarkdown } from './markdown.js';
@@ -165,7 +165,13 @@ app.get('/api/notes/tree', (req, res) => {
   const data = store.read();
   const notebookId = req.query.notebookId;
   if (!notebookId) return res.status(400).json({ ok: false, error: '缺少 notebookId' });
-  res.json({ ok: true, tree: buildNoteTree(data.notes, notebookId) });
+  const sort = req.query.sort === 'title' ? 'title' : 'updated';
+  const ctx = buildEnrichedContext(data.notes, notebookId);
+  res.json({
+    ok: true,
+    tree: buildNoteTree(data.notes, notebookId, ctx, sort),
+    stats: notebookStats(data.notes, notebookId)
+  });
 });
 
 app.get('/api/notes', (req, res) => {

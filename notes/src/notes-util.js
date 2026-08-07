@@ -1,3 +1,5 @@
+import { computeBacklinks } from './links.js';
+
 export function normalizeNote(note) {
   return {
     id: note.id,
@@ -25,6 +27,74 @@ export function noteSummary(note) {
   };
 }
 
+export function buildNoteTree(notes, notebookId, enrichCtx, sortMode) {
+  if (enrichCtx === undefined) enrichCtx = null;
+  if (sortMode === undefined) sortMode = 'updated';
+  const items = notes
+    .filter(function(n) { return n.notebookId === notebookId; })
+    .map(function(n) {
+      return enrichCtx ? enrichNoteSummaryLite(n, enrichCtx) : noteSummary(n);
+    });
+
+  function enrichNoteSummaryLite(note, ctx) {
+    const directChildren = ctx.directChildren.get(note.id) || 0;
+    return {
+      ...noteSummary(note),
+      preview: makePreview(note.content),
+      wordCount: countWords(note.content),
+      childCount: directChildren,
+      descendantCount: ctx.totalChildren.get(note.id) || 0,
+      backlinkCount: ctx.backlinkCounts[note.id] || 0,
+      hasChildren: directChildren > 0
+    };
+  }
+
+  const byParent = new Map();
+  items.forEach(function(note) {
+    const key = note.parentId || '';
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(note);
+  });
+
+  function sortList(list) {
+    const mode = sortMode === 'title' ? 'title' : 'updated';
+    list.sort(function(a, b) {
+      if (mode === 'title') {
+        return String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN');
+      }
+      return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
+    });
+  }
+
+  function attach(parentId, depth) {
+    const list = byParent.get(parentId || '') || [];
+    sortList(list);
+    return list.map(function(note) {
+      return {
+        ...note,
+        depth,
+        children: attach(note.id, depth + 1)
+      };
+    });
+  }
+  return attach('', 0);
+}
+
+function makePreview(content) {
+  const text = extractPlainText(content);
+  if (!text) return '';
+  if (text.length <= 72) return text;
+  return text.slice(0, 72) + '…';
+}
+
+function countWords(content) {
+  const text = extractPlainText(content);
+  if (!text) return 0;
+  const cjk = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return cjk + Math.max(0, words - 1);
+}
+
 export function extractPlainText(content) {
   if (!content) return '';
   const parts = [];
@@ -41,29 +111,54 @@ function walkNodes(node, parts) {
   if (Array.isArray(node.content)) node.content.forEach(function(child) { walkNodes(child, parts); });
 }
 
-export function buildNoteTree(notes, notebookId) {
-  const items = notes
-    .filter(function(n) { return n.notebookId === notebookId; })
-    .map(noteSummary);
-  const byParent = new Map();
-  items.forEach(function(note) {
-    const key = note.parentId || '';
-    if (!byParent.has(key)) byParent.set(key, []);
-    byParent.get(key).push(note);
+export function buildEnrichedContext(notes, notebookId) {
+  const backlinkMap = computeBacklinks(notes);
+  const backlinkCounts = {};
+  Object.keys(backlinkMap).forEach(function(id) {
+    backlinkCounts[id] = backlinkMap[id].length;
   });
-  byParent.forEach(function(list) {
-    list.sort(function(a, b) {
-      return String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN');
-    });
+  const counts = childCounts(notes, notebookId);
+  return {
+    directChildren: counts.direct,
+    totalChildren: counts.total,
+    backlinkCounts
+  };
+}
+
+function childCounts(notes, notebookId) {
+  const direct = new Map();
+  const total = new Map();
+  const nbNotes = notes.filter(function(n) { return n.notebookId === notebookId; });
+
+  nbNotes.forEach(function(note) {
+    if (note.parentId) {
+      direct.set(note.parentId, (direct.get(note.parentId) || 0) + 1);
+    }
   });
-  function attach(parentId, depth) {
-    return (byParent.get(parentId || '') || []).map(function(note) {
-      return {
-        ...note,
-        depth,
-        children: attach(note.id, depth + 1)
-      };
+
+  function totalDescendants(id) {
+    if (total.has(id)) return total.get(id);
+    let count = 0;
+    nbNotes.forEach(function(n) {
+      if (n.parentId === id) count += 1 + totalDescendants(n.id);
     });
+    total.set(id, count);
+    return count;
   }
-  return attach('', 0);
+
+  nbNotes.forEach(function(n) { totalDescendants(n.id); });
+  return { direct, total };
+}
+
+export function notebookStats(notes, notebookId) {
+  const list = notes.filter(function(n) { return n.notebookId === notebookId; });
+  const tagSet = new Set();
+  list.forEach(function(n) {
+    (n.tags || []).forEach(function(t) { if (t) tagSet.add(t); });
+  });
+  return {
+    noteCount: list.length,
+    tagCount: tagSet.size,
+    totalWords: list.reduce(function(sum, n) { return sum + countWords(n.content); }, 0)
+  };
 }

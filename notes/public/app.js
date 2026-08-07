@@ -31,6 +31,27 @@ let saving = false;
 let dirty = false;
 let suppressEditorUpdate = false;
 let searchResults = null;
+let sidebarStats = { noteCount: 0, tagCount: 0, totalWords: 0 };
+let treeSort = localStorage.getItem('notes-tree-sort') || 'updated';
+let collapsedIds = new Set();
+
+function collapsedStorageKey() {
+  return 'notes-collapsed-' + (activeNotebookId || 'default');
+}
+
+function loadCollapsed() {
+  try {
+    collapsedIds = new Set(JSON.parse(localStorage.getItem(collapsedStorageKey()) || '[]'));
+  } catch {
+    collapsedIds = new Set();
+  }
+}
+
+function saveCollapsed() {
+  try {
+    localStorage.setItem(collapsedStorageKey(), JSON.stringify([...collapsedIds]));
+  } catch { /* ignore */ }
+}
 
 async function api(path, options) {
   const resp = await fetch('./api/' + path, options || {});
@@ -51,6 +72,69 @@ function formatTime(iso) {
   });
 }
 
+function formatRelative(iso) {
+  if (!iso) return '';
+  const diff = Date.now() - new Date(iso).getTime();
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return '刚刚';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return min + ' 分钟前';
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return hr + ' 小时前';
+  const day = Math.floor(hr / 24);
+  if (day === 1) return '昨天';
+  if (day < 7) return day + ' 天前';
+  return formatTime(iso);
+}
+
+function renderSidebarStats() {
+  const el = $('sidebar-stats');
+  if (!el) return;
+  const s = sidebarStats;
+  el.innerHTML = '<span>' + s.noteCount + ' 篇文档</span>'
+    + ' · <span>' + s.tagCount + ' 个标签</span>'
+    + ' · <span>' + s.totalWords.toLocaleString() + ' 字</span>';
+}
+
+function noteIcon(node) {
+  if (node.hasChildren) return '📁';
+  if ((node.tags || []).length) return '🏷';
+  return '📄';
+}
+
+function buildStatBadges(node) {
+  const parts = [];
+  if (node.wordCount > 0) parts.push('<span class="notes-stat-badge">' + node.wordCount + ' 字</span>');
+  if (node.childCount > 0) {
+    parts.push('<span class="notes-stat-badge">' + node.childCount + ' 子页</span>');
+  }
+  if (node.backlinkCount > 0) {
+    parts.push('<span class="notes-stat-badge">' + node.backlinkCount + ' 反链</span>');
+  }
+  return parts.join('');
+}
+
+function buildNoteItemHtml(node, opts) {
+  opts = opts || {};
+  const isActive = node.id === activeNoteId;
+  const isDirty = isActive && dirty;
+  const tags = (node.tags || []).slice(0, 3).map(function(t) {
+    return '<span class="notes-tag-chip">' + escapeHtml(t) + '</span>';
+  }).join('');
+  const preview = opts.snippet || node.preview || node.snippet || '';
+  const stats = buildStatBadges(node);
+  return ''
+    + '<div class="notes-list-item-head">'
+    + '<span class="notes-list-icon">' + noteIcon(node) + '</span>'
+    + '<div class="notes-list-title">' + escapeHtml(node.title || '无标题') + '</div>'
+    + (isDirty ? '<span class="notes-list-dot" title="未保存"></span>' : '')
+    + '</div>'
+    + (preview ? '<div class="notes-list-preview">' + escapeHtml(preview) + '</div>' : '')
+    + (tags ? '<div class="notes-list-tags">' + tags + '</div>' : '')
+    + (stats ? '<div class="notes-list-stats">' + stats + '</div>' : '')
+    + '<div class="notes-list-meta">' + formatRelative(node.updatedAt) + '</div>';
+}
+
 function setSaveStatus(text) {
   $('save-status').textContent = text;
 }
@@ -58,6 +142,7 @@ function setSaveStatus(text) {
 function markDirty() {
   dirty = true;
   setSaveStatus('编辑中…');
+  renderNoteList();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(function() { saveCurrentNote(true); }, 800);
 }
@@ -90,13 +175,22 @@ async function loadBootstrap() {
   await refreshTree();
   renderNotebooks();
   renderTagFilter();
+  renderSidebarStats();
+  $('tree-sort').value = treeSort;
   renderNoteList();
 }
 
 async function refreshTree() {
-  if (!activeNotebookId) { noteTree = []; return; }
-  const data = await api('notes/tree?notebookId=' + encodeURIComponent(activeNotebookId));
+  if (!activeNotebookId) {
+    noteTree = [];
+    sidebarStats = { noteCount: 0, tagCount: 0, totalWords: 0 };
+    return;
+  }
+  loadCollapsed();
+  const data = await api('notes/tree?notebookId=' + encodeURIComponent(activeNotebookId)
+    + '&sort=' + encodeURIComponent(treeSort));
   noteTree = data.tree || [];
+  sidebarStats = data.stats || { noteCount: 0, tagCount: 0, totalWords: 0 };
 }
 
 function renderNotebooks() {
@@ -153,25 +247,60 @@ async function runSearch() {
   renderNoteList();
 }
 
-function renderTreeNodes(nodes, container) {
-  nodes.forEach(function(node) {
-    const li = document.createElement('li');
-    li.className = 'notes-tree-item';
-    const row = document.createElement('div');
-    row.className = 'notes-list-item' + (node.id === activeNoteId ? ' active' : '');
-    row.style.paddingLeft = (12 + node.depth * 16) + 'px';
-    row.dataset.id = node.id;
-    const tags = (node.tags || []).slice(0, 2).map(function(t) {
-      return '<span class="notes-tag-chip">' + escapeHtml(t) + '</span>';
-    }).join('');
-    row.innerHTML = '<div class="notes-list-title">' + escapeHtml(node.title || '无标题') + '</div>'
-      + (tags ? '<div class="notes-list-tags">' + tags + '</div>' : '')
-      + '<div class="notes-list-meta">' + formatTime(node.updatedAt) + '</div>';
-    row.addEventListener('click', function() { openNote(node.id); });
-    li.appendChild(row);
-    container.appendChild(li);
-    if (node.children && node.children.length) renderTreeNodes(node.children, container);
-  });
+function expandAncestors(noteId) {
+  let cur = noteById(noteId);
+  while (cur && cur.parentId) {
+    collapsedIds.delete(cur.parentId);
+    cur = noteById(cur.parentId);
+  }
+  saveCollapsed();
+}
+
+function renderTreeBranch(node, container) {
+  const li = document.createElement('li');
+  li.className = 'notes-tree-branch';
+  li.dataset.id = node.id;
+
+  const row = document.createElement('div');
+  row.className = 'notes-tree-row';
+
+  const hasKids = node.children && node.children.length;
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'notes-tree-toggle' + (hasKids ? '' : ' placeholder');
+  if (hasKids) {
+    const expanded = !collapsedIds.has(node.id);
+    toggle.classList.toggle('expanded', expanded);
+    toggle.textContent = '▸';
+    toggle.title = expanded ? '折叠' : '展开';
+    toggle.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (collapsedIds.has(node.id)) collapsedIds.delete(node.id);
+      else collapsedIds.add(node.id);
+      saveCollapsed();
+      renderNoteList();
+    });
+  }
+
+  const item = document.createElement('div');
+  item.className = 'notes-list-item' + (node.id === activeNoteId ? ' active' : '');
+  item.dataset.id = node.id;
+  item.innerHTML = buildNoteItemHtml(node);
+  item.addEventListener('click', function() { openNote(node.id); });
+
+  row.appendChild(toggle);
+  row.appendChild(item);
+  li.appendChild(row);
+
+  if (hasKids) {
+    const childUl = document.createElement('ul');
+    childUl.className = 'notes-tree-children';
+    if (collapsedIds.has(node.id)) childUl.classList.add('collapsed');
+    node.children.forEach(function(child) { renderTreeBranch(child, childUl); });
+    li.appendChild(childUl);
+  }
+
+  container.appendChild(li);
 }
 
 function renderNoteList() {
@@ -185,22 +314,30 @@ function renderNoteList() {
     }
     searchResults.forEach(function(note) {
       const li = document.createElement('li');
-      li.className = 'notes-list-item' + (note.id === activeNoteId ? ' active' : '');
-      li.dataset.id = note.id;
-      li.innerHTML = '<div class="notes-list-title">' + escapeHtml(note.title || '无标题') + '</div>'
-        + (note.snippet ? '<div class="notes-list-snippet">' + escapeHtml(note.snippet) + '</div>' : '')
-        + '<div class="notes-list-meta">' + formatTime(note.updatedAt) + '</div>';
-      li.addEventListener('click', function() { openNote(note.id); });
+      li.className = 'notes-tree-branch';
+      const row = document.createElement('div');
+      row.className = 'notes-tree-row';
+      const spacer = document.createElement('button');
+      spacer.type = 'button';
+      spacer.className = 'notes-tree-toggle placeholder';
+      spacer.tabIndex = -1;
+      const item = document.createElement('div');
+      item.className = 'notes-list-item' + (note.id === activeNoteId ? ' active' : '');
+      item.innerHTML = buildNoteItemHtml(note, { snippet: note.snippet });
+      item.addEventListener('click', function() { openNote(note.id); });
+      row.appendChild(spacer);
+      row.appendChild(item);
+      li.appendChild(row);
       list.appendChild(li);
     });
     return;
   }
 
   if (!noteTree.length) {
-    list.innerHTML = '<li class="notes-list-meta" style="padding:12px">暂无笔记</li>';
+    list.innerHTML = '<li class="notes-list-meta" style="padding:12px">暂无笔记，点击「新建」开始</li>';
     return;
   }
-  renderTreeNodes(noteTree, list);
+  noteTree.forEach(function(node) { renderTreeBranch(node, list); });
 }
 
 function showEditor(show) {
@@ -317,6 +454,7 @@ async function openNote(noteId) {
   if (dirty && activeNoteId && activeNoteId !== noteId) {
     await saveCurrentNote(true);
   }
+  expandAncestors(noteId);
   activeNoteId = noteId;
   renderNoteList();
   showEditor(true);
@@ -371,6 +509,7 @@ async function saveCurrentNote(silent) {
     dirty = false;
     await refreshTree();
     await refreshTags();
+    renderSidebarStats();
     renderNoteList();
     renderBreadcrumb(note);
     setSaveStatus('已保存 · ' + formatTime(note.updatedAt));
@@ -559,6 +698,7 @@ $('notebook-select').addEventListener('change', async function() {
   showEditor(false);
   await refreshTree();
   await refreshTags();
+  renderSidebarStats();
   renderNoteList();
 });
 
@@ -568,6 +708,36 @@ $('note-search').addEventListener('input', function() {
 });
 
 $('tag-filter').addEventListener('change', runSearch);
+
+$('tree-sort').value = treeSort;
+$('tree-sort').addEventListener('change', async function() {
+  treeSort = this.value;
+  localStorage.setItem('notes-tree-sort', treeSort);
+  await refreshTree();
+  renderSidebarStats();
+  renderNoteList();
+});
+
+$('btn-tree-expand').addEventListener('click', function() {
+  collapsedIds.clear();
+  saveCollapsed();
+  renderNoteList();
+});
+
+$('btn-tree-collapse').addEventListener('click', function() {
+  function collectIds(nodes) {
+    nodes.forEach(function(n) {
+      if (n.children && n.children.length) {
+        collapsedIds.add(n.id);
+        collectIds(n.children);
+      }
+    });
+  }
+  collectIds(noteTree);
+  saveCollapsed();
+  renderNoteList();
+});
+
 $('note-title').addEventListener('input', markDirty);
 $('note-tags').addEventListener('input', markDirty);
 $('btn-note-add').addEventListener('click', function() { createNote(null); });
