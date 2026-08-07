@@ -36,20 +36,6 @@
 
     <section class="sm-panel">
       <div class="sm-panel-head">
-        <h2>持仓</h2>
-        <button type="button" id="btn-col-toggle" class="btn ghost sm-btn-sm">列数据</button>
-      </div>
-      <div id="col-toggle-panel" class="sm-col-panel hidden"></div>
-      <div class="sm-table-wrap">
-        <table class="sm-table" id="holdings-table">
-          <thead id="holdings-head"></thead>
-          <tbody id="holdings-body"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="sm-panel">
-      <div class="sm-panel-head">
         <h2>查询盈亏</h2>
         <div class="sm-inline-form">
           <input type="date" id="pnl-start">
@@ -61,6 +47,20 @@
       </div>
       <div id="pnl-stats" class="sm-stats sm-stats--inner"></div>
       <div id="pnl-chart"></div>
+    </section>
+
+    <section class="sm-panel">
+      <div class="sm-panel-head">
+        <h2>持仓</h2>
+        <button type="button" id="btn-col-toggle" class="btn ghost sm-btn-sm">列数据</button>
+      </div>
+      <div id="col-toggle-panel" class="sm-col-panel hidden"></div>
+      <div class="sm-table-wrap">
+        <table class="sm-table" id="holdings-table">
+          <thead id="holdings-head"></thead>
+          <tbody id="holdings-body"></tbody>
+        </table>
+      </div>
     </section>
   </div>
 
