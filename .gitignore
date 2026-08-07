@@ -4,3 +4,4 @@
 **/config.undercut.json
 **/config.company.json
 .DS_Store
+**/data/uploads/

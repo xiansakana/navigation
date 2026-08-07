@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'node:path';
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, createStore, resolveDataPath } from './storage.js';
@@ -10,6 +11,9 @@ import { tiptapToMarkdown, stripLeadingTitle, resolveRefsFromMarkdown } from './
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
+const UPLOADS_DIR = path.join(__dirname, '..', 'data', 'uploads');
+
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 let config;
 try {
@@ -317,6 +321,30 @@ app.delete('/api/notes/:id', (req, res) => {
   data.notes = data.notes.filter(function(n) { return !removeIds.has(n.id); });
   store.write(data);
   res.json({ ok: true, removed: removeIds.size });
+});
+
+app.post('/api/uploads', (req, res) => {
+  const filename = String(req.body?.filename || 'image.png');
+  const mime = String(req.body?.mime || 'application/octet-stream');
+  const raw = String(req.body?.data || '');
+  if (!raw) return res.status(400).json({ ok: false, error: '缺少图片数据' });
+  if (!mime.startsWith('image/')) return res.status(400).json({ ok: false, error: '仅支持图片' });
+  const ext = path.extname(filename).toLowerCase()
+    || (mime.includes('png') ? '.png' : mime.includes('jpeg') || mime.includes('jpg') ? '.jpg' : mime.includes('gif') ? '.gif' : mime.includes('webp') ? '.webp' : '.bin');
+  const id = crypto.randomUUID() + ext;
+  try {
+    fs.writeFileSync(path.join(UPLOADS_DIR, id), Buffer.from(raw, 'base64'));
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: '保存失败' });
+  }
+  res.status(201).json({ ok: true, id, url: './api/uploads/' + encodeURIComponent(id) });
+});
+
+app.get('/api/uploads/:id', (req, res) => {
+  const id = path.basename(req.params.id);
+  const filePath = path.join(UPLOADS_DIR, id);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ ok: false, error: '文件不存在' });
+  res.sendFile(filePath);
 });
 
 app.post('/api/notes/:id/duplicate', (req, res) => {

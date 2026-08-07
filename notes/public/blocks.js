@@ -1,6 +1,8 @@
 import TaskList from 'https://esm.sh/@tiptap/extension-task-list@2.11.5';
 import TaskItem from 'https://esm.sh/@tiptap/extension-task-item@2.11.5';
 import { ToggleBlock, insertToggleBlock } from './toggle-block.js';
+import { NotesCodeBlock, insertCodeBlock } from './code-block.js';
+import { NotesImage } from './image-block.js';
 
 const SLASH_COMMANDS = [
   { id: 'paragraph', label: '正文', hint: '普通文本段落', icon: '¶', keywords: ['text', '段落', '正文'] },
@@ -12,7 +14,8 @@ const SLASH_COMMANDS = [
   { id: 'orderedList', label: '有序列表', hint: '编号列表', icon: '1.', keywords: ['list', '列表'] },
   { id: 'taskList', label: '待办清单', hint: '可勾选的任务', icon: '☑', keywords: ['todo', '待办', '任务'] },
   { id: 'blockquote', label: '引用', hint: '引用块', icon: '❝', keywords: ['quote', '引用'] },
-  { id: 'codeBlock', label: '代码块', hint: '等宽代码', icon: '{ }', keywords: ['code', '代码'] },
+  { id: 'codeBlock', label: '代码块', hint: '语法高亮代码', icon: '{ }', keywords: ['code', '代码'] },
+  { id: 'image', label: '图片', hint: '上传或插入图片', icon: '🖼', keywords: ['image', '图片', 'photo'] },
   { id: 'hr', label: '分隔线', hint: '水平分割线', icon: '—', keywords: ['divider', '分割'] },
   { id: 'noteRef', label: '块引用', hint: '链接到其他笔记', icon: '🔗', keywords: ['link', '引用', 'ref'] }
 ];
@@ -28,6 +31,7 @@ const BLOCK_ACTIONS = [
   { id: 'taskList', label: '转为待办', icon: '☑' },
   { id: 'blockquote', label: '转为引用', icon: '❝' },
   { id: 'codeBlock', label: '转为代码块', icon: '{ }' },
+  { id: 'image', label: '插入图片', icon: '🖼' },
   { id: 'divider', label: '—', icon: '' },
   { id: 'duplicate', label: '复制块', icon: '⎘' },
   { id: 'delete', label: '删除块', icon: '🗑', danger: true },
@@ -37,6 +41,8 @@ const BLOCK_ACTIONS = [
 export function blockExtensions() {
   return [
     ToggleBlock,
+    NotesCodeBlock,
+    NotesImage,
     TaskList.configure({ HTMLAttributes: { class: 'notes-task-list' } }),
     TaskItem.configure({ nested: true, HTMLAttributes: { class: 'notes-task-item' } })
   ];
@@ -86,7 +92,7 @@ function listTopLevelBlocks(doc) {
   return blocks;
 }
 
-function runBlockCommand(editor, id) {
+function runBlockCommand(editor, id, opts) {
   const chain = editor.chain().focus();
   if (id === 'paragraph') chain.setParagraph().run();
   else if (id === 'h1') chain.setHeading({ level: 1 }).run();
@@ -97,7 +103,11 @@ function runBlockCommand(editor, id) {
   else if (id === 'orderedList') chain.toggleOrderedList().run();
   else if (id === 'taskList') chain.toggleTaskList().run();
   else if (id === 'blockquote') chain.toggleBlockquote().run();
-  else if (id === 'codeBlock') chain.toggleCodeBlock().run();
+  else if (id === 'codeBlock') {
+    if (editor.isActive('codeBlock')) chain.run();
+    else insertCodeBlock(editor, 'text');
+  }
+  else if (id === 'image') opts?.onInsertImage?.();
   else if (id === 'hr') chain.setHorizontalRule().run();
 }
 
@@ -117,13 +127,17 @@ function deleteTriggerQuery(editor, trigger) {
   editor.chain().focus().deleteRange({ from, to }).run();
 }
 
-function applySlashCommand(editor, id, onNoteRef) {
+function applySlashCommand(editor, id, opts) {
   deleteTriggerQuery(editor, '/');
   if (id === 'noteRef') {
-    onNoteRef?.();
+    opts?.onNoteRef?.();
     return;
   }
-  runBlockCommand(editor, id);
+  if (id === 'image') {
+    opts?.onInsertImage?.();
+    return;
+  }
+  runBlockCommand(editor, id, opts);
 }
 
 function insertMention(editor, note, insertNoteReference) {
@@ -154,18 +168,26 @@ function addBlockBelow(editor, blockPos) {
   editor.chain().focus().insertContentAt(insertPos, { type: 'paragraph' }).setTextSelection(insertPos + 1).run();
 }
 
-function moveTopLevelBlock(editor, fromPos, toPos, after) {
+function moveBlockByIndex(editor, fromIndex, toIndex) {
   const { state } = editor;
+  const blocks = listTopLevelBlocks(state.doc);
+  if (fromIndex < 0 || fromIndex >= blocks.length) return;
+  if (toIndex < 0 || toIndex > blocks.length) return;
+  if (toIndex === fromIndex || toIndex === fromIndex + 1) return;
+
+  const fromPos = blocks[fromIndex].pos;
   const node = state.doc.nodeAt(fromPos);
   if (!node) return;
   const size = node.nodeSize;
-  if (toPos >= fromPos && toPos < fromPos + size) return;
 
   let tr = state.tr.delete(fromPos, fromPos + size);
-  let insertPos = tr.mapping.map(toPos);
-  if (after) {
-    const target = tr.doc.nodeAt(insertPos);
-    if (target) insertPos += target.nodeSize;
+  const remaining = listTopLevelBlocks(tr.doc);
+  let insertPos;
+  if (toIndex >= remaining.length) {
+    insertPos = tr.doc.content.size;
+  } else {
+    const targetIndex = toIndex > fromIndex ? toIndex - 1 : toIndex;
+    insertPos = remaining[targetIndex]?.pos ?? tr.doc.content.size;
   }
   tr.insert(insertPos, node);
   editor.view.dispatch(tr.scrollIntoView());
@@ -254,7 +276,7 @@ export function setupBlockEditor(editor, opts) {
         + '<span class="notes-slash-hint">' + escapeHtml(cmd.hint) + '</span></span>';
       li.addEventListener('mousedown', function(e) {
         e.preventDefault();
-        applySlashCommand(editor, cmd.id, opts.onNoteRef);
+        applySlashCommand(editor, cmd.id, opts);
         hideSlash();
       });
       list.appendChild(li);
@@ -357,7 +379,7 @@ export function setupBlockEditor(editor, opts) {
         if (action.id === 'duplicate') duplicateBlock(editor, blockPos);
         else if (action.id === 'delete') deleteBlock(editor, blockPos);
         else if (action.id === 'addBelow') addBlockBelow(editor, blockPos);
-        else runBlockCommand(editor, action.id);
+        else runBlockCommand(editor, action.id, opts);
       });
       list.appendChild(li);
     });
@@ -366,23 +388,32 @@ export function setupBlockEditor(editor, opts) {
     positionEl(blockMenuEl, anchorRect, shellRect, true);
   }
 
-  function resolveDropTarget(clientY) {
+  function blockIndexFromPos(pos) {
+    const blocks = listTopLevelBlocks(editor.state.doc);
+    return blocks.findIndex(function(b) { return b.pos === pos; });
+  }
+
+  function resolveDropTarget(clientY, fromIndex) {
     const view = editor.view;
     const blocks = listTopLevelBlocks(view.state.doc);
     if (!blocks.length) return null;
+    let dropIndex = blocks.length;
     for (let i = 0; i < blocks.length; i++) {
       const dom = blockDomAtPos(view, blocks[i].pos + 1);
       if (!dom) continue;
       const rect = dom.getBoundingClientRect();
       const mid = rect.top + rect.height / 2;
       if (clientY < mid) {
-        return { pos: blocks[i].pos, after: false, rect: rect };
-      }
-      if (i === blocks.length - 1 && clientY >= mid) {
-        return { pos: blocks[i].pos, after: true, rect: rect };
+        dropIndex = i;
+        return { dropIndex: dropIndex, rect: rect, before: true };
       }
     }
-    return { pos: blocks[blocks.length - 1].pos, after: true, rect: blockDomAtPos(view, blocks[blocks.length - 1].pos + 1)?.getBoundingClientRect() };
+    const lastDom = blockDomAtPos(view, blocks[blocks.length - 1].pos + 1);
+    return {
+      dropIndex: blocks.length,
+      rect: lastDom?.getBoundingClientRect(),
+      before: false
+    };
   }
 
   function showDropLine(target) {
@@ -391,16 +422,17 @@ export function setupBlockEditor(editor, opts) {
       return;
     }
     const shellRect = shell.getBoundingClientRect();
-    const y = target.after
-      ? target.rect.bottom - shellRect.top + shell.scrollTop
-      : target.rect.top - shellRect.top + shell.scrollTop;
+    const y = target.before
+      ? target.rect.top - shellRect.top + shell.scrollTop
+      : target.rect.bottom - shellRect.top + shell.scrollTop;
     dropLineEl.classList.remove('hidden');
     dropLineEl.style.top = y + 'px';
   }
 
-  function onMouseMove(e) {
+  function onPointerMove(e) {
     if (dragState?.dragging) {
-      const target = resolveDropTarget(e.clientY);
+      const fromIndex = dragState.fromIndex;
+      const target = resolveDropTarget(e.clientY, fromIndex);
       dragState.dropTarget = target;
       showDropLine(target);
       dragGhostEl.style.left = (e.clientX + 12) + 'px';
@@ -408,8 +440,13 @@ export function setupBlockEditor(editor, opts) {
       return;
     }
     if (blockMenuEl.classList.contains('hidden') === false) return;
+    if (e.target === handleEl || handleEl.contains(e.target)) return;
+    updateHandleForPointer(e.clientX, e.clientY);
+  }
+
+  function updateHandleForPointer(clientX, clientY) {
     const view = editor.view;
-    const pos = view.posAtCoords({ left: e.clientX, top: e.clientY });
+    const pos = view.posAtCoords({ left: clientX, top: clientY });
     if (!pos) {
       hideHandle();
       return;
@@ -431,68 +468,88 @@ export function setupBlockEditor(editor, opts) {
     positionEl(handleEl, rect, shellRect, false);
   }
 
-  function onShellLeave() {
-    if (!dragState?.dragging && blockMenuEl.classList.contains('hidden')) hideHandle();
+  function onShellLeave(e) {
+    if (dragState?.dragging) return;
+    if (e.relatedTarget && (handleEl.contains(e.relatedTarget) || shell.contains(e.relatedTarget))) return;
+    if (blockMenuEl.classList.contains('hidden')) hideHandle();
   }
 
-  function endDrag(commit) {
+  function finishDrag(commit) {
     if (dragState?.dragging && commit && dragState.dropTarget) {
-      moveTopLevelBlock(editor, dragState.blockPos, dragState.dropTarget.pos, dragState.dropTarget.after);
+      const fromIndex = dragState.fromIndex;
+      let toIndex = dragState.dropTarget.dropIndex;
+      if (toIndex > fromIndex) toIndex--;
+      moveBlockByIndex(editor, fromIndex, toIndex);
     }
     dragState = null;
     hideDropLine();
     hideDragGhost();
+    hideHandle();
     document.body.classList.remove('notes-is-dragging');
-    document.removeEventListener('mousemove', onDocumentMouseMove);
-    document.removeEventListener('mouseup', onDocumentMouseUp);
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', onPointerUp);
   }
 
-  function onDocumentMouseMove(e) {
-    if (!dragState) return;
-    if (!dragState.dragging) {
-      const dx = Math.abs(e.clientX - dragState.startX);
-      const dy = Math.abs(e.clientY - dragState.startY);
-      if (dx + dy < 5) return;
-      dragState.dragging = true;
-      document.body.classList.add('notes-is-dragging');
-      const node = editor.state.doc.nodeAt(dragState.blockPos);
-      dragGhostEl.textContent = node?.textContent?.slice(0, 40) || '块';
-      dragGhostEl.classList.remove('hidden');
-      hideBlockMenu();
-    }
-    onMouseMove(e);
-  }
-
-  function onDocumentMouseUp(e) {
+  function onPointerUp(e) {
     if (!dragState) return;
     if (dragState.dragging) {
-      endDrag(true);
+      finishDrag(true);
       return;
     }
     const blockPos = dragState.blockPos;
     dragState = null;
-    document.removeEventListener('mousemove', onDocumentMouseMove);
-    document.removeEventListener('mouseup', onDocumentMouseUp);
+    document.removeEventListener('pointermove', onPointerMove);
+    document.removeEventListener('pointerup', onPointerUp);
     const dom = blockDomAtPos(editor.view, blockPos + 1);
     if (dom) showBlockMenu(blockPos, dom.getBoundingClientRect());
   }
 
-  handleEl.addEventListener('mousedown', function(e) {
+  handleEl.addEventListener('pointerdown', function(e) {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
+    const blockPos = Number(handleEl.dataset.blockPos);
+    const fromIndex = blockIndexFromPos(blockPos);
+    if (fromIndex < 0) return;
+    handleEl.setPointerCapture(e.pointerId);
     dragState = {
-      blockPos: Number(handleEl.dataset.blockPos),
+      blockPos: blockPos,
+      fromIndex: fromIndex,
+      pointerId: e.pointerId,
       startX: e.clientX,
       startY: e.clientY,
       dragging: false,
       dropTarget: null
     };
-    document.addEventListener('mousemove', onDocumentMouseMove);
-    document.addEventListener('mouseup', onDocumentMouseUp);
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
   });
 
-  shell.addEventListener('mousemove', onMouseMove);
+  handleEl.addEventListener('pointermove', function(e) {
+    if (!dragState || dragState.pointerId !== e.pointerId) return;
+    if (!dragState.dragging) {
+      const dx = Math.abs(e.clientX - dragState.startX);
+      const dy = Math.abs(e.clientY - dragState.startY);
+      if (dx + dy < 4) return;
+      dragState.dragging = true;
+      document.body.classList.add('notes-is-dragging');
+      hideBlockMenu();
+      const node = editor.state.doc.nodeAt(dragState.blockPos);
+      dragGhostEl.textContent = (node?.textContent || node?.type?.name || '块').slice(0, 48);
+      dragGhostEl.classList.remove('hidden');
+      handleEl.classList.add('is-dragging');
+    }
+    onPointerMove(e);
+  });
+
+  handleEl.addEventListener('pointerup', function(e) {
+    if (!dragState || dragState.pointerId !== e.pointerId) return;
+    try { handleEl.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    handleEl.classList.remove('is-dragging');
+    onPointerUp(e);
+  });
+
+  shell.addEventListener('pointermove', onPointerMove);
   shell.addEventListener('mouseleave', onShellLeave);
 
   document.addEventListener('mousedown', function(e) {
@@ -537,7 +594,7 @@ export function setupBlockEditor(editor, opts) {
         renderSlash(filtered[slashIdx]?.label || '');
       } else if (e.key === 'Enter' && filtered[slashIdx]) {
         e.preventDefault();
-        applySlashCommand(editor, filtered[slashIdx].id, opts.onNoteRef);
+        applySlashCommand(editor, filtered[slashIdx].id, opts);
         hideSlash();
       } else if (e.key === 'Escape') {
         e.preventDefault();
@@ -572,12 +629,12 @@ export function setupBlockEditor(editor, opts) {
   }
 
   return function cleanup() {
-    endDrag(false);
+    finishDrag(false);
     editor.off('update', updateTriggerMenus);
     editor.off('selectionUpdate', updateTriggerMenus);
     editor.off('blur', onEditorBlur);
     editor.view.dom.removeEventListener('keydown', onMenuKeydown);
-    shell.removeEventListener('mousemove', onMouseMove);
+    shell.removeEventListener('pointermove', onPointerMove);
     shell.removeEventListener('mouseleave', onShellLeave);
     handleEl.remove();
     slashEl.remove();

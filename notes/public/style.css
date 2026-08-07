@@ -1249,13 +1249,44 @@ body.has-navbar .notes-app {
 }
 
 .notes-editor .ProseMirror pre {
+  position: relative;
   background: var(--notes-hover);
   border-radius: var(--notes-radius-sm);
-  padding: 14px 16px;
+  padding: 32px 16px 14px;
   overflow-x: auto;
   font-family: ui-monospace, Consolas, monospace;
   font-size: 13px;
   line-height: 1.5;
+  border: 1px solid var(--notes-border);
+}
+
+.notes-editor .ProseMirror pre[data-language]::before,
+.notes-editor .ProseMirror pre.notes-code-block::before {
+  content: attr(data-language);
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--notes-muted);
+  font-family: var(--notes-font);
+}
+
+.notes-editor .ProseMirror img,
+.notes-editor .ProseMirror .notes-image-block {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.6em 0;
+  border-radius: var(--notes-radius-sm);
+  border: 1px solid var(--notes-border);
+}
+
+.notes-block-handle.is-dragging {
+  opacity: 1;
+  cursor: grabbing;
 }
 
 .notes-editor .ProseMirror code {

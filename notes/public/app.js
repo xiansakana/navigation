@@ -4,6 +4,7 @@ import Placeholder from 'https://esm.sh/@tiptap/extension-placeholder@2.11.5';
 import { NoteReference, insertNoteReference } from './note-link.js';
 import { createDropdown } from './dropdown.js';
 import { blockExtensions, setupBlockEditor, openNotePicker } from './blocks.js';
+import { uploadImageFile, insertImage } from './image-block.js';
 import { openContextMenu } from './context-menu.js';
 
 const $ = (id) => document.getElementById(id);
@@ -523,6 +524,9 @@ function showEditor(show) {
 }
 
 function destroyEditor() {
+  if (editor) {
+    editor.view.dom.removeEventListener('paste', onEditorPaste);
+  }
   if (blockEditorCleanup) {
     blockEditorCleanup();
     blockEditorCleanup = null;
@@ -559,10 +563,14 @@ function initEditor(content) {
   editor = new Editor({
     element: $('note-editor'),
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+        codeBlock: false
+      }),
       Placeholder.configure({
         placeholder: function({ node }) {
           if (node.type.name === 'heading') return '标题';
+          if (node.type.name === 'codeBlock') return '输入代码…';
           return '输入 / 块命令，@ 提及笔记…';
         }
       }),
@@ -589,6 +597,7 @@ function initEditor(content) {
   blockEditorCleanup = setupBlockEditor(editor, {
     shell: $('note-editor-shell'),
     onNoteRef: pickNoteForReference,
+    onInsertImage: pickImageForInsert,
     getNotes: function() {
       return notes.filter(function(n) {
         return n.notebookId === activeNotebookId && n.id !== activeNoteId;
@@ -597,7 +606,35 @@ function initEditor(content) {
     insertNoteReference: insertNoteReference
   });
 
+  editor.view.dom.addEventListener('paste', onEditorPaste);
+
   updateToolbarState();
+}
+
+function onEditorPaste(e) {
+  const files = e.clipboardData?.files;
+  if (!files || !files.length) return;
+  const image = [...files].find(function(f) { return f.type.startsWith('image/'); });
+  if (!image) return;
+  e.preventDefault();
+  insertUploadedImage(image);
+}
+
+async function insertUploadedImage(file) {
+  if (!editor || !file) return;
+  try {
+    setSaveStatus('上传图片…');
+    const url = await uploadImageFile(file, api);
+    insertImage(editor, url, file.name.replace(/\.[^.]+$/, ''));
+    markDirty();
+    toastOk('图片已插入');
+  } catch (err) {
+    toastErr(err.message);
+  }
+}
+
+function pickImageForInsert() {
+  $('image-upload-input')?.click();
 }
 
 function renderBreadcrumb(note) {
@@ -868,7 +905,11 @@ function runToolbarCmd(cmd) {
   else if (cmd === 'orderedList') chain.toggleOrderedList().run();
   else if (cmd === 'taskList') chain.toggleTaskList().run();
   else if (cmd === 'blockquote') chain.toggleBlockquote().run();
-  else if (cmd === 'codeBlock') chain.toggleCodeBlock().run();
+  else if (cmd === 'codeBlock') {
+    if (editor.isActive('codeBlock')) chain.run();
+    else editor.chain().focus().insertContent({ type: 'codeBlock', attrs: { language: 'text' }, content: [{ type: 'text', text: '' }] }).run();
+  }
+  else if (cmd === 'image') pickImageForInsert();
   else if (cmd === 'hr') chain.setHorizontalRule().run();
   else if (cmd === 'undo') chain.undo().run();
   else if (cmd === 'redo') chain.redo().run();
@@ -965,6 +1006,12 @@ $('btn-sidebar-collapse')?.addEventListener('click', function() {
 });
 $('btn-sidebar-expand')?.addEventListener('click', function() {
   setSidebarCollapsed(false);
+});
+$('btn-insert-image')?.addEventListener('click', pickImageForInsert);
+$('image-upload-input')?.addEventListener('change', function(e) {
+  const file = e.target.files?.[0];
+  if (file) insertUploadedImage(file);
+  e.target.value = '';
 });
 $('btn-insert-ref').addEventListener('click', pickNoteForReference);
 $('btn-import-md').addEventListener('click', function() { $('import-file').click(); });
