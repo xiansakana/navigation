@@ -4,7 +4,11 @@ import net from 'node:net';
 
 function pickHeaders(reqHeaders, extra) {
     var out = {};
-    ['content-type', 'authorization', 'accept', 'accept-language', 'cache-control', 'sec-websocket-key', 'sec-websocket-version', 'sec-websocket-extensions'].forEach(function(key) {
+    [
+        'content-type', 'authorization', 'accept', 'accept-language', 'cache-control',
+        'cookie', 'user-agent', 'referer', 'origin',
+        'sec-websocket-key', 'sec-websocket-version', 'sec-websocket-extensions'
+    ].forEach(function(key) {
         var val = reqHeaders[key];
         if (val) out[key] = val;
     });
