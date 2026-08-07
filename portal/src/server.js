@@ -12,7 +12,9 @@ import {
 } from './auth.js';
 import {
     getVisibleMenus,
-    canAccessService,
+    canViewService,
+    canEditService,
+    canViewAdmin,
     hasPermission
 } from './rbac.js';
 import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket } from './proxy.js';
@@ -127,7 +129,7 @@ async function handleApi(req, res, url, session) {
             username: session.username,
             userId: session.userId,
             permissions: session.permissions,
-            canAdmin: hasPermission(session.permissions, 'admin:access')
+            canAdmin: canViewAdmin(session.permissions)
         });
     }
 
@@ -182,6 +184,10 @@ function isPortalApi(pathname, method) {
     return false;
 }
 
+function isWriteMethod(method) {
+    return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
+}
+
 function handleProxyRoute(req, res) {
     var ctx = resolveProxyContext(config.services, req.url);
     if (!ctx) return false;
@@ -189,8 +195,12 @@ function handleProxyRoute(req, res) {
     var proxySession = requireAuth(req, res);
     if (!proxySession) return true;
 
-    if (!canAccessService(proxySession.permissions, ctx.service.id)) {
+    if (!canViewService(proxySession.permissions, ctx.service.id)) {
         json(res, 403, { ok: false, error: '无权访问该服务' });
+        return true;
+    }
+    if (isWriteMethod(req.method) && !canEditService(proxySession.permissions, ctx.service.id)) {
+        json(res, 403, { ok: false, error: '该服务为只读权限，无法修改' });
         return true;
     }
 
@@ -265,7 +275,7 @@ var server = http.createServer(async function(req, res) {
     if (url.pathname === hubPath || url.pathname === hubPath + '/' || url.pathname === hubPath + '/index.html') {
         var hubSession = requireAuth(req, res);
         if (!hubSession) return;
-        if (!canAccessService(hubSession.permissions, 'torn-toolbox')) {
+        if (!canViewService(hubSession.permissions, 'torn-toolbox')) {
             return json(res, 403, { ok: false, error: '无权访问该服务' });
         }
         if (serveStatic(path.join(PUBLIC_DIR, 'torn-toolbox', 'index.html'), res)) return;
@@ -280,7 +290,7 @@ var server = http.createServer(async function(req, res) {
     if (url.pathname === '/admin' || url.pathname === '/admin.html') {
         var adminSession = requireAuth(req, res);
         if (!adminSession) return;
-        if (!hasPermission(adminSession.permissions, 'admin:access')) {
+        if (!canViewAdmin(adminSession.permissions)) {
             return redirect(res, '/');
         }
         if (serveStatic(path.join(PUBLIC_DIR, 'admin.html'), res)) return;
@@ -315,7 +325,7 @@ server.on('upgrade', function(req, socket, head) {
         socket.destroy();
         return;
     }
-    if (!canAccessService(ctx.permissions, proxyCtx.service.id)) {
+    if (!canViewService(ctx.permissions, proxyCtx.service.id)) {
         socket.destroy();
         return;
     }
