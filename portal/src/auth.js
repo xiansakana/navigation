@@ -75,6 +75,51 @@ export function resolveSessionUser(session, config) {
     return null;
 }
 
+export function isAnonymousGuestEnabled(config) {
+    return config?.auth?.anonymousGuest !== false;
+}
+
+export function resolveGuestContext(config) {
+    var rbac = loadRbac(config);
+    var guestUsername = config?.auth?.guestUsername || 'guest';
+    var user = findUserByUsername(rbac, guestUsername);
+    if (!user || user.enabled === false) return null;
+    return {
+        user: user,
+        permissions: resolveUserPermissions(rbac, user),
+        rbac: rbac
+    };
+}
+
+export function resolveRequestUser(req, config) {
+    var secret = config?.auth?.sessionSecret || config?.auth?.password || 'portal';
+    var session = getSession(req, secret);
+    if (session) {
+        var ctx = resolveSessionUser(session, config);
+        if (ctx) {
+            return {
+                userId: ctx.user.id,
+                username: ctx.user.username,
+                permissions: ctx.permissions,
+                rbac: ctx.rbac,
+                isGuest: false,
+                session: session
+            };
+        }
+    }
+    if (!isAnonymousGuestEnabled(config)) return null;
+    var guest = resolveGuestContext(config);
+    if (!guest) return null;
+    return {
+        userId: guest.user.id,
+        username: guest.user.username,
+        permissions: guest.permissions,
+        rbac: guest.rbac,
+        isGuest: true,
+        session: null
+    };
+}
+
 export function verifyLogin(username, password, config) {
     var rbac = loadRbac(config);
     var user = authenticateUser(rbac, username, password);
