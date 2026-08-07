@@ -24,7 +24,7 @@
     <div class="sm-toggles">
       <label class="sm-toggle-row">
         <input type="checkbox" id="toggle-dashboard" checked>
-        <span>显示顶部看板（总资产、市值、盈亏、当日盈亏、现金）</span>
+        <span>显示看板（总资产、市值、盈亏、当日盈亏、现金）</span>
       </label>
       <label class="sm-toggle-row">
         <input type="checkbox" id="toggle-fullwidth">
@@ -32,26 +32,34 @@
       </label>
     </div>
 
-    <section id="dashboard" class="sm-dashboard"></section>
-
     <section class="sm-panel">
-      <div class="sm-panel-head">
+      <div class="sm-panel-head sm-panel-head--stack">
         <h2>查询盈亏</h2>
-        <div class="sm-inline-form">
-          <input type="date" id="pnl-start">
-          <span class="sm-muted">至</span>
-          <input type="date" id="pnl-end">
-          <button type="button" id="btn-pnl-query" class="btn ghost">查询</button>
-          <button type="button" id="btn-pnl-reset" class="btn ghost">重置</button>
+        <div class="sm-pnl-filter">
+          <label class="sm-pnl-filter-field">
+            <span class="sm-pnl-filter-label">起始</span>
+            <input type="date" id="pnl-start">
+          </label>
+          <span class="sm-pnl-filter-sep">至</span>
+          <label class="sm-pnl-filter-field">
+            <span class="sm-pnl-filter-label">结束</span>
+            <input type="date" id="pnl-end">
+          </label>
+          <div class="sm-pnl-filter-actions">
+            <button type="button" id="btn-pnl-query" class="btn ghost sm-btn-sm">查询</button>
+            <button type="button" id="btn-pnl-reset" class="btn ghost sm-btn-sm">重置</button>
+          </div>
         </div>
       </div>
       <div id="pnl-stats" class="sm-stats sm-stats--inner"></div>
       <div id="pnl-chart"></div>
     </section>
 
+    <section id="dashboard" class="sm-dashboard"></section>
+
     <section class="sm-panel">
       <div class="sm-panel-head">
-        <h2>持仓</h2>
+        <h2>持仓明细</h2>
         <button type="button" id="btn-col-toggle" class="btn ghost sm-btn-sm">列数据</button>
       </div>
       <div id="col-toggle-panel" class="sm-col-panel hidden"></div>
