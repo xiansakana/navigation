@@ -90,6 +90,13 @@ function rewriteProxiedBody(text, service) {
         .replace(/https?:\/\/127\.0\.0\.1:6099/g, prefix)
         .replace(/https?:\/\/[^"'\s]+:6099/g, prefix)
         .replace(/(["'])\/webui/g, '$1' + prefix + '/webui');
+    if (service.id === 'napcat') {
+        var webuiBase = prefix + '/webui/';
+        out = out
+            .replace(/basename:"\/webui\/"/g, 'basename:"' + webuiBase + '"')
+            .replace(/basename:'\/webui\/'/g, "basename:'" + webuiBase + "'")
+            .replace(/const e="\/webui\/"/g, 'const e="' + webuiBase + '"');
+    }
     if (prefix.startsWith('/torn-toolbox/')) {
         out = out
             .replace(/(["'])\/style\.css/g, '$1' + prefix + '/style.css')
@@ -97,19 +104,6 @@ function rewriteProxiedBody(text, service) {
             .replace(/(["'])\/app\.js/g, '$1' + prefix + '/app.js');
     }
     return out;
-}
-
-function injectNapcatBackLink(html) {
-    var markup = '<style>'
-        + '.portal-napcat-back{position:fixed;top:12px;left:12px;z-index:2147483646;display:inline-flex;align-items:center;padding:8px 12px;border-radius:8px;font:14px/1.4 system-ui,sans-serif;text-decoration:none;color:#e8edf5;background:rgba(15,17,21,.88);border:1px solid rgba(255,255,255,.12);box-shadow:0 4px 16px rgba(0,0,0,.25);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}'
-        + '.portal-napcat-back:hover{background:rgba(23,27,34,.95)}'
-        + '@media (prefers-color-scheme:light){.portal-napcat-back{color:#152033;background:rgba(255,255,255,.92);border-color:rgba(15,23,42,.12);box-shadow:0 4px 16px rgba(15,23,42,.12)}.portal-napcat-back:hover{background:#fff}}'
-        + '</style>'
-        + '<a class="portal-napcat-back" href="/">← 服务导航</a>';
-    if (!html.includes('<body')) return html;
-    return html.replace(/<body([^>]*)>/, function(match, attrs) {
-        return '<body' + attrs + '>' + markup;
-    });
 }
 
 function injectPortalShell(html, service) {
@@ -129,11 +123,11 @@ function injectPortalShell(html, service) {
     }
     var portalCss = '<link rel="stylesheet" href="/portal.css">';
     if (service.injectBar === false) {
-        var isSiyuanAuthPage = service.id === 'notes' && html.includes('id="authCode"');
-        var headInject = isSiyuanAuthPage ? '' : themeBoot + themeJs + toastJs + dialogJs + baseTag;
+        var skipShell = service.id === 'napcat'
+            || (service.id === 'notes' && html.includes('id="authCode"'));
+        var headInject = skipShell ? '' : themeBoot + themeJs + toastJs + dialogJs + baseTag;
         if (!headInject && service.id !== 'napcat' && service.id !== 'notes') return html;
         if (headInject) html = html.replace('<head>', '<head>' + headInject);
-        if (service.id === 'napcat') html = injectNapcatBackLink(html);
         return html;
     }
     var title = service.title || '服务';
@@ -349,23 +343,18 @@ export function resolveProxyContext(services, reqUrl) {
 }
 
 export function getServiceEntryHref(service) {
-    if (service.id === 'napcat') {
-        var entry = service.entryPath || '/webui';
-        if (!entry.startsWith('/')) entry = '/' + entry;
-        return entry.replace(/\/$/, '') || '/webui';
-    }
     var base = service.path.replace(/\/$/, '');
     var entry = service.entryPath || '/';
     if (!entry.startsWith('/')) entry = '/' + entry;
     return base + entry;
 }
 
-/** NapCat WebUI 的 React basename 为 /webui/，须从根路径 /webui 访问，不能用 /napcat/webui */
-export function napcatPublicWebuiPath(service, pathname) {
+/** 兼容根路径 /webui，统一重定向到 /napcat/webui */
+export function napcatCanonicalWebuiPath(service, pathname) {
     if (service.id !== 'napcat') return null;
-    var mount = service.path.replace(/\/$/, '') + '/webui';
-    if (pathname === mount || pathname.startsWith(mount + '/')) {
-        return '/webui' + pathname.slice(mount.length) || '/';
+    if (pathname === '/webui' || pathname.startsWith('/webui/')) {
+        var mount = service.path.replace(/\/$/, '') + '/webui';
+        return mount + pathname.slice('/webui'.length) || mount + '/';
     }
     return null;
 }
