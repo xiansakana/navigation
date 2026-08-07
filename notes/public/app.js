@@ -2,6 +2,8 @@ import { Editor } from 'https://esm.sh/@tiptap/core@2.11.5';
 import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2.11.5';
 import Placeholder from 'https://esm.sh/@tiptap/extension-placeholder@2.11.5';
 import { NoteReference, insertNoteReference } from './note-link.js';
+import { createDropdown } from './dropdown.js';
+import { blockExtensions, setupBlockEditor, openNotePicker } from './blocks.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -34,6 +36,11 @@ let searchResults = null;
 let sidebarStats = { noteCount: 0, tagCount: 0, totalWords: 0 };
 let treeSort = localStorage.getItem('notes-tree-sort') || 'updated';
 let collapsedIds = new Set();
+let notebookDropdown = null;
+let tagFilterDropdown = null;
+let treeSortDropdown = null;
+let blockEditorCleanup = null;
+let noteTags = [];
 
 function collapsedStorageKey() {
   return 'notes-collapsed-' + (activeNotebookId || 'default');
@@ -161,6 +168,58 @@ function parseTagsInput(raw) {
   return String(raw || '').split(/[,，\s]+/).map(function(t) { return t.trim(); }).filter(Boolean);
 }
 
+function renderTagChips() {
+  const wrap = $('note-tags-chips');
+  if (!wrap) return;
+  wrap.innerHTML = noteTags.map(function(tag, i) {
+    return '<span class="notes-tag-pill">' + escapeHtml(tag)
+      + '<button type="button" class="notes-tag-remove" data-idx="' + i + '" title="移除">×</button></span>';
+  }).join('');
+  wrap.querySelectorAll('.notes-tag-remove').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      noteTags.splice(Number(btn.dataset.idx), 1);
+      renderTagChips();
+      markDirty();
+    });
+  });
+}
+
+function setNoteTags(tags) {
+  noteTags = (tags || []).slice();
+  renderTagChips();
+}
+
+function addTagFromInput(raw) {
+  const tag = String(raw || '').trim().replace(/[,，]+$/, '');
+  if (!tag) return;
+  if (!noteTags.includes(tag)) {
+    noteTags.push(tag);
+    renderTagChips();
+    markDirty();
+  }
+}
+
+function initDropdowns() {
+  notebookDropdown = createDropdown($('notebook-dropdown'), {
+    placeholder: '选择笔记本',
+    onChange: function(val) { onNotebookChange(val); }
+  });
+  tagFilterDropdown = createDropdown($('tag-filter-dropdown'), {
+    placeholder: '全部标签',
+    compact: true,
+    onChange: function() { runSearch(); }
+  });
+  treeSortDropdown = createDropdown($('tree-sort-dropdown'), {
+    value: treeSort,
+    compact: true,
+    items: [
+      { value: 'updated', label: '最近更新' },
+      { value: 'title', label: '按标题' }
+    ],
+    onChange: function(val) { onTreeSortChange(val); }
+  });
+}
+
 async function loadBootstrap() {
   const prevNotebook = activeNotebookId;
   const data = await api('bootstrap');
@@ -174,7 +233,6 @@ async function loadBootstrap() {
   renderNotebooks();
   renderTagFilter();
   renderSidebarStats();
-  $('tree-sort').value = treeSort;
   renderNoteList();
 }
 
@@ -192,15 +250,11 @@ async function refreshTree() {
 }
 
 function renderNotebooks() {
-  const select = $('notebook-select');
-  select.innerHTML = '';
-  notebooks.forEach(function(nb) {
-    const opt = document.createElement('option');
-    opt.value = nb.id;
-    opt.textContent = nb.title;
-    if (nb.id === activeNotebookId) opt.selected = true;
-    select.appendChild(opt);
-  });
+  if (!notebookDropdown) return;
+  notebookDropdown.setItems(notebooks.map(function(nb) {
+    return { value: nb.id, label: nb.title, icon: '📓' };
+  }));
+  notebookDropdown.setValue(activeNotebookId);
 }
 
 async function refreshTags() {
@@ -210,22 +264,19 @@ async function refreshTags() {
 }
 
 function renderTagFilter() {
-  const select = $('tag-filter');
-  const current = select.value;
-  select.innerHTML = '<option value="">全部标签</option>';
-  allTags.forEach(function(item) {
-    const opt = document.createElement('option');
-    opt.value = item.tag;
-    opt.textContent = item.tag + ' (' + item.count + ')';
-    select.appendChild(opt);
-  });
-  if ([...select.options].some(function(o) { return o.value === current; })) {
-    select.value = current;
-  }
+  if (!tagFilterDropdown) return;
+  const current = tagFilterDropdown.getValue();
+  tagFilterDropdown.setItems([
+    { value: '', label: '全部标签', icon: '🏷' }
+  ].concat(allTags.map(function(item) {
+    return { value: item.tag, label: item.tag, hint: item.count + ' 篇', icon: '◆' };
+  })));
+  const values = [''].concat(allTags.map(function(t) { return t.tag; }));
+  tagFilterDropdown.setValue(values.includes(current) ? current : '');
 }
 
 function isFiltering() {
-  return $('note-search').value.trim() || $('tag-filter').value;
+  return $('note-search').value.trim() || tagFilterDropdown?.getValue();
 }
 
 async function runSearch() {
@@ -237,7 +288,7 @@ async function runSearch() {
   const params = new URLSearchParams();
   params.set('notebookId', activeNotebookId);
   const q = $('note-search').value.trim();
-  const tag = $('tag-filter').value;
+  const tag = tagFilterDropdown?.getValue() || '';
   if (q) params.set('q', q);
   if (tag) params.set('tag', tag);
   const data = await api('search?' + params.toString());
@@ -344,6 +395,10 @@ function showEditor(show) {
 }
 
 function destroyEditor() {
+  if (blockEditorCleanup) {
+    blockEditorCleanup();
+    blockEditorCleanup = null;
+  }
   if (editor) {
     editor.destroy();
     editor = null;
@@ -366,6 +421,7 @@ function updateToolbarState() {
     else if (cmd === 'orderedList') active = editor.isActive('orderedList');
     else if (cmd === 'blockquote') active = editor.isActive('blockquote');
     else if (cmd === 'codeBlock') active = editor.isActive('codeBlock');
+    else if (cmd === 'taskList') active = editor.isActive('taskList');
     btn.classList.toggle('is-active', active);
   });
 }
@@ -377,9 +433,13 @@ function initEditor(content) {
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       Placeholder.configure({
-        placeholder: '块级编辑：段落、标题、列表… 用 🔗 插入块引用 [[标题|id]]'
+        placeholder: function({ node }) {
+          if (node.type.name === 'heading') return '标题';
+          return '输入 / 唤起块命令，或开始写作…';
+        }
       }),
-      NoteReference
+      NoteReference,
+      ...blockExtensions()
     ],
     content: content || { type: 'doc', content: [{ type: 'paragraph' }] },
     onUpdate: function() {
@@ -397,6 +457,11 @@ function initEditor(content) {
     const id = ref.getAttribute('data-note-ref');
     if (id) openNote(id);
   };
+
+  blockEditorCleanup = setupBlockEditor(editor, {
+    shell: $('note-editor-shell'),
+    onNoteRef: pickNoteForReference
+  });
 
   updateToolbarState();
 }
@@ -465,7 +530,7 @@ async function openNote(noteId) {
   else notes.push(summary);
 
   $('note-title').value = note.title || '';
-  $('note-tags').value = (note.tags || []).join(', ');
+  setNoteTags(note.tags || []);
   renderBreadcrumb(summary);
   suppressEditorUpdate = true;
   initEditor(note.content);
@@ -493,7 +558,7 @@ async function saveCurrentNote(silent) {
   setSaveStatus('保存中…');
   try {
     const title = $('note-title').value.trim() || '无标题';
-    const tags = parseTagsInput($('note-tags').value);
+    const tags = noteTags.slice();
     const content = editor.getJSON();
     const data = await api('notes/' + activeNoteId, {
       method: 'PATCH',
@@ -601,17 +666,7 @@ function pickNoteForReference() {
     toastErr('当前笔记本没有其他笔记可引用');
     return;
   }
-  const lines = candidates.slice(0, 30).map(function(n, i) {
-    return (i + 1) + '. ' + (n.title || '无标题');
-  }).join('\n');
-  dlgPrompt('输入序号插入块引用：\n' + lines, '1', { title: '插入块引用' }).then(function(input) {
-    if (input == null) return;
-    const idx = Number(input) - 1;
-    const picked = candidates[idx];
-    if (!picked) {
-      toastErr('无效序号');
-      return;
-    }
+  openNotePicker($('note-editor-shell'), candidates, activeNoteId, function(picked) {
     insertNoteReference(editor, picked.id, picked.title);
     markDirty();
   });
@@ -677,6 +732,7 @@ function runToolbarCmd(cmd) {
   else if (cmd === 'h3') chain.toggleHeading({ level: 3 }).run();
   else if (cmd === 'bulletList') chain.toggleBulletList().run();
   else if (cmd === 'orderedList') chain.toggleOrderedList().run();
+  else if (cmd === 'taskList') chain.toggleTaskList().run();
   else if (cmd === 'blockquote') chain.toggleBlockquote().run();
   else if (cmd === 'codeBlock') chain.toggleCodeBlock().run();
   else if (cmd === 'hr') chain.setHorizontalRule().run();
@@ -685,36 +741,55 @@ function runToolbarCmd(cmd) {
   updateToolbarState();
 }
 
-$('notebook-select').addEventListener('change', async function() {
+async function onNotebookChange(val) {
+  if (val === activeNotebookId) return;
   if (dirty && activeNoteId) await saveCurrentNote(true);
-  activeNotebookId = this.value;
+  activeNotebookId = val;
   activeNoteId = '';
   searchResults = null;
   $('note-search').value = '';
-  $('tag-filter').value = '';
+  tagFilterDropdown?.setValue('');
   destroyEditor();
   showEditor(false);
   await refreshTree();
   await refreshTags();
   renderSidebarStats();
   renderNoteList();
-});
+}
+
+async function onTreeSortChange(val) {
+  treeSort = val;
+  localStorage.setItem('notes-tree-sort', treeSort);
+  await refreshTree();
+  renderSidebarStats();
+  renderNoteList();
+}
 
 $('note-search').addEventListener('input', function() {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(runSearch, 300);
 });
 
-$('tag-filter').addEventListener('change', runSearch);
-
-$('tree-sort').value = treeSort;
-$('tree-sort').addEventListener('change', async function() {
-  treeSort = this.value;
-  localStorage.setItem('notes-tree-sort', treeSort);
-  await refreshTree();
-  renderSidebarStats();
-  renderNoteList();
+$('note-tags-input')?.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    addTagFromInput(this.value);
+    this.value = '';
+  } else if (e.key === 'Backspace' && !this.value && noteTags.length) {
+    noteTags.pop();
+    renderTagChips();
+    markDirty();
+  }
 });
+
+$('note-tags-input')?.addEventListener('blur', function() {
+  if (this.value.trim()) {
+    addTagFromInput(this.value);
+    this.value = '';
+  }
+});
+
+$('note-title').addEventListener('input', markDirty);
 
 $('btn-tree-expand').addEventListener('click', function() {
   collapsedIds.clear();
@@ -736,8 +811,6 @@ $('btn-tree-collapse').addEventListener('click', function() {
   renderNoteList();
 });
 
-$('note-title').addEventListener('input', markDirty);
-$('note-tags').addEventListener('input', markDirty);
 $('btn-note-add').addEventListener('click', function() { createNote(null); });
 $('btn-empty-new')?.addEventListener('click', function() { createNote(null); });
 $('btn-subpage').addEventListener('click', function() {
@@ -779,6 +852,7 @@ window.addEventListener('beforeunload', function(e) {
   }
 });
 
+initDropdowns();
 loadBootstrap().catch(function(err) {
   toastErr(err.message);
 });
