@@ -37,6 +37,10 @@ document.getElementById('logout').addEventListener('click', function() {
 
 api('me').then(function(data) {
     document.getElementById('welcome').textContent = '欢迎，' + data.username;
+    if (data.canAdmin) {
+        var adminLink = document.getElementById('admin-link');
+        if (adminLink) adminLink.classList.remove('hidden');
+    }
     return api('services');
 }).then(function(data) {
     renderServices(data.services || []);
