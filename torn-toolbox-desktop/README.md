@@ -98,6 +98,7 @@ http://123.56.235.12:8790/?token=你的adminToken
 | `server.openBrowser` | `false` |
 | `server.adminToken` | 强随机字符串（配置页访问密码） |
 | `undercut.autoStart` | `true`（pm2 重启后自动恢复监听） |
+| `company.autoStart` | `true`（点「开始监听」后会写入配置；pm2 重启后自动恢复） |
 | `notify.desktop` | `false`（服务器无桌面通知） |
 | `notify.qq.url` | `http://127.0.0.1:8787/notify` |
 

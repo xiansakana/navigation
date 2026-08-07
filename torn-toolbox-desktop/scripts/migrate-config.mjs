@@ -50,7 +50,7 @@ function buildUndercutFromLegacy(legacy) {
 function buildCompanyFromLegacy(legacy) {
     return {
         server: { ...legacy.server, port: 8791, openBrowser: false },
-        company: legacy.company || { intervalSeconds: 30, autoStart: false, watchers: [] },
+        company: legacy.company || { intervalSeconds: 30, autoStart: true, watchers: [] },
         notify: legacy.notify || {}
     };
 }

@@ -7,7 +7,7 @@
   },
   "company": {
     "intervalSeconds": 30,
-    "autoStart": false,
+    "autoStart": true,
     "watchers": [
       {
         "id": "company-a",

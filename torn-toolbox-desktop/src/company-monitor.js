@@ -107,7 +107,12 @@ export class CompanyMonitor extends EventEmitter {
             try {
                 var applications = await fetchCompanyApplications(watcher.apiKey);
                 var newApps = [];
+                var seedExisting = state.seen.size === 0;
                 Object.keys(applications).forEach(function(id) {
+                    if (seedExisting) {
+                        state.seen.add(id);
+                        return;
+                    }
                     if (!state.seen.has(id)) {
                         state.seen.add(id);
                         state.apps++;
