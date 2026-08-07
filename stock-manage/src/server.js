@@ -13,6 +13,7 @@ import {
   expandDailySeries,
   sliceSeries,
   enrichHoldings,
+  computeDailySummary,
   normalizeTrade,
   recalcCashFromTrades,
   roundMoney,
@@ -45,6 +46,7 @@ function buildPortfolio(data, pnlOpts = {}) {
   const sparse = buildDailyCumulativeSeries(data.trades);
   const expanded = expandDailySeries(sparse);
   const chartSeries = sliceSeries(expanded, pnlOpts.startDate, pnlOpts.endDate);
+  const daily = computeDailySummary(enriched.rows, data.trades);
   return {
     cash: data.cash,
     trades: data.trades,
@@ -58,7 +60,8 @@ function buildPortfolio(data, pnlOpts = {}) {
       totalAssets: enriched.totalAssets,
       unrealized: enriched.unrealized,
       totalPnl: enriched.unrealized,
-      ...pnl
+      ...pnl,
+      ...daily
     },
     chartSeries
   };
