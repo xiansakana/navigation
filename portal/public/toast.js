@@ -1,6 +1,7 @@
 (function () {
   var DEFAULT_DURATION = 3200;
   var host = null;
+  var active = new Map();
 
   function ensureHost() {
     if (host && document.body.contains(host)) return host;
@@ -12,9 +13,14 @@
     return host;
   }
 
-  function dismiss(el) {
+  function toastKey(type, text) {
+    return type + '\0' + text;
+  }
+
+  function dismiss(el, key) {
     if (!el || el.classList.contains('portal-toast--out')) return;
     el.classList.add('portal-toast--out');
+    if (key) active.delete(key);
     setTimeout(function () { el.remove(); }, 200);
   }
 
@@ -25,6 +31,14 @@
     var text = String(message == null ? '' : message).trim();
     if (!text) return;
 
+    var key = toastKey(type, text);
+    var prev = active.get(key);
+    if (prev) {
+      clearTimeout(prev.timer);
+      prev.timer = setTimeout(function () { dismiss(prev.el, key); }, duration);
+      return;
+    }
+
     var el = document.createElement('div');
     el.className = 'portal-toast portal-toast--' + type;
     el.setAttribute('role', type === 'error' ? 'alert' : 'status');
@@ -33,10 +47,12 @@
     var root = ensureHost();
     root.appendChild(el);
 
-    var timer = setTimeout(function () { dismiss(el); }, duration);
+    var timer = setTimeout(function () { dismiss(el, key); }, duration);
+    active.set(key, { el: el, timer: timer });
+
     el.addEventListener('click', function () {
       clearTimeout(timer);
-      dismiss(el);
+      dismiss(el, key);
     });
   }
 

@@ -511,12 +511,15 @@ body.stock-proxied .sm-header h1 {
 .portal-toast-host {
     position: fixed;
     top: calc(var(--navbar-height) + 12px);
-    right: 16px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
     z-index: 1200;
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 8px;
-    max-width: min(420px, calc(100vw - 32px));
+    width: min(420px, calc(100vw - 32px));
     pointer-events: none;
 }
 
@@ -526,6 +529,8 @@ body.login-page .portal-toast-host {
 
 .portal-toast {
     pointer-events: auto;
+    width: 100%;
+    text-align: center;
     padding: 12px 16px;
     border-radius: 10px;
     border: 1px solid var(--border);
@@ -541,7 +546,7 @@ body.login-page .portal-toast-host {
 
 .portal-toast--out {
     opacity: 0;
-    transform: translateX(12px);
+    transform: translateY(-8px);
 }
 
 .portal-toast--success {
@@ -567,10 +572,10 @@ body.login-page .portal-toast-host {
 @keyframes portal-toast-in {
     from {
         opacity: 0;
-        transform: translateX(12px);
+        transform: translateY(-8px);
     }
     to {
         opacity: 1;
-        transform: translateX(0);
+        transform: translateY(0);
     }
 }

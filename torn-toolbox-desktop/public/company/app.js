@@ -216,7 +216,6 @@ async function saveConfig() {
         })
     });
     $('global-status').textContent = '设置已保存';
-    WUI.toastOk('设置已保存');
     await loadState();
 }
 
