@@ -107,6 +107,7 @@
                   <button type="button" data-cmd="taskList" class="btn ghost notes-tool" title="待办清单">☑</button>
                   <button type="button" data-cmd="blockquote" class="btn ghost notes-tool" title="引用">❝</button>
                   <button type="button" data-cmd="codeBlock" class="btn ghost notes-tool" title="代码块">{ }</button>
+                  <button type="button" data-cmd="image" class="btn ghost notes-tool" title="插入图片">🖼</button>
                   <button type="button" data-cmd="hr" class="btn ghost notes-tool" title="分隔线">—</button>
                   <button type="button" id="btn-insert-ref" class="btn ghost notes-tool" title="块引用">🔗</button>
                 </div>
@@ -118,6 +119,7 @@
                 <span class="notes-toolbar-spacer"></span>
               </div>
             </div>
+            <input type="file" id="image-upload-input" accept="image/*" hidden>
 
             <div class="notes-editor-body">
               <div class="notes-editor-shell" id="note-editor-shell">

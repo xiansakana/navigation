@@ -108,6 +108,9 @@ function walkNodes(node, parts) {
   if (node.type === 'noteReference') {
     parts.push(node.attrs?.title || '');
   }
+  if (node.type === 'image') {
+    parts.push(node.attrs?.alt || '[图片]');
+  }
   if (Array.isArray(node.content)) node.content.forEach(function(child) { walkNodes(child, parts); });
 }
 
