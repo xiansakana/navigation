@@ -221,6 +221,7 @@ body.has-navbar {
 
 input,
 select {
+    width: 100%;
     padding: 10px 12px;
     border-radius: 10px;
     border: 1px solid var(--border);
@@ -254,8 +255,18 @@ select:focus {
     border-radius: 16px;
     width: min(440px, 100%);
     max-height: 90vh;
-    overflow: auto;
+    display: flex;
+    flex-direction: column;
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.sm-modal-body {
+    padding: 20px;
+    display: grid;
+    gap: 14px;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
 }
 
 .sm-modal-head {
@@ -264,18 +275,13 @@ select:focus {
     align-items: center;
     padding: 18px 20px;
     border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
 }
 
 .sm-modal-head h3 {
     margin: 0;
     font-size: 18px;
     font-weight: 600;
-}
-
-.sm-modal-body {
-    padding: 20px;
-    display: grid;
-    gap: 14px;
 }
 
 .sm-modal-body label {

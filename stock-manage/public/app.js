@@ -96,7 +96,7 @@ function closeModal() {
 function openModal(title, bodyHtml, onSubmit) {
   const root = $('#modal-root');
   root.innerHTML = `
-    <div class="sm-modal-backdrop" data-close>
+    <div class="sm-modal-backdrop">
       <div class="sm-modal" role="dialog">
         <div class="sm-modal-head">
           <h3>${title}</h3>
@@ -109,10 +109,13 @@ function openModal(title, bodyHtml, onSubmit) {
         </div>
       </div>
     </div>`;
-  root.querySelector('[data-close]').closest('.sm-modal-backdrop').addEventListener('click', (e) => {
-    if (e.target.matches('[data-close]') || e.target.classList.contains('sm-modal-backdrop')) closeModal();
+  const backdrop = root.querySelector('.sm-modal-backdrop');
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) closeModal();
   });
-  root.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', closeModal));
+  root.querySelectorAll('[data-close]').forEach((el) => {
+    el.addEventListener('click', closeModal);
+  });
   $('#modal-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
