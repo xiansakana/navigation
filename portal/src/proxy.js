@@ -64,6 +64,11 @@ function rewriteProxiedBody(text, service) {
     return out;
 }
 
+function shouldInjectBar(service) {
+    if (service.id === 'napcat') return true;
+    return service.injectBar !== false;
+}
+
 function injectPortalShell(html, service) {
     if (!html.includes('<body')) return html;
     var themeBoot = '<script>(function(){try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>';
@@ -79,7 +84,7 @@ function injectPortalShell(html, service) {
         baseTag = '<base href="' + service.path.replace(/\/$/, '') + '/">';
     }
     var portalCss = '<link rel="stylesheet" href="/portal.css">';
-    if (service.injectBar === false) {
+    if (!shouldInjectBar(service)) {
         if (!baseTag) return html;
         return html.replace('<head>', '<head>' + themeBoot + themeJs + toastJs + baseTag);
     }
@@ -101,6 +106,7 @@ function injectPortalShell(html, service) {
     var bodyClass = 'has-navbar';
     if (isToolbox) bodyClass += ' toolbox-proxied';
     if (service.id === 'stock-manage') bodyClass += ' stock-proxied';
+    if (service.id === 'napcat') bodyClass += ' napcat-proxied';
     return html
         .replace('<head>', '<head>' + themeBoot + baseTag + portalCss + themeJs + toastJs + layoutJs)
         .replace(/<body([^>]*)>/, function(match, attrs) {
