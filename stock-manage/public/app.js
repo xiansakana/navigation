@@ -64,6 +64,10 @@ function maskPnlValue(html) {
   return pnlVisible ? html : MASK;
 }
 
+function maskDashboardValue(html) {
+  return dashboardVisible ? html : MASK;
+}
+
 function schedulePrefsSave(partial) {
   clearTimeout(prefSaveTimer);
   prefSaveTimer = setTimeout(() => {
@@ -124,50 +128,53 @@ function signalOptions(val) {
 
 function renderDashboard() {
   const el = $('#dashboard');
-  const show = dashboardVisible;
-  $('#toggle-dashboard').checked = show;
+  $('#toggle-dashboard').checked = dashboardVisible;
   $('#toggle-pnl-visible').checked = pnlVisible;
-  if (!show) { el.innerHTML = ''; el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
   const s = state.summary || {};
   const cashPct = s.totalAssets > 0 ? (state.cash / s.totalAssets * 100) : 0;
   const dailyVal = s.dailyTotalPnl;
-  const dailyHint = dailyVal == null
-    ? '刷新行情后显示持仓涨跌'
-    : (s.tradeDailyPnl != null && s.tradeDailyPnl !== 0
-      ? `持仓 ${fmtUsd(s.marketDailyPnl)} + 交易 ${fmtUsd(s.tradeDailyPnl)}`
-      : '持仓当日涨跌合计');
+  const dailyHint = !dashboardVisible || !pnlVisible
+    ? '—'
+    : dailyVal == null
+      ? '刷新行情后显示持仓涨跌'
+      : (s.tradeDailyPnl != null && s.tradeDailyPnl !== 0
+        ? `持仓 ${fmtUsd(s.marketDailyPnl)} + 交易 ${fmtUsd(s.tradeDailyPnl)}`
+        : '持仓当日涨跌合计');
+  const dailyDisplay = dailyVal == null ? '—' : fmtUsdSigned(dailyVal);
+  const cashField = !dashboardVisible
+    ? `<div class="value">${MASK}</div>`
+    : can('cash')
+      ? `<div class="sm-cash-input-wrap"><span>$</span><input type="number" step="0.01" id="cash-input" value="${state.cash}"></div>`
+      : `<div class="value">${fmtUsd(state.cash)}</div>`;
   el.innerHTML = `
     <div class="sm-summary-grid">
       <div class="sm-summary-card sm-summary-card--accent">
         <div class="label">总资产</div>
-        <div class="value">${fmtUsd(s.totalAssets)}</div>
+        <div class="value">${maskDashboardValue(fmtUsd(s.totalAssets))}</div>
       </div>
       <div class="sm-summary-card">
         <div class="label">股票市值</div>
-        <div class="value">${fmtUsd(s.stockMv)}</div>
+        <div class="value">${maskDashboardValue(fmtUsd(s.stockMv))}</div>
       </div>
       <div class="sm-summary-card">
         <div class="label">期权市值</div>
-        <div class="value">${fmtUsd(s.optionMv)}</div>
+        <div class="value">${maskDashboardValue(fmtUsd(s.optionMv))}</div>
       </div>
       <div class="sm-summary-card sm-summary-card--green">
         <div class="label">总盈亏</div>
-        <div class="value ${cls(s.totalPnl)}">${maskPnlValue(fmtUsdSigned(s.totalPnl))}</div>
+        <div class="value ${dashboardVisible && pnlVisible ? cls(s.totalPnl) : ''}">${maskDashboardValue(maskPnlValue(fmtUsdSigned(s.totalPnl)))}</div>
         <div class="hint">未实现盈亏合计</div>
       </div>
       <div class="sm-summary-card sm-summary-card--amber">
         <div class="label">当日总盈亏</div>
-        <div class="value ${dailyVal == null ? '' : cls(dailyVal)}">${dailyVal == null ? '—' : maskPnlValue(fmtUsdSigned(dailyVal))}</div>
+        <div class="value ${dashboardVisible && pnlVisible && dailyVal != null ? cls(dailyVal) : ''}">${dailyVal == null && dashboardVisible && pnlVisible ? '—' : maskDashboardValue(maskPnlValue(dailyVal == null ? '—' : fmtUsdSigned(dailyVal)))}</div>
         <div class="hint">${dailyHint}</div>
       </div>
       <div class="sm-summary-card sm-summary-card--cash">
         <div class="label">现金</div>
-        <div class="sm-cash-input-wrap">
-          <span>$</span>
-          <input type="number" step="0.01" id="cash-input" value="${state.cash}" ${can('cash') ? '' : 'readonly'}>
-        </div>
-        <div class="hint">占组合 ${fmtPct(cashPct)}</div>
+        ${cashField}
+        <div class="hint">占组合 ${maskDashboardValue(fmtPct(cashPct))}</div>
       </div>
     </div>`;
   bindCashInput();
@@ -262,11 +269,14 @@ function renderHoldings() {
 }
 
 function renderPnlStat(label, val, kind) {
+  if (!pnlVisible) {
+    return `<div class="sm-stat"><div class="label">${label}</div><div class="value">${MASK}</div></div>`;
+  }
   if (kind === 'commission') {
     return `<div class="sm-stat"><div class="label">${label}</div><div class="value neg">${fmtCommission(val)}</div></div>`;
   }
   if (kind === 'signed') {
-    return `<div class="sm-stat"><div class="label">${label}</div><div class="value ${cls(val)}">${maskPnlValue(fmtUsdSigned(val))}</div></div>`;
+    return `<div class="sm-stat"><div class="label">${label}</div><div class="value ${cls(val)}">${fmtUsdSigned(val)}</div></div>`;
   }
   return `<div class="sm-stat"><div class="label">${label}</div><div class="value">${fmtUsd(val)}</div></div>`;
 }
