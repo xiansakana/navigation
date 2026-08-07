@@ -507,36 +507,20 @@ body.stock-proxied .sm-header h1 {
     padding: 2px 8px;
 }
 
-/* ── Toast (inverse theme for contrast) ── */
+/* ── Toast (inverse theme, solid high contrast) ── */
 .portal-toast-host {
     --toast-bg: #ffffff;
-    --toast-text: #152033;
-    --toast-border: #d8e0ea;
-    --toast-shadow: 0 8px 28px rgba(15, 23, 42, 0.14);
-    --toast-success-border: rgba(5, 150, 105, 0.45);
-    --toast-success-bg: rgba(5, 150, 105, 0.08);
-    --toast-error-border: rgba(220, 38, 38, 0.45);
-    --toast-error-bg: rgba(220, 38, 38, 0.08);
-    --toast-warn-border: rgba(217, 119, 6, 0.45);
-    --toast-warn-bg: rgba(217, 119, 6, 0.08);
-    --toast-info-border: rgba(37, 99, 235, 0.45);
-    --toast-info-bg: rgba(37, 99, 235, 0.08);
+    --toast-text: #0f172a;
+    --toast-border: #94a3b8;
+    --toast-shadow: 0 8px 28px rgba(15, 23, 42, 0.18);
     color-scheme: light;
 }
 
 [data-theme="light"] .portal-toast-host {
-    --toast-bg: #171b22;
-    --toast-text: #e8edf5;
-    --toast-border: #2a3140;
-    --toast-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
-    --toast-success-border: rgba(61, 220, 132, 0.4);
-    --toast-success-bg: rgba(61, 220, 132, 0.1);
-    --toast-error-border: rgba(255, 123, 123, 0.45);
-    --toast-error-bg: rgba(255, 123, 123, 0.1);
-    --toast-warn-border: rgba(245, 158, 11, 0.45);
-    --toast-warn-bg: rgba(245, 158, 11, 0.1);
-    --toast-info-border: rgba(91, 156, 255, 0.4);
-    --toast-info-bg: rgba(91, 156, 255, 0.1);
+    --toast-bg: #0f1115;
+    --toast-text: #f1f5f9;
+    --toast-border: #64748b;
+    --toast-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
     color-scheme: dark;
 }
 
@@ -579,26 +563,6 @@ body.login-page .portal-toast-host {
 .portal-toast--out {
     opacity: 0;
     transform: translateY(-8px);
-}
-
-.portal-toast--success {
-    border-color: var(--toast-success-border);
-    background: linear-gradient(135deg, var(--toast-bg), var(--toast-success-bg));
-}
-
-.portal-toast--error {
-    border-color: var(--toast-error-border);
-    background: linear-gradient(135deg, var(--toast-bg), var(--toast-error-bg));
-}
-
-.portal-toast--warn {
-    border-color: var(--toast-warn-border);
-    background: linear-gradient(135deg, var(--toast-bg), var(--toast-warn-bg));
-}
-
-.portal-toast--info {
-    border-color: var(--toast-info-border);
-    background: linear-gradient(135deg, var(--toast-bg), var(--toast-info-bg));
 }
 
 @keyframes portal-toast-in {
