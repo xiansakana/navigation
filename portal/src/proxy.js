@@ -38,6 +38,20 @@ export function buildTargetUrl(service, reqUrl) {
     return target;
 }
 
+function siyuanEntryPath() {
+    return '/stage/build/desktop/';
+}
+
+function fixSiyuanAuthQuery(search) {
+    var params = new URLSearchParams(search || '');
+    var to = params.get('to');
+    if (!to || to === '/') {
+        params.set('to', siyuanEntryPath());
+    }
+    var q = params.toString();
+    return q ? '?' + q : '';
+}
+
 function rewriteLocation(location, service) {
     if (!location) return location;
     var prefix = service.path.replace(/\/$/, '');
@@ -45,10 +59,19 @@ function rewriteLocation(location, service) {
         var loc = new URL(location, service.internalUrl);
         var base = new URL(service.internalUrl);
         if (loc.origin === base.origin) {
+            if (service.id === 'notes' && loc.pathname === '/check-auth') {
+                return prefix + loc.pathname + fixSiyuanAuthQuery(loc.search);
+            }
             return prefix + loc.pathname + loc.search + loc.hash;
         }
     } catch (e) { /* ignore */ }
     if (String(location).startsWith('/') && !String(location).startsWith('//')) {
+        if (service.id === 'notes' && String(location).startsWith('/check-auth')) {
+            var qIdx = location.indexOf('?');
+            var path = qIdx >= 0 ? location.slice(0, qIdx) : location;
+            var search = qIdx >= 0 ? location.slice(qIdx) : '';
+            return prefix + path + fixSiyuanAuthQuery(search);
+        }
         return prefix + location;
     }
     return String(location)
