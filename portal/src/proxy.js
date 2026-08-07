@@ -263,10 +263,9 @@ function findNotesService(services) {
     });
 }
 
-/** SiYuan 使用根路径 /api、/ws、/stage 等，需在 portal 根路由反代 */
+/** SiYuan 使用根路径 /ws、/stage 等，需在 portal 根路由反代；/api 按命名空间区分 */
 var SIYUAN_ROOT_PREFIXES = [
     '/ws',
-    '/api/',
     '/stage/',
     '/appearance/',
     '/plugins/',
@@ -287,7 +286,26 @@ var SIYUAN_ROOT_PREFIXES = [
     '/repo/'
 ];
 
+var SIYUAN_API_PREFIXES = [
+    '/api/account/', '/api/ai/', '/api/archive/', '/api/asset/', '/api/attr/', '/api/av/',
+    '/api/bazaar/', '/api/block/', '/api/bookmark/', '/api/broadcast/', '/api/clipboard/',
+    '/api/cloud/', '/api/convert/', '/api/export/', '/api/extension/', '/api/file/',
+    '/api/filetree/', '/api/format/', '/api/graph/', '/api/history/', '/api/icon/',
+    '/api/import/', '/api/inbox/', '/api/lute/', '/api/network/', '/api/notebook/',
+    '/api/notification/', '/api/outline/', '/api/petal/', '/api/plugin/', '/api/query/',
+    '/api/ref/', '/api/repo/', '/api/riff/', '/api/search/', '/api/setting/',
+    '/api/snippet/', '/api/sqlite/', '/api/storage/', '/api/sync/', '/api/system/',
+    '/api/tag/', '/api/template/', '/api/transactions/', '/api/ui/'
+];
+
+function isSiyuanApiPath(pathname) {
+    return SIYUAN_API_PREFIXES.some(function(prefix) {
+        return pathname.startsWith(prefix);
+    });
+}
+
 function isSiyuanRootPath(pathname) {
+    if (isSiyuanApiPath(pathname)) return true;
     if (pathname === '/upload') return true;
     if (pathname === '/check-auth') return true;
     if (pathname === '/favicon.ico') return true;
@@ -306,25 +324,6 @@ function findNapcatService(services) {
     });
 }
 
-var NAPCAT_API_PREFIXES = [
-    '/api/auth/',
-    '/api/Log/',
-    '/api/Process/',
-    '/api/QQLogin/',
-    '/api/WebUIConfig/',
-    '/api/base/',
-    '/api/Network/',
-    '/api/File/',
-    '/api/Plugin/',
-    '/api/OB/',
-];
-
-function isNapcatApiPath(pathname) {
-    return NAPCAT_API_PREFIXES.some(function(prefix) {
-        return pathname.startsWith(prefix);
-    });
-}
-
 /** NapCat WebUI 使用绝对路径 /webui/...，需额外挂载到同一反代 */
 export function resolveProxyContext(services, reqUrl) {
     var url = new URL(reqUrl, 'http://127.0.0.1');
@@ -336,7 +335,7 @@ export function resolveProxyContext(services, reqUrl) {
         var webuiPrefix = napcat.path.replace(/\/$/, '');
         return { service: napcat, proxyUrl: webuiPrefix + url.pathname + url.search };
     }
-    if (napcat && isNapcatApiPath(url.pathname)) {
+    if (napcat && url.pathname.startsWith('/api/') && !isSiyuanApiPath(url.pathname)) {
         var apiPrefix = napcat.path.replace(/\/$/, '');
         return { service: napcat, proxyUrl: apiPrefix + url.pathname + url.search };
     }
