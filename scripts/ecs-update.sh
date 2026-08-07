@@ -102,10 +102,9 @@ fi
 if should_run stock-manage; then
     echo "==> stock-manage"
     cd "$ROOT/stock-manage"
-    npm install
-    VITE_BASE_PATH=/stock-manage/ npm run build
+    npm install --production
     if pm2 describe stock-manage >/dev/null 2>&1; then
-        COZE_PROJECT_ENV=PROD NODE_ENV=production TRUST_PROXY=1 pm2 restart stock-manage
+        TRUST_PROXY=1 pm2 restart stock-manage --update-env
     else
         echo "stock-manage 未运行，请先配置 config.json 并执行 ./deploy-ecs.sh"
     fi

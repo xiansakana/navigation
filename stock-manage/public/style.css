@@ -1,0 +1,315 @@
+/* 与 portal.css 设计体系一致；通过 portal 反代时会叠加 portal.css 的导航栏与基础组件 */
+:root {
+    color-scheme: dark;
+    --bg: #0f1115;
+    --card: #171b22;
+    --border: #2a3140;
+    --text: #e8edf5;
+    --muted: #9aa4b2;
+    --accent: #5b9cff;
+    --accent-hover: #7eb6ff;
+    --green: #3ddc84;
+    --red: #ff7b7b;
+    --navbar-height: 56px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, sans-serif;
+    background:
+        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(91, 156, 255, 0.08), transparent),
+        var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    line-height: 1.5;
+}
+
+body.has-navbar {
+    padding-top: var(--navbar-height);
+}
+
+.sm-app {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+}
+
+.sm-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+}
+
+.sm-header h1 {
+    margin: 0 0 8px;
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.subtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: 15px;
+}
+
+.sm-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* 独立访问（:5000）时的按钮；经 portal 反代时与 portal.css 一致 */
+.btn {
+    border: 0;
+    border-radius: 10px;
+    padding: 10px 16px;
+    cursor: pointer;
+    font-size: 14px;
+    font-family: inherit;
+    transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.btn.primary {
+    background: var(--accent);
+    color: #fff;
+}
+
+.btn.primary:hover { background: var(--accent-hover); }
+
+.btn.ghost {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+}
+
+.btn.ghost:hover {
+    color: var(--text);
+    border-color: rgba(91, 156, 255, 0.35);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.btn.link {
+    background: none;
+    border: none;
+    color: var(--accent);
+    padding: 4px 8px;
+    font-size: 13px;
+}
+
+.btn.link:hover { color: var(--accent-hover); }
+
+.btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.sm-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.sm-stats--inner {
+    padding: 16px 20px 20px;
+    margin-bottom: 0;
+}
+
+.sm-stat {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px 20px;
+    transition: border-color .15s ease;
+}
+
+.sm-stat:hover {
+    border-color: rgba(91, 156, 255, 0.25);
+}
+
+.sm-stat .label {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 6px;
+}
+
+.sm-stat .value {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+}
+
+.sm-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    margin-bottom: 20px;
+    overflow: hidden;
+}
+
+.sm-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+}
+
+.sm-panel-head h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.sm-table-wrap {
+    overflow-x: auto;
+}
+
+.sm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.sm-table th,
+.sm-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.sm-table th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.sm-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.sm-table tbody tr:hover td {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.sm-table .empty {
+    color: var(--muted);
+    text-align: center;
+    padding: 24px;
+}
+
+.pos { color: var(--green); }
+.neg { color: var(--red); }
+.sm-muted { color: var(--muted); font-size: 14px; }
+
+.sm-inline-form {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+input,
+select {
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: #0f131a;
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+}
+
+input:focus,
+select:focus {
+    outline: none;
+    border-color: rgba(91, 156, 255, 0.45);
+}
+
+.sm-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    z-index: 1100;
+}
+
+.sm-modal {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    width: min(440px, 100%);
+    max-height: 90vh;
+    overflow: auto;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.sm-modal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.sm-modal-head h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.sm-modal-body {
+    padding: 20px;
+    display: grid;
+    gap: 14px;
+}
+
+.sm-modal-body label {
+    display: grid;
+    gap: 6px;
+    font-size: 14px;
+    color: var(--muted);
+}
+
+.sm-modal-foot {
+    padding: 0 20px 20px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.hint {
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0;
+    line-height: 1.55;
+}
+
+.hidden { display: none !important; }
+
+.sm-error {
+    padding: 32px 24px;
+    color: var(--red);
+    text-align: center;
+}
+
+@media (max-width: 640px) {
+    .sm-app { padding: 24px 16px 48px; }
+    .sm-header { flex-direction: column; }
+    .sm-header-actions { width: 100%; }
+    .sm-header-actions .btn { flex: 1; text-align: center; }
+}

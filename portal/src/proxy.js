@@ -91,6 +91,7 @@ function injectPortalShell(html, service) {
         + '</div></header>';
     var bodyClass = 'has-navbar';
     if (isToolbox) bodyClass += ' toolbox-proxied';
+    if (service.id === 'stock-manage') bodyClass += ' stock-proxied';
     return html
         .replace('<head>', '<head>' + baseTag + portalCss)
         .replace(/<body([^>]*)>/, function(match, attrs) {
