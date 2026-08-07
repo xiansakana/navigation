@@ -4,6 +4,7 @@ import Placeholder from 'https://esm.sh/@tiptap/extension-placeholder@2.11.5';
 import { NoteReference, insertNoteReference } from './note-link.js';
 import { createDropdown } from './dropdown.js';
 import { blockExtensions, setupBlockEditor, openNotePicker } from './blocks.js';
+import { openContextMenu } from './context-menu.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -41,6 +42,7 @@ let tagFilterDropdown = null;
 let treeSortDropdown = null;
 let blockEditorCleanup = null;
 let noteTags = [];
+let sidebarCollapsed = localStorage.getItem('notes-sidebar-collapsed') === '1';
 
 function collapsedStorageKey() {
   return 'notes-collapsed-' + (activeNotebookId || 'default');
@@ -162,6 +164,130 @@ function escapeHtml(text) {
 
 function noteById(id) {
   return notes.find(function(n) { return n.id === id; });
+}
+
+function applySidebarCollapsed() {
+  const app = $('notes-app');
+  const expandBtn = $('btn-sidebar-expand');
+  if (!app) return;
+  app.classList.toggle('notes-sidebar-collapsed', sidebarCollapsed);
+  expandBtn?.classList.toggle('hidden', !sidebarCollapsed);
+}
+
+function setSidebarCollapsed(collapsed) {
+  sidebarCollapsed = collapsed;
+  localStorage.setItem('notes-sidebar-collapsed', collapsed ? '1' : '0');
+  applySidebarCollapsed();
+}
+
+function noteMenuItems(noteId) {
+  return [
+    { id: 'open', label: '打开', icon: '📄' },
+    { id: 'subpage', label: '新建子页面', icon: '📁' },
+    { id: 'duplicate', label: '复制', icon: '⎘' },
+    { id: 'export', label: '导出 Markdown', icon: '↓' },
+    { divider: true },
+    { id: 'delete', label: '删除', icon: '🗑', danger: true }
+  ];
+}
+
+async function runNoteMenuAction(action, noteId) {
+  if (action === 'open') {
+    await openNote(noteId);
+    return;
+  }
+  if (action === 'subpage') {
+    if (activeNoteId !== noteId) await openNote(noteId);
+    await createNote(noteId);
+    return;
+  }
+  if (action === 'duplicate') {
+    if (activeNoteId !== noteId) await openNote(noteId);
+    await duplicateActiveNote();
+    return;
+  }
+  if (action === 'export') {
+    if (activeNoteId !== noteId) await openNote(noteId);
+    await exportMarkdown();
+    return;
+  }
+  if (action === 'delete') {
+    if (activeNoteId !== noteId) await openNote(noteId);
+    await deleteActiveNote();
+  }
+}
+
+function showNoteContextMenu(noteId, anchorOrEvent) {
+  const items = noteMenuItems(noteId);
+  const opts = {
+    items: items,
+    onSelect: function(id) { runNoteMenuAction(id, noteId); }
+  };
+  if (anchorOrEvent instanceof HTMLElement) {
+    opts.anchor = anchorOrEvent;
+  } else if (anchorOrEvent && anchorOrEvent.clientX != null) {
+    opts.x = anchorOrEvent.clientX;
+    opts.y = anchorOrEvent.clientY;
+  }
+  openContextMenu(opts);
+}
+
+function showPageMenu(anchorOrEvent) {
+  if (!activeNoteId) return;
+  const opts = {
+    items: [
+      { id: 'subpage', label: '新建子页面', icon: '📁' },
+      { id: 'duplicate', label: '复制', icon: '⎘' },
+      { id: 'export', label: '导出 Markdown', icon: '↓' },
+      { divider: true },
+      { id: 'delete', label: '删除', icon: '🗑', danger: true }
+    ],
+    onSelect: function(id) { runNoteMenuAction(id, activeNoteId); }
+  };
+  if (anchorOrEvent instanceof HTMLElement && anchorOrEvent.clientX == null) {
+    opts.anchor = anchorOrEvent;
+  } else if (anchorOrEvent && anchorOrEvent.clientX != null) {
+    opts.x = anchorOrEvent.clientX;
+    opts.y = anchorOrEvent.clientY;
+  }
+  openContextMenu(opts);
+}
+
+function showNotebookMenu(anchor) {
+  openContextMenu({
+    anchor: anchor,
+    items: [
+      { id: 'add', label: '新建笔记本', icon: '+' },
+      { id: 'rename', label: '重命名', icon: '✎' },
+      { divider: true },
+      { id: 'delete', label: '删除笔记本', icon: '🗑', danger: true }
+    ],
+    onSelect: function(id) {
+      if (id === 'add') addNotebook();
+      else if (id === 'rename') renameNotebook();
+      else if (id === 'delete') deleteNotebook();
+    }
+  });
+}
+
+function attachNoteItemInteractions(item, noteId) {
+  item.addEventListener('click', function(e) {
+    if (e.target.closest('.notes-item-more')) return;
+    openNote(noteId);
+  });
+  item.addEventListener('contextmenu', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    showNoteContextMenu(noteId, e);
+  });
+  const moreBtn = item.querySelector('.notes-item-more');
+  if (moreBtn) {
+    moreBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      showNoteContextMenu(noteId, moreBtn);
+    });
+  }
 }
 
 function parseTagsInput(raw) {
@@ -334,8 +460,9 @@ function renderTreeBranch(node, container) {
   const item = document.createElement('div');
   item.className = 'notes-list-item' + (node.id === activeNoteId ? ' active' : '');
   item.dataset.id = node.id;
-  item.innerHTML = buildNoteItemHtml(node);
-  item.addEventListener('click', function() { openNote(node.id); });
+  item.innerHTML = '<div class="notes-list-item-body">' + buildNoteItemHtml(node) + '</div>'
+    + '<button type="button" class="notes-item-more" title="更多">⋯</button>';
+  attachNoteItemInteractions(item, node.id);
 
   row.appendChild(toggle);
   row.appendChild(item);
@@ -372,8 +499,9 @@ function renderNoteList() {
       spacer.tabIndex = -1;
       const item = document.createElement('div');
       item.className = 'notes-list-item' + (note.id === activeNoteId ? ' active' : '');
-      item.innerHTML = buildNoteItemHtml(note, { snippet: note.snippet });
-      item.addEventListener('click', function() { openNote(note.id); });
+      item.innerHTML = '<div class="notes-list-item-body">' + buildNoteItemHtml(note, { snippet: note.snippet }) + '</div>'
+        + '<button type="button" class="notes-item-more" title="更多">⋯</button>';
+      attachNoteItemInteractions(item, note.id);
       row.appendChild(spacer);
       row.appendChild(item);
       li.appendChild(row);
@@ -819,16 +947,25 @@ $('btn-tree-collapse').addEventListener('click', function() {
 
 $('btn-note-add').addEventListener('click', function() { createNote(null); });
 $('btn-empty-new')?.addEventListener('click', function() { createNote(null); });
-$('btn-subpage').addEventListener('click', function() {
-  if (!activeNoteId) return;
-  createNote(activeNoteId);
-});
 $('btn-notebook-add').addEventListener('click', addNotebook);
-$('btn-notebook-rename').addEventListener('click', renameNotebook);
-$('btn-notebook-delete').addEventListener('click', deleteNotebook);
-$('btn-note-delete').addEventListener('click', deleteActiveNote);
-$('btn-note-duplicate').addEventListener('click', duplicateActiveNote);
-$('btn-export-md').addEventListener('click', exportMarkdown);
+$('btn-notebook-menu')?.addEventListener('click', function(e) {
+  showNotebookMenu(e.currentTarget);
+});
+$('btn-page-menu')?.addEventListener('click', function(e) {
+  showPageMenu(e.currentTarget);
+});
+$('notes-page-header')?.addEventListener('contextmenu', function(e) {
+  if (!activeNoteId) return;
+  if (e.target.closest('input, button, .notes-tag-pill')) return;
+  e.preventDefault();
+  showPageMenu(e);
+});
+$('btn-sidebar-collapse')?.addEventListener('click', function() {
+  setSidebarCollapsed(true);
+});
+$('btn-sidebar-expand')?.addEventListener('click', function() {
+  setSidebarCollapsed(false);
+});
 $('btn-insert-ref').addEventListener('click', pickNoteForReference);
 $('btn-import-md').addEventListener('click', function() { $('import-file').click(); });
 $('import-file').addEventListener('change', function(e) {
@@ -859,6 +996,7 @@ window.addEventListener('beforeunload', function(e) {
 });
 
 initDropdowns();
+applySidebarCollapsed();
 loadBootstrap().catch(function(err) {
   toastErr(err.message);
 });

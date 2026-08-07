@@ -7,14 +7,15 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <div class="notes-app">
-    <aside class="notes-sidebar">
+  <div class="notes-app" id="notes-app">
+    <aside class="notes-sidebar" id="notes-sidebar">
       <div class="notes-sidebar-brand">
         <span class="notes-sidebar-logo">📝</span>
         <div class="notes-sidebar-brand-text">
           <span class="notes-sidebar-brand-title">笔记</span>
           <span id="sidebar-stats" class="notes-sidebar-stats"></span>
         </div>
+        <button type="button" id="btn-sidebar-collapse" class="btn ghost notes-icon-btn notes-sidebar-toggle" title="收起侧边栏">◂</button>
       </div>
 
       <div class="notes-sidebar-section">
@@ -22,10 +23,7 @@
         <div class="notes-notebook-row">
           <div id="notebook-dropdown" class="notes-dropdown-host"></div>
           <button type="button" id="btn-notebook-add" class="btn ghost notes-icon-btn" title="新建笔记本">+</button>
-        </div>
-        <div class="notes-notebook-actions">
-          <button type="button" id="btn-notebook-rename" class="btn ghost notes-btn-sm">重命名</button>
-          <button type="button" id="btn-notebook-delete" class="btn ghost notes-btn-sm danger">删除</button>
+          <button type="button" id="btn-notebook-menu" class="btn ghost notes-icon-btn notes-more-btn" title="笔记本菜单">⋯</button>
         </div>
       </div>
 
@@ -53,6 +51,10 @@
     </aside>
 
     <main class="notes-main">
+      <div class="notes-main-bar">
+        <button type="button" id="btn-sidebar-expand" class="btn ghost notes-icon-btn notes-sidebar-expand hidden" title="展开侧边栏">☰</button>
+      </div>
+
       <div id="notes-empty" class="notes-empty">
         <div class="notes-empty-card">
           <div class="notes-empty-icon">✦</div>
@@ -63,13 +65,15 @@
       </div>
 
       <div id="notes-editor-wrap" class="notes-editor-wrap hidden">
-        <div class="notes-page-cover" aria-hidden="true"></div>
         <div class="notes-page">
           <div class="notes-page-inner">
             <nav id="note-breadcrumb" class="notes-breadcrumb hidden"></nav>
 
             <div class="notes-page-header">
-              <input type="text" id="note-title" class="notes-title" placeholder="无标题" maxlength="200">
+              <div class="notes-page-title-row">
+                <input type="text" id="note-title" class="notes-title" placeholder="无标题" maxlength="200">
+                <button type="button" id="btn-page-menu" class="btn ghost notes-more-btn" title="页面菜单">⋯</button>
+              </div>
               <div class="notes-properties">
                 <div class="notes-property notes-property--tags">
                   <span class="notes-property-label">标签</span>
@@ -112,12 +116,6 @@
                   <button type="button" data-cmd="redo" class="btn ghost notes-tool" title="重做">↷</button>
                 </div>
                 <span class="notes-toolbar-spacer"></span>
-                <div class="notes-toolbar-group notes-toolbar-actions">
-                  <button type="button" id="btn-subpage" class="btn ghost notes-btn-sm">子页面</button>
-                  <button type="button" id="btn-export-md" class="btn ghost notes-btn-sm">导出</button>
-                  <button type="button" id="btn-note-duplicate" class="btn ghost notes-btn-sm">复制</button>
-                  <button type="button" id="btn-note-delete" class="btn ghost notes-btn-sm danger">删除</button>
-                </div>
               </div>
             </div>
 

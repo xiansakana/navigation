@@ -42,6 +42,116 @@ body {
   margin: 0;
 }
 
+.notes-app.notes-sidebar-collapsed .notes-sidebar {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-right-color: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.notes-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--notes-main-bg);
+}
+
+.notes-main-bar {
+  flex-shrink: 0;
+  padding: 10px 16px 0;
+  min-height: 42px;
+}
+
+.notes-sidebar-expand.hidden {
+  display: none !important;
+}
+
+.notes-app.notes-sidebar-collapsed .notes-sidebar-expand {
+  display: inline-grid !important;
+}
+
+.notes-sidebar-toggle {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.notes-more-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  font-size: 18px;
+  line-height: 1;
+  letter-spacing: 0;
+  color: var(--notes-muted);
+  flex-shrink: 0;
+}
+
+.notes-more-btn:hover {
+  color: var(--notes-text);
+  background: var(--notes-hover);
+}
+
+/* Context menu */
+.notes-context-menu {
+  position: fixed;
+  z-index: 10050;
+  min-width: 180px;
+  max-width: 260px;
+  padding: 4px;
+  border-radius: var(--notes-radius);
+  border: 1px solid var(--notes-border-strong);
+  background: var(--notes-surface);
+  box-shadow: var(--notes-shadow);
+}
+
+.notes-context-menu-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.notes-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--notes-radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.notes-context-menu-item:hover {
+  background: var(--notes-hover);
+}
+
+.notes-context-menu-item.is-danger {
+  color: #f87171;
+}
+
+.notes-context-menu-item.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.notes-context-menu-icon {
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.notes-context-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--notes-border);
+}
+
 body.has-navbar .notes-app {
   min-height: calc(100vh - var(--navbar-height));
 }
@@ -55,6 +165,7 @@ body.has-navbar .notes-app {
   display: flex;
   flex-direction: column;
   min-height: inherit;
+  transition: width 0.22s ease, opacity 0.22s ease, border-color 0.22s ease;
 }
 
 .notes-sidebar-brand {
@@ -115,12 +226,12 @@ body.has-navbar .notes-app {
 .notes-notebook-row {
   display: flex;
   gap: 6px;
+  align-items: center;
 }
 
-.notes-notebook-actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
+.notes-notebook-row .notes-dropdown-host {
+  flex: 1;
+  min-width: 0;
 }
 
 .notes-search-wrap {
@@ -430,11 +541,46 @@ body.has-navbar .notes-app {
   position: relative;
   flex: 1;
   min-width: 0;
-  padding: 8px 10px 8px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 6px 8px 12px;
   border-radius: var(--notes-radius-sm);
   cursor: pointer;
   border: none;
   transition: background 0.12s ease;
+}
+
+.notes-list-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.notes-item-more {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--notes-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.notes-list-item:hover .notes-item-more,
+.notes-list-item.active .notes-item-more,
+.notes-item-more:focus-visible {
+  opacity: 1;
+}
+
+.notes-item-more:hover {
+  background: var(--notes-hover);
+  color: var(--notes-text);
 }
 
 .notes-list-item::before {
@@ -538,14 +684,6 @@ body.has-navbar .notes-app {
 }
 
 /* ── Main ── */
-.notes-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--notes-main-bg);
-}
-
 .notes-empty {
   flex: 1;
   display: flex;
@@ -595,21 +733,6 @@ body.has-navbar .notes-app {
 .notes-editor-wrap.hidden,
 .hidden { display: none !important; }
 
-.notes-page-cover {
-  height: 120px;
-  flex-shrink: 0;
-  background:
-    linear-gradient(135deg, rgba(91, 156, 255, 0.35) 0%, rgba(91, 156, 255, 0.05) 50%, transparent 100%),
-    linear-gradient(180deg, var(--notes-surface) 0%, var(--notes-main-bg) 100%);
-  border-bottom: 1px solid var(--notes-border);
-}
-
-[data-theme="light"] .notes-page-cover {
-  background:
-    linear-gradient(135deg, rgba(37, 99, 235, 0.18) 0%, rgba(37, 99, 235, 0.04) 50%, transparent 100%),
-    linear-gradient(180deg, #ffffff 0%, var(--notes-main-bg) 100%);
-}
-
 .notes-page {
   flex: 1;
   overflow-y: auto;
@@ -619,7 +742,23 @@ body.has-navbar .notes-app {
 .notes-page-inner {
   max-width: var(--notes-content-max);
   margin: 0 auto;
-  padding: 0 48px 64px;
+  padding: 8px 48px 64px;
+}
+
+.notes-page-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.notes-page-title-row .notes-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.notes-page-header {
+  position: relative;
+  padding-top: 8px;
 }
 
 .notes-breadcrumb {
@@ -627,7 +766,7 @@ body.has-navbar .notes-app {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  padding: 16px 0 0;
+  padding: 12px 0 0;
   font-size: 12px;
   color: var(--notes-muted);
 }
@@ -645,12 +784,6 @@ body.has-navbar .notes-app {
 .notes-crumb:hover { background: var(--notes-hover); }
 
 .notes-crumb-sep { opacity: 0.45; }
-
-.notes-page-header {
-  margin-top: -28px;
-  position: relative;
-  z-index: 1;
-}
 
 .notes-title {
   width: 100%;
@@ -803,7 +936,16 @@ body.has-navbar .notes-app {
   gap: 2px;
 }
 
-.notes-toolbar-actions { margin-left: auto; }
+.notes-empty-card kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--notes-hover);
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.notes-toolbar-actions { display: none; }
 
 .notes-tool {
   min-width: 30px;
@@ -1388,12 +1530,20 @@ body.notes-is-dragging .notes-block-handle {
 
 @media (max-width: 760px) {
   .notes-app { flex-direction: column; }
+  .notes-app.notes-sidebar-collapsed .notes-sidebar {
+    width: 100%;
+    opacity: 1;
+    pointer-events: auto;
+    max-height: 0;
+    border-bottom: none;
+  }
   .notes-sidebar {
     width: 100%;
     max-height: 44vh;
     border-right: none;
     border-bottom: 1px solid var(--notes-border);
   }
-  .notes-page-cover { height: 80px; }
-  .notes-toolbar-actions { width: 100%; justify-content: flex-end; }
+  .notes-sidebar-toggle { display: none; }
+  .notes-main-bar { padding-top: 6px; }
+  .notes-toolbar { flex-wrap: wrap; }
 }
