@@ -100,7 +100,7 @@
                 <div class="admin-panel-head">
                     <div>
                         <h1>权限清单</h1>
-                        <p>系统权限与服务权限均分为「查看」与「编辑」；编辑权限包含查看能力</p>
+                        <p>树状展示菜单访问权限与各服务内的按钮/功能权限</p>
                     </div>
                 </div>
                 <div class="admin-perm-groups" id="permissions-list"></div>
@@ -123,8 +123,8 @@
         </form>
     </dialog>
 
-    <dialog class="admin-dialog" id="role-dialog">
-        <form method="dialog" class="admin-dialog-inner" id="role-form">
+    <dialog class="admin-dialog admin-dialog--role" id="role-dialog">
+        <form method="dialog" class="admin-dialog-inner admin-dialog-inner--wide" id="role-form">
             <h2 id="role-dialog-title">新建角色</h2>
             <input type="hidden" id="role-id">
             <label>角色名<input type="text" id="role-name" required></label>

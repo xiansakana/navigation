@@ -1065,6 +1065,134 @@ body.portal-dialog-open {
     font-size: 14px;
     color: var(--text);
 }
+.admin-dialog-inner--wide {
+    width: min(720px, calc(100vw - 24px));
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+}
+#role-permissions.admin-checks {
+    max-height: min(60vh, 520px);
+    overflow: auto;
+}
+.admin-perm-tree-group {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 16px;
+}
+.admin-perm-tree-group:last-child { margin-bottom: 0; }
+.admin-perm-tree-group-title {
+    margin: 0 0 12px;
+    font-size: 16px;
+}
+.admin-perm-tree-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 0 8px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+}
+.admin-perm-tree-head .admin-perm-tree-label { flex: 1; }
+.admin-perm-tree {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.admin-perm-tree-item { margin: 0; }
+.admin-perm-tree-node {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 0 6px;
+}
+.admin-perm-tree-toggle {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    flex: 0 0 24px;
+}
+.admin-perm-tree-toggle:hover { background: var(--hover-bg); color: var(--text); }
+.admin-perm-tree-toggle--spacer { display: inline-block; }
+.admin-perm-tree-icon { font-size: 18px; line-height: 1; }
+.admin-perm-tree-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 14px;
+    color: var(--text);
+}
+.admin-perm-tree-label--strong { font-weight: 600; }
+.admin-perm-tree-meta {
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+}
+.admin-perm-tree-children {
+    margin-left: 11px;
+    padding-left: 16px;
+    border-left: 1px solid var(--border);
+}
+.admin-perm-tree-children.collapsed { display: none; }
+.admin-perm-tree-section-label {
+    margin: 10px 0 4px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+}
+.admin-perm-tree-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+[data-theme="light"] .admin-perm-tree-row {
+    border-bottom-color: rgba(15, 23, 42, 0.06);
+}
+.admin-perm-tree-row:last-child { border-bottom: none; }
+.admin-perm-tree-row--feature .admin-perm-tree-label {
+    padding-left: 8px;
+}
+.admin-perm-tree-cols {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 16px;
+    flex: 0 0 180px;
+}
+.admin-perm-tree-head--service .admin-perm-tree-cols { flex-basis: 120px; }
+.admin-perm-tree-col {
+    flex: 0 0 80px;
+    text-align: right;
+}
+.admin-perm-code {
+    font-size: 11px;
+    color: var(--accent);
+    word-break: break-all;
+}
+.admin-check--inline {
+    margin: 0;
+    white-space: nowrap;
+}
+.admin-perm-badge {
+    display: inline-flex;
+    margin-left: 8px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 11px;
+    color: var(--muted);
+    border: 1px solid var(--border);
+}
 .admin-dialog::backdrop {
     background: rgba(0, 0, 0, 0.48);
 }
