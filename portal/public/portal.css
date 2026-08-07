@@ -463,7 +463,12 @@ body.stock-proxied .sm-header h1 {
 }
 
 body.notes-proxied .notes-app {
-    min-height: calc(100vh - var(--navbar-height));
+  min-height: calc(100vh - var(--navbar-height));
+  max-width: none;
+}
+
+body.notes-proxied {
+  background: var(--bg);
 }
 
 .service-card {

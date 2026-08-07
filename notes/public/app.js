@@ -91,9 +91,7 @@ function renderSidebarStats() {
   const el = $('sidebar-stats');
   if (!el) return;
   const s = sidebarStats;
-  el.innerHTML = '<span>' + s.noteCount + ' 篇文档</span>'
-    + ' · <span>' + s.tagCount + ' 个标签</span>'
-    + ' · <span>' + s.totalWords.toLocaleString() + ' 字</span>';
+  el.textContent = s.noteCount + ' 篇 · ' + s.tagCount + ' 标签 · ' + s.totalWords.toLocaleString() + ' 字';
 }
 
 function noteIcon(node) {
@@ -741,6 +739,7 @@ $('btn-tree-collapse').addEventListener('click', function() {
 $('note-title').addEventListener('input', markDirty);
 $('note-tags').addEventListener('input', markDirty);
 $('btn-note-add').addEventListener('click', function() { createNote(null); });
+$('btn-empty-new')?.addEventListener('click', function() { createNote(null); });
 $('btn-subpage').addEventListener('click', function() {
   if (!activeNoteId) return;
   createNote(activeNoteId);
