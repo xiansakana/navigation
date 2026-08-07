@@ -29,7 +29,12 @@ export function buildTargetUrl(service, reqUrl) {
     var base = new URL(service.internalUrl);
     var prefix = service.path.replace(/\/$/, '');
     var url = new URL(reqUrl, 'http://127.0.0.1');
-    var subPath = url.pathname.slice(prefix.length) || '/';
+    var subPath;
+    if (url.pathname === prefix || url.pathname.startsWith(prefix + '/')) {
+        subPath = url.pathname.slice(prefix.length) || '/';
+    } else {
+        subPath = url.pathname || '/';
+    }
     if (!subPath.startsWith('/')) subPath = '/' + subPath;
     var target = new URL(subPath + url.search, base.origin);
     if (service.adminToken && !subPath.startsWith('/api/')) {
@@ -94,19 +99,6 @@ function rewriteProxiedBody(text, service) {
     return out;
 }
 
-function injectSiyuanBackLink(html) {
-    var markup = '<style>'
-        + '.portal-siyuan-back{position:fixed;top:12px;left:12px;z-index:2147483646;display:inline-flex;align-items:center;padding:8px 12px;border-radius:8px;font:14px/1.4 system-ui,sans-serif;text-decoration:none;color:#e8edf5;background:rgba(15,17,21,.88);border:1px solid rgba(255,255,255,.12);box-shadow:0 4px 16px rgba(0,0,0,.25);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}'
-        + '.portal-siyuan-back:hover{background:rgba(23,27,34,.95)}'
-        + '@media (prefers-color-scheme:light){.portal-siyuan-back{color:#152033;background:rgba(255,255,255,.92);border-color:rgba(15,23,42,.12)}.portal-siyuan-back:hover{background:#fff}}'
-        + '</style>'
-        + '<a class="portal-siyuan-back" href="/">← 服务导航</a>';
-    if (!html.includes('<body')) return html;
-    return html.replace(/<body([^>]*)>/, function(match, attrs) {
-        return '<body' + attrs + '>' + markup;
-    });
-}
-
 function injectNapcatBackLink(html) {
     var markup = '<style>'
         + '.portal-napcat-back{position:fixed;top:12px;left:12px;z-index:2147483646;display:inline-flex;align-items:center;padding:8px 12px;border-radius:8px;font:14px/1.4 system-ui,sans-serif;text-decoration:none;color:#e8edf5;background:rgba(15,17,21,.88);border:1px solid rgba(255,255,255,.12);box-shadow:0 4px 16px rgba(0,0,0,.25);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}'
@@ -137,11 +129,11 @@ function injectPortalShell(html, service) {
     }
     var portalCss = '<link rel="stylesheet" href="/portal.css">';
     if (service.injectBar === false) {
-        var headInject = themeBoot + themeJs + toastJs + dialogJs + baseTag;
+        var isSiyuanAuthPage = service.id === 'notes' && html.includes('id="authCode"');
+        var headInject = isSiyuanAuthPage ? '' : themeBoot + themeJs + toastJs + dialogJs + baseTag;
         if (!headInject && service.id !== 'napcat' && service.id !== 'notes') return html;
         if (headInject) html = html.replace('<head>', '<head>' + headInject);
         if (service.id === 'napcat') html = injectNapcatBackLink(html);
-        if (service.id === 'notes') html = injectSiyuanBackLink(html);
         return html;
     }
     var title = service.title || '服务';
