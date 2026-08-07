@@ -72,7 +72,7 @@ function requireAuth(req, res) {
     return session;
 }
 
-function publicServices() {
+function publicServices(userAgent) {
     return (config.services || [])
         .filter(function(service) { return !service.hidden; })
         .map(function(service) {
@@ -85,7 +85,7 @@ function publicServices() {
             newTab: !!service.newTab
         };
         if (service.type === 'proxy' || service.type === 'hub') {
-            item.path = getServiceEntryHref(service);
+            item.path = getServiceEntryHref(service, userAgent);
         } else if (service.type === 'external') {
             item.url = service.url;
         }
@@ -99,7 +99,7 @@ async function handleApi(req, res, url, session) {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/services') {
-        return json(res, 200, { ok: true, services: publicServices() });
+        return json(res, 200, { ok: true, services: publicServices(req.headers['user-agent']) });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/logout') {
@@ -162,7 +162,7 @@ function handleProxyRoute(req, res) {
                 return true;
             }
         } else {
-            var entry = new URL(getServiceEntryHref(ctx.service), 'http://127.0.0.1');
+            var entry = new URL(getServiceEntryHref(ctx.service, req.headers['user-agent']), 'http://127.0.0.1');
             if (ctx.service.adminToken) entry.searchParams.set('token', ctx.service.adminToken);
             redirect(res, entry.pathname + entry.search);
             return true;

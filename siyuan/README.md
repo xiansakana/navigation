@@ -16,7 +16,12 @@ bash siyuan/deploy-ecs.sh
 
 - 数据目录：`siyuan/data/siyuan/`（挂载为 workspace）
 - 本地端口：`127.0.0.1:6806`（仅本机，经 portal 反代对外）
-- 门户路径：`/notes/`（保留原入口）
+- 门户路径：`/notes/`（保留原入口；手机浏览器会自动进入移动版 UI）
+
+## 移动端
+
+- 经 portal 访问时，会根据浏览器 User-Agent 进入 `/stage/build/mobile/` 或 desktop 版
+- 日常手机使用更推荐安装 **思源官方 App**，通过云端同步同一工作空间
 
 ## 鉴权
 
