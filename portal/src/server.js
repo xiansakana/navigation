@@ -7,9 +7,16 @@ import {
     clearSessionCookie,
     createSessionCookie,
     getSession,
-    verifyLogin
+    verifyLogin,
+    resolveSessionUser
 } from './auth.js';
+import {
+    getVisibleMenus,
+    canAccessService,
+    hasPermission
+} from './rbac.js';
 import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket } from './proxy.js';
+import { handleAdminApi } from './admin-api.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -69,42 +76,80 @@ function requireAuth(req, res) {
         redirect(res, '/login.html');
         return null;
     }
-    return session;
+    var ctx = resolveSessionUser(session, config);
+    if (!ctx) {
+        redirect(res, '/login.html');
+        return null;
+    }
+    return Object.assign({}, session, {
+        username: ctx.user.username,
+        userId: ctx.user.id,
+        permissions: ctx.permissions
+    });
 }
 
-function publicServices(userAgent) {
-    return (config.services || [])
-        .filter(function(service) { return !service.hidden; })
-        .map(function(service) {
-        var item = {
-            id: service.id,
-            title: service.title,
-            description: service.description,
-            type: service.type,
-            icon: service.icon || '📦',
-            newTab: !!service.newTab
-        };
-        if (service.type === 'proxy' || service.type === 'hub') {
+function menuToService(menu, userAgent) {
+    var service = (config.services || []).find(function(s) { return s.id === menu.serviceId; });
+    var item = {
+        id: menu.id,
+        title: menu.title,
+        description: menu.description || (service && service.description) || '',
+        type: menu.type || (service && service.type) || 'external',
+        icon: menu.icon || (service && service.icon) || '📦',
+        newTab: !!(service && service.newTab)
+    };
+    if (menu.url || (service && service.type === 'external')) {
+        item.url = menu.url || (service && service.url);
+    } else if (menu.path) {
+        item.path = menu.path;
+        if (service && (service.type === 'proxy' || service.type === 'hub')) {
             item.path = getServiceEntryHref(service, userAgent);
-        } else if (service.type === 'external') {
-            item.url = service.url;
         }
-        return item;
-    });
+    } else if (service) {
+        if (service.type === 'proxy' || service.type === 'hub') item.path = getServiceEntryHref(service, userAgent);
+        else item.url = service.url;
+    }
+    return item;
+}
+
+function publicServices(session, userAgent) {
+    var ctx = resolveSessionUser(session, config);
+    if (!ctx) return [];
+    return getVisibleMenus(ctx.rbac, ctx.permissions)
+        .filter(function(menu) { return menu.id !== 'menu_admin'; })
+        .map(function(menu) { return menuToService(menu, userAgent); });
 }
 
 async function handleApi(req, res, url, session) {
     if (req.method === 'GET' && url.pathname === '/api/me') {
-        return json(res, 200, { ok: true, username: session.username });
+        return json(res, 200, {
+            ok: true,
+            username: session.username,
+            userId: session.userId,
+            permissions: session.permissions,
+            canAdmin: hasPermission(session.permissions, 'admin:access')
+        });
     }
 
     if (req.method === 'GET' && url.pathname === '/api/services') {
-        return json(res, 200, { ok: true, services: publicServices(req.headers['user-agent']) });
+        return json(res, 200, { ok: true, services: publicServices(session, req.headers['user-agent']) });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/menus') {
+        var ctx = resolveSessionUser(session, config);
+        var menus = getVisibleMenus(ctx.rbac, ctx.permissions).map(function(menu) {
+            return menuToService(menu, req.headers['user-agent']);
+        });
+        return json(res, 200, { ok: true, menus: menus });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/logout') {
         res.setHeader('Set-Cookie', clearSessionCookie());
         return json(res, 200, { ok: true });
+    }
+
+    if (url.pathname.startsWith('/api/admin/')) {
+        return handleAdminApi(req, res, url, session, config, json, readJson);
     }
 
     return json(res, 404, { ok: false, error: 'Not Found' });
@@ -116,10 +161,11 @@ async function handleLoginApi(req, res) {
     }
     try {
         var body = await readJson(req);
-        if (!verifyLogin(body.username, body.password, config)) {
+        var user = verifyLogin(body.username, body.password, config);
+        if (!user) {
             return json(res, 401, { ok: false, error: '用户名或密码错误' });
         }
-        res.setHeader('Set-Cookie', createSessionCookie(body.username, getSessionSecret()));
+        res.setHeader('Set-Cookie', createSessionCookie(user.id, getSessionSecret()));
         return json(res, 200, { ok: true });
     } catch (err) {
         return json(res, 400, { ok: false, error: err.message });
@@ -130,7 +176,9 @@ function isPortalApi(pathname, method) {
     if (pathname === '/api/login' && method === 'POST') return true;
     if (pathname === '/api/me' && method === 'GET') return true;
     if (pathname === '/api/services' && method === 'GET') return true;
+    if (pathname === '/api/menus' && method === 'GET') return true;
     if (pathname === '/api/logout' && method === 'POST') return true;
+    if (pathname.startsWith('/api/admin/')) return true;
     return false;
 }
 
@@ -140,6 +188,11 @@ function handleProxyRoute(req, res) {
 
     var proxySession = requireAuth(req, res);
     if (!proxySession) return true;
+
+    if (!canAccessService(proxySession.permissions, ctx.service.id)) {
+        json(res, 403, { ok: false, error: '无权访问该服务' });
+        return true;
+    }
 
     var proxyUrl = new URL(ctx.proxyUrl, 'http://127.0.0.1');
     var browserUrl = new URL(req.url, 'http://127.0.0.1');
@@ -212,6 +265,9 @@ var server = http.createServer(async function(req, res) {
     if (url.pathname === hubPath || url.pathname === hubPath + '/' || url.pathname === hubPath + '/index.html') {
         var hubSession = requireAuth(req, res);
         if (!hubSession) return;
+        if (!canAccessService(hubSession.permissions, 'torn-toolbox')) {
+            return json(res, 403, { ok: false, error: '无权访问该服务' });
+        }
         if (serveStatic(path.join(PUBLIC_DIR, 'torn-toolbox', 'index.html'), res)) return;
     }
 
@@ -221,8 +277,17 @@ var server = http.createServer(async function(req, res) {
         return serveStatic(path.join(PUBLIC_DIR, 'dashboard.html'), res);
     }
 
+    if (url.pathname === '/admin' || url.pathname === '/admin.html') {
+        var adminSession = requireAuth(req, res);
+        if (!adminSession) return;
+        if (!hasPermission(adminSession.permissions, 'admin:access')) {
+            return redirect(res, '/');
+        }
+        if (serveStatic(path.join(PUBLIC_DIR, 'admin.html'), res)) return;
+    }
+
     if (url.pathname === '/login' || url.pathname === '/login.html') {
-        if (getSession(req, getSessionSecret())) {
+        if (getSession(req, getSessionSecret()) && resolveSessionUser(getSession(req, getSessionSecret()), config)) {
             return redirect(res, '/');
         }
         if (serveStatic(path.join(PUBLIC_DIR, 'login.html'), res)) return;
@@ -235,17 +300,27 @@ var server = http.createServer(async function(req, res) {
 });
 
 server.on('upgrade', function(req, socket, head) {
-    if (!getSession(req, getSessionSecret())) {
+    var session = getSession(req, getSessionSecret());
+    if (!session) {
         socket.destroy();
         return;
     }
-    var ctx = resolveProxyContext(config.services, req.url);
+    var ctx = resolveSessionUser(session, config);
     if (!ctx) {
         socket.destroy();
         return;
     }
-    req.url = ctx.proxyUrl;
-    proxyWebSocket(ctx.service, req, socket, head);
+    var proxyCtx = resolveProxyContext(config.services, req.url);
+    if (!proxyCtx) {
+        socket.destroy();
+        return;
+    }
+    if (!canAccessService(ctx.permissions, proxyCtx.service.id)) {
+        socket.destroy();
+        return;
+    }
+    req.url = proxyCtx.proxyUrl;
+    proxyWebSocket(proxyCtx.service, req, socket, head);
 });
 
 var host = config.server?.host || '127.0.0.1';
@@ -256,7 +331,7 @@ server.listen(port, host, function() {
     if (host === '0.0.0.0' && port === 80) {
         console.log('外网访问: http://<公网IP>/');
     }
-    console.log('登录后可在卡片中进入各服务（含 Torn 压价助手配置）');
+    console.log('登录后可在卡片中进入各服务；管理员可访问 /admin.html');
 });
 
 process.on('SIGINT', function() { process.exit(0); });
