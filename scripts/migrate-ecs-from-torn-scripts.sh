@@ -10,6 +10,10 @@ if [ ! -d "$NEW" ]; then
     exit 1
 fi
 
+echo "==> 修复脚本权限与换行..."
+find "$NEW" -name '*.sh' -exec sed -i 's/\r$//' {} +
+chmod +x "$NEW"/scripts/*.sh "$NEW"/portal/deploy-ecs.sh "$NEW"/qq-bot/deploy-ecs.sh "$NEW"/torn-toolbox-desktop/deploy-ecs.sh
+
 echo "==> 复制配置文件..."
 if [ -f "$OLD/portal/config.json" ] && [ ! -f "$NEW/portal/config.json" ]; then
     cp "$OLD/portal/config.json" "$NEW/portal/config.json"
@@ -25,6 +29,11 @@ for f in config.undercut.json config.company.json config.json; do
         echo "  torn-toolbox-desktop/$f"
     fi
 done
+
+if [ -f "$NEW/qq-bot/config.json" ] && grep -q '"host": "127.0.0.1"' "$NEW/qq-bot/config.json"; then
+    sed -i 's/"host": "127.0.0.1"/"host": "0.0.0.0"/' "$NEW/qq-bot/config.json"
+    echo "  qq-bot server.host -> 0.0.0.0"
+fi
 
 echo "==> 重新部署 pm2（指向新路径）..."
 cd "$NEW/qq-bot" && npm install --production && ./deploy-ecs.sh

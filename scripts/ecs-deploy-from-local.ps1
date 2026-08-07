@@ -34,6 +34,6 @@ if ($Only) {
 }
 
 Write-Host "==> Restart services (skip ECS git pull)"
-ssh -i $Key $SshTarget "cd $RemoteRoot; sed -i 's/\r$//' scripts/ecs-update.sh; bash scripts/ecs-update.sh --skip-pull$onlyArg"
+ssh -i $Key $SshTarget "cd $RemoteRoot; find . -name '*.sh' -exec sed -i 's/\r$//' {} +; chmod +x scripts/*.sh portal/deploy-ecs.sh qq-bot/deploy-ecs.sh torn-toolbox-desktop/deploy-ecs.sh; bash scripts/ecs-update.sh --skip-pull$onlyArg"
 
 Write-Host "==> Deploy done"
