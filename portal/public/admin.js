@@ -131,6 +131,29 @@ function sortFeaturePerms(features) {
     });
 }
 
+var HOLDINGS_FIELD_ORDER = [
+    'type', 'symbol', 'shares', 'cost', 'price', 'pnl', 'pnlPct', 'dailyPnl', 'dailyPnlPct',
+    'position', 'weight', 'target', 'optinfo', 'signal', 'actions'
+];
+
+function splitServiceFeatures(features) {
+    var buttons = [];
+    var fields = [];
+    (features || []).forEach(function(perm) {
+        if (perm.featureGroup === 'holdings-field' || (perm.feature && perm.feature.indexOf('col-') === 0)) {
+            fields.push(perm);
+        } else {
+            buttons.push(perm);
+        }
+    });
+    fields.sort(function(a, b) {
+        var ak = a.columnKey || String(a.feature || '').replace(/^col-/, '');
+        var bk = b.columnKey || String(b.feature || '').replace(/^col-/, '');
+        return HOLDINGS_FIELD_ORDER.indexOf(ak) - HOLDINGS_FIELD_ORDER.indexOf(bk);
+    });
+    return { buttons: sortFeaturePerms(buttons), fields: fields };
+}
+
 function renderPermActionCell(perm, mode, rolePerms, isAdminRole) {
     if (!perm) return '<span class="sm-muted">—</span>';
     if (mode === 'readonly') {
@@ -162,7 +185,8 @@ function renderResourceRow(node, mode, rolePerms, isAdminRole) {
 }
 
 function renderFeatureRow(perm, mode, rolePerms, isAdminRole) {
-    var badge = perm.action === 'edit' ? '编辑' : '查看';
+    var badge = perm.featureGroup === 'holdings-field' ? '字段'
+        : (perm.action === 'edit' ? '编辑' : '查看');
     return '<div class="admin-perm-tree-row admin-perm-tree-row--feature">'
         + '<span class="admin-perm-tree-label">' + esc(perm.name) + '<span class="admin-perm-badge">' + badge + '</span></span>'
         + '<span class="admin-perm-tree-cols">'
@@ -195,9 +219,16 @@ function renderServiceNode(node, mode, rolePerms, isAdminRole) {
             edit: node.edit
         }, mode, rolePerms, isAdminRole);
     }
-    if (node.features && node.features.length) {
+    var split = splitServiceFeatures(node.features || []);
+    if (split.buttons.length) {
         html += '<div class="admin-perm-tree-section-label">页面按钮与功能</div>';
-        node.features.forEach(function(perm) {
+        split.buttons.forEach(function(perm) {
+            html += renderFeatureRow(perm, mode, rolePerms, isAdminRole);
+        });
+    }
+    if (split.fields.length) {
+        html += '<div class="admin-perm-tree-section-label">持仓明细字段</div>';
+        split.fields.forEach(function(perm) {
             html += renderFeatureRow(perm, mode, rolePerms, isAdminRole);
         });
     }

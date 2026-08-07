@@ -8,12 +8,30 @@ const RBAC_PATH = path.resolve(__dirname, '../data/rbac.json');
 
 var STOCK_MANAGE_SERVICE_ID = 'stock-manage';
 
+var STOCK_MANAGE_HOLDINGS_COLUMNS = [
+    { key: 'type', name: '类型' },
+    { key: 'symbol', name: '代码' },
+    { key: 'shares', name: '股数' },
+    { key: 'cost', name: '成本' },
+    { key: 'price', name: '现价' },
+    { key: 'pnl', name: '盈亏' },
+    { key: 'pnlPct', name: '盈亏比例' },
+    { key: 'dailyPnl', name: '当日盈亏' },
+    { key: 'dailyPnlPct', name: '当日盈亏比例' },
+    { key: 'position', name: '持仓' },
+    { key: 'weight', name: '仓位 / 占比' },
+    { key: 'target', name: '1y目标价' },
+    { key: 'optinfo', name: '期权信息' },
+    { key: 'signal', name: '打分' },
+    { key: 'actions', name: '操作' }
+];
+
 var STOCK_MANAGE_FEATURES = [
     { feature: 'dashboard', name: '显示看板', action: 'view' },
     { feature: 'pnl', name: '查询盈亏', action: 'view' },
     { feature: 'pnl-toggle', name: '盈亏显隐', action: 'view' },
     { feature: 'trades', name: '交易记录', action: 'view' },
-    { feature: 'columns', name: '列数据', action: 'view' },
+    { feature: 'columns', name: '列数据显隐控制', action: 'view' },
     { feature: 'export', name: '导出交易', action: 'view' },
     { feature: 'import', name: '导入交易', action: 'edit' },
     { feature: 'trade', name: '记一笔', action: 'edit' },
@@ -21,7 +39,15 @@ var STOCK_MANAGE_FEATURES = [
     { feature: 'cash', name: '编辑现金', action: 'edit' },
     { feature: 'meta', name: '编辑目标价/打分', action: 'edit' },
     { feature: 'row-trade', name: '行内买卖/记录', action: 'edit' }
-];
+].concat(STOCK_MANAGE_HOLDINGS_COLUMNS.map(function(col) {
+    return {
+        feature: 'col-' + col.key,
+        name: col.name,
+        action: 'view',
+        featureGroup: 'holdings-field',
+        columnKey: col.key
+    };
+}));
 
 function stockManageFeaturePermissionId(feature, action) {
     return 'service:' + STOCK_MANAGE_SERVICE_ID + ':' + feature + ':' + action;
@@ -31,11 +57,13 @@ function buildStockManagePermissions() {
     return STOCK_MANAGE_FEATURES.map(function(item) {
         return {
             id: stockManageFeaturePermissionId(item.feature, item.action),
-            name: item.name,
+            name: item.featureGroup === 'holdings-field' ? ('字段·' + item.name) : item.name,
             group: '股票管理',
             serviceId: STOCK_MANAGE_SERVICE_ID,
             feature: item.feature,
-            action: item.action
+            action: item.action,
+            featureGroup: item.featureGroup || null,
+            columnKey: item.columnKey || null
         };
     });
 }

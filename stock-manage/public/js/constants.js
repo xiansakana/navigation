@@ -16,6 +16,10 @@ export const HOLDINGS_COLUMNS = [
   { key: 'actions', label: '操作' }
 ];
 
+export function colFeatureId(key) {
+  return 'col-' + key;
+}
+
 export const PNL_COLUMN_KEYS = ['pnl', 'pnlPct', 'dailyPnl', 'dailyPnlPct'];
 
 export const LS_PNL_VISIBLE = 'smPnlVisible';

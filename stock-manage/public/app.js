@@ -1,4 +1,4 @@
-import { HOLDINGS_COLUMNS, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
+import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization } from './js/pnl-viz.js';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js';
 import { loadPortalContext, can, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js';
@@ -55,7 +55,16 @@ async function api(path, opts = {}) {
   return data;
 }
 
-function mask(key, html) {
+function canCol(key) {
+  return can(colFeatureId(key));
+}
+
+function visibleHoldingsColumns() {
+  return HOLDINGS_COLUMNS.filter((c) => canCol(c.key));
+}
+
+function maskCol(key, html) {
+  if (!canCol(key)) return MASK;
   return colVis[key] !== false ? html : MASK;
 }
 
@@ -193,13 +202,15 @@ function bindCashInput() {
 
 function renderColToggle() {
   if (!can('columns')) return;
-  $('#col-toggle-panel').innerHTML = HOLDINGS_COLUMNS.map((c) => `
+  const cols = HOLDINGS_COLUMNS.filter((c) => canCol(c.key));
+  $('#col-toggle-panel').innerHTML = cols.map((c) => `
     <label class="sm-col-check"><input type="checkbox" data-col="${c.key}" ${colVis[c.key] !== false ? 'checked' : ''}> ${c.label}</label>
   `).join('');
 }
 
 function renderHoldingsHead() {
-  $('#holdings-head').innerHTML = `<tr>${HOLDINGS_COLUMNS.map((c) => {
+  const cols = visibleHoldingsColumns();
+  $('#holdings-head').innerHTML = `<tr>${cols.map((c) => {
     if (c.key === 'symbol') {
       return `<th class="sm-sort-th" data-sort="symbol" title="按标的代码排序">代码${sortMark(tableSort, 'symbol')}</th>`;
     }
@@ -210,61 +221,104 @@ function renderHoldingsHead() {
   }).join('')}</tr>`;
 }
 
-function renderHoldings() {
-  renderHoldingsHead();
-  const groups = buildHoldingsGroups(state.holdings || [], tableSort.key, tableSort.dir);
-  let html = '';
-  groups.forEach((group, gi) => {
-    group.items.forEach((h, i) => {
-      const opt = h.optionInfo;
-      const optStr = opt ? `${opt.type} $${opt.strike} · ${opt.expiration}` : '—';
-      const lots = h.costLots?.length > 1 ? `<div class="sm-lots-hint">${h.costLots.length} 笔合计</div>` : '';
-      const rowCls = [
-        gi > 0 && i === 0 ? 'sm-holding-group-start' : '',
-        h.type === 'option' ? 'sm-holding-option' : ''
-      ].filter(Boolean).join(' ');
-      const symInner = colVis.symbol !== false ? `
+function holdingsCellContent(h, key, ctx) {
+  const { optStr, lots, symInner } = ctx;
+  switch (key) {
+    case 'type':
+      return maskCol('type', h.type === 'option' ? '期权' : '股票');
+    case 'symbol':
+      return maskCol('symbol', symInner);
+    case 'shares':
+      return maskCol('shares', h.shares);
+    case 'cost':
+      return maskCol('cost', fmtUsd(h.avgCost) + lots);
+    case 'price':
+      return maskCol('price', `<span>${fmtUsd(h.price)}</span>${can('refresh') ? ` <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>` : ''}`);
+    case 'pnl':
+      return maskCol('pnl', h.pnl == null ? '—' : fmtUsdSigned(h.pnl));
+    case 'pnlPct':
+      return maskCol('pnlPct', h.pnlPct == null ? '—' : fmtPct(h.pnlPct));
+    case 'dailyPnl':
+      return maskCol('dailyPnl', h.dailyPnl == null ? '—' : fmtUsdSigned(h.dailyPnl));
+    case 'dailyPnlPct':
+      return maskCol('dailyPnlPct', h.dailyPnlPct == null ? '—' : fmtPct(h.dailyPnlPct));
+    case 'position':
+      return maskCol('position', fmtUsd(h.marketValue));
+    case 'weight':
+      return maskCol('weight', fmtPct(h.weight));
+    case 'target':
+      return maskCol('target', `<input class="sm-cell-input" data-meta="target" data-symbol="${h.symbol}" type="number" step="any" value="${h.targetPrice ?? ''}" placeholder="—" ${can('meta') ? '' : 'readonly'}>`);
+    case 'optinfo':
+      return maskCol('optinfo', optStr);
+    case 'signal':
+      return maskCol('signal', `<select class="sm-cell-select" data-meta="signal" data-symbol="${h.symbol}" ${can('meta') ? '' : 'disabled'}>${signalOptions(h.signal)}</select>`);
+    case 'actions':
+      return maskCol('actions', can('row-trade') ? `
+        <button type="button" class="btn link" data-trade="buy" data-symbol="${h.symbol}">买</button>
+        <button type="button" class="btn link" data-trade="sell" data-symbol="${h.symbol}">卖</button>
+        <button type="button" class="btn link" data-history="${h.symbol}">记录</button>` : '—');
+    default:
+      return MASK;
+  }
+}
+
+function pnlCellClass(key, h) {
+  if (key === 'pnl') return cls(h.pnl);
+  if (key === 'pnlPct') return cls(h.pnlPct);
+  if (key === 'dailyPnl') return cls(h.dailyPnl);
+  if (key === 'dailyPnlPct') return cls(h.dailyPnlPct);
+  return '';
+}
+
+function renderHoldingsRowCells(h, group, i) {
+  return visibleHoldingsColumns().map((c) => {
+    if (c.key === 'weight') {
+      if (i !== 0) return '';
+      return `<td rowspan="${group.items.length}" class="sm-weight-cell">${holdingsCellContent(h, 'weight', {})}</td>`;
+    }
+    const tdCls = pnlCellClass(c.key, h);
+    const opt = h.optionInfo;
+    const optStr = opt ? `${opt.type} $${opt.strike} · ${opt.expiration}` : '—';
+    const lots = h.costLots?.length > 1 ? `<div class="sm-lots-hint">${h.costLots.length} 笔合计</div>` : '';
+    const symInner = colVis.symbol !== false && canCol('symbol') ? `
         <span class="sm-symbol-drag" draggable="true" data-drag="${h.symbol}" title="拖动代码到另一行，合并为同一标的">
           <strong>${h.symbol}</strong>
           ${h.groupWith ? `<button type="button" class="btn link sm-clear-group" data-clear-group="${h.symbol}" title="恢复自动分组">↺</button>` : ''}
         </span>` : MASK;
-      const weightCell = i === 0
-        ? `<td rowspan="${group.items.length}" class="sm-weight-cell">${mask('weight', fmtPct(h.weight))}</td>`
-        : '';
-      html += `<tr data-symbol="${h.symbol}" class="${rowCls}">
-      <td>${mask('type', h.type === 'option' ? '期权' : '股票')}</td>
-      <td>${mask('symbol', symInner)}</td>
-      <td>${mask('shares', h.shares)}</td>
-      <td>${mask('cost', fmtUsd(h.avgCost) + lots)}</td>
-      <td>${mask('price', `<span>${fmtUsd(h.price)}</span>${can('refresh') ? ` <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>` : ''}`)}</td>
-      <td class="${cls(h.pnl)}">${mask('pnl', h.pnl == null ? '—' : fmtUsdSigned(h.pnl))}</td>
-      <td class="${cls(h.pnlPct)}">${mask('pnlPct', h.pnlPct == null ? '—' : fmtPct(h.pnlPct))}</td>
-      <td class="${cls(h.dailyPnl)}">${mask('dailyPnl', h.dailyPnl == null ? '—' : fmtUsdSigned(h.dailyPnl))}</td>
-      <td class="${cls(h.dailyPnlPct)}">${mask('dailyPnlPct', h.dailyPnlPct == null ? '—' : fmtPct(h.dailyPnlPct))}</td>
-      <td>${mask('position', fmtUsd(h.marketValue))}</td>
-      ${weightCell}
-      <td>${mask('target', `<input class="sm-cell-input" data-meta="target" data-symbol="${h.symbol}" type="number" step="any" value="${h.targetPrice ?? ''}" placeholder="—" ${can('meta') ? '' : 'readonly'}>`)}</td>
-      <td>${mask('optinfo', optStr)}</td>
-      <td>${mask('signal', `<select class="sm-cell-select" data-meta="signal" data-symbol="${h.symbol}" ${can('meta') ? '' : 'disabled'}>${signalOptions(h.signal)}</select>`)}</td>
-      <td>${mask('actions', can('row-trade') ? `
-        <button type="button" class="btn link" data-trade="buy" data-symbol="${h.symbol}">买</button>
-        <button type="button" class="btn link" data-trade="sell" data-symbol="${h.symbol}">卖</button>
-        <button type="button" class="btn link" data-history="${h.symbol}">记录</button>` : '—')}</td>
-    </tr>`;
+    return `<td${tdCls ? ` class="${tdCls}"` : ''}>${holdingsCellContent(h, c.key, { optStr, lots, symInner })}</td>`;
+  }).join('');
+}
+
+function renderCashRowCells(cashPct) {
+  return visibleHoldingsColumns().map((c) => {
+    if (c.key === 'type') return `<td>${maskCol('type', '现金')}</td>`;
+    if (c.key === 'symbol') return `<td>${maskCol('symbol', 'CASH')}</td>`;
+    if (c.key === 'position') return `<td>${maskCol('position', fmtUsd(state.cash))}</td>`;
+    if (c.key === 'weight') return `<td>${maskCol('weight', fmtPct(cashPct))}</td>`;
+    return `<td>${maskCol(c.key, '—')}</td>`;
+  }).join('');
+}
+
+function renderHoldings() {
+  renderHoldingsHead();
+  const cols = visibleHoldingsColumns();
+  const groups = buildHoldingsGroups(state.holdings || [], tableSort.key, tableSort.dir);
+  let html = '';
+  groups.forEach((group, gi) => {
+    group.items.forEach((h, i) => {
+      const rowCls = [
+        gi > 0 && i === 0 ? 'sm-holding-group-start' : '',
+        h.type === 'option' ? 'sm-holding-option' : ''
+      ].filter(Boolean).join(' ');
+      html += `<tr data-symbol="${h.symbol}" class="${rowCls}">${renderHoldingsRowCells(h, group, i)}</tr>`;
     });
   });
 
   const cashPct = state.summary?.totalAssets > 0 ? (state.cash / state.summary.totalAssets * 100) : 0;
-  html += `<tr class="sm-cash-row">
-    <td>${mask('type', '现金')}</td>
-    <td>${mask('symbol', 'CASH')}</td>
-    <td colspan="7">${mask('shares', '—')}</td>
-    <td>${mask('position', fmtUsd(state.cash))}</td>
-    <td>${mask('weight', fmtPct(cashPct))}</td>
-    <td colspan="4"></td>
-  </tr>`;
+  html += `<tr class="sm-cash-row">${renderCashRowCells(cashPct)}</tr>`;
 
-  $('#holdings-body').innerHTML = html || `<tr><td colspan="${HOLDINGS_COLUMNS.length}" class="empty">暂无持仓</td></tr>`;
+  const colCount = cols.length || 1;
+  $('#holdings-body').innerHTML = html || `<tr><td colspan="${colCount}" class="empty">暂无持仓</td></tr>`;
 }
 
 function renderPnlStat(label, val, kind) {
