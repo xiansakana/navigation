@@ -10,14 +10,6 @@ function featurePermId(feature, action) {
   return `service:${STOCK_MANAGE_SERVICE}:${feature}:${action}`;
 }
 
-function hasAnyFeaturePerm(perms) {
-  return perms.some((p) => {
-    if (!p.startsWith(`service:${STOCK_MANAGE_SERVICE}:`)) return false;
-    if (p === `service:${STOCK_MANAGE_SERVICE}:view` || p === `service:${STOCK_MANAGE_SERVICE}:edit`) return false;
-    return /^service:stock-manage:[^:]+:(view|edit)$/.test(p);
-  });
-}
-
 export function isPortalMode() {
   return ctx.portal;
 }
@@ -37,9 +29,6 @@ export function can(feature, action = 'view') {
   const fid = featurePermId(feature, action);
   if (perms.includes(fid)) return true;
   if (action === 'view' && perms.includes(featurePermId(feature, 'edit'))) return true;
-  if (hasAnyFeaturePerm(perms)) return false;
-  if (action === 'edit' && perms.includes(`service:${STOCK_MANAGE_SERVICE}:edit`)) return true;
-  if (action === 'view' && perms.includes(`service:${STOCK_MANAGE_SERVICE}:view`)) return true;
   return false;
 }
 
