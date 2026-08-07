@@ -185,9 +185,141 @@ body.has-navbar {
 }
 
 @media (max-width: 640px) {
-    .navbar-inner { padding: 0 16px; }
+    .navbar-inner { padding: 0 12px; gap: 8px; }
+    .navbar-brand span:not(.navbar-logo) { display: none; }
     .navbar-user { display: none; }
+    .navbar-nav {
+        flex: 1;
+        min-width: 0;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+    .navbar-nav::-webkit-scrollbar { display: none; }
     .navbar-link span.label { display: none; }
+    .navbar-title {
+        max-width: 42vw;
+        font-size: 13px;
+    }
+    .navbar-theme-btn .navbar-theme-label { display: none; }
+    .navbar-layout-btn .label { display: none; }
+    .navbar-actions { gap: 6px; }
+    .toolbox-hero { padding: 24px 16px 16px; }
+    .toolbox-grid { padding: 8px 16px 48px; grid-template-columns: 1fr; }
+    .page-header { padding: 24px 16px 8px; }
+    .grid { padding: 16px; grid-template-columns: 1fr; }
+    .portal-dialog-host { padding: 16px; }
+    .portal-toast-host { width: min(420px, calc(100vw - 24px)); }
+}
+
+/* Proxied sub-apps (torn-toolbox / stock-manage) */
+@media (max-width: 768px) {
+    body.toolbox-proxied .app,
+    body.stock-proxied .sm-app {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+    }
+
+    body.toolbox-proxied .header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    body.toolbox-proxied .header-status {
+        align-self: flex-start;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    body.toolbox-proxied .card {
+        padding: 14px;
+    }
+
+    body.toolbox-proxied .btn-row {
+        flex-direction: column;
+    }
+
+    body.toolbox-proxied .btn-row .btn {
+        width: 100%;
+    }
+
+    body.toolbox-proxied .field.inline {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    body.toolbox-proxied .field.inline input[type="number"] {
+        width: 100%;
+    }
+
+    body.toolbox-proxied .tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 2px;
+    }
+
+    body.toolbox-proxied .section-head {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    body.toolbox-proxied .section-head .btn.small {
+        width: 100%;
+        text-align: center;
+    }
+
+    body.toolbox-proxied .watcher-card-head {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    body.toolbox-proxied .watcher-actions {
+        flex-wrap: wrap;
+    }
+
+    body.toolbox-proxied .watcher-actions .btn {
+        flex: 1 1 auto;
+    }
+
+    body.stock-proxied .sm-panel-head {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    body.stock-proxied .sm-panel-head-actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    body.stock-proxied .sm-panel-head-actions .btn {
+        width: 100%;
+        text-align: center;
+        justify-content: center;
+    }
+
+    body.stock-proxied .sm-holdings-hint {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+
+    body.stock-proxied .sm-col-panel {
+        padding: 12px;
+    }
+
+    body.stock-proxied .sm-table th,
+    body.stock-proxied .sm-table td {
+        padding: 10px 12px;
+        font-size: 13px;
+    }
 }
 
 .login-page {
