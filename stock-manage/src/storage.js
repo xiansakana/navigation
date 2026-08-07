@@ -29,7 +29,7 @@ export function resolveDataPath(config) {
   return path.isAbsolute(p) ? p : path.join(ROOT, p);
 }
 
-const EMPTY = { cash: 0, trades: [], quotes: {} };
+const EMPTY = { cash: 0, trades: [], quotes: {}, holdingsMeta: {} };
 
 export function createStore(dataPath) {
   fs.mkdirSync(path.dirname(dataPath), { recursive: true });
@@ -43,10 +43,11 @@ export function createStore(dataPath) {
       return {
         cash: Number(raw.cash) || 0,
         trades: Array.isArray(raw.trades) ? raw.trades : [],
-        quotes: raw.quotes && typeof raw.quotes === 'object' ? raw.quotes : {}
+        quotes: raw.quotes && typeof raw.quotes === 'object' ? raw.quotes : {},
+        holdingsMeta: raw.holdingsMeta && typeof raw.holdingsMeta === 'object' ? raw.holdingsMeta : {}
       };
     } catch {
-      return { ...EMPTY };
+      return { cash: 0, trades: [], quotes: {}, holdingsMeta: {} };
     }
   }
 
@@ -56,6 +57,7 @@ export function createStore(dataPath) {
       cash: Number(data.cash) || 0,
       trades: Array.isArray(data.trades) ? data.trades : [],
       quotes: data.quotes && typeof data.quotes === 'object' ? data.quotes : {},
+      holdingsMeta: data.holdingsMeta && typeof data.holdingsMeta === 'object' ? data.holdingsMeta : {},
       updatedAt: new Date().toISOString()
     };
     fs.writeFileSync(tmp, JSON.stringify(payload, null, 2) + '\n');

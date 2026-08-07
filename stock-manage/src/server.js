@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'node:path';
+import XLSX from 'xlsx';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, createStore, resolveDataPath } from './storage.js';
 import { createQuoteService } from './quotes.js';
@@ -7,6 +8,10 @@ import { parseImportBuffer } from './import-moomoo.js';
 import {
   deriveHoldings,
   computePnl,
+  computeSymbolSummaries,
+  buildDailyCumulativeSeries,
+  expandDailySeries,
+  sliceSeries,
   enrichHoldings,
   normalizeTrade,
   recalcCashFromTrades,
@@ -33,15 +38,18 @@ if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 
 app.use(express.json({ limit: '2mb' }));
 
-function sendPortfolio(res) {
-  const data = store.read();
+function buildPortfolio(data, pnlOpts = {}) {
   const holdings = deriveHoldings(data.trades);
-  const enriched = enrichHoldings(holdings, data.quotes, data.cash);
-  const pnl = computePnl(data.trades);
-  res.json({
+  const enriched = enrichHoldings(holdings, data.quotes, data.cash, data.holdingsMeta);
+  const pnl = computePnl(data.trades, pnlOpts);
+  const sparse = buildDailyCumulativeSeries(data.trades);
+  const expanded = expandDailySeries(sparse);
+  const chartSeries = sliceSeries(expanded, pnlOpts.startDate, pnlOpts.endDate);
+  return {
     cash: data.cash,
     trades: data.trades,
     quotes: data.quotes,
+    holdingsMeta: data.holdingsMeta,
     holdings: enriched.rows,
     summary: {
       stockMv: enriched.stockMv,
@@ -49,20 +57,47 @@ function sendPortfolio(res) {
       totalMv: enriched.totalMv,
       totalAssets: enriched.totalAssets,
       unrealized: enriched.unrealized,
+      totalPnl: enriched.unrealized,
       ...pnl
-    }
-  });
+    },
+    chartSeries
+  };
+}
+
+function sendPortfolio(res, pnlOpts = {}) {
+  res.json(buildPortfolio(store.read(), pnlOpts));
 }
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-app.get('/api/portfolio', (_req, res) => sendPortfolio(res));
+app.get('/api/portfolio', (req, res) => {
+  sendPortfolio(res, { startDate: req.query.start, endDate: req.query.end });
+});
 
 app.put('/api/cash', (req, res) => {
   const cash = roundMoney(req.body?.cash);
   if (!Number.isFinite(cash)) return res.status(400).json({ error: '无效现金' });
   const data = store.read();
   data.cash = cash;
+  store.write(data);
+  sendPortfolio(res);
+});
+
+app.put('/api/holdings-meta/:symbol', (req, res) => {
+  const symbol = String(req.params.symbol || '').trim().toUpperCase();
+  if (!symbol) return res.status(400).json({ error: '无效代码' });
+  const data = store.read();
+  if (!data.holdingsMeta) data.holdingsMeta = {};
+  const prev = data.holdingsMeta[symbol] || {};
+  const next = { ...prev };
+  if ('targetPrice' in req.body) {
+    const v = req.body.targetPrice;
+    next.targetPrice = v === '' || v == null ? '' : roundMoney(Number(v));
+  }
+  if ('signal' in req.body) {
+    next.signal = String(req.body.signal || '');
+  }
+  data.holdingsMeta[symbol] = next;
   store.write(data);
   sendPortfolio(res);
 });
@@ -87,6 +122,7 @@ app.put('/api/trades/:id', (req, res) => {
     const i = data.trades.findIndex((t) => t.id === req.params.id);
     if (i < 0) return res.status(404).json({ error: '未找到' });
     const old = data.trades[i];
+    data.trades[i] = { ...trade, id: req.params.id, created_at: old.created_at || trade.created_at };
     data.cash = roundMoney(data.cash - cashDelta(old) + cashDelta(trade));
     store.write(data);
     sendPortfolio(res);
@@ -135,6 +171,45 @@ app.get('/api/pnl', (req, res) => {
   }));
 });
 
+app.get('/api/trades/summary', (req, res) => {
+  const data = store.read();
+  res.json(computeSymbolSummaries(data.trades, {
+    startDate: req.query.start || undefined,
+    endDate: req.query.end || undefined
+  }));
+});
+
+app.get('/api/trades/export', (req, res) => {
+  const data = store.read();
+  let trades = [...data.trades].sort((a, b) => new Date(b.trade_date) - new Date(a.trade_date));
+  const sym = String(req.query.symbol || '').trim().toUpperCase();
+  const type = req.query.type;
+  const start = req.query.start;
+  const end = req.query.end;
+  if (sym) trades = trades.filter((t) => t.symbol.toUpperCase().includes(sym));
+  if (type && type !== 'all') trades = trades.filter((t) => t.type === type);
+  if (start) trades = trades.filter((t) => t.trade_date.slice(0, 10) >= start);
+  if (end) trades = trades.filter((t) => t.trade_date.slice(0, 10) <= end);
+
+  const rows = trades.map((t) => ({
+    时间: t.trade_date,
+    类型: t.type === 'buy' ? '买入' : t.type === 'sell' ? '卖出' : '其它',
+    其它类别: t.other_category || '',
+    代码: t.symbol,
+    名称: t.name || '',
+    股数: t.type === 'other' ? '' : t.shares,
+    价格: t.type === 'other' ? '' : t.price,
+    金额: t.total_amount,
+    手续费: t.commission
+  }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), '交易记录');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename=trades.xlsx');
+  res.send(buf);
+});
+
 app.get('/api/search', async (req, res) => {
   try {
     res.json(await quotes.search(req.query.q));
@@ -159,17 +234,18 @@ app.get('/api/option/:symbol', async (req, res) => {
   }
 });
 
-app.post('/api/quotes/refresh', async (_req, res) => {
+app.post('/api/quotes/refresh', async (req, res) => {
   const data = store.read();
-  const symbols = [...new Set(deriveHoldings(data.trades).map((h) => h.symbol))];
+  const symbol = req.body?.symbol;
+  const symbols = symbol
+    ? [String(symbol).toUpperCase()]
+    : [...new Set(deriveHoldings(data.trades).map((h) => h.symbol))];
   const updated = { ...data.quotes };
-  const errors = [];
   for (const sym of symbols) {
     try {
       updated[sym] = await quotes.getQuote(sym);
-    } catch (e) {
-      errors.push({ symbol: sym, error: e.message });
-    }
+      if (!symbol) await new Promise((r) => setTimeout(r, 800));
+    } catch { /* skip */ }
   }
   data.quotes = updated;
   store.write(data);
