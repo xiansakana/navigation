@@ -1,6 +1,7 @@
-import { HOLDINGS_COLUMNS, LS_COL_VIS, LS_DASHBOARD, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
+import { HOLDINGS_COLUMNS, PNL_COLUMN_KEYS, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization } from './js/pnl-viz.js';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js';
+import { loadPortalContext, can, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const fmt = (n) => Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
@@ -23,14 +24,16 @@ const toastRefresh = (type, msg) => {
 };
 
 let state = { cash: 0, trades: [], holdings: [], summary: {}, chartSeries: [], chartSparse: [], chartExpandedFull: [], holdingsMeta: {} };
-let colVis = loadJson(LS_COL_VIS, defaultColVis());
-let dashboardVisible = loadJson(LS_DASHBOARD, true);
+let colVis = defaultColVis();
+let dashboardVisible = true;
+let pnlVisible = true;
 let fullWidth = loadJson(LS_FULL_WIDTH, false);
 let tableSort = loadJson(LS_TABLE_SORT, defaultTableSort());
 let dragSourceSymbol = null;
 let quotesRefreshBusy = false;
 let pnlStart = '';
 let pnlEnd = '';
+let prefSaveTimer = null;
 
 const ui = {
   tradeTab: 'list',
@@ -53,7 +56,58 @@ async function api(path, opts = {}) {
 }
 
 function mask(key, html) {
+  if (!pnlVisible && PNL_COLUMN_KEYS.includes(key)) return MASK;
   return colVis[key] !== false ? html : MASK;
+}
+
+function maskPnlValue(html) {
+  return pnlVisible ? html : MASK;
+}
+
+function schedulePrefsSave(partial) {
+  clearTimeout(prefSaveTimer);
+  prefSaveTimer = setTimeout(() => {
+    persistPrefs(partial).catch((e) => toastErr(e.message));
+  }, 300);
+}
+
+async function persistPrefs(partial) {
+  if (isPortalMode()) {
+    await saveStockManagePrefs(partial);
+    return;
+  }
+  if ('dashboardVisible' in partial) saveJson(LS_DASHBOARD, partial.dashboardVisible);
+  if ('pnlVisible' in partial) saveJson(LS_PNL_VISIBLE, partial.pnlVisible);
+  if ('colVis' in partial) saveJson(LS_COL_VIS, partial.colVis);
+}
+
+function applyPortalPrefs() {
+  if (isPortalMode()) {
+    const prefs = getStockManagePrefs();
+    dashboardVisible = prefs.dashboardVisible !== false;
+    pnlVisible = prefs.pnlVisible !== false;
+    if (prefs.colVis && typeof prefs.colVis === 'object') {
+      colVis = Object.assign(defaultColVis(), prefs.colVis);
+    }
+    return;
+  }
+  colVis = loadJson(LS_COL_VIS, defaultColVis());
+  dashboardVisible = loadJson(LS_DASHBOARD, true);
+  pnlVisible = loadJson(LS_PNL_VISIBLE, true);
+}
+
+function applyPermissions() {
+  $('#section-pnl')?.classList.toggle('hidden', !can('pnl'));
+  const dashBlock = $('#section-dashboard');
+  if (dashBlock) dashBlock.classList.toggle('hidden', !can('dashboard') && !can('pnl-toggle'));
+  document.querySelector('.sm-dashboard-toggle')?.classList.toggle('hidden', !can('dashboard'));
+  document.querySelector('.sm-pnl-visible-toggle')?.classList.toggle('hidden', !can('pnl-toggle'));
+  $('#btn-trades').hidden = !can('trades');
+  $('#btn-import').hidden = !can('import');
+  $('#btn-add').hidden = !can('trade');
+  $('#btn-refresh').hidden = !can('refresh');
+  $('#btn-col-toggle').hidden = !can('columns');
+  $('#col-toggle-panel')?.classList.toggle('hidden', !can('columns'));
 }
 
 function typeLabel(t) {
@@ -72,6 +126,7 @@ function renderDashboard() {
   const el = $('#dashboard');
   const show = dashboardVisible;
   $('#toggle-dashboard').checked = show;
+  $('#toggle-pnl-visible').checked = pnlVisible;
   if (!show) { el.innerHTML = ''; el.classList.add('hidden'); return; }
   el.classList.remove('hidden');
   const s = state.summary || {};
@@ -98,19 +153,19 @@ function renderDashboard() {
       </div>
       <div class="sm-summary-card sm-summary-card--green">
         <div class="label">总盈亏</div>
-        <div class="value ${cls(s.totalPnl)}">${fmtUsdSigned(s.totalPnl)}</div>
+        <div class="value ${cls(s.totalPnl)}">${maskPnlValue(fmtUsdSigned(s.totalPnl))}</div>
         <div class="hint">未实现盈亏合计</div>
       </div>
       <div class="sm-summary-card sm-summary-card--amber">
         <div class="label">当日总盈亏</div>
-        <div class="value ${dailyVal == null ? '' : cls(dailyVal)}">${dailyVal == null ? '—' : fmtUsdSigned(dailyVal)}</div>
+        <div class="value ${dailyVal == null ? '' : cls(dailyVal)}">${dailyVal == null ? '—' : maskPnlValue(fmtUsdSigned(dailyVal))}</div>
         <div class="hint">${dailyHint}</div>
       </div>
       <div class="sm-summary-card sm-summary-card--cash">
         <div class="label">现金</div>
         <div class="sm-cash-input-wrap">
           <span>$</span>
-          <input type="number" step="0.01" id="cash-input" value="${state.cash}">
+          <input type="number" step="0.01" id="cash-input" value="${state.cash}" ${can('cash') ? '' : 'readonly'}>
         </div>
         <div class="hint">占组合 ${fmtPct(cashPct)}</div>
       </div>
@@ -120,7 +175,7 @@ function renderDashboard() {
 
 function bindCashInput() {
   const el = $('#cash-input');
-  if (!el || el.dataset.cashBound === '1') return;
+  if (!el || el.dataset.cashBound === '1' || !can('cash')) return;
   el.dataset.cashBound = '1';
   el.addEventListener('change', async (e) => {
     try {
@@ -131,6 +186,7 @@ function bindCashInput() {
 }
 
 function renderColToggle() {
+  if (!can('columns')) return;
   $('#col-toggle-panel').innerHTML = HOLDINGS_COLUMNS.map((c) => `
     <label class="sm-col-check"><input type="checkbox" data-col="${c.key}" ${colVis[c.key] !== false ? 'checked' : ''}> ${c.label}</label>
   `).join('');
@@ -174,20 +230,20 @@ function renderHoldings() {
       <td>${mask('symbol', symInner)}</td>
       <td>${mask('shares', h.shares)}</td>
       <td>${mask('cost', fmtUsd(h.avgCost) + lots)}</td>
-      <td>${mask('price', `<span>${fmtUsd(h.price)}</span> <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>`)}</td>
+      <td>${mask('price', `<span>${fmtUsd(h.price)}</span>${can('refresh') ? ` <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>` : ''}`)}</td>
       <td class="${cls(h.pnl)}">${mask('pnl', h.pnl == null ? '—' : fmtUsdSigned(h.pnl))}</td>
       <td class="${cls(h.pnlPct)}">${mask('pnlPct', h.pnlPct == null ? '—' : fmtPct(h.pnlPct))}</td>
       <td class="${cls(h.dailyPnl)}">${mask('dailyPnl', h.dailyPnl == null ? '—' : fmtUsdSigned(h.dailyPnl))}</td>
       <td class="${cls(h.dailyPnlPct)}">${mask('dailyPnlPct', h.dailyPnlPct == null ? '—' : fmtPct(h.dailyPnlPct))}</td>
       <td>${mask('position', fmtUsd(h.marketValue))}</td>
       ${weightCell}
-      <td>${mask('target', `<input class="sm-cell-input" data-meta="target" data-symbol="${h.symbol}" type="number" step="any" value="${h.targetPrice ?? ''}" placeholder="—">`)}</td>
+      <td>${mask('target', `<input class="sm-cell-input" data-meta="target" data-symbol="${h.symbol}" type="number" step="any" value="${h.targetPrice ?? ''}" placeholder="—" ${can('meta') ? '' : 'readonly'}>`)}</td>
       <td>${mask('optinfo', optStr)}</td>
-      <td>${mask('signal', `<select class="sm-cell-select" data-meta="signal" data-symbol="${h.symbol}">${signalOptions(h.signal)}</select>`)}</td>
-      <td>${mask('actions', `
+      <td>${mask('signal', `<select class="sm-cell-select" data-meta="signal" data-symbol="${h.symbol}" ${can('meta') ? '' : 'disabled'}>${signalOptions(h.signal)}</select>`)}</td>
+      <td>${mask('actions', can('row-trade') ? `
         <button type="button" class="btn link" data-trade="buy" data-symbol="${h.symbol}">买</button>
         <button type="button" class="btn link" data-trade="sell" data-symbol="${h.symbol}">卖</button>
-        <button type="button" class="btn link" data-history="${h.symbol}">记录</button>`)}</td>
+        <button type="button" class="btn link" data-history="${h.symbol}">记录</button>` : '—')}</td>
     </tr>`;
     });
   });
@@ -210,7 +266,7 @@ function renderPnlStat(label, val, kind) {
     return `<div class="sm-stat"><div class="label">${label}</div><div class="value neg">${fmtCommission(val)}</div></div>`;
   }
   if (kind === 'signed') {
-    return `<div class="sm-stat"><div class="label">${label}</div><div class="value ${cls(val)}">${fmtUsdSigned(val)}</div></div>`;
+    return `<div class="sm-stat"><div class="label">${label}</div><div class="value ${cls(val)}">${maskPnlValue(fmtUsdSigned(val))}</div></div>`;
   }
   return `<div class="sm-stat"><div class="label">${label}</div><div class="value">${fmtUsd(val)}</div></div>`;
 }
@@ -225,7 +281,12 @@ function renderPnl() {
     renderPnlStat('其它收支', s.otherAmount, 'signed'),
     renderPnlStat('净盈亏', s.netPL, 'signed')
   ].join('');
-  renderPnlVisualization($('#pnl-chart'), () => ({
+  const chartEl = $('#pnl-chart');
+  if (!pnlVisible) {
+    chartEl.innerHTML = '<p class="hint sm-muted">盈亏数据已隐藏</p>';
+    return;
+  }
+  renderPnlVisualization(chartEl, () => ({
     chartSeries: state.chartSeries || [],
     chartSparse: state.chartSparse || [],
     chartExpandedFull: state.chartExpandedFull || [],
@@ -499,9 +560,9 @@ function renderTradeListTab() {
               <td>${t.type === 'other' ? '—' : fmtUsd(t.price)}</td>
               <td>${fmtUsd(t.total_amount)}</td>
               <td>${fmtCommission(t.commission)}</td>
-              <td>
+              <td>${can('trade') ? `
                 <button type="button" class="btn link" data-edit="${t.id}">编辑</button>
-                <button type="button" class="btn link" data-del="${t.id}">删除</button>
+                <button type="button" class="btn link" data-del="${t.id}">删除</button>` : '—'}
               </td>
             </tr>`).join('') : `<tr><td colspan="9" class="empty">暂无记录</td></tr>`}
           </tbody>
@@ -539,12 +600,12 @@ async function renderTradeSummaryTab() {
           <tbody>${rows.length ? rows.map((r) => `
             <tr>
               <td>${r.symbol}</td><td>${fmtUsd(r.totalBuyAmount)}</td><td>${fmtUsd(r.totalSellAmount)}</td>
-              <td>${fmtCommission(r.totalCommission)}</td><td class="${cls(r.netPnl)}">${fmtUsdSigned(r.netPnl)}</td>
-              <td>${r.netPnlRate == null ? '—' : fmtPct(r.netPnlRate)}</td>
+              <td>${fmtCommission(r.totalCommission)}</td><td class="${cls(r.netPnl)}">${maskPnlValue(fmtUsdSigned(r.netPnl))}</td>
+              <td>${r.netPnlRate == null ? '—' : maskPnlValue(fmtPct(r.netPnlRate))}</td>
             </tr>`).join('') : `<tr><td colspan="6" class="empty">暂无数据</td></tr>`}
           <tr class="sm-total-row">
             <td>合计</td><td>${fmtUsd(totals.buy)}</td><td>${fmtUsd(totals.sell)}</td>
-            <td>${fmtCommission(totals.fee)}</td><td class="${cls(totals.pnl)}">${fmtUsdSigned(totals.pnl)}</td><td>—</td>
+            <td>${fmtCommission(totals.fee)}</td><td class="${cls(totals.pnl)}">${maskPnlValue(fmtUsdSigned(totals.pnl))}</td><td>—</td>
           </tr></tbody>
         </table>
       </div>
@@ -559,9 +620,9 @@ async function renderTradeModalBody() {
       <button type="button" class="sm-tab ${ui.tradeTab === 'summary' ? 'active' : ''}" data-tab="summary">盈亏汇总</button>
     </div>
     <div class="sm-modal-toolbar">
-      <button type="button" class="btn ghost sm-btn-sm" id="modal-add-other">＋ 其它收支</button>
-      <button type="button" class="btn ghost sm-btn-sm" id="modal-import">导入</button>
-      <button type="button" class="btn ghost sm-btn-sm" id="modal-export">导出 xlsx</button>
+      ${can('trade') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-add-other">＋ 其它收支</button>' : ''}
+      ${can('import') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-import">导入</button>' : ''}
+      ${can('export') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-export">导出 xlsx</button>' : ''}
     </div>`;
   const content = ui.tradeTab === 'summary' ? await renderTradeSummaryTab() : renderTradeListTab();
   return `<div class="sm-trade-modal-content">${tabs}${content}</div>`;
@@ -659,6 +720,7 @@ function bindTradeModalEvents() {
 }
 
 async function saveMeta(symbol, patch) {
+  if (!can('meta')) throw new Error('无权修改');
   applyPortfolio(await api('/holdings-meta/' + encodeURIComponent(symbol), { method: 'PUT', body: patch }));
 }
 
@@ -677,11 +739,20 @@ window.addEventListener('storage', (e) => {
 
 $('#toggle-dashboard').addEventListener('change', (e) => {
   dashboardVisible = e.target.checked;
-  saveJson(LS_DASHBOARD, dashboardVisible);
+  schedulePrefsSave({ dashboardVisible });
   renderDashboard();
 });
 
+$('#toggle-pnl-visible').addEventListener('change', (e) => {
+  pnlVisible = e.target.checked;
+  schedulePrefsSave({ pnlVisible });
+  renderDashboard();
+  renderHoldings();
+  renderPnl();
+});
+
 $('#btn-col-toggle').addEventListener('click', () => {
+  if (!can('columns')) return;
   renderColToggle();
   $('#col-toggle-panel').classList.toggle('hidden');
 });
@@ -690,12 +761,12 @@ $('#col-toggle-panel').addEventListener('change', (e) => {
   const col = e.target.dataset?.col;
   if (!col) return;
   colVis[col] = e.target.checked;
-  saveJson(LS_COL_VIS, colVis);
+  schedulePrefsSave({ colVis });
   renderHoldings();
 });
 
 async function refreshQuotes(symbol) {
-  if (quotesRefreshBusy) return;
+  if (quotesRefreshBusy || !can('refresh')) return;
   quotesRefreshBusy = true;
   const btn = $('#btn-refresh');
   const rowBtns = [...document.querySelectorAll('[data-refresh]')];
@@ -768,6 +839,7 @@ $('#holdings-body').addEventListener('dragover', (e) => {
 $('#holdings-body').addEventListener('dragend', () => { dragSourceSymbol = null; });
 
 $('#holdings-body').addEventListener('drop', async (e) => {
+  if (!can('meta')) return;
   const targetEl = e.target.closest('[data-drag]');
   if (!targetEl) return;
   e.preventDefault();
@@ -787,6 +859,7 @@ $('#holdings-body').addEventListener('drop', async (e) => {
 $('#holdings-body').addEventListener('click', async (e) => {
   const clearSym = e.target.closest('[data-clear-group]')?.dataset.clearGroup;
   if (clearSym) {
+    if (!can('meta')) return;
     try {
       await saveMeta(clearSym, { groupWith: '' });
       toastOk('已恢复自动分组');
@@ -810,7 +883,7 @@ $('#holdings-body').addEventListener('click', async (e) => {
 
 $('#holdings-body').addEventListener('change', async (e) => {
   const el = e.target.closest('[data-meta]');
-  if (!el) return;
+  if (!el || !can('meta')) return;
   const symbol = el.dataset.symbol;
   const field = el.dataset.meta;
   const body = (field === 'target' || field === 'targetPrice')
@@ -824,8 +897,19 @@ $('#holdings-body').addEventListener('change', async (e) => {
   }
 });
 
-renderColToggle();
-loadPortfolio().catch((e) => {
-  toastErr(`加载失败: ${e.message}`);
-  document.body.innerHTML = `<p class="sm-error">加载失败: ${e.message}</p>`;
-});
+async function init() {
+  await loadPortalContext();
+  applyPortalPrefs();
+  applyPermissions();
+  renderColToggle();
+  $('#toggle-dashboard').checked = dashboardVisible;
+  $('#toggle-pnl-visible').checked = pnlVisible;
+  try {
+    await loadPortfolio();
+  } catch (e) {
+    toastErr(`加载失败: ${e.message}`);
+    document.body.innerHTML = `<p class="sm-error">加载失败: ${e.message}</p>`;
+  }
+}
+
+init();

@@ -16,6 +16,10 @@ export const HOLDINGS_COLUMNS = [
   { key: 'actions', label: '操作' }
 ];
 
+export const PNL_COLUMN_KEYS = ['pnl', 'pnlPct', 'dailyPnl', 'dailyPnlPct'];
+
+export const LS_PNL_VISIBLE = 'smPnlVisible';
+
 export const LS_COL_VIS = 'smHoldingsColumnVisibility';
 export const LS_DASHBOARD = 'smDashboardSummaryVisible';
 export const LS_FULL_WIDTH = 'smFullWidthLayout';
