@@ -53,6 +53,8 @@ function buildPortfolio(data, pnlOpts = {}) {
     quotes: data.quotes,
     holdingsMeta: data.holdingsMeta,
     holdings: enriched.rows,
+    chartSparse: sparse,
+    chartExpandedFull: expanded,
     summary: {
       stockMv: enriched.stockMv,
       optionMv: enriched.optionMv,
@@ -143,6 +145,21 @@ app.delete('/api/trades/:id', (req, res) => {
   data.cash = roundMoney(data.cash - cashDelta(old));
   store.write(data);
   sendPortfolio(res);
+});
+
+app.post('/api/trades/import/preview', express.raw({
+  type: ['application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  limit: '20mb'
+}), (req, res) => {
+  const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
+  if (!buf.length) return res.status(400).json({ error: '空文件' });
+  try {
+    const trades = parseImportBuffer(buf);
+    if (!trades.length) return res.status(400).json({ error: '未解析到有效记录' });
+    res.json({ count: trades.length, trades: trades.slice(0, 5), preview: trades.slice(0, 5) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 app.post('/api/trades/import', express.raw({

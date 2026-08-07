@@ -1,13 +1,16 @@
 import { HOLDINGS_COLUMNS, LS_COL_VIS, LS_DASHBOARD, LS_FULL_WIDTH, loadJson, saveJson, defaultColVis } from './js/constants.js';
-import { buildLineChartSvg } from './js/chart.js';
+import { renderPnlVisualization } from './js/pnl-viz.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const fmt = (n) => Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+const fmtUsd = (n) => Number.isFinite(n) ? '$' + fmt(n) : '—';
+const fmtUsdSigned = (n) => !Number.isFinite(n) ? '—' : `${n >= 0 ? '+' : ''}$${fmt(n)}`;
+const fmtCommission = (n) => Number.isFinite(n) && n > 0 ? '-$' + fmt(n) : '—';
 const fmtPct = (n) => Number.isFinite(n) ? n.toFixed(2) + '%' : '—';
 const cls = (n) => n > 0 ? 'pos' : n < 0 ? 'neg' : '';
 const MASK = '<span class="sm-mask">—</span>';
 
-let state = { cash: 0, trades: [], holdings: [], summary: {}, chartSeries: [], holdingsMeta: {} };
+let state = { cash: 0, trades: [], holdings: [], summary: {}, chartSeries: [], chartSparse: [], chartExpandedFull: [], holdingsMeta: {} };
 let colVis = loadJson(LS_COL_VIS, defaultColVis());
 let dashboardVisible = loadJson(LS_DASHBOARD, true);
 let fullWidth = loadJson(LS_FULL_WIDTH, false);
@@ -62,30 +65,30 @@ function renderDashboard() {
   const dailyHint = dailyVal == null
     ? '刷新行情后显示持仓涨跌'
     : (s.tradeDailyPnl != null && s.tradeDailyPnl !== 0
-      ? `持仓 ${fmt(s.marketDailyPnl)} + 交易 ${fmt(s.tradeDailyPnl)}`
+      ? `持仓 ${fmtUsd(s.marketDailyPnl)} + 交易 ${fmtUsd(s.tradeDailyPnl)}`
       : '持仓当日涨跌合计');
   el.innerHTML = `
     <div class="sm-summary-grid">
-      <div class="sm-summary-card sm-summary-card--purple">
+      <div class="sm-summary-card sm-summary-card--accent">
         <div class="label">总资产</div>
-        <div class="value">$${fmt(s.totalAssets)}</div>
+        <div class="value">${fmtUsd(s.totalAssets)}</div>
       </div>
-      <div class="sm-summary-card sm-summary-card--blue">
+      <div class="sm-summary-card">
         <div class="label">股票市值</div>
-        <div class="value">$${fmt(s.stockMv)}</div>
+        <div class="value">${fmtUsd(s.stockMv)}</div>
       </div>
-      <div class="sm-summary-card sm-summary-card--violet">
+      <div class="sm-summary-card">
         <div class="label">期权市值</div>
-        <div class="value">$${fmt(s.optionMv)}</div>
+        <div class="value">${fmtUsd(s.optionMv)}</div>
       </div>
-      <div class="sm-summary-card sm-summary-card--teal">
+      <div class="sm-summary-card sm-summary-card--green">
         <div class="label">总盈亏</div>
-        <div class="value ${cls(s.totalPnl)}">$${fmt(s.totalPnl)}</div>
+        <div class="value ${cls(s.totalPnl)}">${fmtUsdSigned(s.totalPnl)}</div>
         <div class="hint">未实现盈亏合计</div>
       </div>
       <div class="sm-summary-card sm-summary-card--amber">
         <div class="label">当日总盈亏</div>
-        <div class="value ${dailyVal == null ? '' : cls(dailyVal)}">${dailyVal == null ? '—' : '$' + fmt(dailyVal)}</div>
+        <div class="value ${dailyVal == null ? '' : cls(dailyVal)}">${dailyVal == null ? '—' : fmtUsdSigned(dailyVal)}</div>
         <div class="hint">${dailyHint}</div>
       </div>
       <div class="sm-summary-card sm-summary-card--cash">
@@ -125,13 +128,13 @@ function renderHoldings() {
       <td>${mask('type', h.type === 'option' ? '期权' : '股票')}</td>
       <td>${mask('symbol', `<strong>${h.symbol}</strong>`)}</td>
       <td>${mask('shares', h.shares)}</td>
-      <td>${mask('cost', fmt(h.avgCost) + lots)}</td>
-      <td>${mask('price', `<span>${fmt(h.price)}</span> <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>`)}</td>
-      <td class="${cls(h.pnl)}">${mask('pnl', h.pnl == null ? '—' : fmt(h.pnl))}</td>
+      <td>${mask('cost', fmtUsd(h.avgCost) + lots)}</td>
+      <td>${mask('price', `<span>${fmtUsd(h.price)}</span> <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>`)}</td>
+      <td class="${cls(h.pnl)}">${mask('pnl', h.pnl == null ? '—' : fmtUsdSigned(h.pnl))}</td>
       <td class="${cls(h.pnlPct)}">${mask('pnlPct', h.pnlPct == null ? '—' : fmtPct(h.pnlPct))}</td>
-      <td class="${cls(h.dailyPnl)}">${mask('dailyPnl', h.dailyPnl == null ? '—' : fmt(h.dailyPnl))}</td>
+      <td class="${cls(h.dailyPnl)}">${mask('dailyPnl', h.dailyPnl == null ? '—' : fmtUsdSigned(h.dailyPnl))}</td>
       <td class="${cls(h.dailyPnlPct)}">${mask('dailyPnlPct', h.dailyPnlPct == null ? '—' : fmtPct(h.dailyPnlPct))}</td>
-      <td>${mask('position', fmt(h.marketValue))}</td>
+      <td>${mask('position', fmtUsd(h.marketValue))}</td>
       <td>${mask('weight', fmtPct(h.weight))}</td>
       <td>${mask('target', `<input class="sm-cell-input" data-meta="target" data-symbol="${h.symbol}" type="number" step="any" value="${h.targetPrice ?? ''}" placeholder="—">`)}</td>
       <td>${mask('optinfo', optStr)}</td>
@@ -148,7 +151,7 @@ function renderHoldings() {
     <td>${mask('type', '现金')}</td>
     <td>${mask('symbol', 'CASH')}</td>
     <td colspan="7">${mask('shares', '—')}</td>
-    <td>${mask('position', fmt(state.cash))}</td>
+    <td>${mask('position', fmtUsd(state.cash))}</td>
     <td>${mask('weight', fmtPct(cashPct))}</td>
     <td colspan="4"></td>
   </tr>`;
@@ -156,16 +159,41 @@ function renderHoldings() {
   $('#holdings-body').innerHTML = html || `<tr><td colspan="${HOLDINGS_COLUMNS.length}" class="empty">暂无持仓</td></tr>`;
 }
 
+function renderPnlStat(label, val, kind) {
+  if (kind === 'commission') {
+    return `<div class="sm-stat"><div class="label">${label}</div><div class="value neg">${fmtCommission(val)}</div></div>`;
+  }
+  if (kind === 'signed') {
+    return `<div class="sm-stat"><div class="label">${label}</div><div class="value ${cls(val)}">${fmtUsdSigned(val)}</div></div>`;
+  }
+  return `<div class="sm-stat"><div class="label">${label}</div><div class="value">${fmtUsd(val)}</div></div>`;
+}
+
 function renderPnl() {
   const s = state.summary || {};
-  const items = [
-    ['买入总额', s.totalBuy], ['卖出总额', s.totalSell], ['已实现盈亏', s.realizedPL],
-    ['手续费', s.commission], ['其它收支', s.otherAmount], ['净盈亏', s.netPL]
-  ];
-  $('#pnl-stats').innerHTML = items.map(([label, val]) =>
-    `<div class="sm-stat"><div class="label">${label}</div><div class="value ${cls(val)}">${fmt(val)}</div></div>`
-  ).join('');
-  $('#pnl-chart').innerHTML = buildLineChartSvg(state.chartSeries || [], s.totalAssets || 0);
+  $('#pnl-stats').innerHTML = [
+    renderPnlStat('买入总额', s.totalBuy, 'money'),
+    renderPnlStat('卖出总额', s.totalSell, 'money'),
+    renderPnlStat('已实现盈亏', s.realizedPL, 'signed'),
+    renderPnlStat('手续费', s.commission, 'commission'),
+    renderPnlStat('其它收支', s.otherAmount, 'signed'),
+    renderPnlStat('净盈亏', s.netPL, 'signed')
+  ].join('');
+  renderPnlVisualization($('#pnl-chart'), () => ({
+    chartSeries: state.chartSeries || [],
+    chartSparse: state.chartSparse || [],
+    chartExpandedFull: state.chartExpandedFull || [],
+    totalAssets: s.totalAssets || 0,
+    pnlStart,
+    pnlEnd
+  }), {
+    onCalendarDay: (d) => openTradeHistoryForRange(d, d),
+    onCalendarMonth: (y, mo) => {
+      const start = `${y}-${String(mo).padStart(2, '0')}-01`;
+      const end = `${y}-${String(mo).padStart(2, '0')}-${String(new Date(y, mo, 0).getDate()).padStart(2, '0')}`;
+      openTradeHistoryForRange(start, end);
+    }
+  });
 }
 
 function applyPortfolio(data) {
@@ -184,11 +212,12 @@ async function loadPortfolio() {
 
 function closeModal() { $('#modal-root').innerHTML = ''; }
 
-function openModal(title, bodyHtml, footHtml, onSubmit) {
+function openModal(title, bodyHtml, footHtml, onSubmit, opts = {}) {
+  const sizeClass = opts.size === 'xl' ? ' sm-modal--xl' : ' sm-modal--wide';
   const root = $('#modal-root');
   root.innerHTML = `
     <div class="sm-modal-backdrop">
-      <div class="sm-modal sm-modal--wide" role="dialog">
+      <div class="sm-modal${sizeClass}" role="dialog">
         <div class="sm-modal-head"><h3>${title}</h3><button type="button" class="btn link" data-close>关闭</button></div>
         <div class="sm-modal-body" id="modal-body">${bodyHtml}</div>
         <div class="sm-modal-foot">${footHtml || `
@@ -260,28 +289,101 @@ function openTradeModal(trade = {}) {
   bindTradeForm($('#modal-body'));
 }
 
+const importState = { buffer: null, count: 0, preview: [], error: null, mode: 'merge' };
+
+function renderImportPreviewSection() {
+  if (importState.error) return `<div class="sm-error-box">${importState.error}</div>`;
+  if (!importState.count) return '';
+  const rows = importState.preview.map((t) => `
+    <tr>
+      <td>${(t.trade_date || '').slice(0, 19).replace('T', ' ')}</td>
+      <td>${typeLabel(t)}</td>
+      <td>${t.symbol}</td>
+      <td>${t.name || ''}</td>
+      <td>${t.type === 'other' ? '—' : t.shares}</td>
+      <td>${t.type === 'other' ? '—' : fmtUsd(t.price)}</td>
+    </tr>`).join('');
+  return `
+    <div class="sm-import-preview">
+      <div class="sm-import-preview-head">预览（前 5 条，共 ${importState.count} 条）</div>
+      <div class="sm-table-wrap">
+        <table class="sm-table">
+          <thead><tr>
+            <th>时间</th><th>类型</th><th>代码</th><th>名称</th><th>数量</th><th>价格</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      ${importState.count > 5 ? `<p class="hint">... 还有 ${importState.count - 5} 条记录</p>` : ''}
+    </div>`;
+}
+
+function bindImportModal() {
+  $('#import-mode')?.addEventListener('change', (e) => { importState.mode = e.target.value; });
+  $('#import-file')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    importState.buffer = await file.arrayBuffer();
+    try {
+      const res = await fetch('./api/trades/import/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+        body: importState.buffer
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '解析失败');
+      importState.count = data.count;
+      importState.preview = data.preview || data.trades || [];
+      importState.error = null;
+    } catch (err) {
+      importState.count = 0;
+      importState.preview = [];
+      importState.error = err.message;
+    }
+    const area = $('#import-preview-area');
+    if (area) area.innerHTML = renderImportPreviewSection();
+    const btn = $('#import-confirm');
+    if (btn) {
+      btn.disabled = importState.count === 0;
+      btn.textContent = importState.count > 0 ? `导入 (${importState.count} 条)` : '导入';
+    }
+  });
+}
+
 function openImportModal() {
+  importState.buffer = null;
+  importState.count = 0;
+  importState.preview = [];
+  importState.error = null;
+  importState.mode = 'merge';
   openModal('导入交易', `
-    <p class="hint">支持 Moomoo 历史 xlsx 或本应用导出的「交易记录」xlsx。</p>
+    <p class="hint">支持 Moomoo 历史 xlsx 或本应用导出的「交易记录」xlsx。选择文件后将显示预览，确认后再导入。</p>
     <form id="import-form" class="sm-form-grid">
-      <label>导入模式<select name="mode">
+      <label>导入模式<select name="mode" id="import-mode">
         <option value="merge">合并到现有记录</option>
         <option value="replace">替换全部记录</option>
       </select></label>
-      <label>选择文件<input type="file" name="file" accept=".xlsx,.xls" required></label>
-    </form>`, null, async () => {
-    const fd = new FormData($('#import-form'));
-    const file = fd.get('file');
-    if (!file?.size) throw new Error('请选择文件');
-    const buf = await file.arrayBuffer();
-    const res = await fetch('./api/trades/import?mode=' + encodeURIComponent(fd.get('mode') || 'merge'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
-      body: buf
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '导入失败');
-    applyPortfolio(data);
+      <label>选择文件<input type="file" id="import-file" class="sm-file-input" accept=".xlsx,.xls"></label>
+    </form>
+    <div id="import-preview-area"></div>`, `
+    <button type="button" class="btn ghost" data-close>取消</button>
+    <button type="button" class="btn primary" id="import-confirm" disabled>导入</button>`, null, { size: 'wide' });
+  bindImportModal();
+  $('#import-confirm')?.addEventListener('click', async () => {
+    if (!importState.buffer || !importState.count) return;
+    try {
+      const res = await fetch('./api/trades/import?mode=' + encodeURIComponent(importState.mode), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+        body: importState.buffer
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '导入失败');
+      closeModal();
+      applyPortfolio(data);
+    } catch (err) {
+      alert(err.message);
+    }
   });
 }
 
@@ -338,9 +440,9 @@ function renderTradeListTab() {
             <td>${t.symbol}</td>
             <td>${t.name || ''}</td>
             <td>${t.type === 'other' ? '—' : t.shares}</td>
-            <td>${t.type === 'other' ? '—' : fmt(t.price)}</td>
-            <td>${fmt(t.total_amount)}</td>
-            <td>${fmt(t.commission)}</td>
+            <td>${t.type === 'other' ? '—' : fmtUsd(t.price)}</td>
+            <td>${fmtUsd(t.total_amount)}</td>
+            <td>${fmtCommission(t.commission)}</td>
             <td>
               <button type="button" class="btn link" data-edit="${t.id}">编辑</button>
               <button type="button" class="btn link" data-del="${t.id}">删除</button>
@@ -378,13 +480,13 @@ async function renderTradeSummaryTab() {
         </tr></thead>
         <tbody>${rows.length ? rows.map((r) => `
           <tr>
-            <td>${r.symbol}</td><td>${fmt(r.totalBuyAmount)}</td><td>${fmt(r.totalSellAmount)}</td>
-            <td>${fmt(r.totalCommission)}</td><td class="${cls(r.netPnl)}">${fmt(r.netPnl)}</td>
+            <td>${r.symbol}</td><td>${fmtUsd(r.totalBuyAmount)}</td><td>${fmtUsd(r.totalSellAmount)}</td>
+            <td>${fmtCommission(r.totalCommission)}</td><td class="${cls(r.netPnl)}">${fmtUsdSigned(r.netPnl)}</td>
             <td>${r.netPnlRate == null ? '—' : fmtPct(r.netPnlRate)}</td>
           </tr>`).join('') : `<tr><td colspan="6" class="empty">暂无数据</td></tr>`}
         <tr class="sm-total-row">
-          <td>合计</td><td>${fmt(totals.buy)}</td><td>${fmt(totals.sell)}</td>
-          <td>${fmt(totals.fee)}</td><td class="${cls(totals.pnl)}">${fmt(totals.pnl)}</td><td>—</td>
+          <td>合计</td><td>${fmtUsd(totals.buy)}</td><td>${fmtUsd(totals.sell)}</td>
+          <td>${fmtCommission(totals.fee)}</td><td class="${cls(totals.pnl)}">${fmtUsdSigned(totals.pnl)}</td><td>—</td>
         </tr></tbody>
       </table>
     </div>
@@ -409,13 +511,19 @@ async function renderTradeModalBody() {
 async function openTradeHistoryModal(symbol = '') {
   if (symbol) ui.tradeFilter.symbol = symbol;
   ui.tradePage = 1;
-  openModal('交易记录', '<div id="trade-modal-content">加载中…</div>', '<button type="button" class="btn ghost" data-close>关闭</button>');
+  openModal('交易记录', '<div id="trade-modal-content">加载中…</div>', '<button type="button" class="btn ghost" data-close>关闭</button>', null, { size: 'xl' });
   const refresh = async () => {
     $('#trade-modal-content').innerHTML = await renderTradeModalBody();
     bindTradeModalEvents();
   };
   await refresh();
   window._refreshTradeModal = refresh;
+}
+
+function openTradeHistoryForRange(start, end) {
+  ui.tradeFilter = { symbol: '', type: 'all', otherCategory: '', start, end };
+  ui.tradePage = 1;
+  openTradeHistoryModal();
 }
 
 function bindTradeModalEvents() {
