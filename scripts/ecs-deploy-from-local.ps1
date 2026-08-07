@@ -15,7 +15,7 @@ $Key = Join-Path $env:USERPROFILE ".ssh\ecs_torn"
 $SshTarget = "root@123.56.235.12"
 $RemoteRoot = "/opt/navigation"
 
-$Dirs = @("portal", "qq-bot", "torn-toolbox-desktop", "scripts")
+$Dirs = @("portal", "qq-bot", "torn-toolbox-desktop", "stock-manage", "scripts")
 
 Write-Host "==> Sync to ECS: ${SshTarget}:${RemoteRoot}"
 foreach ($dir in $Dirs) {
@@ -34,6 +34,6 @@ if ($Only) {
 }
 
 Write-Host "==> Restart services (skip ECS git pull)"
-ssh -i $Key $SshTarget "cd $RemoteRoot; find . -name '*.sh' -exec sed -i 's/\r$//' {} +; chmod +x scripts/*.sh portal/deploy-ecs.sh qq-bot/deploy-ecs.sh torn-toolbox-desktop/deploy-ecs.sh; bash scripts/ecs-update.sh --skip-pull$onlyArg"
+ssh -i $Key $SshTarget "cd $RemoteRoot; find . -name '*.sh' -exec sed -i 's/\r$//' {} +; chmod +x scripts/*.sh portal/deploy-ecs.sh qq-bot/deploy-ecs.sh torn-toolbox-desktop/deploy-ecs.sh stock-manage/deploy-ecs.sh; bash scripts/ecs-update.sh --skip-pull$onlyArg"
 
 Write-Host "==> Deploy done"

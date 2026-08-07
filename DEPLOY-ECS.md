@@ -1,6 +1,6 @@
 # ECS 部署（navigation 仓库）
 
-本仓库为 ECS 服务栈（portal / qq-bot / torn-toolbox）。Torn 浏览器脚本在 [xiansakana-torn-scripts](https://github.com/xiansakana/xiansakana-torn-scripts)。
+本仓库为 ECS 服务栈（portal / qq-bot / torn-toolbox / stock-manage）。Torn 浏览器脚本在 [xiansakana-torn-scripts](https://github.com/xiansakana/xiansakana-torn-scripts)。
 
 **ECS 路径：** `/opt/navigation`
 
@@ -27,7 +27,7 @@ git clone git@github.com:xiansakana/navigation.git
 cd navigation
 ```
 
-按顺序配置并 `./deploy-ecs.sh`：`qq-bot` → `torn-toolbox-desktop` → `portal`。
+按顺序配置并 `./deploy-ecs.sh`：`qq-bot` → `torn-toolbox-desktop` → `stock-manage` → `portal`。
 
 详见各目录内 `config.ecs.example.json`。
 
