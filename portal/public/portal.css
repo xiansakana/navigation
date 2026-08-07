@@ -394,6 +394,110 @@ input {
     color: #fff;
 }
 
+.error-page {
+    display: grid;
+    place-items: center;
+    min-height: 100vh;
+    padding: 72px 24px 24px;
+    background:
+        radial-gradient(ellipse 80% 50% at 50% -20%, var(--page-glow), transparent),
+        var(--bg);
+}
+
+.error-top-bar {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    z-index: 1001;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.error-card {
+    width: min(480px, 100%);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 40px 32px 32px;
+    text-align: center;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.18);
+}
+
+.error-icon {
+    font-size: 48px;
+    line-height: 1;
+    margin-bottom: 8px;
+}
+
+.error-code {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 56px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--red);
+    border: 1px solid rgba(255, 123, 123, 0.35);
+    background: rgba(255, 123, 123, 0.08);
+    margin-bottom: 16px;
+}
+
+[data-theme="light"] .error-code {
+    border-color: rgba(220, 38, 38, 0.25);
+    background: rgba(220, 38, 38, 0.06);
+}
+
+.error-card h1 {
+    margin: 0 0 12px;
+    font-size: 26px;
+}
+
+.error-message {
+    margin: 0 0 10px;
+    color: var(--text);
+    font-size: 16px;
+    line-height: 1.6;
+}
+
+.error-hint {
+    margin: 0 0 28px;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.error-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+}
+
+.error-actions .btn {
+    min-width: 132px;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.error-actions .btn.primary {
+    background: var(--accent);
+    color: #fff;
+}
+
+.error-actions .btn.ghost {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+}
+
 .btn.primary {
     background: var(--accent);
     color: #fff;
