@@ -108,7 +108,14 @@ function renderDashboard() {
         <div class="hint">占组合 ${fmtPct(cashPct)}</div>
       </div>
     </div>`;
-  $('#cash-input')?.addEventListener('change', async (e) => {
+  bindCashInput();
+}
+
+function bindCashInput() {
+  const el = $('#cash-input');
+  if (!el || el.dataset.cashBound === '1') return;
+  el.dataset.cashBound = '1';
+  el.addEventListener('change', async (e) => {
     try {
       applyPortfolio(await api('/cash', { method: 'PUT', body: { cash: Number(e.target.value) } }));
       toastOk('现金已更新');
