@@ -944,11 +944,19 @@ select:focus {
 }
 
 @media (max-width: 640px) {
-    .sm-app { padding: 24px 16px 48px; }
+    .sm-app { padding: 20px 12px calc(48px + env(safe-area-inset-bottom, 0px)); }
     .sm-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .sm-header { flex-direction: column; }
     .sm-header-actions { width: 100%; }
     .sm-header-actions .btn { flex: 1; text-align: center; }
+    .sm-panel-head { flex-direction: column; align-items: stretch; gap: 12px; }
+    .sm-panel-head-actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+    .sm-panel-head-actions .btn { width: 100%; }
     .sm-panel-head--pnl { align-items: stretch; }
     .sm-pnl-filter { justify-content: stretch; flex-basis: 100%; }
     .sm-pnl-filter-field { flex: 1 1 140px; }
@@ -956,4 +964,44 @@ select:focus {
     .sm-pnl-filter-sep { padding-bottom: 0; align-self: center; }
     .sm-pnl-filter-actions { width: 100%; }
     .sm-pnl-filter-actions .btn { flex: 1; }
+    .sm-table-wrap {
+        margin: 0 -4px;
+        -webkit-overflow-scrolling: touch;
+    }
+    .sm-table th,
+    .sm-table td {
+        padding: 10px 12px;
+        font-size: 13px;
+    }
+    .sm-col-panel { padding: 12px; }
+    .sm-holdings-hint { padding-left: 12px; padding-right: 12px; }
+    .sm-summary-grid { grid-template-columns: 1fr; }
+    .sm-cal-gran { flex-direction: column; align-items: stretch; }
+    .sm-cal-gran-net { margin-left: 0; white-space: normal; }
+    .sm-cal-cell { min-height: 52px; }
+    .sm-cal-year-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .sm-modal-backdrop {
+        padding: 0;
+        align-items: flex-end;
+    }
+    .sm-modal,
+    .sm-modal.sm-modal--wide,
+    .sm-modal.sm-modal--xl,
+    .sm-modal.sm-modal--trade {
+        width: 100%;
+        max-width: 100%;
+        border-radius: 16px 16px 0 0;
+        max-height: min(94vh, calc(100dvh - env(safe-area-inset-top, 0px)));
+        height: auto;
+    }
+    .sm-modal.sm-modal--trade {
+        height: min(94vh, calc(100dvh - env(safe-area-inset-top, 0px)));
+    }
+    .sm-modal-head { padding: 14px 16px; }
+    .sm-modal-body { padding: 16px; }
+    .sm-trade-modal-content { padding: 12px 16px 8px; }
+    .sm-modal--trade .sm-modal-foot { padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); }
+    .sm-trade-filters { gap: 6px; }
+    .sm-trade-filters input,
+    .sm-trade-filters select { min-width: 0; flex: 1 1 120px; }
 }

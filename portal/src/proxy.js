@@ -140,8 +140,16 @@ function injectProxiedBackLink(html, variant) {
     });
 }
 
+function ensureViewportMeta(html) {
+    if (/name=["']viewport["']/i.test(html)) return html;
+    var tag = '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">';
+    if (html.includes('<head>')) return html.replace('<head>', '<head>' + tag);
+    return tag + html;
+}
+
 function injectPortalShell(html, service) {
     if (!html.includes('<body')) return html;
+    html = ensureViewportMeta(html);
     var themeBoot = '<script>(function(){try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>';
     var themeJs = '<script src="/theme.js"></script>';
     var toastJs = '<script src="/toast.js"></script>';
