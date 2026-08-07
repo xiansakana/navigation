@@ -31,6 +31,18 @@ function blockToMd(node) {
         const p = item.content?.[0];
         return (i + 1) + '. ' + inlineToMd(p?.content);
       }).join('\n');
+    case 'taskList':
+      return (node.content || []).map(function(item) {
+        const checked = item.attrs?.checked;
+        const p = item.content?.[0];
+        return '- [' + (checked ? 'x' : ' ') + '] ' + inlineToMd(p?.content);
+      }).join('\n');
+    case 'toggleBlock': {
+      const parts = node.content || [];
+      const summary = parts[0] ? blockToMd(parts[0]) : '';
+      const body = parts.slice(1).map(blockToMd).filter(Boolean).join('\n\n');
+      return '▸ ' + summary + (body ? '\n\n' + body : '');
+    }
     case 'blockquote':
       return (node.content || []).map(function(inner) {
         return '> ' + blockToMd(inner).replace(/\n/g, '\n> ');
@@ -120,6 +132,40 @@ export function markdownToTiptap(md, titleById) {
           return { type: 'paragraph', content: parseInline(q, titleById) };
         })
       });
+      continue;
+    }
+
+    if (/^[▸▾]\s+/.test(line)) {
+      const summaryText = line.replace(/^[▸▾]\s+/, '');
+      const bodyBlocks = [];
+      i++;
+      while (i < lines.length && lines[i].trim()) {
+        bodyBlocks.push({ type: 'paragraph', content: parseInline(lines[i], titleById) });
+        i++;
+      }
+      blocks.push({
+        type: 'toggleBlock',
+        attrs: { open: true },
+        content: [
+          { type: 'paragraph', content: parseInline(summaryText, titleById) },
+          ...(bodyBlocks.length ? bodyBlocks : [{ type: 'paragraph' }])
+        ]
+      });
+      continue;
+    }
+
+    if (/^[-*]\s+\[[ xX]\]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^[-*]\s+\[[ xX]\]\s+/.test(lines[i])) {
+        const checked = /^\[[xX]\]/.test(lines[i].replace(/^[-*]\s+/, ''));
+        items.push({
+          type: 'taskItem',
+          attrs: { checked },
+          content: [{ type: 'paragraph', content: parseInline(lines[i].replace(/^[-*]\s+\[[ xX]\]\s+/, ''), titleById) }]
+        });
+        i++;
+      }
+      blocks.push({ type: 'taskList', content: items });
       continue;
     }
 
