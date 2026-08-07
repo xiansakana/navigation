@@ -83,7 +83,15 @@ body.has-navbar {
 
 .sm-toggle-row input { width: auto; }
 
-.sm-dashboard { margin: 20px 0; }
+.sm-dashboard-block {
+    margin: 20px 0;
+}
+
+.sm-dashboard-toggle {
+    margin-bottom: 12px;
+}
+
+.sm-dashboard { margin: 0; }
 
 .sm-summary-grid {
     display: grid;
@@ -292,34 +300,60 @@ body.has-navbar {
 .sm-pnl-tooltip-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
 .sm-cal-block { margin-top: 12px; }
-.sm-cal-gran { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+.sm-cal-gran {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.sm-cal-gran-left {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.sm-cal-gran-net {
+  margin-left: auto;
+  font-size: 14px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.sm-cal-gran-net strong {
+  font-weight: 600;
+}
 .sm-cal-toolbar {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 8px 10px;
+  align-items: center;
+  gap: 8px 12px;
   margin-bottom: 10px;
   font-size: 13px;
 }
 
 .sm-cal-toolbar-field {
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
   gap: 6px;
-  min-width: 0;
+  flex-shrink: 0;
 }
 
 .sm-cal-toolbar-label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
   line-height: 1;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .sm-cal-toolbar-field select {
   width: auto;
-  min-width: 108px;
+  min-width: 92px;
   padding: 8px 10px;
   font-size: 13px;
+  flex-shrink: 0;
 }
 
 .sm-cal-toolbar .btn {
@@ -609,14 +643,15 @@ body.has-navbar {
 
 .sm-stats {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 12px;
     margin-bottom: 20px;
 }
 
 .sm-stats--inner {
-    padding: 16px 20px 20px;
+    padding: 14px 20px 16px;
     margin-bottom: 0;
+    border-bottom: 1px solid var(--border);
 }
 
 #pnl-chart {
@@ -624,11 +659,12 @@ body.has-navbar {
 }
 
 .sm-stat {
-    background: var(--card);
+    background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 18px 20px;
+    border-radius: 12px;
+    padding: 14px 16px;
     transition: border-color .15s ease;
+    min-width: 0;
 }
 
 .sm-stat:hover {
@@ -642,9 +678,10 @@ body.has-navbar {
 }
 
 .sm-stat .value {
-    font-size: 22px;
+    font-size: clamp(16px, 1.6vw, 22px);
     font-weight: 600;
     letter-spacing: -0.02em;
+    word-break: break-word;
 }
 
 .sm-panel {
@@ -672,8 +709,29 @@ body.has-navbar {
     flex-shrink: 0;
 }
 
+.sm-panel-head-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
 .sm-panel-head--stack {
     align-items: flex-start;
+}
+
+.sm-panel-head--pnl {
+    align-items: flex-end;
+    justify-content: flex-start;
+    gap: 16px 20px;
+    flex-wrap: wrap;
+}
+
+.sm-panel-head--pnl h2 {
+    margin-right: 4px;
 }
 
 .sm-pnl-filter {
@@ -681,8 +739,8 @@ body.has-navbar {
     flex-wrap: wrap;
     align-items: flex-end;
     gap: 10px 12px;
-    flex: 1 1 320px;
-    justify-content: flex-end;
+    flex: 1 1 420px;
+    justify-content: flex-start;
 }
 
 .sm-pnl-filter-field {
@@ -785,6 +843,11 @@ select:focus {
     border-color: rgba(91, 156, 255, 0.45);
 }
 
+#pnl-chart .sm-cal-toolbar-field select {
+    width: auto;
+    min-width: 92px;
+}
+
 .sm-modal-backdrop {
     position: fixed;
     inset: 0;
@@ -876,12 +939,18 @@ select:focus {
     text-align: center;
 }
 
+@media (max-width: 1100px) {
+    .sm-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
 @media (max-width: 640px) {
     .sm-app { padding: 24px 16px 48px; }
+    .sm-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .sm-header { flex-direction: column; }
     .sm-header-actions { width: 100%; }
     .sm-header-actions .btn { flex: 1; text-align: center; }
-    .sm-pnl-filter { justify-content: stretch; }
+    .sm-panel-head--pnl { align-items: stretch; }
+    .sm-pnl-filter { justify-content: stretch; flex-basis: 100%; }
     .sm-pnl-filter-field { flex: 1 1 140px; }
     .sm-pnl-filter-field input[type="date"] { width: 100%; }
     .sm-pnl-filter-sep { padding-bottom: 0; align-self: center; }

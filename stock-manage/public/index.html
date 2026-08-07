@@ -8,28 +8,9 @@
 </head>
 <body>
   <div class="sm-app" id="app">
-    <header class="sm-header">
-      <div class="sm-header-text">
-        <h1>股票管理</h1>
-        <p class="subtitle">美股持仓、交易记录与盈亏统计</p>
-      </div>
-      <div class="sm-header-actions">
-        <button type="button" id="btn-trades" class="btn ghost">交易记录</button>
-        <button type="button" id="btn-refresh" class="btn ghost">刷新价格</button>
-        <button type="button" id="btn-import" class="btn ghost">导入交易</button>
-        <button type="button" id="btn-add" class="btn primary">记一笔</button>
-      </div>
-    </header>
-
-    <div class="sm-toggles">
-      <label class="sm-toggle-row">
-        <input type="checkbox" id="toggle-dashboard" checked>
-        <span>显示看板（总资产、市值、盈亏、当日盈亏、现金）</span>
-      </label>
-    </div>
 
     <section class="sm-panel">
-      <div class="sm-panel-head sm-panel-head--stack">
+      <div class="sm-panel-head sm-panel-head--pnl">
         <h2>查询盈亏</h2>
         <div class="sm-pnl-filter">
           <label class="sm-pnl-filter-field">
@@ -51,12 +32,24 @@
       <div id="pnl-chart"></div>
     </section>
 
-    <section id="dashboard" class="sm-dashboard"></section>
+    <div class="sm-dashboard-block">
+      <label class="sm-toggle-row sm-dashboard-toggle">
+        <input type="checkbox" id="toggle-dashboard" checked>
+        <span>显示看板（总资产、市值、盈亏、当日盈亏、现金）</span>
+      </label>
+      <section id="dashboard" class="sm-dashboard"></section>
+    </div>
 
     <section class="sm-panel">
       <div class="sm-panel-head">
         <h2>持仓明细</h2>
-        <button type="button" id="btn-col-toggle" class="btn ghost sm-btn-sm">列数据</button>
+        <div class="sm-panel-head-actions">
+          <button type="button" id="btn-trades" class="btn ghost sm-btn-sm">交易记录</button>
+          <button type="button" id="btn-import" class="btn ghost sm-btn-sm">导入交易</button>
+          <button type="button" id="btn-add" class="btn primary sm-btn-sm">记一笔</button>
+          <button type="button" id="btn-refresh" class="btn ghost sm-btn-sm">刷新价格</button>
+          <button type="button" id="btn-col-toggle" class="btn ghost sm-btn-sm">列数据</button>
+        </div>
       </div>
       <div id="col-toggle-panel" class="sm-col-panel hidden"></div>
       <p class="sm-holdings-hint hint">同标的自动分组（期权归入正股）；可拖动代码行合并分组，点击 ↺ 恢复。点击「代码」「仓位 / 占比」表头排序。</p>
