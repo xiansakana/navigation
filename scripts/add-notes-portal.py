@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""在 portal/config.json 中注册 notes 服务（若尚未存在）。"""
+"""在 portal/config.json 中注册 SiYuan 笔记服务（若尚未存在）。"""
 import json
 from pathlib import Path
 
@@ -17,12 +17,12 @@ if any(s.get("id") == "notes" for s in services):
 entry = {
     "id": "notes",
     "title": "笔记",
-    "description": "块级富文本笔记，笔记本与文档管理",
+    "description": "思源笔记（SiYuan）— 块级引用、大纲、反链",
     "type": "proxy",
     "path": "/notes",
-    "entryPath": "/",
-    "internalUrl": "http://127.0.0.1:5001",
-    "injectBar": True,
+    "entryPath": "/stage/build/desktop/",
+    "internalUrl": "http://127.0.0.1:6806",
+    "injectBar": False,
     "injectBase": False,
     "icon": "📝",
 }
@@ -30,4 +30,4 @@ entry = {
 idx = next((i for i, s in enumerate(services) if s.get("id") == "stock-manage"), len(services))
 services.insert(idx + 1, entry)
 path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-print("portal config: notes 已添加")
+print("portal config: notes (SiYuan) 已添加")
