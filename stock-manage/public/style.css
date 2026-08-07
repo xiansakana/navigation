@@ -31,10 +31,163 @@ body.has-navbar {
 }
 
 .sm-app {
-    max-width: 1100px;
+    max-width: 1200px;
     margin: 0 auto;
     padding: 32px 24px 64px;
 }
+
+.sm-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    color: var(--muted);
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.sm-toggle-row input { width: auto; }
+
+.sm-dashboard { margin-bottom: 20px; }
+
+.sm-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+}
+
+.sm-summary-card {
+    border-radius: 16px;
+    padding: 20px;
+    color: #fff;
+}
+
+.sm-summary-card .label { font-size: 13px; opacity: 0.9; margin-bottom: 8px; }
+.sm-summary-card .value { font-size: 26px; font-weight: 700; }
+.sm-summary-card .hint { font-size: 12px; opacity: 0.75; margin-top: 6px; }
+
+.sm-summary-card--purple { background: linear-gradient(135deg, #667eea, #764ba2); }
+.sm-summary-card--blue { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
+.sm-summary-card--violet { background: linear-gradient(135deg, #a855f7, #7c3aed); }
+.sm-summary-card--teal { background: linear-gradient(135deg, #0d9488, #0f766e); }
+.sm-summary-card--cash {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+
+.sm-cash-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 26px;
+    font-weight: 700;
+}
+
+.sm-cash-input-wrap input {
+    width: auto;
+    flex: 1;
+    font-size: 22px;
+    font-weight: 700;
+    border: none;
+    background: transparent;
+    padding: 0;
+}
+
+.sm-col-panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.sm-col-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.sm-col-check input { width: auto; }
+
+.sm-mask { color: var(--muted); }
+.sm-lots-hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.sm-cash-row td { background: rgba(255, 193, 7, 0.06); }
+.sm-cell-input, .sm-cell-select {
+    width: 88px;
+    padding: 4px 8px;
+    font-size: 13px;
+    border-radius: 6px;
+}
+
+.sm-btn-sm { padding: 6px 12px !important; font-size: 13px !important; }
+.btn.ghost.active { color: var(--accent); border-color: rgba(91, 156, 255, 0.45); }
+
+.sm-chart-wrap { padding: 0 20px 20px; position: relative; }
+.sm-chart-badge {
+    position: absolute;
+    top: 8px;
+    right: 28px;
+    font-size: 13px;
+    color: var(--accent);
+    background: rgba(91, 156, 255, 0.1);
+    border: 1px solid rgba(91, 156, 255, 0.25);
+    border-radius: 999px;
+    padding: 4px 12px;
+}
+
+.sm-chart-svg { width: 100%; height: auto; display: block; }
+.sm-chart-empty { padding: 24px; text-align: center; color: var(--muted); }
+
+.sm-modal--wide { width: min(920px, 100%); }
+.sm-modal-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.sm-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.sm-tab {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.sm-tab.active {
+    background: rgba(91, 156, 255, 0.12);
+    color: var(--accent);
+    border-color: rgba(91, 156, 255, 0.35);
+}
+
+.sm-trade-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+    align-items: center;
+}
+
+.sm-trade-filters input,
+.sm-trade-filters select { width: auto; min-width: 100px; }
+
+.sm-table-wrap--modal { max-height: 420px; overflow: auto; }
+.sm-pagination {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.sm-pagination select { width: auto; }
+.sm-total-row td { font-weight: 600; background: rgba(255, 255, 255, 0.03); }
+.sm-form-grid { display: grid; gap: 12px; }
+.sm-form-grid label { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
 
 .sm-header {
     display: flex;
