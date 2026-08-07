@@ -19,6 +19,11 @@ export const HOLDINGS_COLUMNS = [
 export const LS_COL_VIS = 'smHoldingsColumnVisibility';
 export const LS_DASHBOARD = 'smDashboardSummaryVisible';
 export const LS_FULL_WIDTH = 'smFullWidthLayout';
+export const LS_TABLE_SORT = 'smHoldingsTableSort';
+
+export function defaultTableSort() {
+  return { key: 'weight', dir: -1 };
+}
 
 export function loadJson(key, fallback) {
   try {

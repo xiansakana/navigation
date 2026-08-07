@@ -171,6 +171,12 @@ body.has-navbar {
     line-height: 1;
 }
 
+.navbar-layout-btn.active {
+    color: var(--accent);
+    border-color: rgba(91, 156, 255, 0.45);
+    background: rgba(91, 156, 255, 0.12);
+}
+
 .login-theme-bar {
     position: fixed;
     top: 12px;

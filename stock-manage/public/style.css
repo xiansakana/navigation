@@ -172,6 +172,25 @@ body.has-navbar {
 
 .sm-mask { color: var(--muted); }
 .sm-lots-hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.sm-holdings-hint { margin: 0; padding: 0 20px 12px; }
+.sm-holding-group-start td { border-top: 2px solid var(--border); }
+.sm-holding-option td { background: rgba(91, 156, 255, 0.04); }
+.sm-sort-th { cursor: pointer; user-select: none; white-space: nowrap; }
+.sm-sort-th:hover { color: var(--accent); }
+.sm-symbol-drag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: grab;
+}
+.sm-symbol-drag:active { cursor: grabbing; }
+.sm-clear-group { padding: 0 4px !important; font-size: 12px !important; }
+.sm-weight-cell {
+  font-weight: 600;
+  color: var(--accent);
+  text-align: center;
+  vertical-align: middle;
+}
 .sm-cash-row td { background: rgba(255, 193, 7, 0.06); }
 .sm-cell-input, .sm-cell-select {
     width: 88px;
@@ -277,18 +296,34 @@ body.has-navbar {
 .sm-cal-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
+  align-items: flex-end;
+  gap: 8px 10px;
   margin-bottom: 10px;
   font-size: 13px;
 }
-.sm-cal-toolbar select {
-  margin-left: 6px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--card);
-  color: var(--text);
+
+.sm-cal-toolbar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sm-cal-toolbar-label {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.sm-cal-toolbar-field select {
+  width: auto;
+  min-width: 108px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.sm-cal-toolbar .btn {
+  flex-shrink: 0;
 }
 .sm-cal-weekdays {
   display: grid;
@@ -358,14 +393,6 @@ body.has-navbar {
 .sm-cal-year-amt.neg { color: var(--red); }
 .sm-cal-year-pct { font-size: 11px; margin-top: 4px; line-height: 1.35; }
 
-.sm-modal--wide { width: min(920px, 100%); }
-.sm-modal--xl { width: min(1280px, 96vw); }
-.sm-modal--trade {
-    width: min(calc(100vw - 32px), 1440px);
-    max-width: calc(100vw - 32px);
-    height: min(92vh, 960px);
-    max-height: 92vh;
-}
 .sm-modal-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .sm-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
 .sm-tab {
@@ -456,6 +483,10 @@ body.has-navbar {
 .sm-modal--trade .sm-tabs,
 .sm-modal--trade .sm-modal-toolbar {
     flex-shrink: 0;
+}
+
+.sm-modal--trade .sm-table-wrap--modal .sm-table {
+    min-width: 980px;
 }
 
 .sm-modal--trade .sm-table-wrap--modal .sm-table thead th {
@@ -770,11 +801,26 @@ select:focus {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 16px;
-    width: min(440px, 100%);
+    width: min(440px, calc(100vw - 48px));
     max-height: 90vh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.sm-modal.sm-modal--wide {
+    width: min(920px, calc(100vw - 48px));
+}
+
+.sm-modal.sm-modal--xl {
+    width: min(1280px, calc(100vw - 48px));
+}
+
+.sm-modal.sm-modal--trade {
+    width: min(1440px, calc(100vw - 48px));
+    max-width: calc(100vw - 48px);
+    height: min(92vh, 960px);
+    max-height: 92vh;
 }
 
 .sm-modal-body {
