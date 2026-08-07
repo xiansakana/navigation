@@ -229,6 +229,7 @@ function bindItemSelect(card, watcher) {
         if (wrap.classList.contains('disabled')) return;
         var apiKeyInput = card.querySelector('[data-field="apiKey"]');
         if (!watcher.hasApiKey && !apiKeyInput.value.trim()) {
+            WUI.toastWarn('请先填写并保存该账号的 API Key');
             $('uc-message').textContent = '请先填写并保存该账号的 API Key';
             return;
         }
@@ -236,12 +237,14 @@ function bindItemSelect(card, watcher) {
             $('uc-message').textContent = '正在加载物品列表...';
             loadItemsForWatcher(watcher.id).then(function(items) {
                 $('uc-message').textContent = '已加载 ' + items.length + ' 个物品';
+                WUI.toastOk('已加载 ' + items.length + ' 个物品');
                 drop.classList.add('show');
                 search.value = '';
                 renderList('');
                 search.focus();
             }).catch(function(err) {
                 $('uc-message').textContent = err.message;
+                WUI.toastErr(err.message);
             });
             return;
         }
@@ -291,11 +294,15 @@ async function testWatcherNotify(card) {
                 }
             })
         });
-        $('uc-message').textContent = '测试通知已发送'
+        var msg = '测试通知已发送'
             + (result.targets && result.targets.length ? ' → ' + result.targets.join('；') : '')
             + (result.errors && result.errors.length ? '（失败: ' + result.errors.join('；') + '）' : '');
+        $('uc-message').textContent = msg;
+        if (result.errors && result.errors.length) WUI.toastWarn(msg);
+        else WUI.toastOk(msg);
     } catch (err) {
         $('uc-message').textContent = err.message;
+        WUI.toastErr(err.message);
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = '测试通知'; }
     }
@@ -366,6 +373,7 @@ async function saveConfig() {
         })
     });
     $('global-status').textContent = '设置已保存';
+    WUI.toastOk('设置已保存');
     await loadState();
 }
 
@@ -375,7 +383,9 @@ function connectEvents() {
     es.addEventListener('undercutAlerts', function(e) { renderUndercutAlerts(JSON.parse(e.data)); });
     es.addEventListener('error', function(e) {
         if (!e.data) return;
-        $('global-status').textContent = JSON.parse(e.data).message;
+        var msg = JSON.parse(e.data).message;
+        $('global-status').textContent = msg;
+        WUI.toastErr(msg);
     });
 }
 
@@ -387,16 +397,29 @@ $('uc-add-watcher').addEventListener('click', function() {
 $('uc-save-config').addEventListener('click', function() {
     saveConfig().then(function() {
         $('uc-message').textContent = '压价配置已保存';
-    }).catch(function(err) { $('uc-message').textContent = err.message; });
+        WUI.toastOk('压价配置已保存');
+    }).catch(function(err) {
+        $('uc-message').textContent = err.message;
+        WUI.toastErr(err.message);
+    });
 });
 
 $('uc-start').addEventListener('click', function() {
     saveConfig().then(function() { return api('undercut/start', { method: 'POST' }); })
-        .catch(function(err) { $('uc-message').textContent = err.message; });
+        .then(function() { WUI.toastOk('已开始监听'); })
+        .catch(function(err) {
+            $('uc-message').textContent = err.message;
+            WUI.toastErr(err.message);
+        });
 });
 
 $('uc-stop').addEventListener('click', function() {
-    api('undercut/stop', { method: 'POST' }).catch(function(err) { $('uc-message').textContent = err.message; });
+    api('undercut/stop', { method: 'POST' })
+        .then(function() { WUI.toastOk('已停止监听'); })
+        .catch(function(err) {
+            $('uc-message').textContent = err.message;
+            WUI.toastErr(err.message);
+        });
 });
 
 $('uc-watchers').addEventListener('click', function(e) {
@@ -440,4 +463,5 @@ WUI.bindTargetTypeChange($('uc-watchers'));
 
 loadState().then(connectEvents).catch(function(err) {
     $('global-status').textContent = err.message;
+    WUI.toastErr(err.message);
 });

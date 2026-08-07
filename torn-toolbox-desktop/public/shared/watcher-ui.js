@@ -163,6 +163,19 @@ window.WatcherUI = (function() {
         });
     }
 
+    function toastCall(type, msg) {
+        if (msg == null || msg === '') return;
+        var t = window.portalToast;
+        if (t && typeof t[type] === 'function') {
+            t[type](String(msg));
+        }
+    }
+
+    function toastErr(msg) { toastCall('error', msg); }
+    function toastOk(msg) { toastCall('success', msg); }
+    function toastWarn(msg) { toastCall('warn', msg); }
+    function toastInfo(msg) { toastCall('info', msg); }
+
     return {
         escapeHtml: escapeHtml,
         defaultQqTarget: defaultQqTarget,
@@ -174,6 +187,10 @@ window.WatcherUI = (function() {
         collectWatcherNotifyFromCard: collectWatcherNotifyFromCard,
         renderWatcherMeta: renderWatcherMeta,
         bindTargetTypeChange: bindTargetTypeChange,
-        handleTargetActions: handleTargetActions
+        handleTargetActions: handleTargetActions,
+        toastErr: toastErr,
+        toastOk: toastOk,
+        toastWarn: toastWarn,
+        toastInfo: toastInfo
     };
 })();

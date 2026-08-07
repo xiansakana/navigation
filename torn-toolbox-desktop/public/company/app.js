@@ -143,11 +143,15 @@ async function testWatcherNotify(card) {
                 }
             })
         });
-        $('co-message').textContent = '测试通知已发送'
+        var msg = '测试通知已发送'
             + (result.targets && result.targets.length ? ' → ' + result.targets.join('；') : '')
             + (result.errors && result.errors.length ? '（失败: ' + result.errors.join('；') + '）' : '');
+        $('co-message').textContent = msg;
+        if (result.errors && result.errors.length) WUI.toastWarn(msg);
+        else WUI.toastOk(msg);
     } catch (err) {
         $('co-message').textContent = err.message;
+        WUI.toastErr(err.message);
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = '测试通知'; }
     }
@@ -212,6 +216,7 @@ async function saveConfig() {
         })
     });
     $('global-status').textContent = '设置已保存';
+    WUI.toastOk('设置已保存');
     await loadState();
 }
 
@@ -221,7 +226,9 @@ function connectEvents() {
     es.addEventListener('companyApps', function(e) { renderCompanyApps(JSON.parse(e.data)); });
     es.addEventListener('error', function(e) {
         if (!e.data) return;
-        $('global-status').textContent = JSON.parse(e.data).message;
+        var msg = JSON.parse(e.data).message;
+        $('global-status').textContent = msg;
+        WUI.toastErr(msg);
     });
 }
 
@@ -233,16 +240,29 @@ $('co-add-watcher').addEventListener('click', function() {
 $('co-save-config').addEventListener('click', function() {
     saveConfig().then(function() {
         $('co-message').textContent = '公司监听配置已保存';
-    }).catch(function(err) { $('co-message').textContent = err.message; });
+        WUI.toastOk('公司监听配置已保存');
+    }).catch(function(err) {
+        $('co-message').textContent = err.message;
+        WUI.toastErr(err.message);
+    });
 });
 
 $('co-start').addEventListener('click', function() {
     saveConfig().then(function() { return api('company/start', { method: 'POST' }); })
-        .catch(function(err) { $('co-message').textContent = err.message; });
+        .then(function() { WUI.toastOk('已开始监听'); })
+        .catch(function(err) {
+            $('co-message').textContent = err.message;
+            WUI.toastErr(err.message);
+        });
 });
 
 $('co-stop').addEventListener('click', function() {
-    api('company/stop', { method: 'POST' }).catch(function(err) { $('co-message').textContent = err.message; });
+    api('company/stop', { method: 'POST' })
+        .then(function() { WUI.toastOk('已停止监听'); })
+        .catch(function(err) {
+            $('co-message').textContent = err.message;
+            WUI.toastErr(err.message);
+        });
 });
 
 $('co-watchers').addEventListener('click', function(e) {
@@ -263,4 +283,5 @@ WUI.handleTargetActions($('co-watchers'), companyWatchers, renderCompanyWatchers
 
 loadState().then(connectEvents).catch(function(err) {
     $('global-status').textContent = err.message;
+    WUI.toastErr(err.message);
 });
