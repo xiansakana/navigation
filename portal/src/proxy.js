@@ -43,21 +43,32 @@ export function buildTargetUrl(service, reqUrl) {
     return target;
 }
 
-function siyuanEntryPath() {
-    return '/stage/build/desktop/';
+function isMobileUserAgent(userAgent) {
+    var ua = String(userAgent || '');
+    if (!ua) return false;
+    if (ua.includes('Electron')) return false;
+    if (ua.includes('Pad')) return false;
+    if (ua.includes('Android') && !ua.includes('Mobile')) return false;
+    return /Mobile|iPhone|iPod|Android.*Mobile|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
 }
 
-function fixSiyuanAuthQuery(search) {
+function siyuanEntryPath(userAgent) {
+    return isMobileUserAgent(userAgent)
+        ? '/stage/build/mobile/'
+        : '/stage/build/desktop/';
+}
+
+function fixSiyuanAuthQuery(search, userAgent) {
     var params = new URLSearchParams(search || '');
     var to = params.get('to');
     if (!to || to === '/') {
-        params.set('to', siyuanEntryPath());
+        params.set('to', siyuanEntryPath(userAgent));
     }
     var q = params.toString();
     return q ? '?' + q : '';
 }
 
-function rewriteLocation(location, service) {
+function rewriteLocation(location, service, userAgent) {
     if (!location) return location;
     var prefix = service.path.replace(/\/$/, '');
     try {
@@ -65,7 +76,7 @@ function rewriteLocation(location, service) {
         var base = new URL(service.internalUrl);
         if (loc.origin === base.origin) {
             if (service.id === 'notes' && loc.pathname === '/check-auth') {
-                return prefix + loc.pathname + fixSiyuanAuthQuery(loc.search);
+                return prefix + loc.pathname + fixSiyuanAuthQuery(loc.search, userAgent);
             }
             return prefix + loc.pathname + loc.search + loc.hash;
         }
@@ -75,7 +86,7 @@ function rewriteLocation(location, service) {
             var qIdx = location.indexOf('?');
             var path = qIdx >= 0 ? location.slice(0, qIdx) : location;
             var search = qIdx >= 0 ? location.slice(qIdx) : '';
-            return prefix + path + fixSiyuanAuthQuery(search);
+            return prefix + path + fixSiyuanAuthQuery(search, userAgent);
         }
         return prefix + location;
     }
@@ -115,6 +126,7 @@ function injectProxiedBackLink(html, variant) {
         + '.portal-proxied-back:hover{background:rgba(23,27,34,.95)}'
         + '@media (prefers-color-scheme:light){.portal-proxied-back{color:#152033;background:rgba(255,255,255,.92);border-color:rgba(15,23,42,.12);box-shadow:0 4px 16px rgba(15,23,42,.12)}.portal-proxied-back:hover{background:#fff}}'
         + positionRule
+        + '@media (max-width:768px){.portal-proxied-back--notes,.portal-proxied-back--napcat{top:auto!important;bottom:calc(12px + env(safe-area-inset-bottom,0px))!important;left:12px!important;right:auto!important;padding:8px 12px!important;font-size:14px!important;line-height:1.3!important}}'
         + '</style>';
     var keeper = '<script>(function(){var c="portal-proxied-back portal-proxied-back--' + variant + '";function m(){var e=document.querySelector("."+c.split(" ")[0]);if(!e){e=document.createElement("a");e.className=c;e.href="/";e.textContent="← 服务导航";document.body.appendChild(e)}}m();new MutationObserver(m).observe(document.documentElement,{childList:true,subtree:true})})();</script>';
     if (html.includes('</head>')) html = html.replace('</head>', css + '</head>');
@@ -199,7 +211,7 @@ export async function proxyHttpRequest(service, req, res) {
             var headers = Object.assign({}, upstreamRes.headers);
             delete headers['content-security-policy'];
             if (headers.location) {
-                headers.location = rewriteLocation(headers.location, service);
+                headers.location = rewriteLocation(headers.location, service, req.headers['user-agent']);
             }
             var ctype = String(upstreamRes.headers['content-type'] || '');
             var isHtml = ctype.includes('text/html') && upstreamRes.statusCode === 200;
@@ -366,9 +378,14 @@ export function resolveProxyContext(services, reqUrl) {
     return null;
 }
 
-export function getServiceEntryHref(service) {
+export function getServiceEntryHref(service, userAgent) {
     var base = service.path.replace(/\/$/, '');
     var entry = service.entryPath || '/';
+    if (service.id === 'notes') {
+        if (!entry || entry === '/' || entry === '/stage/build/desktop/' || entry === '/stage/build/mobile/') {
+            entry = userAgent ? siyuanEntryPath(userAgent) : '/';
+        }
+    }
     if (!entry.startsWith('/')) entry = '/' + entry;
     return base + entry;
 }
