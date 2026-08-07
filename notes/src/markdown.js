@@ -65,6 +65,12 @@ function blockToMd(node) {
       const height = node.attrs?.height || 360;
       return ':::embed ' + height + '\n' + src + '\n:::';
     }
+    case 'calloutBlock': {
+      const type = (node.attrs?.type || 'note').toUpperCase();
+      const body = (node.content || []).map(blockToMd).filter(Boolean).join('\n\n');
+      const lines = ['[!' + type + ']'].concat(body ? body.split('\n') : []);
+      return lines.map(function(line) { return '> ' + line; }).join('\n');
+    }
     case 'horizontalRule':
       return '---';
     default:
@@ -164,6 +170,26 @@ export function markdownToTiptap(md, titleById) {
           attrs: { src: src, title: '', height: height }
         });
       }
+      continue;
+    }
+
+    if (/^>\s?\[!(\w+)\]\s*$/i.test(line)) {
+      const calloutType = /^>\s?\[!(\w+)\]\s*$/i.exec(line)[1].toLowerCase();
+      const quoteLines = [];
+      i++;
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        quoteLines.push(lines[i].replace(/^>\s?/, ''));
+        i++;
+      }
+      blocks.push({
+        type: 'calloutBlock',
+        attrs: { type: calloutType, title: '' },
+        content: quoteLines.length
+          ? quoteLines.map(function(q) {
+            return { type: 'paragraph', content: parseInline(q, titleById) };
+          })
+          : [{ type: 'paragraph' }]
+      });
       continue;
     }
 

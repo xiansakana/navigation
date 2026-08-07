@@ -114,6 +114,9 @@ function walkNodes(node, parts) {
   if (node.type === 'embedBlock') {
     parts.push(node.attrs?.title || node.attrs?.src || '[嵌入]');
   }
+  if (node.type === 'calloutBlock') {
+    parts.push('[标注]');
+  }
   if (Array.isArray(node.content)) node.content.forEach(function(child) { walkNodes(child, parts); });
 }
 

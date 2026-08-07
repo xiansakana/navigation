@@ -8,6 +8,9 @@ import { setupCodeLangBar, insertCodeBlock } from './code-block.js';
 import { uploadImageFile, insertImage, isValidImageUrl } from './image-block.js';
 import { insertEmbedBlock } from './embed-block.js';
 import { openContextMenu } from './context-menu.js';
+import { BlockId } from './block-id.js';
+import { setupOutlinePanel } from './outline.js';
+import { setupRefPopover } from './ref-popover.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -45,6 +48,8 @@ let tagFilterDropdown = null;
 let treeSortDropdown = null;
 let blockEditorCleanup = null;
 let codeLangBarCleanup = null;
+let outlinePanel = null;
+let refPopoverCleanup = null;
 let noteTags = [];
 let sidebarCollapsed = localStorage.getItem('notes-sidebar-collapsed') === '1';
 let sidebarWidth = clampSidebarWidth(parseInt(localStorage.getItem('notes-sidebar-width') || '300', 10));
@@ -581,6 +586,11 @@ function destroyEditor() {
     codeLangBarCleanup();
     codeLangBarCleanup = null;
   }
+  if (refPopoverCleanup) {
+    refPopoverCleanup();
+    refPopoverCleanup = null;
+  }
+  outlinePanel = null;
   if (editor) {
     editor.destroy();
     editor = null;
@@ -625,6 +635,7 @@ function initEditor(content) {
         }
       }),
       NoteReference,
+      BlockId,
       ...blockExtensions()
     ],
     content: content || { type: 'doc', content: [{ type: 'paragraph' }] },
@@ -632,8 +643,30 @@ function initEditor(content) {
       if (suppressEditorUpdate) return;
       markDirty();
       updateToolbarState();
+      outlinePanel?.refresh();
     },
     onSelectionUpdate: updateToolbarState
+  });
+
+  outlinePanel = setupOutlinePanel({
+    panel: $('outline-panel'),
+    listEl: $('outline-list'),
+    filterEl: $('outline-filter'),
+    getEditor: function() { return editor; }
+  });
+  outlinePanel.refresh();
+
+  refPopoverCleanup = setupRefPopover($('note-editor-shell'), {
+    fetchPreview: async function(noteId) {
+      const data = await api('notes/' + noteId);
+      const note = data.note;
+      const text = plainFromDoc(note.content);
+      return {
+        title: note.title || '无标题',
+        preview: text.slice(0, 200) || '（空笔记）'
+      };
+    },
+    onOpen: openNote
   });
 
   $('note-editor').onclick = function(e) {
@@ -667,6 +700,23 @@ function initEditor(content) {
     },
     onPageMenuAction: function(id) {
       runNoteMenuAction(id, activeNoteId);
+    },
+    onCreateNoteFromMention: async function(title) {
+      if (!activeNotebookId) return null;
+      const data = await api('notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notebookId: activeNotebookId,
+          parentId: activeNoteId || null,
+          title: title || '无标题'
+        })
+      });
+      const summary = noteSummaryFromFull(data.note);
+      notes.unshift(summary);
+      await refreshTree();
+      renderNoteList();
+      return summary;
     }
   });
 
@@ -768,27 +818,45 @@ function renderBreadcrumb(note) {
 }
 
 async function loadBacklinks(noteId) {
-  const panel = $('backlinks-panel');
   const list = $('backlinks-list');
+  const empty = $('backlinks-empty');
   const data = await api('notes/' + noteId + '/backlinks');
   const links = data.backlinks || [];
+  list.innerHTML = '';
   if (!links.length) {
-    panel.classList.add('hidden');
-    list.innerHTML = '';
+    empty?.classList.remove('hidden');
     return;
   }
-  panel.classList.remove('hidden');
-  list.innerHTML = '';
+  empty?.classList.add('hidden');
   links.forEach(function(item) {
     const li = document.createElement('li');
+    li.className = 'notes-backlink-card';
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'notes-backlink-item';
-    btn.textContent = item.title || '无标题';
+    btn.innerHTML =
+      '<span class="notes-backlink-title">' + escapeHtml(item.title || '无标题') + '</span>'
+      + (item.snippet
+        ? '<span class="notes-backlink-snippet">' + escapeHtml(item.snippet) + '</span>'
+        : item.preview
+          ? '<span class="notes-backlink-snippet">' + escapeHtml(item.preview) + '</span>'
+          : '');
     btn.addEventListener('click', function() { openNote(item.id); });
     li.appendChild(btn);
     list.appendChild(li);
   });
+}
+
+function plainFromDoc(content) {
+  const parts = [];
+  function walk(node) {
+    if (!node) return;
+    if (node.type === 'text' && node.text) parts.push(node.text);
+    if (node.type === 'noteReference') parts.push(node.attrs?.title || '');
+    if (Array.isArray(node.content)) node.content.forEach(walk);
+  }
+  walk(content);
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
 }
 
 async function openNote(noteId) {
@@ -1159,7 +1227,20 @@ function syncHljsTheme() {
     : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css';
 }
 
+function initDockTabs() {
+  const tabs = document.querySelectorAll('.notes-dock-tab');
+  tabs.forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      const target = tab.dataset.dock;
+      tabs.forEach(function(t) { t.classList.toggle('is-active', t === tab); });
+      $('outline-panel')?.classList.toggle('hidden', target !== 'outline');
+      $('backlinks-panel')?.classList.toggle('hidden', target !== 'backlinks');
+    });
+  });
+}
+
 initDropdowns();
+initDockTabs();
 syncHljsTheme();
 new MutationObserver(syncHljsTheme).observe(document.documentElement, {
   attributes: true,

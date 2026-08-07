@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, createStore, resolveDataPath } from './storage.js';
 import { normalizeNote, noteSummary, buildNoteTree, buildEnrichedContext, notebookStats, extractPlainText } from './notes-util.js';
-import { getBacklinksForNote } from './links.js';
+import { getBacklinksForNote, enrichBacklinks } from './links.js';
 import { searchNotes, collectTags } from './search.js';
 import { tiptapToMarkdown, stripLeadingTitle, resolveRefsFromMarkdown } from './markdown.js';
 
@@ -201,7 +201,7 @@ app.get('/api/notes/:id/backlinks', (req, res) => {
   const data = store.read();
   const note = findNote(data, req.params.id);
   if (!note) return res.status(404).json({ ok: false, error: '笔记不存在' });
-  res.json({ ok: true, backlinks: getBacklinksForNote(data.notes, note.id) });
+  res.json({ ok: true, backlinks: enrichBacklinks(data.notes, note.id) });
 });
 
 app.get('/api/notes/:id/export.md', (req, res) => {

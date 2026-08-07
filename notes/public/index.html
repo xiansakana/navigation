@@ -127,9 +127,19 @@
               <div class="notes-editor-shell" id="note-editor-shell">
                 <div id="note-editor" class="notes-editor"></div>
               </div>
-              <aside id="backlinks-panel" class="notes-backlinks hidden">
-                <h3>反向链接</h3>
-                <ul id="backlinks-list"></ul>
+              <aside id="notes-dock" class="notes-dock">
+                <div class="notes-dock-tabs">
+                  <button type="button" class="notes-dock-tab is-active" data-dock="outline">大纲</button>
+                  <button type="button" class="notes-dock-tab" data-dock="backlinks">反向链接</button>
+                </div>
+                <div id="outline-panel" class="notes-dock-panel">
+                  <input type="search" id="outline-filter" class="notes-dock-filter" placeholder="筛选标题…">
+                  <ul id="outline-list" class="notes-outline-list"></ul>
+                </div>
+                <div id="backlinks-panel" class="notes-dock-panel hidden">
+                  <ul id="backlinks-list" class="notes-backlinks-list"></ul>
+                  <p id="backlinks-empty" class="notes-dock-empty hidden">暂无反向链接</p>
+                </div>
               </aside>
             </div>
           </div>
