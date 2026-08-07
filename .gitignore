@@ -5,3 +5,5 @@
 **/config.company.json
 .DS_Store
 **/data/uploads/
+siyuan/data/
+siyuan/.env

@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  siyuan:
+    image: b3log/siyuan:latest
+    container_name: siyuan
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6806:6806"
+    volumes:
+      - ./data/siyuan:/siyuan/workspace
+    environment:
+      TZ: Asia/Shanghai
+      SIYUAN_LANG: zh-CN
+      PUID: "1000"
+      PGID: "1000"
+      SIYUAN_ACCESS_AUTH_CODE: ${SIYUAN_ACCESS_AUTH_CODE:-changeme}
+    command:
+      - serve
+      - --workspace=/siyuan/workspace/
+      - --accessAuthCode=${SIYUAN_ACCESS_AUTH_CODE:-changeme}
