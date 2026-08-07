@@ -11,6 +11,10 @@ const fmtPct = (n) => Number.isFinite(n) ? n.toFixed(2) + '%' : '—';
 const cls = (n) => n > 0 ? 'pos' : n < 0 ? 'neg' : '';
 const MASK = '<span class="sm-mask">—</span>';
 
+const toastErr = (msg) => window.portalToast?.error(msg) ?? window.alert(msg);
+const toastWarn = (msg) => window.portalToast?.warn(msg) ?? window.alert(msg);
+const toastOk = (msg) => window.portalToast?.success(msg) ?? window.alert(msg);
+
 let state = { cash: 0, trades: [], holdings: [], summary: {}, chartSeries: [], chartSparse: [], chartExpandedFull: [], holdingsMeta: {} };
 let colVis = loadJson(LS_COL_VIS, defaultColVis());
 let dashboardVisible = loadJson(LS_DASHBOARD, true);
@@ -106,7 +110,7 @@ function renderDashboard() {
   $('#cash-input')?.addEventListener('change', async (e) => {
     try {
       applyPortfolio(await api('/cash', { method: 'PUT', body: { cash: Number(e.target.value) } }));
-    } catch (err) { alert(err.message); }
+    } catch (err) { toastErr(err.message); }
   });
 }
 
@@ -259,7 +263,7 @@ function openModal(title, bodyHtml, footHtml, onSubmit, opts = {}) {
   if (onSubmit) {
     $('#modal-save')?.addEventListener('click', async () => {
       try { await onSubmit(); closeModal(); await loadPortfolio(); }
-      catch (err) { alert(err.message); }
+      catch (err) { toastErr(err.message); }
     });
   }
 }
@@ -410,7 +414,7 @@ function openImportModal() {
       closeModal();
       applyPortfolio(data);
     } catch (err) {
-      alert(err.message);
+      toastErr(err.message);
     }
   });
 }
@@ -668,10 +672,10 @@ async function refreshQuotes(symbol) {
     const r = data.refresh;
     if (r?.failed) {
       const msg = r.errors.slice(0, 5).map((e) => `${e.symbol}: ${e.error}`).join('\n');
-      alert(`已刷新 ${r.ok} 个，失败 ${r.failed} 个：\n${msg}`);
+      toastWarn(`已刷新 ${r.ok} 个，失败 ${r.failed} 个：${msg.replace(/\n/g, ' · ')}`);
     }
   } catch (e) {
-    alert(e.message);
+    toastErr(e.message);
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -685,11 +689,11 @@ $('#btn-trades').addEventListener('click', () => openTradeHistoryModal());
 
 $('#pnl-start').addEventListener('change', (e) => { pnlStart = e.target.value; });
 $('#pnl-end').addEventListener('change', (e) => { pnlEnd = e.target.value; });
-$('#btn-pnl-query').addEventListener('click', () => loadPortfolio().catch((e) => alert(e.message)));
+$('#btn-pnl-query').addEventListener('click', () => loadPortfolio().catch((e) => toastErr(e.message)));
 $('#btn-pnl-reset').addEventListener('click', () => {
   pnlStart = pnlEnd = '';
   $('#pnl-start').value = $('#pnl-end').value = '';
-  loadPortfolio().catch((e) => alert(e.message));
+  loadPortfolio().catch((e) => toastErr(e.message));
 });
 
 $('#holdings-head').addEventListener('click', (e) => {
@@ -729,14 +733,14 @@ $('#holdings-body').addEventListener('drop', async (e) => {
   try {
     await saveMeta(src, { groupWith: effectiveGroupKey(anchor) });
   } catch (err) {
-    alert(err.message);
+    toastErr(err.message);
   }
 });
 
 $('#holdings-body').addEventListener('click', async (e) => {
   const clearSym = e.target.closest('[data-clear-group]')?.dataset.clearGroup;
   if (clearSym) {
-    try { await saveMeta(clearSym, { groupWith: '' }); } catch (err) { alert(err.message); }
+    try { await saveMeta(clearSym, { groupWith: '' }); } catch (err) { toastErr(err.message); }
     return;
   }
   const sym = e.target.closest('[data-refresh]')?.dataset.refresh;
@@ -767,5 +771,6 @@ $('#holdings-body').addEventListener('change', async (e) => {
 
 renderColToggle();
 loadPortfolio().catch((e) => {
+  toastErr(`加载失败: ${e.message}`);
   document.body.innerHTML = `<p class="sm-error">加载失败: ${e.message}</p>`;
 });
