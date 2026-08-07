@@ -6,7 +6,7 @@
   --notes-muted: var(--muted, #9aa4b2);
   --notes-accent: var(--accent, #5b9cff);
   --notes-hover: var(--hover-bg, rgba(255, 255, 255, 0.05));
-  --notes-sidebar-w: 280px;
+  --notes-sidebar-w: 320px;
 }
 
 * { box-sizing: border-box; }
@@ -103,20 +103,182 @@ body.has-navbar .notes-app {
   flex: 1;
 }
 
+.notes-sidebar-stats {
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--notes-muted);
+  border-bottom: 1px solid var(--notes-border);
+  line-height: 1.5;
+}
+
+.notes-tree-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--notes-border);
+}
+
+.notes-tree-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--notes-muted);
+  flex: 1;
+}
+
+.notes-select-sm {
+  width: auto;
+  min-width: 0;
+  flex: 0 1 108px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 .notes-list {
   list-style: none;
   margin: 0;
-  padding: 8px;
+  padding: 6px 8px 12px;
   overflow-y: auto;
   flex: 1;
 }
 
-.notes-tree-item {
+.notes-tree-root {
+  padding-top: 4px;
+}
+
+.notes-tree-branch {
   list-style: none;
 }
 
+.notes-tree-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.notes-tree-children.collapsed {
+  display: none;
+}
+
+.notes-tree-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.notes-tree-toggle {
+  flex-shrink: 0;
+  width: 22px;
+  height: auto;
+  min-height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--notes-muted);
+  cursor: pointer;
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 0;
+}
+
+.notes-tree-toggle:hover {
+  background: var(--notes-hover);
+  color: var(--notes-text);
+}
+
+.notes-tree-toggle.placeholder {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.notes-tree-toggle.expanded {
+  transform: rotate(90deg);
+}
+
+.notes-list-item {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.notes-list-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.notes-list-icon {
+  flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.notes-list-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notes-list-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--notes-accent);
+}
+
+.notes-list-preview {
+  font-size: 11px;
+  color: var(--notes-muted);
+  margin-top: 4px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.notes-list-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+  font-size: 10px;
+  color: var(--notes-muted);
+}
+
+.notes-stat-badge {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--notes-border);
+}
+
+.notes-list-meta {
+  font-size: 10px;
+  color: var(--notes-muted);
+  margin-top: 4px;
+  opacity: 0.9;
+}
+
+.notes-list-item:hover {
+  background: var(--notes-hover);
+}
+
+.notes-list-item.active {
+  background: rgba(91, 156, 255, 0.12);
+  border-color: rgba(91, 156, 255, 0.35);
+}
+
 .notes-list-snippet {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--notes-muted);
   margin-top: 4px;
   line-height: 1.4;
@@ -139,36 +301,6 @@ body.has-navbar .notes-app {
   border-radius: 999px;
   background: rgba(91, 156, 255, 0.15);
   color: var(--notes-accent);
-}
-
-.notes-list-item {
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-
-.notes-list-item:hover {
-  background: var(--notes-hover);
-}
-
-.notes-list-item.active {
-  background: rgba(91, 156, 255, 0.12);
-  border-color: rgba(91, 156, 255, 0.35);
-}
-
-.notes-list-title {
-  font-size: 14px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.notes-list-meta {
-  font-size: 11px;
-  color: var(--notes-muted);
-  margin-top: 4px;
 }
 
 .notes-main {

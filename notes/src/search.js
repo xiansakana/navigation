@@ -27,9 +27,13 @@ export function searchNotes(notes, opts) {
 
   return result
     .map(function(note) {
+      const text = extractPlainText(note.content);
+      const preview = text.length > 72 ? text.slice(0, 72) + '…' : text;
       return {
         ...noteSummary(note),
-        snippet: q ? makeSnippet(note, q) : ''
+        snippet: q ? makeSnippet(note, q) : preview,
+        preview: preview,
+        wordCount: text ? (text.match(/[\u4e00-\u9fff]/g) || []).length + Math.max(0, text.split(/\s+/).filter(Boolean).length - 1) : 0
       };
     })
     .sort(function(a, b) {
