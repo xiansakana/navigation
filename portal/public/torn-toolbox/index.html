@@ -5,36 +5,40 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Torn 工具箱</title>
     <link rel="stylesheet" href="/portal.css">
-    <style>
-        .toolbox-grid { max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; display: grid; gap: 16px; }
-        .toolbox-card {
-            display: block; padding: 20px; border-radius: 12px; text-decoration: none; color: inherit;
-            background: #1a2332; border: 1px solid #2a3544; transition: border-color .15s;
-        }
-        .toolbox-card:hover { border-color: #6eb0ff; }
-        .toolbox-card h2 { margin: 0 0 8px; font-size: 20px; }
-        .toolbox-card p { margin: 0; color: #8b98a8; font-size: 14px; }
-        .toolbox-card .icon { font-size: 28px; margin-bottom: 10px; }
-    </style>
 </head>
-<body>
-    <header class="topbar">
-        <div>
-            <h1>Torn 工具箱</h1>
-            <p>压价助手与公司监听独立运行，互不影响</p>
+<body class="has-navbar toolbox-page">
+    <header class="navbar">
+        <div class="navbar-inner">
+            <a class="navbar-brand" href="/">
+                <span class="navbar-logo">⚡</span>
+                <span>服务导航</span>
+            </a>
+            <nav class="navbar-nav">
+                <a class="navbar-link active" href="/torn-toolbox/">
+                    <span class="label">Torn 工具箱</span>
+                </a>
+            </nav>
         </div>
-        <a class="btn ghost" href="/">← 服务导航</a>
     </header>
+
+    <section class="toolbox-hero">
+        <div class="toolbox-hero-badge">🎮 Torn City 工具集</div>
+        <h1>Torn 工具箱</h1>
+        <p>压价助手与公司监听独立运行，互不影响，支持多账号与 QQ 通知</p>
+    </section>
+
     <main class="toolbox-grid">
         <a class="toolbox-card" href="/torn-toolbox/undercut/">
-            <div class="icon">📉</div>
+            <div class="toolbox-card-icon undercut">📉</div>
             <h2>压价助手</h2>
-            <p>Bazaar / Item Market 压价监听，支持多账号独立配置</p>
+            <p>Bazaar / Item Market 压价监听，支持多账号独立配置与指定物品筛选</p>
+            <span class="toolbox-card-arrow">进入 →</span>
         </a>
         <a class="toolbox-card" href="/torn-toolbox/company/">
-            <div class="icon">🏢</div>
+            <div class="toolbox-card-icon company">🏢</div>
             <h2>公司监听</h2>
-            <p>公司申请提醒，支持多账号与多种 QQ 通知方式</p>
+            <p>公司申请实时提醒，支持多账号与多种 QQ 通知方式（群 @ / 私聊）</p>
+            <span class="toolbox-card-arrow">进入 →</span>
         </a>
     </main>
 </body>
