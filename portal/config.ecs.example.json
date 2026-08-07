@@ -58,7 +58,7 @@
       "description": "思源笔记（SiYuan）— 块级引用、大纲、反链",
       "type": "proxy",
       "path": "/notes",
-      "entryPath": "/",
+      "entryPath": "/stage/build/desktop/",
       "internalUrl": "http://127.0.0.1:6806",
       "injectBar": false,
       "injectBase": false,
