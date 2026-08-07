@@ -64,9 +64,17 @@ function rewriteProxiedBody(text, service) {
     return out;
 }
 
-function shouldInjectBar(service) {
-    if (service.id === 'napcat') return true;
-    return service.injectBar !== false;
+function injectNapcatBackLink(html) {
+    var markup = '<style>'
+        + '.portal-napcat-back{position:fixed;top:12px;left:12px;z-index:2147483646;display:inline-flex;align-items:center;padding:8px 12px;border-radius:8px;font:14px/1.4 system-ui,sans-serif;text-decoration:none;color:#e8edf5;background:rgba(15,17,21,.88);border:1px solid rgba(255,255,255,.12);box-shadow:0 4px 16px rgba(0,0,0,.25);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}'
+        + '.portal-napcat-back:hover{background:rgba(23,27,34,.95)}'
+        + '@media (prefers-color-scheme:light){.portal-napcat-back{color:#152033;background:rgba(255,255,255,.92);border-color:rgba(15,23,42,.12);box-shadow:0 4px 16px rgba(15,23,42,.12)}.portal-napcat-back:hover{background:#fff}}'
+        + '</style>'
+        + '<a class="portal-napcat-back" href="/">← 服务导航</a>';
+    if (!html.includes('<body')) return html;
+    return html.replace(/<body([^>]*)>/, function(match, attrs) {
+        return '<body' + attrs + '>' + markup;
+    });
 }
 
 function injectPortalShell(html, service) {
@@ -84,9 +92,12 @@ function injectPortalShell(html, service) {
         baseTag = '<base href="' + service.path.replace(/\/$/, '') + '/">';
     }
     var portalCss = '<link rel="stylesheet" href="/portal.css">';
-    if (!shouldInjectBar(service)) {
-        if (!baseTag) return html;
-        return html.replace('<head>', '<head>' + themeBoot + themeJs + toastJs + baseTag);
+    if (service.injectBar === false) {
+        var headInject = themeBoot + themeJs + toastJs + baseTag;
+        if (!headInject && service.id !== 'napcat') return html;
+        if (headInject) html = html.replace('<head>', '<head>' + headInject);
+        if (service.id === 'napcat') html = injectNapcatBackLink(html);
+        return html;
     }
     var title = service.title || '服务';
     var isToolbox = service.path.startsWith('/torn-toolbox/');
@@ -106,7 +117,6 @@ function injectPortalShell(html, service) {
     var bodyClass = 'has-navbar';
     if (isToolbox) bodyClass += ' toolbox-proxied';
     if (service.id === 'stock-manage') bodyClass += ' stock-proxied';
-    if (service.id === 'napcat') bodyClass += ' napcat-proxied';
     return html
         .replace('<head>', '<head>' + themeBoot + baseTag + portalCss + themeJs + toastJs + layoutJs)
         .replace(/<body([^>]*)>/, function(match, attrs) {
