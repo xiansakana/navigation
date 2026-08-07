@@ -306,32 +306,67 @@ function findNapcatService(services) {
     });
 }
 
+var NAPCAT_API_PREFIXES = [
+    '/api/auth/',
+    '/api/Log/',
+    '/api/Process/',
+    '/api/QQLogin/',
+    '/api/WebUIConfig/',
+    '/api/base/',
+    '/api/Network/',
+    '/api/File/',
+    '/api/Plugin/',
+    '/api/OB/',
+];
+
+function isNapcatApiPath(pathname) {
+    return NAPCAT_API_PREFIXES.some(function(prefix) {
+        return pathname.startsWith(prefix);
+    });
+}
+
 /** NapCat WebUI 使用绝对路径 /webui/...，需额外挂载到同一反代 */
 export function resolveProxyContext(services, reqUrl) {
     var url = new URL(reqUrl, 'http://127.0.0.1');
     var service = findProxyService(services, url.pathname);
     if (service) return { service: service, proxyUrl: reqUrl };
 
+    var napcat = findNapcatService(services);
+    if (napcat && (url.pathname === '/webui' || url.pathname.startsWith('/webui/'))) {
+        var webuiPrefix = napcat.path.replace(/\/$/, '');
+        return { service: napcat, proxyUrl: webuiPrefix + url.pathname + url.search };
+    }
+    if (napcat && isNapcatApiPath(url.pathname)) {
+        var apiPrefix = napcat.path.replace(/\/$/, '');
+        return { service: napcat, proxyUrl: apiPrefix + url.pathname + url.search };
+    }
+
     var notes = findNotesService(services);
     if (notes && isSiyuanRootPath(url.pathname)) {
         return { service: notes, proxyUrl: url.pathname + url.search };
     }
 
-    var napcat = findNapcatService(services);
-    if (napcat && (url.pathname === '/webui' || url.pathname.startsWith('/webui/'))) {
-        var prefix = napcat.path.replace(/\/$/, '');
-        return { service: napcat, proxyUrl: prefix + url.pathname + url.search };
-    }
-    if (napcat && url.pathname.startsWith('/api/')) {
-        var napcatPrefix = napcat.path.replace(/\/$/, '');
-        return { service: napcat, proxyUrl: napcatPrefix + url.pathname + url.search };
-    }
     return null;
 }
 
 export function getServiceEntryHref(service) {
+    if (service.id === 'napcat') {
+        var entry = service.entryPath || '/webui';
+        if (!entry.startsWith('/')) entry = '/' + entry;
+        return entry.replace(/\/$/, '') || '/webui';
+    }
     var base = service.path.replace(/\/$/, '');
     var entry = service.entryPath || '/';
     if (!entry.startsWith('/')) entry = '/' + entry;
     return base + entry;
+}
+
+/** NapCat WebUI 的 React basename 为 /webui/，须从根路径 /webui 访问，不能用 /napcat/webui */
+export function napcatPublicWebuiPath(service, pathname) {
+    if (service.id !== 'napcat') return null;
+    var mount = service.path.replace(/\/$/, '') + '/webui';
+    if (pathname === mount || pathname.startsWith(mount + '/')) {
+        return '/webui' + pathname.slice(mount.length) || '/';
+    }
+    return null;
 }

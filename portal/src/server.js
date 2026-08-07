@@ -9,7 +9,7 @@ import {
     getSession,
     verifyLogin
 } from './auth.js';
-import { resolveProxyContext, getServiceEntryHref, proxyHttpRequest, proxyWebSocket } from './proxy.js';
+import { resolveProxyContext, getServiceEntryHref, napcatPublicWebuiPath, proxyHttpRequest, proxyWebSocket } from './proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -144,6 +144,31 @@ function handleProxyRoute(req, res) {
     var proxyUrl = new URL(ctx.proxyUrl, 'http://127.0.0.1');
     var browserUrl = new URL(req.url, 'http://127.0.0.1');
 
+    var napcatWebui = napcatPublicWebuiPath(ctx.service, browserUrl.pathname);
+    if (napcatWebui) {
+        var napcatTarget = new URL(napcatWebui + browserUrl.search, 'http://127.0.0.1');
+        if (ctx.service.adminToken && !napcatTarget.searchParams.get('token')) {
+            napcatTarget.searchParams.set('token', ctx.service.adminToken);
+        }
+        redirect(res, napcatTarget.pathname + napcatTarget.search);
+        return true;
+    }
+
+    if (browserUrl.pathname.endsWith('/web_login')) {
+        if (ctx.service.id === 'napcat' && ctx.service.adminToken) {
+            if (!browserUrl.searchParams.get('token')) {
+                browserUrl.searchParams.set('token', ctx.service.adminToken);
+                redirect(res, browserUrl.pathname + browserUrl.search);
+                return true;
+            }
+        } else {
+            var entry = new URL(getServiceEntryHref(ctx.service), 'http://127.0.0.1');
+            if (ctx.service.adminToken) entry.searchParams.set('token', ctx.service.adminToken);
+            redirect(res, entry.pathname + entry.search);
+            return true;
+        }
+    }
+
     if (ctx.service.adminToken && !proxyUrl.searchParams.get('token')) {
         if (browserUrl.pathname.startsWith('/api/')) {
             // NapCat API 不走 URL token 重定向，直接转发
@@ -157,13 +182,6 @@ function handleProxyRoute(req, res) {
         if (!browserUrl.pathname.startsWith('/api/')) {
             return true;
         }
-    }
-
-    if (browserUrl.pathname.endsWith('/web_login')) {
-        var entry = new URL(getServiceEntryHref(ctx.service), 'http://127.0.0.1');
-        if (ctx.service.adminToken) entry.searchParams.set('token', ctx.service.adminToken);
-        redirect(res, entry.pathname + entry.search);
-        return true;
     }
 
     req.url = ctx.proxyUrl;
