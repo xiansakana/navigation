@@ -6,7 +6,9 @@
   "auth": {
     "username": "admin",
     "password": "change-me",
-    "sessionSecret": "change-me-long-random-secret"
+    "sessionSecret": "change-me-long-random-secret",
+    "anonymousGuest": true,
+    "guestUsername": "guest"
   },
   "services": [
     {

@@ -6,7 +6,9 @@
   "auth": {
     "username": "admin",
     "password": "换成强密码",
-    "sessionSecret": "换成随机字符串"
+    "sessionSecret": "换成随机字符串",
+    "anonymousGuest": true,
+    "guestUsername": "guest"
   },
   "services": [
     {

@@ -8,7 +8,8 @@ import {
     createSessionCookie,
     getSession,
     verifyLogin,
-    resolveSessionUser
+    resolveSessionUser,
+    resolveRequestUser
 } from './auth.js';
 import {
     getVisibleMenus,
@@ -75,22 +76,23 @@ function getSessionSecret() {
     return config.auth?.sessionSecret || config.auth?.password || 'portal';
 }
 
-function requireAuth(req, res) {
-    var session = getSession(req, getSessionSecret());
-    if (!session) {
-        redirect(res, '/login.html');
-        return null;
-    }
-    var ctx = resolveSessionUser(session, config);
+function requireAuth(req, res, options) {
+    var opts = options || {};
+    var ctx = resolveRequestUser(req, config);
     if (!ctx) {
         redirect(res, '/login.html');
         return null;
     }
-    return Object.assign({}, session, {
-        username: ctx.user.username,
-        userId: ctx.user.id,
-        permissions: ctx.permissions
-    });
+    if (opts.requireLogin && ctx.isGuest) {
+        redirect(res, '/login.html');
+        return null;
+    }
+    return {
+        username: ctx.username,
+        userId: ctx.userId,
+        permissions: ctx.permissions,
+        isGuest: ctx.isGuest
+    };
 }
 
 function menuToService(menu, userAgent) {
@@ -117,10 +119,10 @@ function menuToService(menu, userAgent) {
     return item;
 }
 
-function publicServices(session, userAgent) {
-    var ctx = resolveSessionUser(session, config);
-    if (!ctx) return [];
-    return getVisibleMenus(ctx.rbac, ctx.permissions)
+function publicServices(userCtx, userAgent) {
+    if (!userCtx) return [];
+    var rbac = loadRbac(config);
+    return getVisibleMenus(rbac, userCtx.permissions)
         .filter(function(menu) { return menu.id !== 'menu_admin'; })
         .map(function(menu) { return menuToService(menu, userAgent); });
 }
@@ -134,7 +136,8 @@ async function handleApi(req, res, url, session) {
             username: session.username,
             userId: session.userId,
             permissions: session.permissions,
-            canAdmin: canViewAdmin(session.permissions),
+            isGuest: !!session.isGuest,
+            canAdmin: !session.isGuest && canViewAdmin(session.permissions),
             prefs: { stockManage: stockManagePrefs }
         });
     }
@@ -170,8 +173,8 @@ async function handleApi(req, res, url, session) {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/menus') {
-        var ctx = resolveSessionUser(session, config);
-        var menus = getVisibleMenus(ctx.rbac, ctx.permissions).map(function(menu) {
+        var rbacMenus = loadRbac(config);
+        var menus = getVisibleMenus(rbacMenus, session.permissions).map(function(menu) {
             return menuToService(menu, req.headers['user-agent']);
         });
         return json(res, 200, { ok: true, menus: menus });
@@ -183,6 +186,9 @@ async function handleApi(req, res, url, session) {
     }
 
     if (url.pathname.startsWith('/api/admin/')) {
+        if (session.isGuest) {
+            return json(res, 401, { ok: false, error: '请先登录' });
+        }
         return handleAdminApi(req, res, url, session, config, json, readJson);
     }
 
@@ -321,7 +327,7 @@ var server = http.createServer(async function(req, res) {
     }
 
     if (url.pathname === '/admin' || url.pathname === '/admin.html') {
-        var adminSession = requireAuth(req, res);
+        var adminSession = requireAuth(req, res, { requireLogin: true });
         if (!adminSession) return;
         if (!canViewAdmin(adminSession.permissions)) {
             return redirect(res, '/');
@@ -330,7 +336,8 @@ var server = http.createServer(async function(req, res) {
     }
 
     if (url.pathname === '/login' || url.pathname === '/login.html') {
-        if (getSession(req, getSessionSecret()) && resolveSessionUser(getSession(req, getSessionSecret()), config)) {
+        var loginSession = getSession(req, getSessionSecret());
+        if (loginSession && resolveSessionUser(loginSession, config)) {
             return redirect(res, '/');
         }
         if (serveStatic(path.join(PUBLIC_DIR, 'login.html'), res)) return;
@@ -343,12 +350,7 @@ var server = http.createServer(async function(req, res) {
 });
 
 server.on('upgrade', function(req, socket, head) {
-    var session = getSession(req, getSessionSecret());
-    if (!session) {
-        socket.destroy();
-        return;
-    }
-    var ctx = resolveSessionUser(session, config);
+    var ctx = resolveRequestUser(req, config);
     if (!ctx) {
         socket.destroy();
         return;
@@ -374,7 +376,7 @@ server.listen(port, host, function() {
     if (host === '0.0.0.0' && port === 80) {
         console.log('外网访问: http://<公网IP>/');
     }
-    console.log('登录后可在卡片中进入各服务；管理员可访问 /admin.html');
+    console.log('未登录访客默认使用 guest 账号权限；管理员可访问 /admin.html');
 });
 
 process.on('SIGINT', function() { process.exit(0); });

@@ -30,16 +30,30 @@ function renderServices(services) {
 }
 
 document.getElementById('logout').addEventListener('click', function() {
-    api('logout', { method: 'POST' }).finally(function() {
+    var btn = document.getElementById('logout');
+    if (btn.dataset.mode === 'login') {
         location.href = '/login.html';
+        return;
+    }
+    api('logout', { method: 'POST' }).finally(function() {
+        location.href = '/';
     });
 });
 
 api('me').then(function(data) {
-    document.getElementById('welcome').textContent = '欢迎，' + data.username;
-    if (data.canAdmin) {
-        var adminLink = document.getElementById('admin-link');
-        if (adminLink) adminLink.classList.remove('hidden');
+    var logoutBtn = document.getElementById('logout');
+    if (data.isGuest) {
+        document.getElementById('welcome').textContent = '访客（guest 权限）';
+        logoutBtn.textContent = '登录';
+        logoutBtn.dataset.mode = 'login';
+    } else {
+        document.getElementById('welcome').textContent = '欢迎，' + data.username;
+        logoutBtn.textContent = '退出登录';
+        logoutBtn.dataset.mode = 'logout';
+        if (data.canAdmin) {
+            var adminLink = document.getElementById('admin-link');
+            if (adminLink) adminLink.classList.remove('hidden');
+        }
     }
     return api('services');
 }).then(function(data) {
