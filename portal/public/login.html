@@ -4,9 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>登录 · 服务导航</title>
+    <script>(function(){try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
     <link rel="stylesheet" href="/portal.css">
 </head>
 <body class="login-page">
+    <div class="login-theme-bar">
+        <button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题">
+            <span class="navbar-theme-icon" aria-hidden="true">☀️</span>
+            <span class="label navbar-theme-label">日间</span>
+        </button>
+    </div>
     <div class="login-card">
         <h1>服务导航</h1>
         <p class="subtitle">登录后管理 ECS 上的各项服务</p>
@@ -19,6 +26,7 @@
             <p class="error" id="error" hidden></p>
         </form>
     </div>
+    <script src="/theme.js"></script>
     <script src="/login.js"></script>
 </body>
 </html>

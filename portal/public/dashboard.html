@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>服务导航</title>
+    <script>(function(){try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
     <link rel="stylesheet" href="/portal.css">
 </head>
 <body class="has-navbar">
@@ -14,6 +15,10 @@
                 <span>服务导航</span>
             </a>
             <div class="navbar-actions">
+                <button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题">
+                    <span class="navbar-theme-icon" aria-hidden="true">☀️</span>
+                    <span class="label navbar-theme-label">日间</span>
+                </button>
                 <span class="navbar-user" id="welcome">欢迎</span>
                 <button class="btn ghost" id="logout">退出登录</button>
             </div>
@@ -24,6 +29,7 @@
         <p>选择一项服务进入管理或访问</p>
     </div>
     <main class="grid" id="service-grid"></main>
+    <script src="/theme.js"></script>
     <script src="/dashboard.js"></script>
 </body>
 </html>

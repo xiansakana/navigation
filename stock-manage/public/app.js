@@ -213,13 +213,15 @@ async function loadPortfolio() {
 function closeModal() { $('#modal-root').innerHTML = ''; }
 
 function openModal(title, bodyHtml, footHtml, onSubmit, opts = {}) {
-  const sizeClass = opts.size === 'xl' ? ' sm-modal--xl' : ' sm-modal--wide';
+  const sizeClass = opts.size === 'trade' ? ' sm-modal--trade'
+    : opts.size === 'xl' ? ' sm-modal--xl' : ' sm-modal--wide';
+  const bodyClass = opts.size === 'trade' ? ' sm-modal-body--trade' : '';
   const root = $('#modal-root');
   root.innerHTML = `
     <div class="sm-modal-backdrop">
       <div class="sm-modal${sizeClass}" role="dialog">
         <div class="sm-modal-head"><h3>${title}</h3><button type="button" class="btn link" data-close>关闭</button></div>
-        <div class="sm-modal-body" id="modal-body">${bodyHtml}</div>
+        <div class="sm-modal-body${bodyClass}" id="modal-body">${bodyHtml}</div>
         <div class="sm-modal-foot">${footHtml || `
           <button type="button" class="btn ghost" data-close>取消</button>
           <button type="button" class="btn primary" id="modal-save">保存</button>`}</div>
@@ -428,28 +430,30 @@ function renderTradeListTab() {
       <input type="date" data-filter="end" value="${ui.tradeFilter.end}">
       <button type="button" class="btn ghost sm-btn-sm" id="filter-reset">重置</button>
     </div>
-    <div class="sm-table-wrap sm-table-wrap--modal">
-      <table class="sm-table">
-        <thead><tr>
-          <th>时间</th><th>类型</th><th>代码</th><th>名称</th><th>股数</th><th>价格</th><th>金额</th><th>手续费</th><th>操作</th>
-        </tr></thead>
-        <tbody>${pageRows.length ? pageRows.map((t) => `
-          <tr>
-            <td>${(t.trade_date || '').slice(0, 19).replace('T', ' ')}</td>
-            <td>${typeLabel(t)}</td>
-            <td>${t.symbol}</td>
-            <td>${t.name || ''}</td>
-            <td>${t.type === 'other' ? '—' : t.shares}</td>
-            <td>${t.type === 'other' ? '—' : fmtUsd(t.price)}</td>
-            <td>${fmtUsd(t.total_amount)}</td>
-            <td>${fmtCommission(t.commission)}</td>
-            <td>
-              <button type="button" class="btn link" data-edit="${t.id}">编辑</button>
-              <button type="button" class="btn link" data-del="${t.id}">删除</button>
-            </td>
-          </tr>`).join('') : `<tr><td colspan="9" class="empty">暂无记录</td></tr>`}
-        </tbody>
-      </table>
+    <div class="sm-trade-modal-scroll">
+      <div class="sm-table-wrap sm-table-wrap--modal">
+        <table class="sm-table">
+          <thead><tr>
+            <th>时间</th><th>类型</th><th>代码</th><th>名称</th><th>股数</th><th>价格</th><th>金额</th><th>手续费</th><th>操作</th>
+          </tr></thead>
+          <tbody>${pageRows.length ? pageRows.map((t) => `
+            <tr>
+              <td>${(t.trade_date || '').slice(0, 19).replace('T', ' ')}</td>
+              <td>${typeLabel(t)}</td>
+              <td>${t.symbol}</td>
+              <td>${t.name || ''}</td>
+              <td>${t.type === 'other' ? '—' : t.shares}</td>
+              <td>${t.type === 'other' ? '—' : fmtUsd(t.price)}</td>
+              <td>${fmtUsd(t.total_amount)}</td>
+              <td>${fmtCommission(t.commission)}</td>
+              <td>
+                <button type="button" class="btn link" data-edit="${t.id}">编辑</button>
+                <button type="button" class="btn link" data-del="${t.id}">删除</button>
+              </td>
+            </tr>`).join('') : `<tr><td colspan="9" class="empty">暂无记录</td></tr>`}
+          </tbody>
+        </table>
+      </div>
     </div>
     <div class="sm-pagination">
       <button type="button" class="btn ghost sm-btn-sm" data-page="prev" ${ui.tradePage <= 1 ? 'disabled' : ''}>上一页</button>
@@ -473,24 +477,26 @@ async function renderTradeSummaryTab() {
   }), { buy: 0, sell: 0, fee: 0, pnl: 0 });
 
   return `
-    <div class="sm-table-wrap sm-table-wrap--modal">
-      <table class="sm-table">
-        <thead><tr>
-          <th>代码</th><th>总买入</th><th>总卖出</th><th>总费用</th><th>盈亏金额</th><th>盈亏比例</th>
-        </tr></thead>
-        <tbody>${rows.length ? rows.map((r) => `
-          <tr>
-            <td>${r.symbol}</td><td>${fmtUsd(r.totalBuyAmount)}</td><td>${fmtUsd(r.totalSellAmount)}</td>
-            <td>${fmtCommission(r.totalCommission)}</td><td class="${cls(r.netPnl)}">${fmtUsdSigned(r.netPnl)}</td>
-            <td>${r.netPnlRate == null ? '—' : fmtPct(r.netPnlRate)}</td>
-          </tr>`).join('') : `<tr><td colspan="6" class="empty">暂无数据</td></tr>`}
-        <tr class="sm-total-row">
-          <td>合计</td><td>${fmtUsd(totals.buy)}</td><td>${fmtUsd(totals.sell)}</td>
-          <td>${fmtCommission(totals.fee)}</td><td class="${cls(totals.pnl)}">${fmtUsdSigned(totals.pnl)}</td><td>—</td>
-        </tr></tbody>
-      </table>
-    </div>
-    <p class="hint">不含「其它」类交易；盈亏按 FIFO 计算。</p>`;
+    <div class="sm-trade-modal-scroll">
+      <div class="sm-table-wrap sm-table-wrap--modal">
+        <table class="sm-table">
+          <thead><tr>
+            <th>代码</th><th>总买入</th><th>总卖出</th><th>总费用</th><th>盈亏金额</th><th>盈亏比例</th>
+          </tr></thead>
+          <tbody>${rows.length ? rows.map((r) => `
+            <tr>
+              <td>${r.symbol}</td><td>${fmtUsd(r.totalBuyAmount)}</td><td>${fmtUsd(r.totalSellAmount)}</td>
+              <td>${fmtCommission(r.totalCommission)}</td><td class="${cls(r.netPnl)}">${fmtUsdSigned(r.netPnl)}</td>
+              <td>${r.netPnlRate == null ? '—' : fmtPct(r.netPnlRate)}</td>
+            </tr>`).join('') : `<tr><td colspan="6" class="empty">暂无数据</td></tr>`}
+          <tr class="sm-total-row">
+            <td>合计</td><td>${fmtUsd(totals.buy)}</td><td>${fmtUsd(totals.sell)}</td>
+            <td>${fmtCommission(totals.fee)}</td><td class="${cls(totals.pnl)}">${fmtUsdSigned(totals.pnl)}</td><td>—</td>
+          </tr></tbody>
+        </table>
+      </div>
+      <p class="hint">不含「其它」类交易；盈亏按 FIFO 计算。</p>
+    </div>`;
 }
 
 async function renderTradeModalBody() {
@@ -505,13 +511,13 @@ async function renderTradeModalBody() {
       <button type="button" class="btn ghost sm-btn-sm" id="modal-export">导出 xlsx</button>
     </div>`;
   const content = ui.tradeTab === 'summary' ? await renderTradeSummaryTab() : renderTradeListTab();
-  return tabs + content;
+  return `<div class="sm-trade-modal-content">${tabs}${content}</div>`;
 }
 
 async function openTradeHistoryModal(symbol = '') {
   if (symbol) ui.tradeFilter.symbol = symbol;
   ui.tradePage = 1;
-  openModal('交易记录', '<div id="trade-modal-content">加载中…</div>', '<button type="button" class="btn ghost" data-close>关闭</button>', null, { size: 'xl' });
+  openModal('交易记录', '<div id="trade-modal-content">加载中…</div>', '<button type="button" class="btn ghost" data-close>关闭</button>', null, { size: 'trade' });
   const refresh = async () => {
     $('#trade-modal-content').innerHTML = await renderTradeModalBody();
     bindTradeModalEvents();

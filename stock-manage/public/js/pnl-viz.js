@@ -169,10 +169,15 @@ function inQuery(d, start, end) {
 }
 
 function calBg(net, maxAbs) {
-  if (net === 0) return 'rgba(148, 163, 184, 0.12)';
+  if (net === 0) return '';
   const t = maxAbs > 0 ? Math.min(1, Math.abs(net) / maxAbs) : 1;
-  const bump = 0.18 + 0.62 * t;
+  const bump = 0.05 + 0.12 * t;
   return net > 0 ? `rgba(61, 220, 132, ${bump})` : `rgba(255, 123, 123, ${bump})`;
+}
+
+function calTone(net, has) {
+  if (!has || net === 0) return 'zero';
+  return net > 0 ? 'pos' : 'neg';
 }
 
 function buildLineSvg(points, hint, panFraction, totalAssets) {
@@ -259,17 +264,22 @@ function buildMonthCal(y, mo, dayNet, expanded, totalAssets, pnlStart, pnlEnd) {
       const ok = inQuery(c.key, pnlStart, pnlEnd);
       const has = dayNet.has(c.key);
       const net = dayNet.get(c.key) ?? 0;
-      const bg = ok ? calBg(has ? net : 0, maxAbs) : 'rgba(148,163,184,0.08)';
+      const tone = ok ? calTone(net, has) : 'out';
+      const bg = ok && has && net !== 0 ? calBg(net, maxAbs) : '';
       const cumEod = ok ? cumAtDate(c.key, expanded) : 0;
       const cumBefore = cumEod - net;
       const yieldDay = fmtIncPct(net, cumBefore, totalAssets);
       const retS = ok ? fmtPct(cumEod, totalAssets, cumEod) : '—';
       const amt = !ok ? '—' : has ? fmtUsdTiny(net) : '$0';
-      const pct = !ok ? '—' : [has ? `月 ${yieldDay}` : '', `收 ${retS}`].filter(Boolean).join(' · ');
-      return `<div class="sm-cal-cell sm-cal-cell--btn${ok ? '' : ' sm-cal-cell--out'}" style="background:${bg}" role="button" tabindex="0" data-cal-day="${c.key}" title="${c.key}">
+      const yieldHtml = has && net !== 0
+        ? `<span class="sm-cal-yield ${net > 0 ? 'pos' : 'neg'}">月 ${yieldDay}</span><span class="sm-cal-pct-sep"> · </span>`
+        : '';
+      const retHtml = ok ? `<span class="sm-cal-ret">收 ${retS}</span>` : '—';
+      const bgStyle = bg ? `background:${bg};` : '';
+      return `<div class="sm-cal-cell sm-cal-cell--btn sm-cal-cell--${tone}" style="${bgStyle}" role="button" tabindex="0" data-cal-day="${c.key}" title="${c.key}">
         <span class="sm-cal-day">${c.d}</span>
-        <span class="sm-cal-amt">${amt}</span>
-        <span class="sm-cal-pct">${pct}</span>
+        <span class="sm-cal-amt ${has && net !== 0 ? (net > 0 ? 'pos' : 'neg') : ''}">${amt}</span>
+        <span class="sm-cal-pct">${yieldHtml}${retHtml}</span>
       </div>`;
     }).join('');
     rows.push(`<div class="sm-cal-row">${tds}</div>`);
@@ -301,11 +311,18 @@ function buildYearCal(y, dayNet, expanded, totalAssets, pnlStart, pnlEnd) {
     const monthDelta = cumEom - cumBefore;
     const pctYield = fmtIncPct(monthDelta, cumBefore, totalAssets);
     const retEom = fmtPct(cumEom, totalAssets, cumEom);
+    const tone = calTone(sm, sm !== 0);
+    const bg = sm !== 0 ? calBg(sm, maxAbs) : '';
+    const bgStyle = bg ? `background:${bg};` : '';
     cells.push(`
-      <div class="sm-cal-year-cell sm-cal-cell--btn" style="background:${calBg(sm, maxAbs)}" role="button" tabindex="0" data-cal-month="${y}-${mo}">
+      <div class="sm-cal-year-cell sm-cal-cell--btn sm-cal-cell--${tone}" style="${bgStyle}" role="button" tabindex="0" data-cal-month="${y}-${mo}">
         <div class="sm-cal-year-mo">${mo}月</div>
-        <div class="sm-cal-year-amt">${fmtUsdTiny(sm)}</div>
-        <div class="sm-cal-year-pct">年 ${pctYield} · 收 ${retEom}</div>
+        <div class="sm-cal-year-amt ${sm !== 0 ? (sm > 0 ? 'pos' : 'neg') : ''}">${fmtUsdTiny(sm)}</div>
+        <div class="sm-cal-year-pct">
+          <span class="sm-cal-yield ${sm !== 0 ? (sm > 0 ? 'pos' : 'neg') : ''}">年 ${pctYield}</span>
+          <span class="sm-cal-pct-sep"> · </span>
+          <span class="sm-cal-ret">收 ${retEom}</span>
+        </div>
       </div>`);
   }
   return `<div class="sm-cal-year-grid">${cells.join('')}</div>`;
