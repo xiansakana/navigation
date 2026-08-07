@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{TITLE}} · 服务导航</title>
+    <script>(function(){try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+    <link rel="stylesheet" href="/portal.css">
+</head>
+<body class="error-page">
+    <div class="error-top-bar">
+        <a href="/" class="btn ghost">返回首页</a>
+        <button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题">
+            <span class="navbar-theme-icon" aria-hidden="true">☀️</span>
+            <span class="label navbar-theme-label">日间</span>
+        </button>
+    </div>
+    <main class="error-card">
+        <div class="error-icon" aria-hidden="true">🔒</div>
+        <div class="error-code">{{STATUS}}</div>
+        <h1>{{TITLE}}</h1>
+        <p class="error-message">{{MESSAGE}}</p>
+        <p class="error-hint{{HINT_CLASS}}">{{HINT}}</p>
+        <div class="error-actions">
+            <a href="/" class="btn primary">返回首页</a>
+            <a href="/login.html" class="btn ghost{{LOGIN_CLASS}}">登录其他账号</a>
+        </div>
+    </main>
+    <script src="/theme.js"></script>
+</body>
+</html>

@@ -23,6 +23,7 @@ import {
 } from './rbac.js';
 import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket } from './proxy.js';
 import { handleAdminApi } from './admin-api.js';
+import { wantsJsonResponse, renderErrorPage, sendHtml } from './error-page.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -35,6 +36,19 @@ function json(res, status, body) {
         'Content-Length': Buffer.byteLength(text, 'utf8')
     });
     res.end(text);
+}
+
+function sendError(req, res, url, status, message, pageOptions) {
+    if (wantsJsonResponse(req, url)) {
+        return json(res, status, { ok: false, error: message });
+    }
+    var html = renderErrorPage(Object.assign({
+        status: status,
+        title: status === 403 ? '无权访问' : status === 404 ? '页面不存在' : '出错了',
+        message: message,
+        hint: ''
+    }, pageOptions || {}));
+    return sendHtml(res, status, html);
 }
 
 function redirect(res, location, setCookie) {
@@ -235,11 +249,16 @@ function handleProxyRoute(req, res) {
     if (!proxySession) return true;
 
     if (!canViewService(proxySession.permissions, ctx.service.id)) {
-        json(res, 403, { ok: false, error: '无权访问该服务' });
+        var serviceTitle = ctx.service.title || ctx.service.id;
+        sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '无权访问该服务', {
+            title: '无权访问该服务',
+            message: '您没有访问「' + serviceTitle + '」的权限',
+            hint: '如需访问，请联系管理员分配权限，或登录具备相应权限的账号。'
+        });
         return true;
     }
     if (isWriteMethod(req.method) && !canEditService(proxySession.permissions, ctx.service.id)) {
-        json(res, 403, { ok: false, error: '该服务为只读权限，无法修改' });
+        sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '该服务为只读权限，无法修改');
         return true;
     }
 
@@ -315,7 +334,11 @@ var server = http.createServer(async function(req, res) {
         var hubSession = requireAuth(req, res);
         if (!hubSession) return;
         if (!canViewService(hubSession.permissions, 'torn-toolbox')) {
-            return json(res, 403, { ok: false, error: '无权访问该服务' });
+            return sendError(req, res, url, 403, '无权访问该服务', {
+                title: '无权访问该服务',
+                message: '您没有访问「Torn 工具箱」的权限',
+                hint: '如需访问，请联系管理员分配权限，或登录具备相应权限的账号。'
+            });
         }
         if (serveStatic(path.join(PUBLIC_DIR, 'torn-toolbox', 'index.html'), res)) return;
     }
@@ -341,6 +364,18 @@ var server = http.createServer(async function(req, res) {
             return redirect(res, '/');
         }
         if (serveStatic(path.join(PUBLIC_DIR, 'login.html'), res)) return;
+    }
+
+    if (url.pathname === '/error.html') {
+        var q = url.searchParams;
+        var html = renderErrorPage({
+            status: Number(q.get('status')) || 403,
+            title: q.get('title') || '无权访问',
+            message: q.get('message') || '无权访问该服务',
+            hint: q.get('hint') || '',
+            showLogin: q.get('login') !== '0'
+        });
+        return sendHtml(res, Number(q.get('status')) || 403, html);
     }
 
     var staticPath = path.normalize(path.join(PUBLIC_DIR, url.pathname));
