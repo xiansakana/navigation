@@ -107,19 +107,24 @@ function rewriteProxiedBody(text, service) {
 }
 
 function injectProxiedBackLink(html, variant) {
-    var positionCss = variant === 'notes'
-        ? '.portal-proxied-back--notes{top:12px;right:56px;left:auto}'
-        : '.portal-proxied-back--napcat{top:12px;right:12px;left:auto}';
-    var markup = '<style>'
-        + '.portal-proxied-back{position:fixed;z-index:2147483646;display:inline-flex;align-items:center;padding:8px 12px;border-radius:8px;font:14px/1.4 system-ui,sans-serif;text-decoration:none;color:#e8edf5;background:rgba(15,17,21,.88);border:1px solid rgba(255,255,255,.12);box-shadow:0 4px 16px rgba(0,0,0,.25);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}'
+    var positionRule = variant === 'notes'
+        ? '.portal-proxied-back--notes{top:12px!important;right:56px!important;left:auto!important}'
+        : '.portal-proxied-back--napcat{top:12px!important;right:12px!important;left:auto!important}';
+    var css = '<style>'
+        + '.portal-proxied-back{position:fixed;z-index:2147483647;display:inline-flex;align-items:center;padding:8px 12px;border-radius:8px;font:14px/1.4 system-ui,sans-serif;text-decoration:none;color:#e8edf5;background:rgba(15,17,21,.88);border:1px solid rgba(255,255,255,.12);box-shadow:0 4px 16px rgba(0,0,0,.25);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);pointer-events:auto}'
         + '.portal-proxied-back:hover{background:rgba(23,27,34,.95)}'
         + '@media (prefers-color-scheme:light){.portal-proxied-back{color:#152033;background:rgba(255,255,255,.92);border-color:rgba(15,23,42,.12);box-shadow:0 4px 16px rgba(15,23,42,.12)}.portal-proxied-back:hover{background:#fff}}'
-        + positionCss
-        + '</style>'
-        + '<a class="portal-proxied-back portal-proxied-back--' + variant + '" href="/">← 服务导航</a>';
+        + positionRule
+        + '</style>';
+    var keeper = '<script>(function(){var c="portal-proxied-back portal-proxied-back--' + variant + '";function m(){var e=document.querySelector("."+c.split(" ")[0]);if(!e){e=document.createElement("a");e.className=c;e.href="/";e.textContent="← 服务导航";document.body.appendChild(e)}}m();new MutationObserver(m).observe(document.documentElement,{childList:true,subtree:true})})();</script>';
+    if (html.includes('</head>')) html = html.replace('</head>', css + '</head>');
+    else html = css + html;
+    if (html.includes('</body>')) {
+        return html.replace('</body>', keeper + '</body>');
+    }
     if (!html.includes('<body')) return html;
     return html.replace(/<body([^>]*)>/, function(match, attrs) {
-        return '<body' + attrs + '>' + markup;
+        return '<body' + attrs + '>' + keeper;
     });
 }
 
