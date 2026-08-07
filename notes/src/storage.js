@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { normalizeNote, noteSummary } from './notes-util.js';
+
+export { noteSummary } from './notes-util.js';
 
 const ROOT = process.cwd();
 
@@ -44,8 +47,6 @@ function defaultNotebook() {
   };
 }
 
-const EMPTY = { notebooks: [], notes: [] };
-
 export function createStore(dataPath) {
   fs.mkdirSync(path.dirname(dataPath), { recursive: true });
 
@@ -59,7 +60,7 @@ export function createStore(dataPath) {
     try {
       const raw = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
       const notebooks = Array.isArray(raw.notebooks) ? raw.notebooks : [];
-      const notes = Array.isArray(raw.notes) ? raw.notes : [];
+      let notes = Array.isArray(raw.notes) ? raw.notes.map(normalizeNote) : [];
       if (!notebooks.length) {
         const nb = defaultNotebook();
         notebooks.push(nb);
@@ -75,7 +76,7 @@ export function createStore(dataPath) {
   function write(data) {
     const payload = {
       notebooks: Array.isArray(data.notebooks) ? data.notebooks : [],
-      notes: Array.isArray(data.notes) ? data.notes : [],
+      notes: Array.isArray(data.notes) ? data.notes.map(normalizeNote) : [],
       updatedAt: nowIso()
     };
     const tmp = dataPath + '.tmp';
@@ -85,14 +86,4 @@ export function createStore(dataPath) {
   }
 
   return { read, write };
-}
-
-export function noteSummary(note) {
-  return {
-    id: note.id,
-    notebookId: note.notebookId,
-    title: note.title,
-    createdAt: note.createdAt,
-    updatedAt: note.updatedAt
-  };
 }
