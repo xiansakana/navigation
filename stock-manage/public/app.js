@@ -14,6 +14,7 @@ const MASK = '<span class="sm-mask">—</span>';
 const toastErr = (msg) => window.portalToast?.error(msg) ?? window.alert(msg);
 const toastWarn = (msg) => window.portalToast?.warn(msg) ?? window.alert(msg);
 const toastOk = (msg) => window.portalToast?.success(msg) ?? window.alert(msg);
+const toastInfo = (msg) => window.portalToast?.info(msg) ?? window.alert(msg);
 
 let state = { cash: 0, trades: [], holdings: [], summary: {}, chartSeries: [], chartSparse: [], chartExpandedFull: [], holdingsMeta: {} };
 let colVis = loadJson(LS_COL_VIS, defaultColVis());
@@ -110,6 +111,7 @@ function renderDashboard() {
   $('#cash-input')?.addEventListener('change', async (e) => {
     try {
       applyPortfolio(await api('/cash', { method: 'PUT', body: { cash: Number(e.target.value) } }));
+      toastOk('现金已更新');
     } catch (err) { toastErr(err.message); }
   });
 }
@@ -262,8 +264,12 @@ function openModal(title, bodyHtml, footHtml, onSubmit, opts = {}) {
   root.querySelectorAll('[data-close]').forEach((el) => el.addEventListener('click', closeModal));
   if (onSubmit) {
     $('#modal-save')?.addEventListener('click', async () => {
-      try { await onSubmit(); closeModal(); await loadPortfolio(); }
-      catch (err) { toastErr(err.message); }
+      try {
+        const msg = await onSubmit();
+        closeModal();
+        toastOk(msg || opts.successMessage || '已保存');
+        if (opts.reload !== false) await loadPortfolio();
+      } catch (err) { toastErr(err.message); }
     });
   }
 }
@@ -317,7 +323,8 @@ function openTradeModal(trade = {}) {
     const body = formToTrade(fd, trade);
     if (trade.id) await api('/trades/' + trade.id, { method: 'PUT', body });
     else await api('/trades', { method: 'POST', body });
-  });
+    return trade.id ? '交易已更新' : '交易已保存';
+  }, { reload: true });
   bindTradeForm($('#modal-body'));
 }
 
@@ -371,6 +378,7 @@ function bindImportModal() {
       importState.count = 0;
       importState.preview = [];
       importState.error = err.message;
+      toastErr(err.message);
     }
     const area = $('#import-preview-area');
     if (area) area.innerHTML = renderImportPreviewSection();
@@ -413,6 +421,7 @@ function openImportModal() {
       if (!res.ok) throw new Error(data.error || '导入失败');
       closeModal();
       applyPortfolio(data);
+      toastOk(`已导入 ${importState.count} 条交易`);
     } catch (err) {
       toastErr(err.message);
     }
@@ -612,8 +621,13 @@ function bindTradeModalEvents() {
   }));
   root.querySelectorAll('[data-del]').forEach((btn) => btn.addEventListener('click', async () => {
     if (!confirm('确定删除？')) return;
-    applyPortfolio(await api('/trades/' + btn.dataset.del, { method: 'DELETE' }));
-    window._refreshTradeModal?.();
+    try {
+      applyPortfolio(await api('/trades/' + btn.dataset.del, { method: 'DELETE' }));
+      toastOk('已删除');
+      window._refreshTradeModal?.();
+    } catch (err) {
+      toastErr(err.message);
+    }
   }));
   $('#modal-add-other')?.addEventListener('click', () => { closeModal(); openTradeModal({ type: 'other' }); });
   $('#modal-import')?.addEventListener('click', () => { closeModal(); openImportModal(); });
@@ -623,6 +637,7 @@ function bindTradeModalEvents() {
       if (v && v !== 'all') q.set(k, v);
     }
     window.open('./api/trades/export?' + q.toString(), '_blank');
+    toastInfo('正在导出交易记录');
   });
 }
 
@@ -673,6 +688,8 @@ async function refreshQuotes(symbol) {
     if (r?.failed) {
       const msg = r.errors.slice(0, 5).map((e) => `${e.symbol}: ${e.error}`).join('\n');
       toastWarn(`已刷新 ${r.ok} 个，失败 ${r.failed} 个：${msg.replace(/\n/g, ' · ')}`);
+    } else if (r?.ok) {
+      toastOk(symbol ? `已刷新 ${symbol} 报价` : `已刷新 ${r.ok} 个报价`);
     }
   } catch (e) {
     toastErr(e.message);
@@ -689,11 +706,17 @@ $('#btn-trades').addEventListener('click', () => openTradeHistoryModal());
 
 $('#pnl-start').addEventListener('change', (e) => { pnlStart = e.target.value; });
 $('#pnl-end').addEventListener('change', (e) => { pnlEnd = e.target.value; });
-$('#btn-pnl-query').addEventListener('click', () => loadPortfolio().catch((e) => toastErr(e.message)));
+$('#btn-pnl-query').addEventListener('click', () => {
+  loadPortfolio()
+    .then(() => toastOk('查询完成'))
+    .catch((e) => toastErr(e.message));
+});
 $('#btn-pnl-reset').addEventListener('click', () => {
   pnlStart = pnlEnd = '';
   $('#pnl-start').value = $('#pnl-end').value = '';
-  loadPortfolio().catch((e) => toastErr(e.message));
+  loadPortfolio()
+    .then(() => toastOk('已重置查询区间'))
+    .catch((e) => toastErr(e.message));
 });
 
 $('#holdings-head').addEventListener('click', (e) => {
@@ -732,6 +755,7 @@ $('#holdings-body').addEventListener('drop', async (e) => {
   if (!anchor) return;
   try {
     await saveMeta(src, { groupWith: effectiveGroupKey(anchor) });
+    toastOk('已合并为同一标的');
   } catch (err) {
     toastErr(err.message);
   }
@@ -740,7 +764,10 @@ $('#holdings-body').addEventListener('drop', async (e) => {
 $('#holdings-body').addEventListener('click', async (e) => {
   const clearSym = e.target.closest('[data-clear-group]')?.dataset.clearGroup;
   if (clearSym) {
-    try { await saveMeta(clearSym, { groupWith: '' }); } catch (err) { toastErr(err.message); }
+    try {
+      await saveMeta(clearSym, { groupWith: '' });
+      toastOk('已恢复自动分组');
+    } catch (err) { toastErr(err.message); }
     return;
   }
   const sym = e.target.closest('[data-refresh]')?.dataset.refresh;
@@ -766,7 +793,12 @@ $('#holdings-body').addEventListener('change', async (e) => {
   const body = (field === 'target' || field === 'targetPrice')
     ? { targetPrice: el.value === '' ? '' : Number(el.value) }
     : { signal: el.value };
-  await saveMeta(symbol, body);
+  try {
+    await saveMeta(symbol, body);
+    toastOk('已保存');
+  } catch (err) {
+    toastErr(err.message);
+  }
 });
 
 renderColToggle();
