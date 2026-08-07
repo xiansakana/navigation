@@ -43,7 +43,21 @@
     setTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
   }
 
-  apply(effective());
+  function init() {
+    apply(effective());
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  window.addEventListener('storage', function (e) {
+    if (e.key !== KEY) return;
+    var t = stored();
+    if (t) apply(t);
+  });
 
   document.addEventListener('click', function (e) {
     if (e.target.closest('.navbar-theme-btn')) {
