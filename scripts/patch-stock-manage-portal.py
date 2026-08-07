@@ -7,8 +7,8 @@ cfg = json.loads(path.read_text(encoding="utf-8"))
 for svc in cfg.get("services", []):
     if svc.get("id") == "stock-manage":
         svc["injectBase"] = False
-        svc["injectBar"] = False
-        print("stock-manage: injectBase=false, injectBar=false")
+        svc["injectBar"] = True
+        print("stock-manage: injectBase=false, injectBar=true")
         break
 else:
     raise SystemExit("stock-manage service not found")

@@ -3,5 +3,7 @@
     "host": "127.0.0.1",
     "port": 5000
   },
-  "dataDir": "data"
+  "dataFile": "data/portfolio.json",
+  "finnhubApiKey": "",
+  "polygonApiKey": ""
 }

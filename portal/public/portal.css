@@ -398,6 +398,14 @@ body.toolbox-proxied .header h1 {
     font-size: 24px;
 }
 
+body.stock-proxied .sm-app {
+    padding-top: 8px;
+}
+
+body.stock-proxied .sm-header h1 {
+    font-size: 24px;
+}
+
 .service-card {
     display: block;
     text-decoration: none;
