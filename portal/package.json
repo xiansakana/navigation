@@ -1,0 +1,13 @@
+{
+  "name": "xiansakana-portal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ECS 服务导航门户（登录 + 多服务卡片）",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js"
+  }
+}

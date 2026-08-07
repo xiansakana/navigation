@@ -1,0 +1,42 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8791,
+    "openBrowser": false,
+    "adminToken": ""
+  },
+  "company": {
+    "intervalSeconds": 30,
+    "autoStart": false,
+    "watchers": [
+      {
+        "id": "company-a",
+        "label": "公司 A",
+        "enabled": true,
+        "apiKey": "",
+        "notify": {
+          "desktop": true,
+          "qq": {
+            "enabled": true,
+            "targets": [
+              {
+                "id": "group-at",
+                "type": "group",
+                "groupId": "263171957",
+                "atUserId": "2461298052"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "notify": {
+    "desktop": false,
+    "qq": {
+      "enabled": true,
+      "url": "http://127.0.0.1:8787/notify",
+      "token": "与qq-bot的server.notifyToken相同"
+    }
+  }
+}

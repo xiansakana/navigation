@@ -1,0 +1,14 @@
+{
+  "name": "torn-qq-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NapCat QQ 消息推送服务，供 Torn 工具箱等脚本远程调用",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test:send": "node src/send-test.js",
+    "start": "node src/server.js"
+  }
+}

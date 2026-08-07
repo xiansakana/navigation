@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Torn 工具箱 Desktop</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <div>
+                <h1>Torn 工具箱 Desktop</h1>
+                <p class="subtitle">本地运行，无需打开 Torn 浏览器标签</p>
+            </div>
+            <div class="header-status" id="global-status">就绪</div>
+        </header>
+
+        <section class="card">
+            <h2>全局设置</h2>
+            <div class="field">
+                <label for="api-key">Torn API Key</label>
+                <input type="password" id="api-key" placeholder="填写后保存">
+            </div>
+            <div class="checks">
+                <label><input type="checkbox" id="notify-desktop" checked> 桌面通知</label>
+                <label><input type="checkbox" id="notify-qq" checked> QQ 群通知</label>
+            </div>
+            <div class="field">
+                <label for="qq-url">QQ 推送地址</label>
+                <input type="text" id="qq-url" value="http://127.0.0.1:8787/notify">
+            </div>
+            <div class="field">
+                <label for="qq-token">QQ 推送 Token</label>
+                <input type="password" id="qq-token" placeholder="与 qq-bot notifyToken 一致">
+            </div>
+            <button class="btn primary" id="save-config">保存设置</button>
+        </section>
+
+        <nav class="tabs">
+            <button class="tab active" data-tab="undercut">压价助手</button>
+            <button class="tab" data-tab="company">公司监听</button>
+        </nav>
+
+        <section class="card tab-pane active" data-pane="undercut">
+            <div class="field">
+                <label>指定物品（可选）</label>
+                <div class="select-wrap" id="uc-select-wrap">
+                    <div class="select-display" id="uc-select-display">-- 全部物品（点击添加指定物品）--</div>
+                    <div class="select-drop" id="uc-select-drop">
+                        <input class="select-search" id="uc-select-search" placeholder="搜索..." />
+                        <div class="select-list" id="uc-select-list"></div>
+                    </div>
+                </div>
+                <div class="chips" id="uc-chips"></div>
+                <p class="hint">留空则监听全部在售货物；需先保存 API Key 后点击加载物品</p>
+            </div>
+            <div class="checks">
+                <label><input type="checkbox" id="uc-bazaar" checked> Bazaar 货物</label>
+                <label><input type="checkbox" id="uc-itemmarket" checked> Item Market 挂单</label>
+            </div>
+            <div class="field inline">
+                <label for="uc-interval">扫描间隔（秒）</label>
+                <input type="number" id="uc-interval" value="60" min="30" max="600">
+            </div>
+            <div class="btn-row">
+                <button class="btn green" id="uc-start">开始监听</button>
+                <button class="btn red" id="uc-stop" hidden>停止</button>
+            </div>
+            <div class="status-box" id="uc-status">
+                <p><strong id="uc-status-text">已停止</strong></p>
+                <p>下次扫描：<span id="uc-next">--</span></p>
+                <p>已扫描 <span id="uc-checks">0</span> 次 · 提醒 <span id="uc-alerts">0</span> 个</p>
+                <p id="uc-message"></p>
+            </div>
+            <div class="list" id="uc-list"></div>
+        </section>
+
+        <section class="card tab-pane" data-pane="company">
+            <div class="field">
+                <div class="section-head">
+                    <label>监听账号</label>
+                    <button type="button" class="btn small" id="co-add-watcher">+ 添加账号</button>
+                </div>
+                <p class="hint">每个 Torn API Key 可添加多个 QQ 通知方式（群 @ 人 / 群直接发 / 私聊均可同时配置）。配置完成后点击下方「保存公司监听配置」。QQ 推送地址与 Token 在上方全局设置中配置。</p>
+                <div id="co-watchers" class="watcher-list"></div>
+                <div class="btn-row">
+                    <button type="button" class="btn primary" id="co-save-config">保存公司监听配置</button>
+                </div>
+            </div>
+            <div class="field inline">
+                <label for="co-interval">检查间隔（秒）</label>
+                <input type="number" id="co-interval" value="30" min="10" max="300">
+            </div>
+            <div class="btn-row">
+                <button class="btn green" id="co-start">开始监听</button>
+                <button class="btn red" id="co-stop" hidden>停止</button>
+            </div>
+            <div class="status-box" id="co-status">
+                <p><strong id="co-status-text">已停止</strong></p>
+                <p>下次检查：<span id="co-next">--</span></p>
+                <p>已检查 <span id="co-checks">0</span> 次 · 申请 <span id="co-apps">0</span> 个</p>
+                <p id="co-message"></p>
+            </div>
+            <div class="list" id="co-list"></div>
+        </section>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
