@@ -13,14 +13,16 @@ export function loadConfig() {
     }
   }
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const defaultFinnhub = 'd7sa5a1r01qorsvhvrlgd7sa5a1r01qorsvhvrm0';
+  const defaultPolygon = 'ksTLCk4yRwmpfGycHMVKdvYIWyoAuCsb';
   return {
     server: {
       host: raw.server?.host || '127.0.0.1',
       port: Number(raw.server?.port) || 5000
     },
     dataFile: raw.dataFile || 'data/portfolio.json',
-    finnhubApiKey: raw.finnhubApiKey || process.env.FINNHUB_API_KEY || '',
-    polygonApiKey: raw.polygonApiKey || process.env.POLYGON_API_KEY || ''
+    finnhubApiKey: raw.finnhubApiKey || process.env.FINNHUB_API_KEY || defaultFinnhub,
+    polygonApiKey: raw.polygonApiKey || process.env.POLYGON_API_KEY || defaultPolygon
   };
 }
 

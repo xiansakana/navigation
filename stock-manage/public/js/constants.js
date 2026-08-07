@@ -18,6 +18,7 @@ export const HOLDINGS_COLUMNS = [
 
 export const LS_COL_VIS = 'smHoldingsColumnVisibility';
 export const LS_DASHBOARD = 'smDashboardSummaryVisible';
+export const LS_FULL_WIDTH = 'smFullWidthLayout';
 
 export function loadJson(key, fallback) {
   try {

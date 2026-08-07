@@ -15,40 +15,68 @@ export function createQuoteService(config) {
   const finnhubKey = config.finnhubApiKey;
   const polygonKey = config.polygonApiKey;
 
+  if (!finnhubKey) {
+    console.warn('stock-manage: finnhubApiKey 未配置，股票行情不可用');
+  }
+  if (!polygonKey) {
+    console.warn('stock-manage: polygonApiKey 未配置，期权行情不可用');
+  }
+
   async function getStock(symbol) {
+    if (!finnhubKey) throw new Error('未配置 Finnhub API Key');
     const sym = String(symbol).toUpperCase();
     const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${finnhubKey}`;
     const res = await fetch(url);
-    if (!res.ok) throw new Error('Finnhub HTTP ' + res.status);
+    if (!res.ok) throw new Error(`Finnhub HTTP ${res.status}`);
     const q = await res.json();
-    if (!q.c && q.c !== 0) throw new Error('无效代码');
-    return { symbol: sym, name: sym, price: q.c, change: q.d, changePercent: q.dp };
+    if (q.error) throw new Error(String(q.error));
+    if (!q.c && q.c !== 0) throw new Error('无效代码或无行情');
+    if (q.c === 0 && q.pc === 0) throw new Error('无效代码或无行情');
+    return { symbol: sym, name: sym, price: q.c, change: q.d ?? 0, changePercent: q.dp ?? 0 };
   }
 
   async function getOption(symbol) {
+    if (!polygonKey) throw new Error('未配置 Polygon API Key');
     const upper = String(symbol).toUpperCase();
     const parsed = parseOptionSymbol(upper);
     if (!parsed) throw new Error('期权代码格式错误');
-    const poly = toPolygonOptionSymbol(upper);
-    const url = `https://api.polygon.io/v3/snapshot/options/${parsed.underlying}/${poly}?apiKey=${polygonKey}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Polygon HTTP ' + res.status);
-    const data = await res.json();
-    const result = data.results;
-    if (!result) throw new Error('无期权行情');
-    const day = result.day || {};
-    const last = result.last_quote || {};
-    const price = day.close || last.ask || last.bid || 0;
+    const polygonSymbol = toPolygonOptionSymbol(upper);
+
+    const contractUrl = `https://api.polygon.io/v3/reference/options/contracts/${encodeURIComponent(polygonSymbol)}?apiKey=${polygonKey}`;
+    const contractRes = await fetch(contractUrl);
+    if (!contractRes.ok) throw new Error(`Polygon HTTP ${contractRes.status}`);
+    const contractData = await contractRes.json();
+    if (contractData.status !== 'OK' || !contractData.results) {
+      throw new Error('期权不存在或已过期');
+    }
+
+    const priceUrl = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(polygonSymbol)}/prev?adjusted=true&apiKey=${polygonKey}`;
+    const priceRes = await fetch(priceUrl);
+    if (!priceRes.ok) throw new Error(`Polygon 价格 HTTP ${priceRes.status}`);
+    const priceData = await priceRes.json();
+
+    let price = 0;
+    let change = 0;
+    let changePercent = 0;
+    if (priceData.status === 'OK' && priceData.results?.length) {
+      const r = priceData.results[0];
+      price = r.c || r.vw || 0;
+      change = r.c && r.o ? r.c - r.o : 0;
+      changePercent = r.c && r.o ? ((r.c - r.o) / r.o) * 100 : 0;
+    }
+
+    const c = contractData.results;
     return {
       symbol: upper,
-      name: upper,
+      name: `${parsed.underlying} ${c.expiration_date} ${c.contract_type} $${c.strike_price}`,
       price,
-      change: day.change || 0,
-      changePercent: day.change_percent || 0
+      change,
+      changePercent
     };
   }
 
   async function search(q) {
+    if (!finnhubKey) return [];
     const query = String(q || '').trim();
     if (query.length < 1) return [];
     const url = `https://finnhub.io/api/v1/search?q=${encodeURIComponent(query)}&token=${finnhubKey}`;

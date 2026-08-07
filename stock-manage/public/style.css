@@ -36,6 +36,20 @@ body.has-navbar {
     padding: 32px 24px 64px;
 }
 
+.sm-app.sm-app--full {
+    max-width: none;
+    width: 100%;
+    padding-left: 20px;
+    padding-right: 20px;
+}
+
+.sm-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 24px;
+    margin-bottom: 16px;
+}
+
 .sm-toggle-row {
     display: flex;
     align-items: center;
