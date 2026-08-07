@@ -40,17 +40,6 @@ function buildStockManagePermissions() {
     });
 }
 
-function hasAnyStockManageFeaturePerm(userPerms) {
-    return (userPerms || []).some(function(p) {
-        if (!p.startsWith('service:' + STOCK_MANAGE_SERVICE_ID + ':')) return false;
-        if (p === serviceViewPermissionId(STOCK_MANAGE_SERVICE_ID)
-            || p === serviceEditPermissionId(STOCK_MANAGE_SERVICE_ID)) {
-            return false;
-        }
-        return /^service:stock-manage:[^:]+:(view|edit)$/.test(p);
-    });
-}
-
 var SYSTEM_PERMISSIONS = [
     { id: 'admin:access:view', name: '查看管理后台', group: '系统', action: 'view', resource: 'admin:access' },
     { id: 'admin:access:edit', name: '编辑管理后台', group: '系统', action: 'edit', resource: 'admin:access' },
@@ -389,9 +378,6 @@ export function hasStockManageFeature(userPerms, feature, action) {
     if (action === 'view') {
         if (userPerms.includes(stockManageFeaturePermissionId(feature, 'edit'))) return true;
     }
-    if (hasAnyStockManageFeaturePerm(userPerms)) return false;
-    if (action === 'edit' && canEditService(userPerms, STOCK_MANAGE_SERVICE_ID)) return true;
-    if (action === 'view' && canViewService(userPerms, STOCK_MANAGE_SERVICE_ID)) return true;
     return false;
 }
 
