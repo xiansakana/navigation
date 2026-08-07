@@ -275,6 +275,7 @@ var SIYUAN_ROOT_PREFIXES = [
     '/emojis/',
     '/snippets/',
     '/assets/',
+    '/export/',
     '/public/',
     '/history/',
     '/upload',
