@@ -24,7 +24,7 @@ function renderServices(services) {
         card.innerHTML = '<div class="icon">' + (service.icon || '📦') + '</div>'
             + '<h2>' + service.title + '</h2>'
             + '<p>' + (service.description || '') + '</p>'
-            + '<span class="tag">' + (service.type === 'proxy' ? '内置' : '外链') + '</span>';
+            + '<span class="tag">' + (service.type === 'proxy' || service.type === 'hub' ? '内置' : '外链') + '</span>';
         grid.appendChild(card);
     });
 }
