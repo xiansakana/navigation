@@ -84,6 +84,7 @@ body.has-navbar {
 .sm-summary-card--blue { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
 .sm-summary-card--violet { background: linear-gradient(135deg, #a855f7, #7c3aed); }
 .sm-summary-card--teal { background: linear-gradient(135deg, #0d9488, #0f766e); }
+.sm-summary-card--amber { background: linear-gradient(135deg, #f59e0b, #d97706); }
 .sm-summary-card--cash {
     background: var(--card);
     border: 1px solid var(--border);

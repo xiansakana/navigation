@@ -58,6 +58,12 @@ function renderDashboard() {
   el.classList.remove('hidden');
   const s = state.summary || {};
   const cashPct = s.totalAssets > 0 ? (state.cash / s.totalAssets * 100) : 0;
+  const dailyVal = s.dailyTotalPnl;
+  const dailyHint = dailyVal == null
+    ? '刷新行情后显示持仓涨跌'
+    : (s.tradeDailyPnl != null && s.tradeDailyPnl !== 0
+      ? `持仓 ${fmt(s.marketDailyPnl)} + 交易 ${fmt(s.tradeDailyPnl)}`
+      : '持仓当日涨跌合计');
   el.innerHTML = `
     <div class="sm-summary-grid">
       <div class="sm-summary-card sm-summary-card--purple">
@@ -75,7 +81,12 @@ function renderDashboard() {
       <div class="sm-summary-card sm-summary-card--teal">
         <div class="label">总盈亏</div>
         <div class="value ${cls(s.totalPnl)}">$${fmt(s.totalPnl)}</div>
-        <div class="hint">不含无成本数据的行</div>
+        <div class="hint">未实现盈亏合计</div>
+      </div>
+      <div class="sm-summary-card sm-summary-card--amber">
+        <div class="label">当日总盈亏</div>
+        <div class="value ${dailyVal == null ? '' : cls(dailyVal)}">${dailyVal == null ? '—' : '$' + fmt(dailyVal)}</div>
+        <div class="hint">${dailyHint}</div>
       </div>
       <div class="sm-summary-card sm-summary-card--cash">
         <div class="label">现金</div>

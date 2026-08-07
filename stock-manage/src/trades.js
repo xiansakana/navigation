@@ -302,9 +302,10 @@ export function enrichHoldings(holdings, quotes, cash, meta = {}) {
     const cost = h.avgCost * h.shares * mult;
     const pnl = price > 0 ? mv - cost : null;
     const pnlPct = price > 0 && h.avgCost ? ((price - h.avgCost) / h.avgCost) * 100 : null;
-    const change = Number(q.change) || 0;
-    const changePct = Number(q.changePercent) || 0;
-    const dailyPnl = price > 0 ? change * h.shares * mult : null;
+    const change = q.change != null && q.change !== '' ? Number(q.change) : null;
+    const changePct = q.changePercent != null && q.changePercent !== '' ? Number(q.changePercent) : null;
+    const dailyPnl = price > 0 && change != null && Number.isFinite(change)
+      ? roundMoney(change * h.shares * mult) : null;
     const m = meta[h.symbol] || {};
     if (h.type === 'option') optionMv += mv;
     else stockMv += mv;
@@ -317,9 +318,9 @@ export function enrichHoldings(holdings, quotes, cash, meta = {}) {
       pnl,
       pnlPct,
       dailyPnl,
-      dailyPnlPct: price > 0 ? changePct : null,
-      change,
-      changePercent: changePct,
+      dailyPnlPct: price > 0 && changePct != null && Number.isFinite(changePct) ? changePct : null,
+      change: change ?? 0,
+      changePercent: changePct ?? 0,
       targetPrice: m.targetPrice ?? '',
       signal: m.signal ?? '',
       optionInfo: opt
@@ -331,6 +332,32 @@ export function enrichHoldings(holdings, quotes, cash, meta = {}) {
     r.weight = totalAssets > 0 ? (r.marketValue / totalAssets) * 100 : 0;
   });
   return { rows, stockMv, optionMv, totalMv, totalAssets, unrealized };
+}
+
+/** 当日总盈亏 = 持仓当日涨跌合计 + 今日交易净变动（已实现/费用/其它） */
+export function computeDailySummary(holdingRows, trades) {
+  let marketDaily = 0;
+  let hasMarket = false;
+  for (const h of holdingRows) {
+    if (h.dailyPnl != null && Number.isFinite(h.dailyPnl)) {
+      marketDaily += h.dailyPnl;
+      hasMarket = true;
+    }
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const sparse = buildDailyCumulativeSeries(trades);
+  const todayPoint = sparse.find((p) => p.date === today);
+  const tradeDaily = todayPoint?.dayNet ?? 0;
+  const hasTradeToday = !!todayPoint;
+
+  if (!hasMarket && !hasTradeToday) {
+    return { dailyTotalPnl: null, marketDailyPnl: null, tradeDailyPnl: null };
+  }
+  return {
+    dailyTotalPnl: roundMoney(marketDaily + tradeDaily),
+    marketDailyPnl: hasMarket ? roundMoney(marketDaily) : null,
+    tradeDailyPnl: hasTradeToday ? roundMoney(tradeDaily) : null
+  };
 }
 
 export function normalizeTrade(input) {
