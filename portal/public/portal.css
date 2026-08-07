@@ -506,3 +506,71 @@ body.stock-proxied .sm-header h1 {
     border-radius: 999px;
     padding: 2px 8px;
 }
+
+/* ── Toast ── */
+.portal-toast-host {
+    position: fixed;
+    top: calc(var(--navbar-height) + 12px);
+    right: 16px;
+    z-index: 1200;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-width: min(420px, calc(100vw - 32px));
+    pointer-events: none;
+}
+
+body.login-page .portal-toast-host {
+    top: 12px;
+}
+
+.portal-toast {
+    pointer-events: auto;
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    box-shadow: var(--navbar-shadow);
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--text);
+    cursor: pointer;
+    transition: opacity .2s ease, transform .2s ease;
+    animation: portal-toast-in .2s ease;
+}
+
+.portal-toast--out {
+    opacity: 0;
+    transform: translateX(12px);
+}
+
+.portal-toast--success {
+    border-color: rgba(61, 220, 132, 0.35);
+    background: linear-gradient(135deg, var(--card), rgba(61, 220, 132, 0.06));
+}
+
+.portal-toast--error {
+    border-color: rgba(255, 123, 123, 0.45);
+    background: linear-gradient(135deg, var(--card), rgba(255, 123, 123, 0.07));
+}
+
+.portal-toast--warn {
+    border-color: rgba(245, 158, 11, 0.4);
+    background: linear-gradient(135deg, var(--card), rgba(245, 158, 11, 0.07));
+}
+
+.portal-toast--info {
+    border-color: rgba(91, 156, 255, 0.35);
+    background: linear-gradient(135deg, var(--card), rgba(91, 156, 255, 0.06));
+}
+
+@keyframes portal-toast-in {
+    from {
+        opacity: 0;
+        transform: translateX(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}

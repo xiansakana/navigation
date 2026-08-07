@@ -41,5 +41,6 @@ api('me').then(function(data) {
 }).then(function(data) {
     renderServices(data.services || []);
 }).catch(function(err) {
-    document.getElementById('welcome').textContent = err.message;
+    document.getElementById('welcome').textContent = '加载失败';
+    window.portalToast?.error(err.message);
 });

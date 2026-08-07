@@ -68,6 +68,7 @@ function injectPortalShell(html, service) {
     if (!html.includes('<body')) return html;
     var themeBoot = '<script>(function(){try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>';
     var themeJs = '<script src="/theme.js"></script>';
+    var toastJs = '<script src="/toast.js"></script>';
     var layoutJs = service.id === 'stock-manage' ? '<script src="/layout.js"></script>' : '';
     var themeBtn = '<button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题"><span class="navbar-theme-icon" aria-hidden="true">☀️</span><span class="label navbar-theme-label">日间</span></button>';
     var layoutBtn = service.id === 'stock-manage'
@@ -80,7 +81,7 @@ function injectPortalShell(html, service) {
     var portalCss = '<link rel="stylesheet" href="/portal.css">';
     if (service.injectBar === false) {
         if (!baseTag) return html;
-        return html.replace('<head>', '<head>' + themeBoot + themeJs + baseTag);
+        return html.replace('<head>', '<head>' + themeBoot + themeJs + toastJs + baseTag);
     }
     var title = service.title || '服务';
     var isToolbox = service.path.startsWith('/torn-toolbox/');
@@ -101,7 +102,7 @@ function injectPortalShell(html, service) {
     if (isToolbox) bodyClass += ' toolbox-proxied';
     if (service.id === 'stock-manage') bodyClass += ' stock-proxied';
     return html
-        .replace('<head>', '<head>' + themeBoot + baseTag + portalCss + themeJs + layoutJs)
+        .replace('<head>', '<head>' + themeBoot + baseTag + portalCss + themeJs + toastJs + layoutJs)
         .replace(/<body([^>]*)>/, function(match, attrs) {
             var cls = bodyClass;
             if (/class="([^"]*)"/.test(attrs)) {

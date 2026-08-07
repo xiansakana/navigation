@@ -17,5 +17,6 @@ document.getElementById('login-form').addEventListener('submit', async function(
     } catch (error) {
         err.textContent = error.message;
         err.hidden = false;
+        window.portalToast?.error(error.message);
     }
 });
