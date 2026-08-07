@@ -4,7 +4,9 @@ import Placeholder from 'https://esm.sh/@tiptap/extension-placeholder@2.11.5';
 import { NoteReference, insertNoteReference } from './note-link.js';
 import { createDropdown } from './dropdown.js';
 import { blockExtensions, setupBlockEditor, openNotePicker } from './blocks.js';
-import { uploadImageFile, insertImage } from './image-block.js';
+import { setupCodeLangBar, insertCodeBlock } from './code-block.js';
+import { uploadImageFile, insertImage, isValidImageUrl } from './image-block.js';
+import { insertEmbedBlock } from './embed-block.js';
 import { openContextMenu } from './context-menu.js';
 
 const $ = (id) => document.getElementById(id);
@@ -42,6 +44,7 @@ let notebookDropdown = null;
 let tagFilterDropdown = null;
 let treeSortDropdown = null;
 let blockEditorCleanup = null;
+let codeLangBarCleanup = null;
 let noteTags = [];
 let sidebarCollapsed = localStorage.getItem('notes-sidebar-collapsed') === '1';
 let sidebarWidth = clampSidebarWidth(parseInt(localStorage.getItem('notes-sidebar-width') || '300', 10));
@@ -574,6 +577,10 @@ function destroyEditor() {
     blockEditorCleanup();
     blockEditorCleanup = null;
   }
+  if (codeLangBarCleanup) {
+    codeLangBarCleanup();
+    codeLangBarCleanup = null;
+  }
   if (editor) {
     editor.destroy();
     editor = null;
@@ -641,6 +648,7 @@ function initEditor(content) {
     shell: $('note-editor-shell'),
     onNoteRef: pickNoteForReference,
     onInsertImage: pickImageForInsert,
+    onInsertEmbed: pickEmbedUrl,
     getNotes: function() {
       return notes.filter(function(n) {
         return n.notebookId === activeNotebookId && n.id !== activeNoteId;
@@ -661,6 +669,8 @@ function initEditor(content) {
       runNoteMenuAction(id, activeNoteId);
     }
   });
+
+  codeLangBarCleanup = setupCodeLangBar($('note-editor-shell'), editor);
 
   editor.view.dom.addEventListener('paste', onEditorPaste);
 
@@ -689,8 +699,49 @@ async function insertUploadedImage(file) {
   }
 }
 
-function pickImageForInsert() {
-  $('image-upload-input')?.click();
+function pickImageForInsert(anchor) {
+  openContextMenu({
+    anchor: anchor || document.querySelector('[data-cmd="image"]'),
+    items: [
+      { id: 'upload', label: '上传图片', icon: '📁' },
+      { id: 'url', label: '外部 URL', icon: '🔗' }
+    ],
+    onSelect: async function(id) {
+      if (id === 'upload') {
+        $('image-upload-input')?.click();
+        return;
+      }
+      const url = await dlgPrompt('输入图片 URL', 'https://', { title: '插入图片' });
+      if (url == null || !url.trim()) return;
+      const trimmed = url.trim();
+      if (!isValidImageUrl(trimmed)) {
+        toastErr('请输入有效的 http/https 图片地址');
+        return;
+      }
+      insertImage(editor, trimmed, '');
+      markDirty();
+      toastOk('图片已插入');
+    }
+  });
+}
+
+async function pickEmbedUrl() {
+  const url = await dlgPrompt('输入嵌入 URL（网页、视频等）', 'https://', { title: '插入嵌入' });
+  if (url == null || !url.trim()) return;
+  const trimmed = url.trim();
+  try {
+    const u = new URL(trimmed);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+      toastErr('请输入有效的 http/https 地址');
+      return;
+    }
+  } catch {
+    toastErr('请输入有效的 URL');
+    return;
+  }
+  insertEmbedBlock(editor, trimmed);
+  markDirty();
+  toastOk('嵌入块已插入');
 }
 
 function renderBreadcrumb(note) {
@@ -963,9 +1014,10 @@ function runToolbarCmd(cmd) {
   else if (cmd === 'blockquote') chain.toggleBlockquote().run();
   else if (cmd === 'codeBlock') {
     if (editor.isActive('codeBlock')) chain.run();
-    else editor.chain().focus().insertContent({ type: 'codeBlock', attrs: { language: 'text' }, content: [{ type: 'text', text: '' }] }).run();
+    else insertCodeBlock(editor, 'text');
   }
   else if (cmd === 'image') pickImageForInsert();
+  else if (cmd === 'embed') pickEmbedUrl();
   else if (cmd === 'hr') chain.setHorizontalRule().run();
   else if (cmd === 'undo') chain.undo().run();
   else if (cmd === 'redo') chain.redo().run();
@@ -1098,7 +1150,21 @@ window.addEventListener('beforeunload', function(e) {
   }
 });
 
+function syncHljsTheme() {
+  const link = document.getElementById('hljs-theme');
+  if (!link) return;
+  const light = document.documentElement.getAttribute('data-theme') === 'light';
+  link.href = light
+    ? 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css'
+    : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css';
+}
+
 initDropdowns();
+syncHljsTheme();
+new MutationObserver(syncHljsTheme).observe(document.documentElement, {
+  attributes: true,
+  attributeFilter: ['data-theme']
+});
 applySidebarWidth();
 applySidebarCollapsed();
 initSidebarResize();

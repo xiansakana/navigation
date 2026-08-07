@@ -1,4 +1,7 @@
-import CodeBlock from 'https://esm.sh/@tiptap/extension-code-block@2.11.5';
+import CodeBlockLowlight from 'https://esm.sh/@tiptap/extension-code-block-lowlight@2.11.5';
+import { createLowlight, common } from 'https://esm.sh/lowlight@3.1.0';
+
+const lowlight = createLowlight(common);
 
 export const LANGUAGES = [
   { id: 'text', label: 'Plain Text' },
@@ -13,11 +16,15 @@ export const LANGUAGES = [
   { id: 'html', label: 'HTML' },
   { id: 'css', label: 'CSS' },
   { id: 'bash', label: 'Bash' },
-  { id: 'markdown', label: 'Markdown' }
+  { id: 'markdown', label: 'Markdown' },
+  { id: 'yaml', label: 'YAML' },
+  { id: 'xml', label: 'XML' }
 ];
 
-export const NotesCodeBlock = CodeBlock.configure({
-  HTMLAttributes: { class: 'notes-code-block' }
+export const NotesCodeBlock = CodeBlockLowlight.configure({
+  lowlight,
+  defaultLanguage: 'text',
+  HTMLAttributes: { class: 'notes-code-block hljs' }
 });
 
 export function insertCodeBlock(editor, language) {
@@ -27,4 +34,55 @@ export function insertCodeBlock(editor, language) {
     attrs: { language: language || 'text' },
     content: [{ type: 'text', text: '' }]
   }).run();
+}
+
+/**
+ * Floating language selector for active code block.
+ */
+export function setupCodeLangBar(shell, editor) {
+  const bar = document.createElement('div');
+  bar.className = 'notes-code-lang-bar hidden';
+  bar.innerHTML =
+    '<label class="notes-code-lang-label">语言</label>'
+    + '<select class="notes-code-lang-select"></select>';
+  shell.appendChild(bar);
+
+  const select = bar.querySelector('.notes-code-lang-select');
+  select.innerHTML = LANGUAGES.map(function(lang) {
+    return '<option value="' + lang.id + '">' + lang.label + '</option>';
+  }).join('');
+
+  function updateBar() {
+    if (!editor.isFocused || !editor.isActive('codeBlock')) {
+      bar.classList.add('hidden');
+      return;
+    }
+    const lang = editor.getAttributes('codeBlock').language || 'text';
+    select.value = LANGUAGES.some(function(l) { return l.id === lang; }) ? lang : 'text';
+    const { view } = editor;
+    const { from } = view.state.selection;
+    const coords = view.coordsAtPos(from);
+    const shellRect = shell.getBoundingClientRect();
+    bar.style.top = Math.max(0, coords.top - shellRect.top + shell.scrollTop - 36) + 'px';
+    bar.style.left = Math.max(8, coords.left - shellRect.left) + 'px';
+    bar.classList.remove('hidden');
+  }
+
+  select.addEventListener('change', function() {
+    editor.chain().focus().updateAttributes('codeBlock', { language: select.value }).run();
+  });
+
+  editor.on('selectionUpdate', updateBar);
+  editor.on('update', updateBar);
+  editor.on('blur', function() {
+    setTimeout(function() {
+      if (!bar.contains(document.activeElement)) bar.classList.add('hidden');
+    }, 120);
+  });
+
+  return function cleanup() {
+    editor.off('selectionUpdate', updateBar);
+    editor.off('update', updateBar);
+    bar.remove();
+  };
 }

@@ -111,6 +111,9 @@ function walkNodes(node, parts) {
   if (node.type === 'image') {
     parts.push(node.attrs?.alt || '[图片]');
   }
+  if (node.type === 'embedBlock') {
+    parts.push(node.attrs?.title || node.attrs?.src || '[嵌入]');
+  }
   if (Array.isArray(node.content)) node.content.forEach(function(child) { walkNodes(child, parts); });
 }
 

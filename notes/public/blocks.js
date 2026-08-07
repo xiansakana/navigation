@@ -1,9 +1,13 @@
 import TaskList from 'https://esm.sh/@tiptap/extension-task-list@2.11.5';
 import TaskItem from 'https://esm.sh/@tiptap/extension-task-item@2.11.5';
 import { ToggleBlock, insertToggleBlock } from './toggle-block.js';
-import { NotesCodeBlock, insertCodeBlock } from './code-block.js';
+import { NotesCodeBlock, insertCodeBlock, LANGUAGES } from './code-block.js';
 import { NotesImage } from './image-block.js';
+import { EmbedBlock, insertEmbedBlock } from './embed-block.js';
 import { openContextMenu } from './context-menu.js';
+import {
+  getDraggableBlock, listSiblingBlocks, blockDomAtPos, moveSiblingBlock
+} from './block-utils.js';
 
 const SLASH_COMMANDS = [
   { id: 'paragraph', label: '正文', hint: '普通文本段落', icon: '¶', keywords: ['text', '段落', '正文'] },
@@ -16,7 +20,8 @@ const SLASH_COMMANDS = [
   { id: 'taskList', label: '待办清单', hint: '可勾选的任务', icon: '☑', keywords: ['todo', '待办', '任务'] },
   { id: 'blockquote', label: '引用', hint: '引用块', icon: '❝', keywords: ['quote', '引用'] },
   { id: 'codeBlock', label: '代码块', hint: '语法高亮代码', icon: '{ }', keywords: ['code', '代码'] },
-  { id: 'image', label: '图片', hint: '上传或插入图片', icon: '🖼', keywords: ['image', '图片', 'photo'] },
+  { id: 'image', label: '图片', hint: '上传或 URL 图片', icon: '🖼', keywords: ['image', '图片', 'photo'] },
+  { id: 'embed', label: '嵌入', hint: 'iframe 网页/视频', icon: '▣', keywords: ['iframe', 'embed', '嵌入'] },
   { id: 'hr', label: '分隔线', hint: '水平分割线', icon: '—', keywords: ['divider', '分割'] },
   { id: 'noteRef', label: '块引用', hint: '链接到其他笔记', icon: '🔗', keywords: ['link', '引用', 'ref'] }
 ];
@@ -26,6 +31,7 @@ const INSERT_MENU_ITEMS = [
   { id: 'h2', label: '插入标题', icon: 'H2' },
   { id: 'codeBlock', label: '插入代码块', icon: '{ }' },
   { id: 'image', label: '插入图片', icon: '🖼' },
+  { id: 'embed', label: '插入嵌入', icon: '▣' },
   { id: 'bulletList', label: '插入列表', icon: '•' },
   { id: 'toggle', label: '插入折叠块', icon: '▸' }
 ];
@@ -41,7 +47,9 @@ const BLOCK_ACTIONS = [
   { id: 'taskList', label: '转为待办', icon: '☑' },
   { id: 'blockquote', label: '转为引用', icon: '❝' },
   { id: 'codeBlock', label: '转为代码块', icon: '{ }' },
+  { id: 'codeLang', label: '代码语言…', icon: '⌨' },
   { id: 'image', label: '插入图片', icon: '🖼' },
+  { id: 'embed', label: '插入嵌入', icon: '▣' },
   { id: 'divider', label: '—', icon: '' },
   { id: 'duplicate', label: '复制块', icon: '⎘' },
   { id: 'delete', label: '删除块', icon: '🗑', danger: true },
@@ -53,6 +61,7 @@ export function blockExtensions() {
     ToggleBlock,
     NotesCodeBlock,
     NotesImage,
+    EmbedBlock,
     TaskList.configure({ HTMLAttributes: { class: 'notes-task-list' } }),
     TaskItem.configure({ nested: true, HTMLAttributes: { class: 'notes-task-item' } })
   ];
@@ -64,42 +73,6 @@ function escapeHtml(text) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
-}
-
-function getTopLevelBlock(view, pos) {
-  const $pos = view.state.doc.resolve(pos);
-  for (let d = $pos.depth; d > 0; d--) {
-    const parent = $pos.node(d - 1);
-    if (parent.type.name === 'doc') {
-      return { node: $pos.node(d), pos: $pos.before(d), depth: d };
-    }
-  }
-  return null;
-}
-
-function blockDomAtPos(view, pos) {
-  const block = getTopLevelBlock(view, pos);
-  if (!block) return null;
-  if (block.node.type.name === 'toggleBlock') {
-    try {
-      const dom = view.nodeDOM(block.pos);
-      if (dom && dom.nodeType === 1) return dom;
-    } catch { /* ignore */ }
-  }
-  try {
-    const dom = view.nodeDOM(block.pos);
-    if (dom && dom.nodeType === 1) return dom;
-    if (dom && dom.parentElement) return dom.parentElement.closest('.ProseMirror > *');
-  } catch { /* ignore */ }
-  return null;
-}
-
-function listTopLevelBlocks(doc) {
-  const blocks = [];
-  doc.forEach(function(node, offset) {
-    if (node.isBlock) blocks.push({ node, pos: offset });
-  });
-  return blocks;
 }
 
 function runBlockCommand(editor, id, opts) {
@@ -118,7 +91,26 @@ function runBlockCommand(editor, id, opts) {
     else insertCodeBlock(editor, 'text');
   }
   else if (id === 'image') opts?.onInsertImage?.();
+  else if (id === 'embed') opts?.onInsertEmbed?.();
+  else if (id === 'codeLang') showCodeLangPicker(editor, opts);
   else if (id === 'hr') chain.setHorizontalRule().run();
+}
+
+function showCodeLangPicker(editor, opts) {
+  const items = LANGUAGES.map(function(lang) {
+    return { id: 'lang:' + lang.id, label: lang.label, icon: '⌨' };
+  });
+  openContextMenu({
+    items: items,
+    onSelect: function(id) {
+      const lang = id.replace(/^lang:/, '');
+      if (editor.isActive('codeBlock')) {
+        editor.chain().focus().updateAttributes('codeBlock', { language: lang }).run();
+      } else {
+        insertCodeBlock(editor, lang);
+      }
+    }
+  });
 }
 
 function deleteTriggerQuery(editor, trigger) {
@@ -145,6 +137,10 @@ function applySlashCommand(editor, id, opts) {
   }
   if (id === 'image') {
     opts?.onInsertImage?.();
+    return;
+  }
+  if (id === 'embed') {
+    opts?.onInsertEmbed?.();
     return;
   }
   runBlockCommand(editor, id, opts);
@@ -178,29 +174,10 @@ function addBlockBelow(editor, blockPos) {
   editor.chain().focus().insertContentAt(insertPos, { type: 'paragraph' }).setTextSelection(insertPos + 1).run();
 }
 
-function moveBlockByIndex(editor, fromIndex, toIndex) {
-  const { state } = editor;
-  const blocks = listTopLevelBlocks(state.doc);
-  if (fromIndex < 0 || fromIndex >= blocks.length) return;
-  if (toIndex < 0 || toIndex > blocks.length) return;
-  if (toIndex === fromIndex || toIndex === fromIndex + 1) return;
-
-  const fromPos = blocks[fromIndex].pos;
-  const node = state.doc.nodeAt(fromPos);
-  if (!node) return;
-  const size = node.nodeSize;
-
-  let tr = state.tr.delete(fromPos, fromPos + size);
-  const remaining = listTopLevelBlocks(tr.doc);
-  let insertPos;
-  if (toIndex >= remaining.length) {
-    insertPos = tr.doc.content.size;
-  } else {
-    const targetIndex = toIndex > fromIndex ? toIndex - 1 : toIndex;
-    insertPos = remaining[targetIndex]?.pos ?? tr.doc.content.size;
-  }
-  tr.insert(insertPos, node);
-  editor.view.dispatch(tr.scrollIntoView());
+function moveBlockByIndex(editor, fromIndex, toIndex, parentPos) {
+  const siblings = listSiblingBlocks(editor.state.doc, parentPos);
+  if (fromIndex < 0 || fromIndex >= siblings.length) return;
+  moveSiblingBlock(editor, siblings[fromIndex].pos, toIndex, parentPos);
 }
 
 /**
@@ -403,11 +380,13 @@ export function setupBlockEditor(editor, opts) {
 
     const view = editor.view;
     const coords = view.posAtCoords({ left: e.clientX, top: e.clientY });
-    const block = coords ? getTopLevelBlock(view, coords.pos) : null;
+    const block = coords ? getDraggableBlock(view, coords.pos) : null;
     let items = [];
     let blockPos = null;
+    let blockInfo = null;
 
     if (block) {
+      blockInfo = block;
       blockPos = block.pos;
       editor.chain().focus().setTextSelection(block.pos + 1).run();
       items = blockMenuContextItems();
@@ -424,7 +403,8 @@ export function setupBlockEditor(editor, opts) {
       items: items,
       onSelect: function(id) {
         if (blockPos != null && BLOCK_ACTIONS.some(function(a) { return a.id === id; })) {
-          runBlockMenuAction(id, blockPos);
+          if (id === 'codeLang') showCodeLangPicker(editor, opts);
+          else runBlockMenuAction(id, blockPos);
           return;
         }
         if (INSERT_MENU_ITEMS.some(function(a) { return a.id === id; })) {
@@ -458,6 +438,7 @@ export function setupBlockEditor(editor, opts) {
         if (action.id === 'duplicate') duplicateBlock(editor, blockPos);
         else if (action.id === 'delete') deleteBlock(editor, blockPos);
         else if (action.id === 'addBelow') addBlockBelow(editor, blockPos);
+        else if (action.id === 'codeLang') showCodeLangPicker(editor, opts);
         else runBlockCommand(editor, action.id, opts);
       });
       list.appendChild(li);
@@ -467,29 +448,29 @@ export function setupBlockEditor(editor, opts) {
     positionEl(blockMenuEl, anchorRect, shellRect, true);
   }
 
-  function blockIndexFromPos(pos) {
-    const blocks = listTopLevelBlocks(editor.state.doc);
-    return blocks.findIndex(function(b) { return b.pos === pos; });
+  function blockIndexFromPos(pos, parentPos) {
+    return listSiblingBlocks(editor.state.doc, parentPos)
+      .findIndex(function(b) { return b.pos === pos; });
   }
 
-  function resolveDropTarget(clientY, fromIndex) {
+  function resolveDropTarget(clientY, dragState) {
     const view = editor.view;
-    const blocks = listTopLevelBlocks(view.state.doc);
-    if (!blocks.length) return null;
-    let dropIndex = blocks.length;
-    for (let i = 0; i < blocks.length; i++) {
-      const dom = blockDomAtPos(view, blocks[i].pos + 1);
+    const siblings = listSiblingBlocks(view.state.doc, dragState.parentPos);
+    if (!siblings.length) return null;
+    for (let i = 0; i < siblings.length; i++) {
+      if (i === dragState.fromIndex) continue;
+      const dom = blockDomAtPos(view, siblings[i]);
       if (!dom) continue;
       const rect = dom.getBoundingClientRect();
       const mid = rect.top + rect.height / 2;
       if (clientY < mid) {
-        dropIndex = i;
-        return { dropIndex: dropIndex, rect: rect, before: true };
+        return { dropIndex: i, rect: rect, before: true };
       }
     }
-    const lastDom = blockDomAtPos(view, blocks[blocks.length - 1].pos + 1);
+    const last = siblings[siblings.length - 1];
+    const lastDom = blockDomAtPos(view, last);
     return {
-      dropIndex: blocks.length,
+      dropIndex: siblings.length,
       rect: lastDom?.getBoundingClientRect(),
       before: false
     };
@@ -510,8 +491,7 @@ export function setupBlockEditor(editor, opts) {
 
   function onPointerMove(e) {
     if (dragState?.dragging) {
-      const fromIndex = dragState.fromIndex;
-      const target = resolveDropTarget(e.clientY, fromIndex);
+      const target = resolveDropTarget(e.clientY, dragState);
       dragState.dropTarget = target;
       showDropLine(target);
       dragGhostEl.style.left = (e.clientX + 12) + 'px';
@@ -530,12 +510,12 @@ export function setupBlockEditor(editor, opts) {
       hideHandle();
       return;
     }
-    const block = getTopLevelBlock(view, pos.pos);
+    const block = getDraggableBlock(view, pos.pos);
     if (!block) {
       hideHandle();
       return;
     }
-    const dom = blockDomAtPos(view, pos.pos);
+    const dom = blockDomAtPos(view, block);
     if (!dom) {
       hideHandle();
       return;
@@ -544,6 +524,7 @@ export function setupBlockEditor(editor, opts) {
     const shellRect = shell.getBoundingClientRect();
     handleEl.classList.remove('hidden');
     handleEl.dataset.blockPos = String(block.pos);
+    handleEl.dataset.parentPos = String(block.parentPos);
     positionEl(handleEl, rect, shellRect, false);
   }
 
@@ -555,10 +536,9 @@ export function setupBlockEditor(editor, opts) {
 
   function finishDrag(commit) {
     if (dragState?.dragging && commit && dragState.dropTarget) {
-      const fromIndex = dragState.fromIndex;
       let toIndex = dragState.dropTarget.dropIndex;
-      if (toIndex > fromIndex) toIndex--;
-      moveBlockByIndex(editor, fromIndex, toIndex);
+      if (toIndex > dragState.fromIndex) toIndex--;
+      moveBlockByIndex(editor, dragState.fromIndex, toIndex, dragState.parentPos);
     }
     dragState = null;
     hideDropLine();
@@ -579,8 +559,9 @@ export function setupBlockEditor(editor, opts) {
     dragState = null;
     document.removeEventListener('pointermove', onPointerMove);
     document.removeEventListener('pointerup', onPointerUp);
-    const dom = blockDomAtPos(editor.view, blockPos + 1);
-    if (dom) showBlockMenu(blockPos, dom.getBoundingClientRect());
+    const block = getDraggableBlock(editor.view, blockPos + 1);
+    const dom = block ? blockDomAtPos(editor.view, block) : null;
+    if (dom && block) showBlockMenu(block.pos, dom.getBoundingClientRect());
   }
 
   handleEl.addEventListener('pointerdown', function(e) {
@@ -588,11 +569,13 @@ export function setupBlockEditor(editor, opts) {
     e.preventDefault();
     e.stopPropagation();
     const blockPos = Number(handleEl.dataset.blockPos);
-    const fromIndex = blockIndexFromPos(blockPos);
+    const parentPos = Number(handleEl.dataset.parentPos);
+    const fromIndex = blockIndexFromPos(blockPos, parentPos);
     if (fromIndex < 0) return;
     handleEl.setPointerCapture(e.pointerId);
     dragState = {
       blockPos: blockPos,
+      parentPos: parentPos,
       fromIndex: fromIndex,
       pointerId: e.pointerId,
       startX: e.clientX,
@@ -717,7 +700,6 @@ export function setupBlockEditor(editor, opts) {
     shell.removeEventListener('pointermove', onPointerMove);
     shell.removeEventListener('mouseleave', onShellLeave);
     shell.removeEventListener('contextmenu', showEditorContextMenu);
-    if (editor.view?.dom) editor.view.dom.removeEventListener('contextmenu', showEditorContextMenu);
     handleEl.remove();
     slashEl.remove();
     mentionEl.remove();
