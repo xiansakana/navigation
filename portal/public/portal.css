@@ -7,7 +7,32 @@
     --muted: #9aa4b2;
     --accent: #5b9cff;
     --accent-hover: #7eb6ff;
+    --green: #3ddc84;
+    --red: #ff7b7b;
     --navbar-height: 56px;
+    --navbar-bg: rgba(15, 17, 21, 0.82);
+    --navbar-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+    --input-bg: #0f131a;
+    --page-glow: rgba(91, 156, 255, 0.08);
+    --hover-bg: rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f3f6fa;
+    --card: #ffffff;
+    --border: #d8e0ea;
+    --text: #152033;
+    --muted: #5c6b7f;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --green: #059669;
+    --red: #dc2626;
+    --navbar-bg: rgba(255, 255, 255, 0.9);
+    --navbar-shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
+    --input-bg: #ffffff;
+    --page-glow: rgba(37, 99, 235, 0.07);
+    --hover-bg: rgba(15, 23, 42, 0.04);
 }
 
 * { box-sizing: border-box; }
@@ -32,11 +57,11 @@ body.has-navbar {
     right: 0;
     z-index: 1000;
     height: var(--navbar-height);
-    background: rgba(15, 17, 21, 0.82);
+    background: var(--navbar-bg);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
     border-bottom: 1px solid var(--border);
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+    box-shadow: var(--navbar-shadow);
 }
 
 .navbar-inner {
@@ -97,7 +122,7 @@ body.has-navbar {
 
 .navbar-link:hover {
     color: var(--text);
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--hover-bg);
 }
 
 .navbar-link.active {
@@ -131,6 +156,26 @@ body.has-navbar {
 .navbar-user {
     color: var(--muted);
     font-size: 14px;
+}
+
+.navbar-theme-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px !important;
+    font-size: 14px !important;
+}
+
+.navbar-theme-icon {
+    font-size: 16px;
+    line-height: 1;
+}
+
+.login-theme-bar {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 1001;
 }
 
 @media (max-width: 640px) {
@@ -175,7 +220,7 @@ input {
     padding: 12px 14px;
     border-radius: 10px;
     border: 1px solid var(--border);
-    background: #0f131a;
+    background: var(--input-bg);
     color: var(--text);
 }
 
@@ -210,7 +255,7 @@ input {
 .btn.ghost:hover {
     color: var(--text);
     border-color: rgba(91, 156, 255, 0.35);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--hover-bg);
 }
 
 .error {
@@ -249,7 +294,7 @@ input {
 /* ── Torn toolbox hub ── */
 .toolbox-page {
     background:
-        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(91, 156, 255, 0.12), transparent),
+        radial-gradient(ellipse 80% 50% at 50% -20%, var(--page-glow), transparent),
         var(--bg);
 }
 
