@@ -462,6 +462,11 @@ body.stock-proxied .sm-header h1 {
     font-size: 24px;
 }
 
+body.napcat-proxied {
+    background: var(--bg);
+    color: var(--text);
+}
+
 .service-card {
     display: block;
     text-decoration: none;
