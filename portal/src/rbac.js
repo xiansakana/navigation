@@ -7,10 +7,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RBAC_PATH = path.resolve(__dirname, '../data/rbac.json');
 
 var SYSTEM_PERMISSIONS = [
-    { id: 'admin:access', name: '访问管理后台', group: '系统' },
-    { id: 'admin:users', name: '管理用户', group: '系统' },
-    { id: 'admin:roles', name: '管理角色', group: '系统' },
-    { id: 'admin:menus', name: '管理菜单', group: '系统' }
+    { id: 'admin:access:view', name: '查看管理后台', group: '系统', action: 'view', resource: 'admin:access' },
+    { id: 'admin:access:edit', name: '编辑管理后台', group: '系统', action: 'edit', resource: 'admin:access' },
+    { id: 'admin:users:view', name: '查看用户', group: '系统', action: 'view', resource: 'admin:users' },
+    { id: 'admin:users:edit', name: '编辑用户', group: '系统', action: 'edit', resource: 'admin:users' },
+    { id: 'admin:roles:view', name: '查看角色', group: '系统', action: 'view', resource: 'admin:roles' },
+    { id: 'admin:roles:edit', name: '编辑角色', group: '系统', action: 'edit', resource: 'admin:roles' },
+    { id: 'admin:menus:view', name: '查看菜单', group: '系统', action: 'view', resource: 'admin:menus' },
+    { id: 'admin:menus:edit', name: '编辑菜单', group: '系统', action: 'edit', resource: 'admin:menus' }
 ];
 
 function newId(prefix) {
@@ -36,18 +40,33 @@ export function verifyPassword(password, record) {
     }
 }
 
-function servicePermissionId(serviceId) {
-    return 'service:' + serviceId;
+function serviceViewPermissionId(serviceId) {
+    return 'service:' + serviceId + ':view';
+}
+
+function serviceEditPermissionId(serviceId) {
+    return 'service:' + serviceId + ':edit';
 }
 
 function buildServicePermissions(services) {
-    return (services || []).map(function(service) {
-        return {
-            id: servicePermissionId(service.id),
-            name: '访问「' + (service.title || service.id) + '」',
-            group: '服务',
-            serviceId: service.id
-        };
+    return (services || []).flatMap(function(service) {
+        var title = service.title || service.id;
+        return [
+            {
+                id: serviceViewPermissionId(service.id),
+                name: '查看「' + title + '」',
+                group: '服务',
+                serviceId: service.id,
+                action: 'view'
+            },
+            {
+                id: serviceEditPermissionId(service.id),
+                name: '编辑「' + title + '」',
+                group: '服务',
+                serviceId: service.id,
+                action: 'edit'
+            }
+        ];
     });
 }
 
@@ -85,7 +104,7 @@ function buildMenusFromServices(services, overrides) {
                 icon: service.icon || '📦',
                 type: service.type,
                 serviceId: service.id,
-                permission: servicePermissionId(service.id),
+                permission: serviceViewPermissionId(service.id),
                 sort: (index + 1) * 10,
                 enabled: true
             };
@@ -99,7 +118,7 @@ function buildMenusFromServices(services, overrides) {
         description: '用户、角色、菜单与权限配置',
         icon: '🔐',
         path: '/admin.html',
-        permission: 'admin:access',
+        permission: 'admin:access:view',
         sort: 9990,
         enabled: true
     }, overrideMap.menu_admin || {});
@@ -142,14 +161,38 @@ export function saveRbac(data) {
     fs.writeFileSync(RBAC_PATH, JSON.stringify(data, null, 2), 'utf8');
 }
 
+function migrateRolePermissions(permissions) {
+    if ((permissions || []).includes('*')) return ['*'];
+    var out = new Set(permissions || []);
+    var legacyMap = {
+        'admin:access': ['admin:access:view', 'admin:access:edit'],
+        'admin:users': ['admin:users:view', 'admin:users:edit'],
+        'admin:roles': ['admin:roles:view', 'admin:roles:edit'],
+        'admin:menus': ['admin:menus:view', 'admin:menus:edit']
+    };
+    (permissions || []).forEach(function(p) {
+        if (legacyMap[p]) legacyMap[p].forEach(function(id) { out.add(id); });
+        var serviceMatch = /^service:([^:]+)$/.exec(p);
+        if (serviceMatch && !p.endsWith(':view') && !p.endsWith(':edit')) {
+            out.add('service:' + serviceMatch[1] + ':view');
+            out.add('service:' + serviceMatch[1] + ':edit');
+        }
+    });
+    return Array.from(out);
+}
+
 export function syncRbacPermissions(data, config) {
     var servicePerms = buildServicePermissions(config.services);
     var known = {};
     SYSTEM_PERMISSIONS.concat(servicePerms).forEach(function(p) { known[p.id] = p; });
     (data.permissions || []).forEach(function(p) {
-        if (!known[p.id] && !p.id.startsWith('service:')) known[p.id] = p;
+        if (!known[p.id]) known[p.id] = p;
     });
     data.permissions = Object.keys(known).map(function(id) { return known[id]; });
+
+    (data.roles || []).forEach(function(role) {
+        role.permissions = migrateRolePermissions(role.permissions || []);
+    });
 
     var overrideMap = {};
     (data.menus || []).forEach(function(menu) { overrideMap[menu.id] = menu; });
@@ -157,7 +200,7 @@ export function syncRbacPermissions(data, config) {
 
     var adminRole = (data.roles || []).find(function(r) { return r.id === 'role_admin'; });
     if (adminRole && adminRole.permissions.includes('*')) {
-        servicePerms.forEach(function(p) {
+        data.permissions.forEach(function(p) {
             if (!adminRole.permissions.includes(p.id)) adminRole.permissions.push(p.id);
         });
     }
@@ -193,12 +236,37 @@ export function hasPermission(userPerms, permission) {
     if (!permission) return true;
     if (userPerms.includes('*')) return true;
     if (userPerms.includes(permission)) return true;
+
+    if (permission.endsWith(':view')) {
+        var editPerm = permission.slice(0, -5) + ':edit';
+        if (userPerms.includes(editPerm)) return true;
+        var legacy = permission.replace(/:view$/, '');
+        if (legacy !== permission && userPerms.includes(legacy)) return true;
+    }
+
+    if (permission.endsWith(':edit')) {
+        var legacyEdit = permission.replace(/:edit$/, '');
+        if (legacyEdit !== permission && userPerms.includes(legacyEdit)) return true;
+    }
+
     var parts = permission.split(':');
     while (parts.length > 1) {
         parts.pop();
         if (userPerms.includes(parts.join(':') + ':*')) return true;
     }
     return false;
+}
+
+export function canViewAdmin(userPerms) {
+    return hasPermission(userPerms, 'admin:access:view');
+}
+
+export function canEditAdminResource(userPerms, resource) {
+    return hasPermission(userPerms, resource + ':edit');
+}
+
+export function canViewAdminResource(userPerms, resource) {
+    return hasPermission(userPerms, resource + ':view') || canEditAdminResource(userPerms, resource);
 }
 
 export function authenticateUser(data, username, password) {
@@ -215,8 +283,17 @@ export function getVisibleMenus(data, userPerms) {
         .sort(function(a, b) { return (a.sort || 0) - (b.sort || 0); });
 }
 
+export function canViewService(userPerms, serviceId) {
+    return hasPermission(userPerms, serviceViewPermissionId(serviceId));
+}
+
+export function canEditService(userPerms, serviceId) {
+    return hasPermission(userPerms, serviceEditPermissionId(serviceId));
+}
+
+/** @deprecated use canViewService */
 export function canAccessService(userPerms, serviceId) {
-    return hasPermission(userPerms, servicePermissionId(serviceId));
+    return canViewService(userPerms, serviceId);
 }
 
 export function publicUser(user) {
@@ -329,4 +406,4 @@ export function updateMenus(data, menus) {
     });
 }
 
-export { SYSTEM_PERMISSIONS, servicePermissionId, newId };
+export { SYSTEM_PERMISSIONS, serviceViewPermissionId, serviceEditPermissionId, newId };

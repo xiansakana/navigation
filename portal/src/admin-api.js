@@ -8,17 +8,28 @@ import {
     deleteRole,
     updateMenus,
     hasPermission,
-    resolveUserPermissions
+    resolveUserPermissions,
+    canViewAdmin,
+    canViewAdminResource,
+    canEditAdminResource
 } from './rbac.js';
 
-function forbidden(res) {
+function forbidden(res, message) {
     res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: false, error: '无权限' }));
+    res.end(JSON.stringify({ ok: false, error: message || '无权限' }));
 }
 
-function requirePerm(res, userPerms, perm) {
-    if (!hasPermission(userPerms, perm)) {
+function requireView(res, userPerms, resource) {
+    if (!canViewAdminResource(userPerms, resource)) {
         forbidden(res);
+        return false;
+    }
+    return true;
+}
+
+function requireEdit(res, userPerms, resource) {
+    if (!canEditAdminResource(userPerms, resource)) {
+        forbidden(res, '需要编辑权限');
         return false;
     }
     return true;
@@ -31,25 +42,36 @@ export async function handleAdminApi(req, res, url, session, config, json, readJ
         return json(res, 401, { ok: false, error: '用户不存在' });
     }
     var userPerms = resolveUserPermissions(rbac, user);
-    if (!hasPermission(userPerms, 'admin:access')) {
+    if (!canViewAdmin(userPerms)) {
         return forbidden(res);
     }
 
     if (req.method === 'GET' && url.pathname === '/api/admin/rbac') {
-        return json(res, 200, { ok: true, rbac: sanitizeRbac(rbac), me: { permissions: userPerms } });
+        return json(res, 200, {
+            ok: true,
+            rbac: sanitizeRbac(rbac),
+            me: {
+                permissions: userPerms,
+                canEdit: {
+                    users: canEditAdminResource(userPerms, 'admin:users'),
+                    roles: canEditAdminResource(userPerms, 'admin:roles'),
+                    menus: canEditAdminResource(userPerms, 'admin:menus')
+                }
+            }
+        });
     }
 
     if (url.pathname === '/api/admin/users') {
         if (req.method === 'GET') {
+            if (!requireView(res, userPerms, 'admin:users')) return;
             return json(res, 200, { ok: true, users: sanitizeRbac(rbac).users });
         }
         if (req.method === 'POST') {
-            if (!requirePerm(res, userPerms, 'admin:users')) return;
+            if (!requireEdit(res, userPerms, 'admin:users')) return;
             try {
-                var userBody = await readJson(req);
-                var savedUser = upsertUser(rbac, userBody);
+                upsertUser(rbac, await readJson(req));
                 saveRbac(rbac);
-                return json(res, 200, { ok: true, user: savedUser.id ? sanitizeRbac(rbac).users.find(function(u) { return u.id === savedUser.id; }) : null });
+                return json(res, 200, { ok: true, users: sanitizeRbac(rbac).users });
             } catch (err) {
                 return json(res, 400, { ok: false, error: err.message });
             }
@@ -57,7 +79,7 @@ export async function handleAdminApi(req, res, url, session, config, json, readJ
     }
 
     if (url.pathname.startsWith('/api/admin/users/') && req.method === 'DELETE') {
-        if (!requirePerm(res, userPerms, 'admin:users')) return;
+        if (!requireEdit(res, userPerms, 'admin:users')) return;
         try {
             deleteUser(rbac, url.pathname.slice('/api/admin/users/'.length));
             saveRbac(rbac);
@@ -69,13 +91,13 @@ export async function handleAdminApi(req, res, url, session, config, json, readJ
 
     if (url.pathname === '/api/admin/roles') {
         if (req.method === 'GET') {
+            if (!requireView(res, userPerms, 'admin:roles')) return;
             return json(res, 200, { ok: true, roles: sanitizeRbac(rbac).roles });
         }
         if (req.method === 'POST') {
-            if (!requirePerm(res, userPerms, 'admin:roles')) return;
+            if (!requireEdit(res, userPerms, 'admin:roles')) return;
             try {
-                var roleBody = await readJson(req);
-                upsertRole(rbac, roleBody);
+                upsertRole(rbac, await readJson(req));
                 saveRbac(rbac);
                 return json(res, 200, { ok: true, roles: sanitizeRbac(rbac).roles });
             } catch (err) {
@@ -85,7 +107,7 @@ export async function handleAdminApi(req, res, url, session, config, json, readJ
     }
 
     if (url.pathname.startsWith('/api/admin/roles/') && req.method === 'DELETE') {
-        if (!requirePerm(res, userPerms, 'admin:roles')) return;
+        if (!requireEdit(res, userPerms, 'admin:roles')) return;
         try {
             deleteRole(rbac, url.pathname.slice('/api/admin/roles/'.length));
             saveRbac(rbac);
@@ -96,7 +118,7 @@ export async function handleAdminApi(req, res, url, session, config, json, readJ
     }
 
     if (url.pathname === '/api/admin/menus' && req.method === 'PUT') {
-        if (!requirePerm(res, userPerms, 'admin:menus')) return;
+        if (!requireEdit(res, userPerms, 'admin:menus')) return;
         try {
             var menuBody = await readJson(req);
             updateMenus(rbac, menuBody.menus || []);

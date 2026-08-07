@@ -29,6 +29,45 @@ function permName(permId) {
     return perm ? perm.name : permId;
 }
 
+function canEdit(resource) {
+    return !!(state.me && state.me.canEdit && state.me.canEdit[resource]);
+}
+
+function buildPermissionPairs() {
+    var map = {};
+    (state.rbac.permissions || []).forEach(function(perm) {
+        var key = perm.serviceId
+            ? 'service:' + perm.serviceId
+            : (perm.resource || perm.id.replace(/:(view|edit)$/, ''));
+        if (!map[key]) {
+            map[key] = { group: perm.group || '其他', title: '', view: null, edit: null };
+        }
+        if (perm.action === 'view') {
+            map[key].view = perm;
+            map[key].title = perm.name.replace(/^查看/, '').trim() || perm.name;
+        } else if (perm.action === 'edit') {
+            map[key].edit = perm;
+            if (!map[key].title) map[key].title = perm.name.replace(/^编辑/, '').trim() || perm.name;
+        }
+    });
+    var groups = {};
+    Object.keys(map).forEach(function(key) {
+        var item = map[key];
+        if (!groups[item.group]) groups[item.group] = [];
+        groups[item.group].push(item);
+    });
+    return groups;
+}
+
+function applyEditMode() {
+    document.getElementById('btn-add-user').hidden = !canEdit('users');
+    document.getElementById('btn-add-role').hidden = !canEdit('roles');
+    document.getElementById('btn-save-menus').hidden = !canEdit('menus');
+    document.querySelectorAll('.menu-sort, .menu-icon, .menu-title, .menu-enabled').forEach(function(el) {
+        el.disabled = !canEdit('menus');
+    });
+}
+
 function switchTab(name) {
     document.querySelectorAll('.admin-tab').forEach(function(btn) {
         btn.classList.toggle('active', btn.dataset.tab === name);
@@ -44,13 +83,14 @@ function renderUsers() {
     (state.rbac.users || []).forEach(function(user) {
         var tr = document.createElement('tr');
         var roles = (user.roleIds || []).map(roleName).join('、') || '—';
+        var actions = canEdit('users')
+            ? '<button type="button" class="btn ghost sm-btn" data-edit-user="' + esc(user.id) + '">编辑</button>'
+                + (user.id === 'usr_admin' ? '' : '<button type="button" class="btn ghost sm-btn danger" data-del-user="' + esc(user.id) + '">删除</button>')
+            : '<span class="sm-muted">只读</span>';
         tr.innerHTML = '<td>' + esc(user.username) + '</td>'
             + '<td>' + esc(roles) + '</td>'
             + '<td><span class="admin-badge ' + (user.enabled ? 'on' : 'off') + '">' + (user.enabled ? '启用' : '禁用') + '</span></td>'
-            + '<td class="admin-actions">'
-            + '<button type="button" class="btn ghost sm-btn" data-edit-user="' + esc(user.id) + '">编辑</button>'
-            + (user.id === 'usr_admin' ? '' : '<button type="button" class="btn ghost sm-btn danger" data-del-user="' + esc(user.id) + '">删除</button>')
-            + '</td>';
+            + '<td class="admin-actions">' + actions + '</td>';
         tbody.appendChild(tr);
     });
 }
@@ -61,16 +101,17 @@ function renderRoles() {
     (state.rbac.roles || []).forEach(function(role) {
         var card = document.createElement('article');
         card.className = 'admin-role-card';
-        var perms = (role.permissions || []).slice(0, 8).map(function(id) {
+        var perms = (role.permissions || []).slice(0, 10).map(function(id) {
             return id === '*' ? '全部权限' : permName(id);
         }).join(' · ');
-        if ((role.permissions || []).length > 8) perms += ' …';
+        if ((role.permissions || []).length > 10) perms += ' …';
+        var actions = canEdit('roles')
+            ? '<button type="button" class="btn ghost sm-btn" data-edit-role="' + esc(role.id) + '">编辑</button>'
+                + ((role.id === 'role_admin' || role.id === 'role_user') ? '' : '<button type="button" class="btn ghost sm-btn danger" data-del-role="' + esc(role.id) + '">删除</button>')
+            : '<span class="sm-muted">只读</span>';
         card.innerHTML = '<div class="admin-role-head">'
             + '<h3>' + esc(role.name) + '</h3>'
-            + '<div class="admin-actions">'
-            + '<button type="button" class="btn ghost sm-btn" data-edit-role="' + esc(role.id) + '">编辑</button>'
-            + ((role.id === 'role_admin' || role.id === 'role_user') ? '' : '<button type="button" class="btn ghost sm-btn danger" data-del-role="' + esc(role.id) + '">删除</button>')
-            + '</div></div>'
+            + '<div class="admin-actions">' + actions + '</div></div>'
             + '<p>' + esc(role.description || '') + '</p>'
             + '<div class="admin-role-perms">' + esc(perms || '无权限') + '</div>';
         root.appendChild(card);
@@ -82,11 +123,12 @@ function renderMenus() {
     tbody.innerHTML = '';
     (state.rbac.menus || []).forEach(function(menu, index) {
         var tr = document.createElement('tr');
-        tr.innerHTML = '<td><input type="number" class="admin-input-sm menu-sort" data-id="' + esc(menu.id) + '" value="' + esc(menu.sort != null ? menu.sort : (index + 1) * 10) + '"></td>'
-            + '<td><input type="text" class="admin-input-sm menu-icon" data-id="' + esc(menu.id) + '" value="' + esc(menu.icon || '') + '"></td>'
-            + '<td><input type="text" class="admin-input-md menu-title" data-id="' + esc(menu.id) + '" value="' + esc(menu.title || '') + '"></td>'
+        var disabled = canEdit('menus') ? '' : ' disabled';
+        tr.innerHTML = '<td><input type="number" class="admin-input-sm menu-sort" data-id="' + esc(menu.id) + '" value="' + esc(menu.sort != null ? menu.sort : (index + 1) * 10) + '"' + disabled + '></td>'
+            + '<td><input type="text" class="admin-input-sm menu-icon" data-id="' + esc(menu.id) + '" value="' + esc(menu.icon || '') + '"' + disabled + '></td>'
+            + '<td><input type="text" class="admin-input-md menu-title" data-id="' + esc(menu.id) + '" value="' + esc(menu.title || '') + '"' + disabled + '></td>'
             + '<td><code>' + esc(menu.permission || '') + '</code></td>'
-            + '<td><input type="checkbox" class="menu-enabled" data-id="' + esc(menu.id) + '" ' + (menu.enabled !== false ? 'checked' : '') + '></td>';
+            + '<td><input type="checkbox" class="menu-enabled" data-id="' + esc(menu.id) + '" ' + (menu.enabled !== false ? 'checked' : '') + disabled + '></td>';
         tbody.appendChild(tr);
     });
 }
@@ -94,28 +136,30 @@ function renderMenus() {
 function renderPermissions() {
     var root = document.getElementById('permissions-list');
     root.innerHTML = '';
-    var groups = {};
-    (state.rbac.permissions || []).forEach(function(perm) {
-        var group = perm.group || '其他';
-        if (!groups[group]) groups[group] = [];
-        groups[group].push(perm);
-    });
-    Object.keys(groups).forEach(function(group) {
+    var groups = buildPermissionPairs();
+    Object.keys(groups).forEach(function(groupName) {
         var section = document.createElement('section');
         section.className = 'admin-perm-group';
-        section.innerHTML = '<h3>' + esc(group) + '</h3>';
-        var list = document.createElement('ul');
-        groups[group].forEach(function(perm) {
-            var li = document.createElement('li');
-            li.innerHTML = '<code>' + esc(perm.id) + '</code><span>' + esc(perm.name) + '</span>';
-            list.appendChild(li);
+        section.innerHTML = '<h3>' + esc(groupName) + '</h3>';
+        var table = document.createElement('table');
+        table.className = 'admin-table admin-perm-table';
+        table.innerHTML = '<thead><tr><th>资源</th><th>查看</th><th>编辑</th></tr></thead>';
+        var tbody = document.createElement('tbody');
+        groups[groupName].forEach(function(item) {
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td>' + esc(item.title) + '</td>'
+                + '<td>' + (item.view ? '<code>' + esc(item.view.id) + '</code>' : '—') + '</td>'
+                + '<td>' + (item.edit ? '<code>' + esc(item.edit.id) + '</code>' : '—') + '</td>';
+            tbody.appendChild(tr);
         });
-        section.appendChild(list);
+        table.appendChild(tbody);
+        section.appendChild(table);
         root.appendChild(section);
     });
 }
 
 function openUserDialog(user) {
+    if (!canEdit('users')) return;
     document.getElementById('user-dialog-title').textContent = user ? '编辑用户' : '新建用户';
     document.getElementById('user-id').value = user ? user.id : '';
     document.getElementById('user-username').value = user ? user.username : '';
@@ -136,26 +180,32 @@ function openUserDialog(user) {
 }
 
 function openRoleDialog(role) {
+    if (!canEdit('roles')) return;
     document.getElementById('role-dialog-title').textContent = role ? '编辑角色' : '新建角色';
     document.getElementById('role-id').value = role ? role.id : '';
     document.getElementById('role-name').value = role ? role.name : '';
     document.getElementById('role-desc').value = role ? (role.description || '') : '';
     var box = document.getElementById('role-permissions');
-    box.innerHTML = '<legend>权限</legend>';
-    (state.rbac.permissions || []).forEach(function(perm) {
-        var label = document.createElement('label');
-        label.className = 'admin-check';
-        var checked = role && ((role.permissions || []).includes(perm.id) || (role.permissions || []).includes('*'));
-        label.innerHTML = '<input type="checkbox" name="perm" value="' + esc(perm.id) + '" ' + (checked ? 'checked' : '') + '> '
-            + esc(perm.name) + ' <code>' + esc(perm.id) + '</code>';
-        box.appendChild(label);
-    });
-    if (role && role.id === 'role_admin') {
-        box.querySelectorAll('input').forEach(function(input) {
-            input.checked = true;
-            input.disabled = true;
+    box.innerHTML = '<legend>权限（查看 / 编辑）</legend>';
+    var groups = buildPermissionPairs();
+    Object.keys(groups).forEach(function(groupName) {
+        var heading = document.createElement('div');
+        heading.className = 'admin-perm-group-title';
+        heading.textContent = groupName;
+        box.appendChild(heading);
+        groups[groupName].forEach(function(item) {
+            var row = document.createElement('div');
+            row.className = 'admin-perm-pair';
+            var rolePerms = role ? (role.permissions || []) : [];
+            var isAdminRole = role && role.id === 'role_admin';
+            var viewChecked = isAdminRole || rolePerms.includes('*') || (item.view && rolePerms.includes(item.view.id));
+            var editChecked = isAdminRole || rolePerms.includes('*') || (item.edit && rolePerms.includes(item.edit.id));
+            row.innerHTML = '<span class="admin-perm-pair-title">' + esc(item.title) + '</span>'
+                + (item.view ? '<label class="admin-check"><input type="checkbox" name="perm" value="' + esc(item.view.id) + '" ' + (viewChecked ? 'checked' : '') + (isAdminRole ? ' disabled' : '') + '> 查看</label>' : '')
+                + (item.edit ? '<label class="admin-check"><input type="checkbox" name="perm" value="' + esc(item.edit.id) + '" ' + (editChecked ? 'checked' : '') + (isAdminRole ? ' disabled' : '') + '> 编辑</label>' : '');
+            box.appendChild(row);
         });
-    }
+    });
     document.getElementById('role-dialog').showModal();
 }
 
@@ -182,7 +232,18 @@ async function reload() {
     renderRoles();
     renderMenus();
     renderPermissions();
+    applyEditMode();
 }
+
+document.querySelectorAll('.admin-dialog').forEach(function(dialog) {
+    dialog.addEventListener('click', function(e) {
+        if (e.target === dialog) dialog.close();
+    });
+    dialog.addEventListener('cancel', function(e) {
+        e.preventDefault();
+        dialog.close();
+    });
+});
 
 document.querySelectorAll('.admin-tab').forEach(function(btn) {
     btn.addEventListener('click', function() { switchTab(btn.dataset.tab); });
