@@ -53,6 +53,7 @@
       "internalUrl": "http://127.0.0.1:6099",
       "adminToken": "",
       "injectBar": false,
+      "injectBase": false,
       "icon": "💬"
     }
   ]

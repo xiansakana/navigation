@@ -9,7 +9,7 @@ import {
     getSession,
     verifyLogin
 } from './auth.js';
-import { resolveProxyContext, getServiceEntryHref, napcatPublicWebuiPath, proxyHttpRequest, proxyWebSocket } from './proxy.js';
+import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket } from './proxy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -144,9 +144,9 @@ function handleProxyRoute(req, res) {
     var proxyUrl = new URL(ctx.proxyUrl, 'http://127.0.0.1');
     var browserUrl = new URL(req.url, 'http://127.0.0.1');
 
-    var napcatWebui = napcatPublicWebuiPath(ctx.service, browserUrl.pathname);
-    if (napcatWebui) {
-        var napcatTarget = new URL(napcatWebui + browserUrl.search, 'http://127.0.0.1');
+    var napcatCanonical = napcatCanonicalWebuiPath(ctx.service, browserUrl.pathname);
+    if (napcatCanonical) {
+        var napcatTarget = new URL(napcatCanonical + browserUrl.search, 'http://127.0.0.1');
         if (ctx.service.adminToken && !napcatTarget.searchParams.get('token')) {
             napcatTarget.searchParams.set('token', ctx.service.adminToken);
         }
