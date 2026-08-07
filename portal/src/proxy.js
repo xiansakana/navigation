@@ -108,7 +108,7 @@ function rewriteProxiedBody(text, service) {
 
 function injectProxiedBackLink(html, variant) {
     var positionRule = variant === 'notes'
-        ? '.portal-proxied-back--notes{top:12px!important;right:56px!important;left:auto!important}'
+        ? '.portal-proxied-back--notes{top:12px!important;right:112px!important;left:auto!important}'
         : '.portal-proxied-back--napcat{top:12px!important;right:12px!important;left:auto!important}';
     var css = '<style>'
         + '.portal-proxied-back{position:fixed;z-index:2147483647;display:inline-flex;align-items:center;padding:8px 12px;border-radius:8px;font:14px/1.4 system-ui,sans-serif;text-decoration:none;color:#e8edf5;background:rgba(15,17,21,.88);border:1px solid rgba(255,255,255,.12);box-shadow:0 4px 16px rgba(0,0,0,.25);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);pointer-events:auto}'
