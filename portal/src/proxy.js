@@ -117,6 +117,7 @@ function injectPortalShell(html, service) {
     var bodyClass = 'has-navbar';
     if (isToolbox) bodyClass += ' toolbox-proxied';
     if (service.id === 'stock-manage') bodyClass += ' stock-proxied';
+    if (service.id === 'notes') bodyClass += ' notes-proxied';
     return html
         .replace('<head>', '<head>' + themeBoot + baseTag + portalCss + themeJs + toastJs + layoutJs)
         .replace(/<body([^>]*)>/, function(match, attrs) {

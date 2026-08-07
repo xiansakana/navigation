@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>笔记</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="notes-app">
+    <aside class="notes-sidebar">
+      <div class="notes-sidebar-head">
+        <label class="notes-field-label" for="notebook-select">笔记本</label>
+        <div class="notes-notebook-row">
+          <select id="notebook-select" class="notes-select"></select>
+          <button type="button" id="btn-notebook-add" class="btn ghost notes-icon-btn" title="新建笔记本">+</button>
+        </div>
+        <div class="notes-notebook-actions">
+          <button type="button" id="btn-notebook-rename" class="btn ghost notes-btn-sm">重命名</button>
+          <button type="button" id="btn-notebook-delete" class="btn ghost notes-btn-sm danger">删除</button>
+        </div>
+      </div>
+      <div class="notes-search-row">
+        <input type="search" id="note-search" class="notes-search" placeholder="搜索笔记…">
+        <button type="button" id="btn-note-add" class="btn primary notes-btn-sm">新建</button>
+      </div>
+      <ul id="note-list" class="notes-list"></ul>
+    </aside>
+
+    <main class="notes-main">
+      <div id="notes-empty" class="notes-empty">
+        <p>选择或新建一篇笔记开始编辑</p>
+      </div>
+      <div id="notes-editor-wrap" class="notes-editor-wrap hidden">
+        <div class="notes-toolbar" id="notes-toolbar">
+          <button type="button" data-cmd="bold" class="btn ghost notes-tool" title="粗体"><b>B</b></button>
+          <button type="button" data-cmd="italic" class="btn ghost notes-tool" title="斜体"><i>I</i></button>
+          <button type="button" data-cmd="strike" class="btn ghost notes-tool" title="删除线"><s>S</s></button>
+          <button type="button" data-cmd="code" class="btn ghost notes-tool" title="行内代码">&lt;/&gt;</button>
+          <span class="notes-tool-sep"></span>
+          <button type="button" data-cmd="h1" class="btn ghost notes-tool" title="标题 1">H1</button>
+          <button type="button" data-cmd="h2" class="btn ghost notes-tool" title="标题 2">H2</button>
+          <button type="button" data-cmd="h3" class="btn ghost notes-tool" title="标题 3">H3</button>
+          <span class="notes-tool-sep"></span>
+          <button type="button" data-cmd="bulletList" class="btn ghost notes-tool" title="无序列表">•</button>
+          <button type="button" data-cmd="orderedList" class="btn ghost notes-tool" title="有序列表">1.</button>
+          <button type="button" data-cmd="blockquote" class="btn ghost notes-tool" title="引用">“</button>
+          <button type="button" data-cmd="codeBlock" class="btn ghost notes-tool" title="代码块">{ }</button>
+          <button type="button" data-cmd="hr" class="btn ghost notes-tool" title="分隔线">—</button>
+          <span class="notes-tool-sep"></span>
+          <button type="button" data-cmd="undo" class="btn ghost notes-tool" title="撤销">↶</button>
+          <button type="button" data-cmd="redo" class="btn ghost notes-tool" title="重做">↷</button>
+          <span class="notes-toolbar-spacer"></span>
+          <button type="button" id="btn-note-duplicate" class="btn ghost notes-btn-sm">复制</button>
+          <button type="button" id="btn-note-delete" class="btn ghost notes-btn-sm danger">删除</button>
+        </div>
+        <input type="text" id="note-title" class="notes-title" placeholder="无标题" maxlength="200">
+        <div id="note-editor" class="notes-editor"></div>
+        <div id="save-status" class="notes-save-status">就绪</div>
+      </div>
+    </main>
+  </div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

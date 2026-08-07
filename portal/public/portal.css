@@ -462,6 +462,10 @@ body.stock-proxied .sm-header h1 {
     font-size: 24px;
 }
 
+body.notes-proxied .notes-app {
+    min-height: calc(100vh - var(--navbar-height));
+}
+
 .service-card {
     display: block;
     text-decoration: none;
