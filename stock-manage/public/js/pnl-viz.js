@@ -168,6 +168,27 @@ function inQuery(d, start, end) {
   return true;
 }
 
+function sumMonthNet(dayNet, y, mo, pnlStart, pnlEnd) {
+  let sum = 0;
+  const dim = daysInMonth(y, mo);
+  for (let d = 1; d <= dim; d++) {
+    const key = ymKey(y, mo, d);
+    if (inQuery(key, pnlStart, pnlEnd)) sum += dayNet.get(key) ?? 0;
+  }
+  return sum;
+}
+
+function sumYearNet(dayNet, y, pnlStart, pnlEnd) {
+  let sum = 0;
+  for (let mo = 1; mo <= 12; mo++) sum += sumMonthNet(dayNet, y, mo, pnlStart, pnlEnd);
+  return sum;
+}
+
+function fmtNetBadge(net, periodLabel) {
+  const cls = net > 0 ? 'pos' : net < 0 ? 'neg' : '';
+  return `<span class="sm-cal-gran-net">${periodLabel} 净盈亏 <strong class="${cls}">${fmtUsdSigned(net)}</strong></span>`;
+}
+
 function calBg(net, maxAbs) {
   if (net === 0) return '';
   const t = maxAbs > 0 ? Math.min(1, Math.abs(net) / maxAbs) : 1;
@@ -600,20 +621,23 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
 
   let yearOpts = '';
   for (let oy = minYo; oy <= maxYo; oy++) {
-    yearOpts += `<option value="${oy}" ${oy === dispY ? 'selected' : ''}>${oy} 年</option>`;
+    yearOpts += `<option value="${oy}" ${oy === dispY ? 'selected' : ''}>${oy}</option>`;
   }
   let monthOpts = '';
   for (let mo = 1; mo <= 12; mo++) {
-    monthOpts += `<option value="${mo}" ${mo === dispM ? 'selected' : ''}>${mo} 月</option>`;
+    monthOpts += `<option value="${mo}" ${mo === dispM ? 'selected' : ''}>${mo}</option>`;
   }
   let yearOnlyOpts = '';
   for (let oy = minYo; oy <= maxYo; oy++) {
-    yearOnlyOpts += `<option value="${oy}" ${oy === yEff ? 'selected' : ''}>${oy} 年</option>`;
+    yearOnlyOpts += `<option value="${oy}" ${oy === yEff ? 'selected' : ''}>${oy}</option>`;
   }
 
   let calHtml = '';
+  let calGranNetHtml = '';
   if (!isLine) {
     if (calGranularity === 'month') {
+      const monthNet = sumMonthNet(dayNet, dispY, dispM, pnlStart, pnlEnd);
+      calGranNetHtml = fmtNetBadge(monthNet, `${dispY}年${dispM}月`);
       calHtml = `
         <div class="sm-cal-toolbar">
           <button type="button" class="btn ghost sm-btn-sm" data-cal-prev>上月</button>
@@ -630,6 +654,8 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
         </div>
         ${buildMonthCal(dispY, dispM, dayNet, chartExpandedFull, totalAssets, pnlStart, pnlEnd)}`;
     } else {
+      const yearNet = sumYearNet(dayNet, yEff, pnlStart, pnlEnd);
+      calGranNetHtml = fmtNetBadge(yearNet, `${yEff}年`);
       calHtml = `
         <div class="sm-cal-toolbar">
           <label class="sm-cal-toolbar-field">
@@ -656,11 +682,14 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
       ${isLine ? lineHtml : `
         <div class="sm-cal-block">
           <div class="sm-cal-gran">
-            <span class="sm-muted">粒度</span>
-            <div class="sm-seg">
-              <button type="button" class="sm-seg-btn ${calGranularity === 'month' ? 'active' : ''}" data-cal-gran="month">按月</button>
-              <button type="button" class="sm-seg-btn ${calGranularity === 'year' ? 'active' : ''}" data-cal-gran="year">按年</button>
+            <div class="sm-cal-gran-left">
+              <span class="sm-muted">粒度</span>
+              <div class="sm-seg">
+                <button type="button" class="sm-seg-btn ${calGranularity === 'month' ? 'active' : ''}" data-cal-gran="month">按月</button>
+                <button type="button" class="sm-seg-btn ${calGranularity === 'year' ? 'active' : ''}" data-cal-gran="year">按年</button>
+              </div>
             </div>
+            ${calGranNetHtml}
           </div>
           ${calHtml}
         </div>`}
