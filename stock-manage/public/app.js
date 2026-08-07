@@ -1,4 +1,4 @@
-import { HOLDINGS_COLUMNS, LS_COL_VIS, LS_DASHBOARD, loadJson, saveJson, defaultColVis } from './js/constants.js';
+import { HOLDINGS_COLUMNS, LS_COL_VIS, LS_DASHBOARD, LS_FULL_WIDTH, loadJson, saveJson, defaultColVis } from './js/constants.js';
 import { buildLineChartSvg } from './js/chart.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -10,6 +10,7 @@ const MASK = '<span class="sm-mask">—</span>';
 let state = { cash: 0, trades: [], holdings: [], summary: {}, chartSeries: [], holdingsMeta: {} };
 let colVis = loadJson(LS_COL_VIS, defaultColVis());
 let dashboardVisible = loadJson(LS_DASHBOARD, true);
+let fullWidth = loadJson(LS_FULL_WIDTH, false);
 let pnlStart = '';
 let pnlEnd = '';
 
@@ -474,7 +475,21 @@ async function saveMeta(symbol, patch) {
   applyPortfolio(await api('/holdings-meta/' + encodeURIComponent(symbol), { method: 'PUT', body: patch }));
 }
 
+function applyLayoutPrefs() {
+  $('#app').classList.toggle('sm-app--full', fullWidth);
+  const fw = $('#toggle-fullwidth');
+  if (fw) fw.checked = fullWidth;
+}
+
 // Event bindings
+applyLayoutPrefs();
+
+$('#toggle-fullwidth')?.addEventListener('change', (e) => {
+  fullWidth = e.target.checked;
+  saveJson(LS_FULL_WIDTH, fullWidth);
+  applyLayoutPrefs();
+});
+
 $('#toggle-dashboard').addEventListener('change', (e) => {
   dashboardVisible = e.target.checked;
   saveJson(LS_DASHBOARD, dashboardVisible);
@@ -494,12 +509,26 @@ $('#col-toggle-panel').addEventListener('change', (e) => {
   renderHoldings();
 });
 
-$('#btn-refresh').addEventListener('click', async () => {
-  $('#btn-refresh').disabled = true;
-  try { applyPortfolio(await api('/quotes/refresh', { method: 'POST' })); }
-  catch (e) { alert(e.message); }
-  finally { $('#btn-refresh').disabled = false; }
-});
+async function refreshQuotes(symbol) {
+  const btn = $('#btn-refresh');
+  if (btn) btn.disabled = true;
+  try {
+    const body = symbol ? { symbol } : undefined;
+    const data = await api('/quotes/refresh', { method: 'POST', body });
+    applyPortfolio(data);
+    const r = data.refresh;
+    if (r?.failed) {
+      const msg = r.errors.slice(0, 5).map((e) => `${e.symbol}: ${e.error}`).join('\n');
+      alert(`已刷新 ${r.ok} 个，失败 ${r.failed} 个：\n${msg}`);
+    }
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+$('#btn-refresh').addEventListener('click', () => refreshQuotes());
 
 $('#btn-add').addEventListener('click', () => openTradeModal());
 $('#btn-import').addEventListener('click', openImportModal);
@@ -517,7 +546,7 @@ $('#btn-pnl-reset').addEventListener('click', () => {
 $('#holdings-body').addEventListener('click', async (e) => {
   const sym = e.target.closest('[data-refresh]')?.dataset.refresh;
   if (sym) {
-    applyPortfolio(await api('/quotes/refresh', { method: 'POST', body: { symbol: sym } }));
+    await refreshQuotes(sym);
     return;
   }
   const tradeType = e.target.closest('[data-trade]')?.dataset.trade;

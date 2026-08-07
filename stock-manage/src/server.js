@@ -240,16 +240,32 @@ app.post('/api/quotes/refresh', async (req, res) => {
   const symbols = symbol
     ? [String(symbol).toUpperCase()]
     : [...new Set(deriveHoldings(data.trades).map((h) => h.symbol))];
+  if (!symbols.length) {
+    return res.status(400).json({ error: '暂无持仓可刷新' });
+  }
   const updated = { ...data.quotes };
+  const errors = [];
+  let ok = 0;
   for (const sym of symbols) {
     try {
       updated[sym] = await quotes.getQuote(sym);
+      ok += 1;
       if (!symbol) await new Promise((r) => setTimeout(r, 800));
-    } catch { /* skip */ }
+    } catch (e) {
+      errors.push({ symbol: sym, error: e.message || '失败' });
+    }
   }
   data.quotes = updated;
   store.write(data);
-  sendPortfolio(res);
+  const payload = buildPortfolio(data, {
+    startDate: req.query?.start,
+    endDate: req.query?.end
+  });
+  payload.refresh = { ok, failed: errors.length, errors };
+  if (!ok && errors.length) {
+    return res.status(502).json({ error: '行情刷新全部失败', ...payload });
+  }
+  res.json(payload);
 });
 
 app.use(express.static(PUBLIC));
