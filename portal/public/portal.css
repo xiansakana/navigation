@@ -177,6 +177,22 @@ body.has-navbar {
     background: rgba(91, 156, 255, 0.12);
 }
 
+.login-top-bar {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    z-index: 1001;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.login-close-btn {
+    text-decoration: none;
+}
+
 .login-theme-bar {
     position: fixed;
     top: 12px;
@@ -334,6 +350,7 @@ body.has-navbar {
     border: 1px solid var(--border);
     border-radius: 16px;
     padding: 32px;
+    position: relative;
 }
 
 .login-card h1 {
