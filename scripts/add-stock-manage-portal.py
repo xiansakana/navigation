@@ -16,9 +16,10 @@ entry = {
     "type": "proxy",
     "path": "/stock-manage",
     "entryPath": "/",
-    "internalUrl": "http://127.0.0.1:5000",
-    "injectBar": False,
-    "icon": "📈",
+        "internalUrl": "http://127.0.0.1:5000",
+        "injectBar": False,
+        "injectBase": False,
+        "icon": "📈",
 }
 idx = next((i for i, s in enumerate(services) if s.get("id") == "napcat"), len(services))
 services.insert(idx, entry)

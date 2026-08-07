@@ -4103,7 +4103,7 @@ function renderTradeHistoryModal(): string {
             <button onclick="openOtherTradeModal()" style="padding: 8px 16px; border: 1px solid #c7d2fe; border-radius: 6px; background: #eef2ff; color: #4338ca; font-size: 0.85rem; cursor: pointer;">
               ＋ 其它收支
             </button>
-            <button onclick="openImportTradeModal()" style="padding: 8px 16px; border: 1px solid #e2e8f0; border-radius: 6px; background: white; color: #334155; font-size: 0.85rem; cursor: pointer;">
+            <button type="button" data-sm-action="open-import-trade" onclick="openImportTradeModal()" style="padding: 8px 16px; border: 1px solid #e2e8f0; border-radius: 6px; background: white; color: #334155; font-size: 0.85rem; cursor: pointer;">
               导入
             </button>
             <button type="button" onclick="void exportTradesToXlsx()" style="padding: 8px 16px; border: 1px solid #e2e8f0; border-radius: 6px; background: white; color: #334155; font-size: 0.85rem; cursor: pointer;">
@@ -4328,7 +4328,7 @@ function renderImportTradeModal(): string {
         <!-- 头部 -->
         <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; border-bottom: 1px solid #e2e8f0;">
           <h2 style="margin: 0; color: #334155; font-size: 1.25rem;">导入交易记录</h2>
-          <button onclick="closeImportTradeModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #94a3b8; padding: 4px;">&times;</button>
+          <button type="button" data-sm-action="close-import-trade" onclick="closeImportTradeModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #94a3b8; padding: 4px;">&times;</button>
         </div>
         
         <!-- 内容 -->
@@ -4336,8 +4336,10 @@ function renderImportTradeModal(): string {
           <!-- 文件选择 -->
           <div style="margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid #e2e8f0;">
             <label style="display: block; margin-bottom: 8px; color: #334155; font-weight: 600;">Moomoo 导入</label>
-            <input type="file" accept=".xlsx,.xls" onchange="handleMoomooTradeImport(event)"
-                   style="width: 100%; padding: 12px; border: 2px dashed #cbd5e1; border-radius: 8px; background: #f8fafc;" />
+            <label style="display: block; cursor: pointer;">
+              <input type="file" accept=".xlsx,.xls" data-sm-change="moomoo-import" onchange="handleMoomooTradeImport(event)"
+                     style="width: 100%; padding: 12px; border: 2px dashed #cbd5e1; border-radius: 8px; background: #f8fafc; cursor: pointer;" />
+            </label>
             <p style="margin: 8px 0 0 0; color: #64748b; font-size: 0.82rem;">
               上传 Moomoo（富途）导出的<strong>历史 / 现金账户 xlsx</strong>。仅导入「全部成交」：方向、代码、成交价格（或成交价）、成交金额、成交时间、合计费用；有「成交数量」则优先。
               期权代码中行权价若为 ×1000 的长数字（如 …C40000→C40，…C5000→C5），会自动转为与本应用行情一致的紧凑码。
@@ -4345,16 +4347,20 @@ function renderImportTradeModal(): string {
           </div>
           <div style="margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid #e2e8f0;">
             <label style="display: block; margin-bottom: 8px; color: #334155; font-weight: 600;">BBAE 导入</label>
-            <input type="file" accept=".xlsx,.xls" onchange="handleBbaeTradeImport(event)"
-                   style="width: 100%; padding: 12px; border: 2px dashed #cbd5e1; border-radius: 8px; background: #f8fafc;" />
+            <label style="display: block; cursor: pointer;">
+              <input type="file" accept=".xlsx,.xls" data-sm-change="bbae-import" onchange="handleBbaeTradeImport(event)"
+                     style="width: 100%; padding: 12px; border: 2px dashed #cbd5e1; border-radius: 8px; background: #f8fafc; cursor: pointer;" />
+            </label>
             <p style="margin: 8px 0 0 0; color: #64748b; font-size: 0.82rem;">
               上传 BBAE 订单导出 xlsx（可多表）：<strong>股票</strong>表（已成、股票代码、成交价、成交数量、佣金…）；<strong>期权</strong>表的手续费为<strong>套餐外费用 + 期权监管费</strong>（不扣套餐抵扣）；仅有一列「套餐外费用加期权监管费减去套餐抵扣」时读取该格数值。
             </p>
           </div>
           <div style="margin-bottom: 8px;">
             <label style="display: block; margin-bottom: 8px; color: #334155; font-weight: 500;">本应用导出（可选）</label>
-            <input type="file" accept=".xlsx,.xls,.csv,.json" onchange="handleTradeBackupImport(event)"
-                   style="width: 100%; padding: 12px; border: 2px dashed #e2e8f0; border-radius: 8px; background: #fafafa;" />
+            <label style="display: block; cursor: pointer;">
+              <input type="file" accept=".xlsx,.xls,.csv,.json" data-sm-change="backup-import" onchange="handleTradeBackupImport(event)"
+                     style="width: 100%; padding: 12px; border: 2px dashed #e2e8f0; border-radius: 8px; background: #fafafa; cursor: pointer;" />
+            </label>
             <p style="margin: 8px 0 0 0; color: #94a3b8; font-size: 0.8rem;">优先使用应用内「导出 xlsx」生成的 <strong>交易记录.xlsx</strong>；仍支持旧版 CSV / JSON。</p>
           </div>
           
@@ -4393,10 +4399,10 @@ function renderImportTradeModal(): string {
         
         <!-- 底部按钮 -->
         <div style="display: flex; gap: 12px; padding: 16px 24px; border-top: 1px solid #e2e8f0;">
-          <button onclick="closeImportTradeModal()" style="flex: 1; padding: 12px; border: 1px solid #e2e8f0; border-radius: 6px; background: white; color: #64748b; font-weight: 500; cursor: pointer;">
+          <button type="button" data-sm-action="close-import-trade" onclick="closeImportTradeModal()" style="flex: 1; padding: 12px; border: 1px solid #e2e8f0; border-radius: 6px; background: white; color: #64748b; font-weight: 500; cursor: pointer;">
             取消
           </button>
-          <button onclick="confirmImportTrades()" ${importPreviewData.length === 0 ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : 'style="flex: 1; padding: 12px; border: none; border-radius: 6px; background: #10b981; color: white; font-weight: 600; cursor: pointer;"'} >
+          <button type="button" data-sm-action="confirm-import-trades" onclick="confirmImportTrades()" ${importPreviewData.length === 0 ? 'disabled style="opacity: 0.5; cursor: not-allowed; flex: 1; padding: 12px; border: none; border-radius: 6px; background: #10b981; color: white; font-weight: 600;"' : 'style="flex: 1; padding: 12px; border: none; border-radius: 6px; background: #10b981; color: white; font-weight: 600; cursor: pointer;"'} >
             导入 ${importPreviewData.length > 0 ? `(${importPreviewData.length} 条)` : ''}
           </button>
         </div>
@@ -5040,6 +5046,21 @@ function updateStock(symbol: string, field: string, value: string | number): voi
 }
 
 // 函数：渲染应用
+function renderModalLayer(): void {
+  let host = document.getElementById('sm-modal-layer');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'sm-modal-layer';
+    document.body.appendChild(host);
+  }
+  host.innerHTML =
+    renderTradeHistoryModal()
+    + renderOtherTradeModal()
+    + renderImportTradeModal()
+    + renderEditTradeModal()
+    + (tradePanelOpen ? renderTradeForm() : '');
+}
+
 function render(): void {
   const app = document.getElementById('app');
   if (!app) return;
@@ -5204,23 +5225,11 @@ function render(): void {
             </table>
           </div>
         `}
-        
-        <!-- 交易历史记录弹窗 -->
-        ${renderTradeHistoryModal()}
-        
-        ${renderOtherTradeModal()}
-        
-        <!-- 导入交易弹窗 -->
-        ${renderImportTradeModal()}
-        
-        <!-- 编辑交易弹窗 -->
-        ${renderEditTradeModal()}
-        
-        <!-- 交易表单弹窗 -->
-        ${tradePanelOpen ? renderTradeForm() : ''}
       </div>
     </div>
   `;
+
+  renderModalLayer();
   
   // 自动保存
   saveToStorage();
@@ -5241,9 +5250,52 @@ async function init(): Promise<void> {
   void refreshFinnhubCanonicalEquivalents();
 }
 
-void init();
+function installSmActionDelegation(): void {
+  if ((window as unknown as { __smDelegation?: boolean }).__smDelegation) return;
+  (window as unknown as { __smDelegation?: boolean }).__smDelegation = true;
 
-// 暴露全局函数供 HTML 调用
+  document.addEventListener('click', (event) => {
+    const el = (event.target as HTMLElement).closest('[data-sm-action]') as HTMLElement | null;
+    if (!el || el.hasAttribute('disabled')) return;
+    const action = el.getAttribute('data-sm-action');
+    if (!action) return;
+    switch (action) {
+      case 'open-import-trade':
+        openImportTradeModal();
+        break;
+      case 'close-import-trade':
+        closeImportTradeModal();
+        break;
+      case 'confirm-import-trades':
+        confirmImportTrades();
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+  });
+
+  document.addEventListener('change', (event) => {
+    const el = event.target as HTMLElement;
+    const action = el.getAttribute('data-sm-change');
+    if (!action) return;
+    switch (action) {
+      case 'moomoo-import':
+        handleMoomooTradeImport(event);
+        break;
+      case 'bbae-import':
+        handleBbaeTradeImport(event);
+        break;
+      case 'backup-import':
+        handleTradeBackupImport(event);
+        break;
+      default:
+        break;
+    }
+  });
+}
+
+// 暴露全局函数供 HTML 调用（须在 init 之前注册）
 (window as any).addStock = addStock;
 (window as any).removeStock = removeStock;
 (window as any).updateStock = updateStock;
@@ -5314,7 +5366,8 @@ void init();
 (window as any).handleTradeBackupImport = handleTradeBackupImport;
 (window as any).confirmImportTrades = confirmImportTrades;
 
-// 下拉搜索相关变量
+installSmActionDelegation();
+void init();
 let selectedIndex = -1;
 /** 与当前下拉内容一致，供键盘上下键/回车使用（含 Finnhub 合并结果） */
 let lastSearchSuggestions: SuggestionItem[] = [];
