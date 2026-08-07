@@ -6,14 +6,23 @@
     <title>服务导航</title>
     <link rel="stylesheet" href="/portal.css">
 </head>
-<body>
-    <header class="topbar">
-        <div>
-            <h1>服务导航</h1>
-            <p id="welcome">欢迎</p>
+<body class="has-navbar">
+    <header class="navbar">
+        <div class="navbar-inner">
+            <a class="navbar-brand" href="/">
+                <span class="navbar-logo">⚡</span>
+                <span>服务导航</span>
+            </a>
+            <div class="navbar-actions">
+                <span class="navbar-user" id="welcome">欢迎</span>
+                <button class="btn ghost" id="logout">退出登录</button>
+            </div>
         </div>
-        <button class="btn ghost" id="logout">退出登录</button>
     </header>
+    <div class="page-header">
+        <h1>我的服务</h1>
+        <p>选择一项服务进入管理或访问</p>
+    </div>
     <main class="grid" id="service-grid"></main>
     <script src="/dashboard.js"></script>
 </body>

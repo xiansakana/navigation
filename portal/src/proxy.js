@@ -70,18 +70,38 @@ function injectPortalShell(html, service) {
     if (service.injectBase !== false) {
         baseTag = '<base href="' + service.path.replace(/\/$/, '') + '/">';
     }
+    var portalCss = '<link rel="stylesheet" href="/portal.css">';
     if (service.injectBar === false) {
-        if (!baseTag) return html;
-        return html.replace('<head>', '<head>' + baseTag);
+        if (!baseTag && !portalCss) return html;
+        return html.replace('<head>', '<head>' + baseTag + portalCss);
     }
     var title = service.title || '服务';
-    var bar = '<div class="portal-topbar"><a href="/">← 服务导航</a>'
-        + (service.path.startsWith('/torn-toolbox/') ? '<a href="/torn-toolbox/">← Torn 工具箱</a>' : '')
-        + '<span>' + title + '</span></div>';
-    var style = '<style>.portal-topbar{display:flex;align-items:center;gap:16px;padding:10px 16px;background:#1a1d24;border-bottom:1px solid #2a3140;font-family:system-ui,sans-serif}.portal-topbar a{color:#7eb6ff;text-decoration:none}.portal-topbar span{color:#9aa4b2;font-size:14px}</style>';
+    var isToolbox = service.path.startsWith('/torn-toolbox/');
+    var navLinks = '';
+    if (isToolbox) {
+        navLinks = '<a class="navbar-link" href="/torn-toolbox/"><span class="label">Torn 工具箱</span></a>'
+            + '<span class="navbar-sep"></span>'
+            + '<span class="navbar-title">' + title + '</span>';
+    } else {
+        navLinks = '<span class="navbar-title">' + title + '</span>';
+    }
+    var bar = '<header class="navbar"><div class="navbar-inner">'
+        + '<a class="navbar-brand" href="/"><span class="navbar-logo">⚡</span><span>服务导航</span></a>'
+        + '<nav class="navbar-nav">' + navLinks + '</nav>'
+        + '</div></header>';
+    var bodyClass = 'has-navbar';
+    if (isToolbox) bodyClass += ' toolbox-proxied';
     return html
-        .replace('<head>', '<head>' + baseTag + style)
-        .replace(/<body([^>]*)>/, '<body$1>' + bar);
+        .replace('<head>', '<head>' + baseTag + portalCss)
+        .replace(/<body([^>]*)>/, function(match, attrs) {
+            var cls = bodyClass;
+            if (/class="([^"]*)"/.test(attrs)) {
+                attrs = attrs.replace(/class="([^"]*)"/, 'class="$1 ' + cls + '"');
+            } else {
+                attrs += ' class="' + cls + '"';
+            }
+            return '<body' + attrs + '>' + bar;
+        });
 }
 
 export async function proxyHttpRequest(service, req, res) {
