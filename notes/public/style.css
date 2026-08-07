@@ -1338,22 +1338,16 @@ body.has-navbar .notes-app {
   color: inherit;
 }
 
-/* Code language bar */
+/* Code language bar (toolbar, top-left) */
+.notes-code-lang-group.hidden { display: none; }
+
 .notes-code-lang-bar {
-  position: absolute;
-  z-index: 12;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px;
-  border-radius: var(--notes-radius-sm);
-  background: var(--notes-surface);
-  border: 1px solid var(--notes-border-strong);
-  box-shadow: var(--notes-shadow);
+  padding: 0 4px;
   font-size: 12px;
 }
-
-.notes-code-lang-bar.hidden { display: none; }
 
 .notes-code-lang-label {
   color: var(--notes-muted);

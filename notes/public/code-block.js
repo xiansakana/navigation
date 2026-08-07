@@ -37,35 +37,32 @@ export function insertCodeBlock(editor, language) {
 }
 
 /**
- * Floating language selector for active code block.
+ * Language selector shown in toolbar when cursor is in a code block.
  */
-export function setupCodeLangBar(shell, editor) {
-  const bar = document.createElement('div');
-  bar.className = 'notes-code-lang-bar hidden';
-  bar.innerHTML =
-    '<label class="notes-code-lang-label">语言</label>'
-    + '<select class="notes-code-lang-select"></select>';
-  shell.appendChild(bar);
+export function setupCodeLangBar(toolbar, editor) {
+  const group = document.createElement('div');
+  group.className = 'notes-toolbar-group notes-code-lang-group hidden';
+  group.innerHTML =
+    '<div class="notes-code-lang-bar">'
+    + '<label class="notes-code-lang-label">语言</label>'
+    + '<select class="notes-code-lang-select"></select>'
+    + '</div>'
+    + '<span class="notes-tool-sep"></span>';
+  toolbar.insertBefore(group, toolbar.firstChild);
 
-  const select = bar.querySelector('.notes-code-lang-select');
+  const select = group.querySelector('.notes-code-lang-select');
   select.innerHTML = LANGUAGES.map(function(lang) {
     return '<option value="' + lang.id + '">' + lang.label + '</option>';
   }).join('');
 
   function updateBar() {
     if (!editor.isFocused || !editor.isActive('codeBlock')) {
-      bar.classList.add('hidden');
+      group.classList.add('hidden');
       return;
     }
     const lang = editor.getAttributes('codeBlock').language || 'text';
     select.value = LANGUAGES.some(function(l) { return l.id === lang; }) ? lang : 'text';
-    const { view } = editor;
-    const { from } = view.state.selection;
-    const coords = view.coordsAtPos(from);
-    const shellRect = shell.getBoundingClientRect();
-    bar.style.top = Math.max(0, coords.top - shellRect.top + shell.scrollTop - 36) + 'px';
-    bar.style.left = Math.max(8, coords.left - shellRect.left) + 'px';
-    bar.classList.remove('hidden');
+    group.classList.remove('hidden');
   }
 
   select.addEventListener('change', function() {
@@ -76,13 +73,13 @@ export function setupCodeLangBar(shell, editor) {
   editor.on('update', updateBar);
   editor.on('blur', function() {
     setTimeout(function() {
-      if (!bar.contains(document.activeElement)) bar.classList.add('hidden');
+      if (!group.contains(document.activeElement)) group.classList.add('hidden');
     }, 120);
   });
 
   return function cleanup() {
     editor.off('selectionUpdate', updateBar);
     editor.off('update', updateBar);
-    bar.remove();
+    group.remove();
   };
 }
