@@ -1,6 +1,6 @@
 /** Parents whose direct block children can be dragged/reordered. */
 export const DRAG_PARENT_TYPES = new Set([
-  'doc', 'toggleBlock', 'blockquote', 'bulletList', 'orderedList', 'taskList'
+  'doc', 'toggleBlock', 'blockquote', 'bulletList', 'orderedList', 'taskList', 'calloutBlock'
 ]);
 
 export function getDraggableBlock(view, pos) {
@@ -38,7 +38,7 @@ export function blockDomAtPos(view, blockInfo) {
     const dom = view.nodeDOM(blockInfo.pos);
     if (dom && dom.nodeType === 1) return dom;
     if (dom?.parentElement) {
-      const hit = dom.parentElement.closest('[data-embed-block], .notes-image-wrap, .notes-toggle-block, .ProseMirror > *, li[data-type="taskItem"]');
+      const hit = dom.parentElement.closest('[data-embed-block], .notes-image-wrap, .notes-toggle-block, .notes-callout-block, .ProseMirror > *, li[data-type="taskItem"]');
       if (hit) return hit;
     }
   } catch { /* ignore */ }

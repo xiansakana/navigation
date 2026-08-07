@@ -41,3 +41,60 @@ export function computeBacklinks(notes) {
 export function getBacklinksForNote(notes, noteId) {
   return computeBacklinks(notes)[noteId] || [];
 }
+
+export function extractPlainFromContent(content) {
+  const parts = [];
+  walkPlain(content, parts);
+  return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function walkPlain(node, parts) {
+  if (!node) return;
+  if (node.type === 'text' && node.text) parts.push(node.text);
+  if (node.type === 'noteReference') parts.push(node.attrs?.title || '');
+  if (Array.isArray(node.content)) node.content.forEach(function(c) { walkPlain(c, parts); });
+}
+
+export function findRefSnippet(content, targetId) {
+  const snippets = [];
+  collectRefContexts(content, targetId, [], snippets);
+  if (!snippets.length) return '';
+  return snippets[0].slice(0, 120);
+}
+
+function collectRefContexts(nodes, targetId, path, out) {
+  if (!Array.isArray(nodes)) return;
+  nodes.forEach(function(node) {
+    if (node.type === 'noteReference' && node.attrs?.id === targetId) {
+      const ctx = path.join(' ').trim();
+      if (ctx) out.push(ctx);
+    }
+    if (node.type === 'paragraph' || node.type === 'heading') {
+      const text = inlinePlain(node.content);
+      if (text) path.push(text);
+    }
+    if (node.content) collectRefContexts(node.content, targetId, path.slice(), out);
+  });
+}
+
+function inlinePlain(nodes) {
+  if (!Array.isArray(nodes)) return '';
+  return nodes.map(function(n) {
+    if (n.type === 'text') return n.text || '';
+    if (n.type === 'noteReference') return '@' + (n.attrs?.title || '');
+    if (n.content) return inlinePlain(n.content);
+    return '';
+  }).join('');
+}
+
+export function enrichBacklinks(notes, noteId) {
+  const raw = getBacklinksForNote(notes, noteId);
+  return raw.map(function(item) {
+    const source = notes.find(function(n) { return n.id === item.id; });
+    return {
+      ...item,
+      snippet: source ? findRefSnippet(source.content, noteId) : '',
+      preview: source ? extractPlainFromContent(source.content).slice(0, 160) : ''
+    };
+  });
+}

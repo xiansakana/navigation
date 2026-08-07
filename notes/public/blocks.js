@@ -4,6 +4,7 @@ import { ToggleBlock, insertToggleBlock } from './toggle-block.js';
 import { NotesCodeBlock, insertCodeBlock, LANGUAGES } from './code-block.js';
 import { NotesImage } from './image-block.js';
 import { EmbedBlock, insertEmbedBlock } from './embed-block.js';
+import { CalloutBlock, insertCalloutBlock, CALLOUT_TYPES } from './callout-block.js';
 import { openContextMenu } from './context-menu.js';
 import {
   getDraggableBlock, listSiblingBlocks, blockDomAtPos, moveSiblingBlock
@@ -22,6 +23,7 @@ const SLASH_COMMANDS = [
   { id: 'codeBlock', label: '代码块', hint: '语法高亮代码', icon: '{ }', keywords: ['code', '代码'] },
   { id: 'image', label: '图片', hint: '上传或 URL 图片', icon: '🖼', keywords: ['image', '图片', 'photo'] },
   { id: 'embed', label: '嵌入', hint: 'iframe 网页/视频', icon: '▣', keywords: ['iframe', 'embed', '嵌入'] },
+  { id: 'callout', label: '标注', hint: 'Note/Tip/Warning 提示块', icon: '💬', keywords: ['callout', '标注', '提示', 'ts'] },
   { id: 'hr', label: '分隔线', hint: '水平分割线', icon: '—', keywords: ['divider', '分割'] },
   { id: 'noteRef', label: '块引用', hint: '链接到其他笔记', icon: '🔗', keywords: ['link', '引用', 'ref'] }
 ];
@@ -32,6 +34,7 @@ const INSERT_MENU_ITEMS = [
   { id: 'codeBlock', label: '插入代码块', icon: '{ }' },
   { id: 'image', label: '插入图片', icon: '🖼' },
   { id: 'embed', label: '插入嵌入', icon: '▣' },
+  { id: 'callout', label: '插入标注', icon: '💬' },
   { id: 'bulletList', label: '插入列表', icon: '•' },
   { id: 'toggle', label: '插入折叠块', icon: '▸' }
 ];
@@ -50,6 +53,7 @@ const BLOCK_ACTIONS = [
   { id: 'codeLang', label: '代码语言…', icon: '⌨' },
   { id: 'image', label: '插入图片', icon: '🖼' },
   { id: 'embed', label: '插入嵌入', icon: '▣' },
+  { id: 'callout', label: '转为标注', icon: '💬' },
   { id: 'divider', label: '—', icon: '' },
   { id: 'duplicate', label: '复制块', icon: '⎘' },
   { id: 'delete', label: '删除块', icon: '🗑', danger: true },
@@ -62,9 +66,26 @@ export function blockExtensions() {
     NotesCodeBlock,
     NotesImage,
     EmbedBlock,
+    CalloutBlock,
     TaskList.configure({ HTMLAttributes: { class: 'notes-task-list' } }),
     TaskItem.configure({ nested: true, HTMLAttributes: { class: 'notes-task-item' } })
   ];
+}
+
+function blockTypeIcon(node) {
+  if (!node) return '⋮⋮';
+  const name = node.type.name;
+  if (name === 'heading') return 'H' + (node.attrs.level || 1);
+  if (name === 'codeBlock') return '{ }';
+  if (name === 'blockquote') return '❝';
+  if (name === 'bulletList' || name === 'orderedList') return '•';
+  if (name === 'taskList') return '☑';
+  if (name === 'toggleBlock') return '▸';
+  if (name === 'calloutBlock') return '💬';
+  if (name === 'image') return '🖼';
+  if (name === 'embedBlock') return '▣';
+  if (name === 'horizontalRule') return '—';
+  return '¶';
 }
 
 function escapeHtml(text) {
@@ -92,8 +113,20 @@ function runBlockCommand(editor, id, opts) {
   }
   else if (id === 'image') opts?.onInsertImage?.();
   else if (id === 'embed') opts?.onInsertEmbed?.();
+  else if (id === 'callout') showCalloutPicker(editor);
   else if (id === 'codeLang') showCodeLangPicker(editor, opts);
   else if (id === 'hr') chain.setHorizontalRule().run();
+}
+
+function showCalloutPicker(editor) {
+  openContextMenu({
+    items: CALLOUT_TYPES.map(function(t) {
+      return { id: 'callout:' + t.id, label: t.label, icon: t.icon };
+    }),
+    onSelect: function(id) {
+      insertCalloutBlock(editor, id.replace(/^callout:/, ''));
+    }
+  });
 }
 
 function showCodeLangPicker(editor, opts) {
@@ -143,6 +176,10 @@ function applySlashCommand(editor, id, opts) {
     opts?.onInsertEmbed?.();
     return;
   }
+  if (id === 'callout') {
+    showCalloutPicker(editor);
+    return;
+  }
   runBlockCommand(editor, id, opts);
 }
 
@@ -188,6 +225,7 @@ export function setupBlockEditor(editor, opts) {
   const shell = opts.shell;
   let slashIdx = 0;
   let mentionIdx = 0;
+  let mentionItems = [];
   let blockMenuPos = null;
   let dragState = null;
 
@@ -215,6 +253,10 @@ export function setupBlockEditor(editor, opts) {
   const dragGhostEl = document.createElement('div');
   dragGhostEl.className = 'notes-drag-ghost hidden';
 
+  const dragTipEl = document.createElement('div');
+  dragTipEl.className = 'notes-drag-tip hidden';
+  dragTipEl.textContent = '移动到此处';
+
   shell.classList.add('notes-editor-shell');
   shell.appendChild(handleEl);
   shell.appendChild(slashEl);
@@ -222,6 +264,7 @@ export function setupBlockEditor(editor, opts) {
   shell.appendChild(blockMenuEl);
   shell.appendChild(dropLineEl);
   shell.appendChild(dragGhostEl);
+  shell.appendChild(dragTipEl);
 
   function hideSlash() { slashEl.classList.add('hidden'); }
   function hideMention() { mentionEl.classList.add('hidden'); }
@@ -232,6 +275,7 @@ export function setupBlockEditor(editor, opts) {
   function hideHandle() { handleEl.classList.add('hidden'); }
   function hideDropLine() { dropLineEl.classList.add('hidden'); }
   function hideDragGhost() { dragGhostEl.classList.add('hidden'); }
+  function hideDragTip() { dragTipEl.classList.add('hidden'); }
 
   function positionEl(el, rect, shellRect, alignRight) {
     const top = rect.top - shellRect.top + shell.scrollTop;
@@ -278,29 +322,41 @@ export function setupBlockEditor(editor, opts) {
     const filtered = q
       ? notes.filter(function(n) { return (n.title || '').toLowerCase().includes(q); })
       : notes.slice(0, 20);
-    mentionIdx = Math.min(mentionIdx, Math.max(0, filtered.length - 1));
+    const items = filtered.slice();
+    if (q && opts.onCreateNoteFromMention) {
+      items.push({ id: '__new__', title: '新建「' + (query || '').trim() + '」并引用', isNew: true });
+    }
+    mentionIdx = Math.min(mentionIdx, Math.max(0, items.length - 1));
     const list = mentionEl.querySelector('.notes-mention-list');
     list.innerHTML = '';
-    if (!filtered.length) {
+    if (!items.length) {
       list.innerHTML = '<li class="notes-slash-empty">无匹配笔记</li>';
-      return filtered;
+      return items;
     }
-    filtered.forEach(function(note, i) {
+    items.forEach(function(note, i) {
       const li = document.createElement('li');
       li.className = 'notes-mention-item' + (i === mentionIdx ? ' is-active' : '');
       li.innerHTML =
-        '<span class="notes-picker-icon">@</span>'
+        '<span class="notes-picker-icon">' + (note.isNew ? '+' : '@') + '</span>'
         + '<span class="notes-mention-body">'
         + '<span class="notes-slash-label">' + escapeHtml(note.title || '无标题') + '</span>'
-        + '<span class="notes-slash-hint">提及并链接笔记</span></span>';
+        + '<span class="notes-slash-hint">' + (note.isNew ? '创建并链接新笔记' : '提及并链接笔记') + '</span></span>';
       li.addEventListener('mousedown', function(e) {
         e.preventDefault();
+        if (note.isNew) {
+          hideMention();
+          opts.onCreateNoteFromMention((query || '').trim()).then(function(created) {
+            if (created) insertMention(editor, created, opts.insertNoteReference);
+          });
+          return;
+        }
         insertMention(editor, note, opts.insertNoteReference);
         hideMention();
       });
       list.appendChild(li);
     });
-    return filtered;
+    mentionItems = items;
+    return items;
   }
 
   function getTriggerMatch(trigger) {
@@ -479,6 +535,7 @@ export function setupBlockEditor(editor, opts) {
   function showDropLine(target) {
     if (!target || !target.rect) {
       hideDropLine();
+      hideDragTip();
       return;
     }
     const shellRect = shell.getBoundingClientRect();
@@ -487,6 +544,9 @@ export function setupBlockEditor(editor, opts) {
       : target.rect.bottom - shellRect.top + shell.scrollTop;
     dropLineEl.classList.remove('hidden');
     dropLineEl.style.top = y + 'px';
+    dragTipEl.classList.remove('hidden');
+    dragTipEl.style.top = (y - 28) + 'px';
+    dragTipEl.style.left = '24px';
   }
 
   function onPointerMove(e) {
@@ -525,6 +585,7 @@ export function setupBlockEditor(editor, opts) {
     handleEl.classList.remove('hidden');
     handleEl.dataset.blockPos = String(block.pos);
     handleEl.dataset.parentPos = String(block.parentPos);
+    handleEl.querySelector('.notes-block-grip').textContent = blockTypeIcon(block.node);
     positionEl(handleEl, rect, shellRect, false);
   }
 
@@ -543,6 +604,7 @@ export function setupBlockEditor(editor, opts) {
     dragState = null;
     hideDropLine();
     hideDragGhost();
+    hideDragTip();
     hideHandle();
     document.body.classList.remove('notes-is-dragging');
     document.removeEventListener('pointermove', onPointerMove);
@@ -666,24 +728,27 @@ export function setupBlockEditor(editor, opts) {
       return;
     }
     if (!mentionEl.classList.contains('hidden')) {
-      const notes = opts.getNotes?.() || [];
       const m = getTriggerMatch('@');
-      const q = (m ? m.query : '').trim().toLowerCase();
-      const filtered = q
-        ? notes.filter(function(n) { return (n.title || '').toLowerCase().includes(q); })
-        : notes.slice(0, 20);
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        mentionIdx = Math.min(mentionIdx + 1, filtered.length - 1);
+        mentionIdx = Math.min(mentionIdx + 1, mentionItems.length - 1);
         renderMention(m?.query || '');
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         mentionIdx = Math.max(mentionIdx - 1, 0);
         renderMention(m?.query || '');
-      } else if (e.key === 'Enter' && filtered[mentionIdx]) {
+      } else if (e.key === 'Enter' && mentionItems[mentionIdx]) {
         e.preventDefault();
-        insertMention(editor, filtered[mentionIdx], opts.insertNoteReference);
-        hideMention();
+        const picked = mentionItems[mentionIdx];
+        if (picked.isNew) {
+          hideMention();
+          opts.onCreateNoteFromMention?.((m?.query || '').trim()).then(function(created) {
+            if (created) insertMention(editor, created, opts.insertNoteReference);
+          });
+        } else {
+          insertMention(editor, picked, opts.insertNoteReference);
+          hideMention();
+        }
       } else if (e.key === 'Escape') {
         e.preventDefault();
         hideMention();
@@ -706,6 +771,7 @@ export function setupBlockEditor(editor, opts) {
     blockMenuEl.remove();
     dropLineEl.remove();
     dragGhostEl.remove();
+    dragTipEl.remove();
     shell.classList.remove('notes-editor-shell');
   };
 }
