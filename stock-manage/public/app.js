@@ -15,6 +15,12 @@ const toastErr = (msg) => window.portalToast?.error(msg) ?? window.alert(msg);
 const toastWarn = (msg) => window.portalToast?.warn(msg) ?? window.alert(msg);
 const toastOk = (msg) => window.portalToast?.success(msg) ?? window.alert(msg);
 const toastInfo = (msg) => window.portalToast?.info(msg) ?? window.alert(msg);
+const toastRefresh = (type, msg) => {
+  if (window.portalToast?.show) window.portalToast.show(msg, { type, group: 'quote-refresh' });
+  else if (type === 'error') toastErr(msg);
+  else if (type === 'warn') toastWarn(msg);
+  else toastOk(msg);
+};
 
 let state = { cash: 0, trades: [], holdings: [], summary: {}, chartSeries: [], chartSparse: [], chartExpandedFull: [], holdingsMeta: {} };
 let colVis = loadJson(LS_COL_VIS, defaultColVis());
@@ -22,6 +28,7 @@ let dashboardVisible = loadJson(LS_DASHBOARD, true);
 let fullWidth = loadJson(LS_FULL_WIDTH, false);
 let tableSort = loadJson(LS_TABLE_SORT, defaultTableSort());
 let dragSourceSymbol = null;
+let quotesRefreshBusy = false;
 let pnlStart = '';
 let pnlEnd = '';
 
@@ -685,23 +692,29 @@ $('#col-toggle-panel').addEventListener('change', (e) => {
 });
 
 async function refreshQuotes(symbol) {
+  if (quotesRefreshBusy) return;
+  quotesRefreshBusy = true;
   const btn = $('#btn-refresh');
+  const rowBtns = [...document.querySelectorAll('[data-refresh]')];
   if (btn) btn.disabled = true;
+  rowBtns.forEach((el) => { el.disabled = true; });
   try {
     const body = symbol ? { symbol } : undefined;
     const data = await api('/quotes/refresh', { method: 'POST', body });
     applyPortfolio(data);
     const r = data.refresh;
     if (r?.failed) {
-      const msg = r.errors.slice(0, 5).map((e) => `${e.symbol}: ${e.error}`).join('\n');
-      toastWarn(`已刷新 ${r.ok} 个，失败 ${r.failed} 个：${msg.replace(/\n/g, ' · ')}`);
+      const msg = r.errors.slice(0, 5).map((e) => `${e.symbol}: ${e.error}`).join(' · ');
+      toastRefresh('warn', `已刷新 ${r.ok} 个，失败 ${r.failed} 个：${msg}`);
     } else if (r?.ok) {
-      toastOk(symbol ? `已刷新 ${symbol} 报价` : `已刷新 ${r.ok} 个报价`);
+      toastRefresh('success', symbol ? `已刷新 ${symbol} 报价` : `已刷新 ${r.ok} 个报价`);
     }
   } catch (e) {
-    toastErr(e.message);
+    toastRefresh('error', e.message);
   } finally {
+    quotesRefreshBusy = false;
     if (btn) btn.disabled = false;
+    rowBtns.forEach((el) => { el.disabled = false; });
   }
 }
 

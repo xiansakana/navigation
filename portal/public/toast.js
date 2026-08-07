@@ -2,6 +2,7 @@
   var DEFAULT_DURATION = 3200;
   var host = null;
   var active = new Map();
+  var groups = new Map();
 
   function ensureHost() {
     if (host && document.body.contains(host)) return host;
@@ -17,10 +18,15 @@
     return type + '\0' + text;
   }
 
-  function dismiss(el, key) {
+  function dismiss(el, key, group) {
     if (!el || el.classList.contains('portal-toast--out')) return;
     el.classList.add('portal-toast--out');
-    if (key) active.delete(key);
+    if (key) {
+      var item = active.get(key);
+      if (item && item.group) groups.delete(item.group);
+      active.delete(key);
+    }
+    if (group) groups.delete(group);
     setTimeout(function () { el.remove(); }, 200);
   }
 
@@ -31,11 +37,21 @@
     var text = String(message == null ? '' : message).trim();
     if (!text) return;
 
+    var group = opts.group || opts.dedupeKey || '';
+    if (group) {
+      var prevGroup = groups.get(group);
+      if (prevGroup) {
+        clearTimeout(prevGroup.timer);
+        dismiss(prevGroup.el, prevGroup.key, null);
+      }
+    }
+
     var key = toastKey(type, text);
     var prev = active.get(key);
     if (prev) {
       clearTimeout(prev.timer);
       prev.timer = setTimeout(function () { dismiss(prev.el, key); }, duration);
+      if (group) groups.set(group, { el: prev.el, timer: prev.timer, key: key });
       return;
     }
 
@@ -48,7 +64,9 @@
     root.appendChild(el);
 
     var timer = setTimeout(function () { dismiss(el, key); }, duration);
-    active.set(key, { el: el, timer: timer });
+    var item = { el: el, timer: timer, group: group || null };
+    active.set(key, item);
+    if (group) groups.set(group, { el: el, timer: timer, key: key });
 
     el.addEventListener('click', function () {
       clearTimeout(timer);
@@ -68,6 +86,6 @@
 
   window.alert = function (msg) {
     if (msg == null || msg === '') return;
-    api.info(String(msg).replace(/\n+/g, ' · '));
+    api.info(String(msg).replace(/\n+/g, ' · '), { group: 'native-alert' });
   };
 })();
