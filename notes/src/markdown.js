@@ -53,8 +53,18 @@ function blockToMd(node) {
       const fence = lang && lang !== 'text' ? lang : '';
       return '```' + fence + '\n' + code + '\n```';
     }
-    case 'image':
-      return '![' + (node.attrs?.alt || '') + '](' + (node.attrs?.src || '') + ')';
+    case 'image': {
+      const alt = node.attrs?.alt || '';
+      const src = node.attrs?.src || '';
+      const w = node.attrs?.width;
+      if (w) return '![' + alt + '|w=' + w + '](' + src + ')';
+      return '![' + alt + '](' + src + ')';
+    }
+    case 'embedBlock': {
+      const src = node.attrs?.src || '';
+      const height = node.attrs?.height || 360;
+      return ':::embed ' + height + '\n' + src + '\n:::';
+    }
     case 'horizontalRule':
       return '---';
     default:
@@ -128,13 +138,32 @@ export function markdownToTiptap(md, titleById) {
       continue;
     }
 
-    const imageLine = /^!\[([^\]]*)\]\(([^)]+)\)\s*$/.exec(line);
+    const imageLine = /^!\[([^\]|]*)(?:\|w=(\d+))?\]\(([^)]+)\)\s*$/.exec(line);
     if (imageLine) {
-      blocks.push({
-        type: 'image',
-        attrs: { alt: imageLine[1], src: imageLine[2], title: null }
-      });
+      const attrs = { alt: imageLine[1], src: imageLine[3], title: null };
+      if (imageLine[2]) attrs.width = parseInt(imageLine[2], 10);
+      blocks.push({ type: 'image', attrs: attrs });
       i++;
+      continue;
+    }
+
+    const embedStart = /^:::\s*embed(?:\s+(\d+))?\s*$/.exec(line);
+    if (embedStart) {
+      const height = embedStart[1] ? parseInt(embedStart[1], 10) : 360;
+      i++;
+      const urlLines = [];
+      while (i < lines.length && !/^:::\s*$/.test(lines[i])) {
+        urlLines.push(lines[i]);
+        i++;
+      }
+      i++;
+      const src = urlLines.join('\n').trim();
+      if (src) {
+        blocks.push({
+          type: 'embedBlock',
+          attrs: { src: src, title: '', height: height }
+        });
+      }
       continue;
     }
 
