@@ -79,11 +79,17 @@ async function handleApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/company/start') {
-        try { companyMonitor.start(); return json(res, 200, { ok: true }); }
-        catch (err) { return json(res, 400, { ok: false, error: err.message }); }
+        try {
+            config.company = { ...config.company, autoStart: true };
+            saveServiceConfig('company', config);
+            companyMonitor.start();
+            return json(res, 200, { ok: true });
+        } catch (err) { return json(res, 400, { ok: false, error: err.message }); }
     }
 
     if (req.method === 'POST' && url.pathname === '/api/company/stop') {
+        config.company = { ...config.company, autoStart: false };
+        saveServiceConfig('company', config);
         companyMonitor.stop();
         return json(res, 200, { ok: true });
     }
@@ -124,7 +130,7 @@ server.listen(port, host, function() {
     var url = 'http://' + (host === '0.0.0.0' ? '127.0.0.1' : host) + ':' + port;
     console.log('Torn 公司监听已启动: ' + url);
     if (config.server?.openBrowser) openBrowser(url);
-    if (config.company?.autoStart && companyMonitor.getWatchers().length) {
+    if (config.company?.autoStart !== false && companyMonitor.getWatchers().length) {
         try { companyMonitor.start(); }
         catch (err) { console.error('公司监听自动启动失败:', err.message); }
     }
