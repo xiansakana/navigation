@@ -1,4 +1,4 @@
-import { HOLDINGS_COLUMNS, PNL_COLUMN_KEYS, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
+import { HOLDINGS_COLUMNS, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization } from './js/pnl-viz.js';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js';
 import { loadPortalContext, can, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js';
@@ -56,7 +56,6 @@ async function api(path, opts = {}) {
 }
 
 function mask(key, html) {
-  if (!pnlVisible && PNL_COLUMN_KEYS.includes(key)) return MASK;
   return colVis[key] !== false ? html : MASK;
 }
 
@@ -168,7 +167,7 @@ function renderDashboard() {
       </div>
       <div class="sm-summary-card sm-summary-card--amber">
         <div class="label">当日总盈亏</div>
-        <div class="value ${dashboardVisible && pnlVisible && dailyVal != null ? cls(dailyVal) : ''}">${dailyVal == null && dashboardVisible && pnlVisible ? '—' : maskDashboardValue(maskPnlValue(dailyVal == null ? '—' : fmtUsdSigned(dailyVal)))}</div>
+        <div class="value ${dashboardVisible && pnlVisible && dailyVal != null ? cls(dailyVal) : ''}">${maskDashboardValue(maskPnlValue(dailyDisplay))}</div>
         <div class="hint">${dailyHint}</div>
       </div>
       <div class="sm-summary-card sm-summary-card--cash">
@@ -757,7 +756,6 @@ $('#toggle-pnl-visible').addEventListener('change', (e) => {
   pnlVisible = e.target.checked;
   schedulePrefsSave({ pnlVisible });
   renderDashboard();
-  renderHoldings();
   renderPnl();
 });
 
