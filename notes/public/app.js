@@ -8,6 +8,16 @@ const $ = (id) => document.getElementById(id);
 const toastOk = (msg) => window.portalToast?.success(msg) ?? null;
 const toastErr = (msg) => window.portalToast?.error(msg) ?? window.alert(msg);
 
+async function dlgConfirm(message, opts) {
+  if (window.portalDialog?.confirm) return window.portalDialog.confirm(message, opts);
+  return window.confirm(message);
+}
+
+async function dlgPrompt(message, defaultValue, opts) {
+  if (window.portalDialog?.prompt) return window.portalDialog.prompt(message, defaultValue, opts);
+  return window.prompt(message, defaultValue);
+}
+
 let notebooks = [];
 let notes = [];
 let noteTree = [];
@@ -397,7 +407,7 @@ async function createNote(parentId) {
 
 async function deleteActiveNote() {
   if (!activeNoteId) return;
-  if (!window.confirm('确定删除这篇笔记及其全部子页面？')) return;
+  if (!await dlgConfirm('确定删除这篇笔记及其全部子页面？', { title: '删除笔记', danger: true, okText: '删除' })) return;
   await api('notes/' + activeNoteId, { method: 'DELETE' });
   activeNoteId = '';
   destroyEditor();
@@ -457,20 +467,21 @@ function pickNoteForReference() {
   const lines = candidates.slice(0, 30).map(function(n, i) {
     return (i + 1) + '. ' + (n.title || '无标题');
   }).join('\n');
-  const input = window.prompt('输入序号插入块引用：\n' + lines, '1');
-  if (input == null) return;
-  const idx = Number(input) - 1;
-  const picked = candidates[idx];
-  if (!picked) {
-    toastErr('无效序号');
-    return;
-  }
-  insertNoteReference(editor, picked.id, picked.title);
-  markDirty();
+  dlgPrompt('输入序号插入块引用：\n' + lines, '1', { title: '插入块引用' }).then(function(input) {
+    if (input == null) return;
+    const idx = Number(input) - 1;
+    const picked = candidates[idx];
+    if (!picked) {
+      toastErr('无效序号');
+      return;
+    }
+    insertNoteReference(editor, picked.id, picked.title);
+    markDirty();
+  });
 }
 
 async function addNotebook() {
-  const title = window.prompt('笔记本名称', '新笔记本');
+  const title = await dlgPrompt('输入笔记本名称', '新笔记本', { title: '新建笔记本' });
   if (title == null) return;
   const data = await api('notebooks', {
     method: 'POST',
@@ -488,7 +499,7 @@ async function addNotebook() {
 async function renameNotebook() {
   const nb = notebooks.find(function(n) { return n.id === activeNotebookId; });
   if (!nb) return;
-  const title = window.prompt('笔记本名称', nb.title);
+  const title = await dlgPrompt('输入笔记本名称', nb.title, { title: '重命名笔记本' });
   if (title == null || !title.trim()) return;
   const data = await api('notebooks/' + nb.id, {
     method: 'PATCH',
@@ -502,7 +513,7 @@ async function renameNotebook() {
 
 async function deleteNotebook() {
   if (!activeNotebookId) return;
-  if (!window.confirm('删除笔记本及其全部笔记？')) return;
+  if (!await dlgConfirm('删除笔记本及其全部笔记？', { title: '删除笔记本', danger: true, okText: '删除' })) return;
   await api('notebooks/' + activeNotebookId, { method: 'DELETE' });
   const removedId = activeNotebookId;
   notebooks = notebooks.filter(function(n) { return n.id !== removedId; });

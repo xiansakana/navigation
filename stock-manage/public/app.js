@@ -634,7 +634,10 @@ function bindTradeModalEvents() {
     if (trade) { closeModal(); openTradeModal(trade); }
   }));
   root.querySelectorAll('[data-del]').forEach((btn) => btn.addEventListener('click', async () => {
-    if (!confirm('确定删除？')) return;
+    const ok = window.portalDialog?.confirm
+      ? await window.portalDialog.confirm('确定删除这条交易记录？', { title: '删除确认', danger: true, okText: '删除' })
+      : confirm('确定删除？');
+    if (!ok) return;
     try {
       applyPortfolio(await api('/trades/' + btn.dataset.del, { method: 'DELETE' }));
       toastOk('已删除');

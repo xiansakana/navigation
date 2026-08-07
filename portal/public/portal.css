@@ -579,3 +579,102 @@ body.login-page .portal-toast-host {
         transform: translateY(0);
     }
 }
+
+/* ── Dialog ── */
+body.portal-dialog-open {
+    overflow: hidden;
+}
+
+.portal-dialog-host {
+    position: fixed;
+    inset: 0;
+    z-index: 1300;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.portal-dialog-host[hidden] {
+    display: none !important;
+}
+
+.portal-dialog-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.48);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+}
+
+.portal-dialog {
+    position: relative;
+    width: min(440px, 100%);
+    max-height: min(80vh, 640px);
+    overflow: auto;
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.28);
+    padding: 20px 20px 16px;
+    animation: portal-dialog-in .18s ease;
+}
+
+.portal-dialog-title {
+    margin: 0 0 12px;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.portal-dialog-message {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.portal-dialog-input {
+    display: block;
+    width: 100%;
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--input-bg);
+    color: var(--text);
+    font: inherit;
+}
+
+.portal-dialog-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.portal-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 18px;
+}
+
+.portal-dialog-danger {
+    background: #dc2626;
+    border-color: #dc2626;
+}
+
+.portal-dialog-danger:hover {
+    filter: brightness(1.06);
+}
+
+@keyframes portal-dialog-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
