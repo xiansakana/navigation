@@ -1,0 +1,18 @@
+# NapCat on ECS — 仅本机 + WebUI 需要外网访问 6099（登录后可收紧安全组）
+# 用法: cd /opt/napcat && NAPCAT_UID=$(id -u) NAPCAT_GID=$(id -g) docker compose up -d
+
+services:
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: napcat
+    restart: always
+    environment:
+      - NAPCAT_UID=${NAPCAT_UID:-0}
+      - NAPCAT_GID=${NAPCAT_GID:-0}
+    ports:
+      - "127.0.0.1:3000:3000"   # HTTP API，仅本机（qq-bot 调用）
+      - "127.0.0.1:3001:3001"   # WebSocket（可选）
+      - "127.0.0.1:6099:6099"   # WebUI，仅 portal :80 转发
+    volumes:
+      - ./config:/app/napcat/config
+      - ./ntqq:/app/.config/QQ

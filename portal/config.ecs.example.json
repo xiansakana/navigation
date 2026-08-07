@@ -1,0 +1,57 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 80
+  },
+  "auth": {
+    "username": "admin",
+    "password": "换成强密码",
+    "sessionSecret": "换成随机字符串"
+  },
+  "services": [
+    {
+      "id": "torn-toolbox",
+      "title": "Torn 工具箱",
+      "description": "压价助手与公司申请监听（独立进程）",
+      "type": "hub",
+      "path": "/torn-toolbox",
+      "entryPath": "/",
+      "icon": "📊"
+    },
+    {
+      "id": "torn-undercut",
+      "title": "压价助手",
+      "hidden": true,
+      "type": "proxy",
+      "path": "/torn-toolbox/undercut",
+      "entryPath": "/",
+      "internalUrl": "http://127.0.0.1:8790",
+      "adminToken": "与 config.undercut.json 的 adminToken 相同",
+      "icon": "📉"
+    },
+    {
+      "id": "torn-company",
+      "title": "公司监听",
+      "hidden": true,
+      "type": "proxy",
+      "path": "/torn-toolbox/company",
+      "entryPath": "/",
+      "internalUrl": "http://127.0.0.1:8791",
+      "adminToken": "与 config.company.json 的 adminToken 相同",
+      "icon": "🏢"
+    },
+    {
+      "id": "napcat",
+      "title": "NapCat 管理",
+      "description": "QQ 机器人 WebUI（网络配置、登录状态）",
+      "type": "proxy",
+      "path": "/napcat",
+      "entryPath": "/webui",
+      "internalUrl": "http://127.0.0.1:6099",
+      "adminToken": "NapCat WebUI token（webui.json）",
+      "injectBar": false,
+      "injectBase": false,
+      "icon": "💬"
+    }
+  ]
+}

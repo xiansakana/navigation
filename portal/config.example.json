@@ -1,0 +1,35 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8080
+  },
+  "auth": {
+    "username": "admin",
+    "password": "change-me",
+    "sessionSecret": "change-me-long-random-secret"
+  },
+  "services": [
+    {
+      "id": "torn-toolbox",
+      "title": "Torn 压价助手",
+      "description": "Bazaar / Item Market 压价监听与公司申请提醒",
+      "type": "proxy",
+      "path": "/torn-toolbox",
+      "entryPath": "/",
+      "internalUrl": "http://127.0.0.1:8790",
+      "icon": "📊"
+    },
+    {
+      "id": "napcat",
+      "title": "NapCat 管理",
+      "description": "QQ 机器人 WebUI",
+      "type": "proxy",
+      "path": "/napcat",
+      "entryPath": "/webui",
+      "internalUrl": "http://127.0.0.1:6099",
+      "adminToken": "",
+      "injectBar": false,
+      "icon": "💬"
+    }
+  ]
+}

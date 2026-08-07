@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>压价助手</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <div>
+                <h1>压价助手</h1>
+                <p class="subtitle">Bazaar / Item Market 压价监听 · 支持多账号</p>
+            </div>
+            <div class="header-status" id="global-status">就绪</div>
+        </header>
+
+        <section class="card">
+            <h2>全局设置</h2>
+            <div class="checks">
+                <label><input type="checkbox" id="notify-desktop" checked> 桌面通知</label>
+                <label><input type="checkbox" id="notify-qq" checked> QQ 通知</label>
+            </div>
+            <div class="field">
+                <label for="qq-url">QQ 推送地址</label>
+                <input type="text" id="qq-url" value="http://127.0.0.1:8787/notify">
+            </div>
+            <div class="field">
+                <label for="qq-token">QQ 推送 Token</label>
+                <input type="password" id="qq-token" placeholder="与 qq-bot notifyToken 一致">
+            </div>
+        </section>
+
+        <section class="card">
+            <div class="section-head">
+                <h2 style="margin:0">监听账号</h2>
+                <button type="button" class="btn small" id="uc-add-watcher">+ 添加账号</button>
+            </div>
+            <p class="hint">每个 Torn API Key 独立配置监听范围、指定物品与 QQ 通知方式。留空物品列表则监听该账号全部在售货物。</p>
+            <div id="uc-watchers" class="watcher-list"></div>
+            <div class="btn-row">
+                <button type="button" class="btn primary" id="uc-save-config">保存压价配置</button>
+            </div>
+            <div class="field inline">
+                <label for="uc-interval">扫描间隔（秒）</label>
+                <input type="number" id="uc-interval" value="60" min="30" max="600">
+            </div>
+            <div class="btn-row">
+                <button class="btn green" id="uc-start">开始监听</button>
+                <button class="btn red" id="uc-stop" hidden>停止</button>
+            </div>
+            <div class="status-box" id="uc-status">
+                <p><strong id="uc-status-text">已停止</strong></p>
+                <p>下次扫描：<span id="uc-next">--</span></p>
+                <p>已扫描 <span id="uc-checks">0</span> 次 · 提醒 <span id="uc-alerts">0</span> 个</p>
+                <p id="uc-message"></p>
+            </div>
+            <div class="list" id="uc-list"></div>
+        </section>
+    </div>
+    <script src="shared/watcher-ui.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "torn-toolbox-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Torn 工具箱：压价助手与公司监听独立进程",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server-undercut.js",
+    "start:undercut": "node src/server-undercut.js",
+    "start:company": "node src/server-company.js",
+    "migrate-config": "node scripts/migrate-config.mjs"
+  },
+  "dependencies": {
+    "node-notifier": "^10.0.1"
+  }
+}

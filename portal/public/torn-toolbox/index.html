@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Torn 工具箱</title>
+    <link rel="stylesheet" href="/portal.css">
+    <style>
+        .toolbox-grid { max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; display: grid; gap: 16px; }
+        .toolbox-card {
+            display: block; padding: 20px; border-radius: 12px; text-decoration: none; color: inherit;
+            background: #1a2332; border: 1px solid #2a3544; transition: border-color .15s;
+        }
+        .toolbox-card:hover { border-color: #6eb0ff; }
+        .toolbox-card h2 { margin: 0 0 8px; font-size: 20px; }
+        .toolbox-card p { margin: 0; color: #8b98a8; font-size: 14px; }
+        .toolbox-card .icon { font-size: 28px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <div>
+            <h1>Torn 工具箱</h1>
+            <p>压价助手与公司监听独立运行，互不影响</p>
+        </div>
+        <a class="btn ghost" href="/">← 服务导航</a>
+    </header>
+    <main class="toolbox-grid">
+        <a class="toolbox-card" href="/torn-toolbox/undercut/">
+            <div class="icon">📉</div>
+            <h2>压价助手</h2>
+            <p>Bazaar / Item Market 压价监听，支持多账号独立配置</p>
+        </a>
+        <a class="toolbox-card" href="/torn-toolbox/company/">
+            <div class="icon">🏢</div>
+            <h2>公司监听</h2>
+            <p>公司申请提醒，支持多账号与多种 QQ 通知方式</p>
+        </a>
+    </main>
+</body>
+</html>

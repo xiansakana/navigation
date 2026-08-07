@@ -1,0 +1,16 @@
+{
+  "napcat": {
+    "baseUrl": "http://127.0.0.1:3000",
+    "accessToken": "填写ECS上NapCat的HTTP_Token"
+  },
+  "defaultTarget": {
+    "type": "group",
+    "groupId": "263171957",
+    "atUserId": "2461298052"
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8787,
+    "notifyToken": "换成强随机字符串"
+  }
+}

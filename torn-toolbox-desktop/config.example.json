@@ -1,0 +1,53 @@
+{
+  "tornApiKey": "",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8790,
+    "openBrowser": true,
+    "adminToken": ""
+  },
+  "undercut": {
+    "intervalSeconds": 60,
+    "watchBazaar": true,
+    "watchItemMarket": true,
+    "selectedItems": []
+  },
+  "company": {
+    "intervalSeconds": 30,
+    "watchers": [
+      {
+        "id": "company-a",
+        "label": "公司 A",
+        "enabled": true,
+        "apiKey": "",
+        "notify": {
+          "desktop": true,
+          "qq": {
+            "enabled": true,
+            "targets": [
+              {
+                "id": "group-at",
+                "type": "group",
+                "groupId": "263171957",
+                "atUserId": "2461298052"
+              },
+              {
+                "id": "private-me",
+                "type": "private",
+                "userId": "123456789"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "notify": {
+    "desktop": true,
+    "qq": {
+      "enabled": true,
+      "url": "http://127.0.0.1:8787/notify",
+      "token": "change-me-to-a-long-random-string"
+    }
+  }
+}

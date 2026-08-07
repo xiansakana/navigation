@@ -1,0 +1,16 @@
+{
+  "napcat": {
+    "baseUrl": "http://127.0.0.1:3000",
+    "accessToken": ""
+  },
+  "defaultTarget": {
+    "type": "group",
+    "groupId": "123456789",
+    "atUserId": "987654321"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8787,
+    "notifyToken": "change-me-to-a-long-random-string"
+  }
+}

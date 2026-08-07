@@ -1,0 +1,6 @@
+**/node_modules/
+**/*.log
+**/config.json
+**/config.undercut.json
+**/config.company.json
+.DS_Store

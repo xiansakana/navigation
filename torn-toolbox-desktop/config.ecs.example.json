@@ -1,0 +1,50 @@
+{
+  "tornApiKey": "填写你的Torn API Key",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8790,
+    "openBrowser": false,
+    "adminToken": ""
+  },
+  "undercut": {
+    "intervalSeconds": 30,
+    "watchBazaar": true,
+    "watchItemMarket": true,
+    "autoStart": true,
+    "selectedItems": []
+  },
+  "company": {
+    "intervalSeconds": 30,
+    "autoStart": false,
+    "watchers": [
+      {
+        "id": "main-company",
+        "label": "主公司",
+        "enabled": true,
+        "apiKey": "填写你的Torn API Key",
+        "notify": {
+          "desktop": false,
+          "qq": {
+            "enabled": true,
+            "targets": [
+              {
+                "id": "group-at",
+                "type": "group",
+                "groupId": "263171957",
+                "atUserId": "2461298052"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "notify": {
+    "desktop": false,
+    "qq": {
+      "enabled": true,
+      "url": "http://127.0.0.1:8787/notify",
+      "token": "与qq-bot的server.notifyToken相同"
+    }
+  }
+}
