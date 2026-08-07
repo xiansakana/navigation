@@ -82,6 +82,7 @@ function injectPortalShell(html, service) {
     var themeBoot = '<script>(function(){try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>';
     var themeJs = '<script src="/theme.js"></script>';
     var toastJs = '<script src="/toast.js"></script>';
+    var dialogJs = '<script src="/dialog.js"></script>';
     var layoutJs = service.id === 'stock-manage' ? '<script src="/layout.js"></script>' : '';
     var themeBtn = '<button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题"><span class="navbar-theme-icon" aria-hidden="true">☀️</span><span class="label navbar-theme-label">日间</span></button>';
     var layoutBtn = service.id === 'stock-manage'
@@ -93,7 +94,7 @@ function injectPortalShell(html, service) {
     }
     var portalCss = '<link rel="stylesheet" href="/portal.css">';
     if (service.injectBar === false) {
-        var headInject = themeBoot + themeJs + toastJs + baseTag;
+        var headInject = themeBoot + themeJs + toastJs + dialogJs + baseTag;
         if (!headInject && service.id !== 'napcat') return html;
         if (headInject) html = html.replace('<head>', '<head>' + headInject);
         if (service.id === 'napcat') html = injectNapcatBackLink(html);
@@ -119,7 +120,7 @@ function injectPortalShell(html, service) {
     if (service.id === 'stock-manage') bodyClass += ' stock-proxied';
     if (service.id === 'notes') bodyClass += ' notes-proxied';
     return html
-        .replace('<head>', '<head>' + themeBoot + baseTag + portalCss + themeJs + toastJs + layoutJs)
+        .replace('<head>', '<head>' + themeBoot + baseTag + portalCss + themeJs + toastJs + dialogJs + layoutJs)
         .replace(/<body([^>]*)>/, function(match, attrs) {
             var cls = bodyClass;
             if (/class="([^"]*)"/.test(attrs)) {
