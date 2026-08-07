@@ -618,15 +618,24 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
         <div class="sm-cal-toolbar">
           <button type="button" class="btn ghost sm-btn-sm" data-cal-prev>上月</button>
           <button type="button" class="btn ghost sm-btn-sm" data-cal-next>下月</button>
-          <label>年 <select id="pnl-cal-year">${yearOpts}</select></label>
-          <label>月 <select id="pnl-cal-month">${monthOpts}</select></label>
+          <label class="sm-cal-toolbar-field">
+            <span class="sm-cal-toolbar-label">年</span>
+            <select id="pnl-cal-year">${yearOpts}</select>
+          </label>
+          <label class="sm-cal-toolbar-field">
+            <span class="sm-cal-toolbar-label">月</span>
+            <select id="pnl-cal-month">${monthOpts}</select>
+          </label>
           <button type="button" class="btn ghost sm-btn-sm" data-cal-reset>回到当月</button>
         </div>
         ${buildMonthCal(dispY, dispM, dayNet, chartExpandedFull, totalAssets, pnlStart, pnlEnd)}`;
     } else {
       calHtml = `
         <div class="sm-cal-toolbar">
-          <label>年 <select id="pnl-cal-year-only">${yearOnlyOpts}</select></label>
+          <label class="sm-cal-toolbar-field">
+            <span class="sm-cal-toolbar-label">年</span>
+            <select id="pnl-cal-year-only">${yearOnlyOpts}</select>
+          </label>
         </div>
         ${buildYearCal(yEff, dayNet, chartExpandedFull, totalAssets, pnlStart, pnlEnd)}`;
     }

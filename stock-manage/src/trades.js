@@ -329,7 +329,26 @@ export function enrichHoldings(holdings, quotes, cash, meta = {}) {
   const totalMv = stockMv + optionMv;
   const totalAssets = totalMv + cash;
   rows.forEach((r) => {
-    r.weight = totalAssets > 0 ? (r.marketValue / totalAssets) * 100 : 0;
+    r.groupKey = (() => {
+      const manual = String(m[r.symbol]?.groupWith || '').trim().toUpperCase();
+      if (manual) return manual;
+      const sym = String(r.symbol || '').trim().toUpperCase();
+      if (r.type === 'option' || isOptionSymbol(sym)) {
+        const match = sym.match(/^([A-Z]+)\d{6}[CP]/i);
+        if (match) return match[1];
+      }
+      return sym;
+    })();
+    r.groupWith = String(m[r.symbol]?.groupWith || '').trim();
+  });
+  const groupSum = new Map();
+  for (const r of rows) {
+    groupSum.set(r.groupKey, (groupSum.get(r.groupKey) ?? 0) + r.marketValue);
+  }
+  rows.forEach((r) => {
+    const gs = groupSum.get(r.groupKey) ?? r.marketValue;
+    r.groupMarketValue = gs;
+    r.weight = totalAssets > 0 ? (gs / totalAssets) * 100 : 0;
   });
   return { rows, stockMv, optionMv, totalMv, totalAssets, unrealized };
 }

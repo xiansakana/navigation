@@ -26,10 +26,6 @@
         <input type="checkbox" id="toggle-dashboard" checked>
         <span>显示看板（总资产、市值、盈亏、当日盈亏、现金）</span>
       </label>
-      <label class="sm-toggle-row">
-        <input type="checkbox" id="toggle-fullwidth">
-        <span>全宽布局</span>
-      </label>
     </div>
 
     <section class="sm-panel">
@@ -63,6 +59,7 @@
         <button type="button" id="btn-col-toggle" class="btn ghost sm-btn-sm">列数据</button>
       </div>
       <div id="col-toggle-panel" class="sm-col-panel hidden"></div>
+      <p class="sm-holdings-hint hint">同标的自动分组（期权归入正股）；可拖动代码行合并分组，点击 ↺ 恢复。点击「代码」「仓位 / 占比」表头排序。</p>
       <div class="sm-table-wrap">
         <table class="sm-table" id="holdings-table">
           <thead id="holdings-head"></thead>

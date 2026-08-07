@@ -102,6 +102,11 @@ app.put('/api/holdings-meta/:symbol', (req, res) => {
   if ('signal' in req.body) {
     next.signal = String(req.body.signal || '');
   }
+  if ('groupWith' in req.body) {
+    const v = req.body.groupWith;
+    if (v === '' || v == null) delete next.groupWith;
+    else next.groupWith = String(v).trim().toUpperCase();
+  }
   data.holdingsMeta[symbol] = next;
   store.write(data);
   sendPortfolio(res);

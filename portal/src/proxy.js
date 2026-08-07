@@ -68,7 +68,11 @@ function injectPortalShell(html, service) {
     if (!html.includes('<body')) return html;
     var themeBoot = '<script>(function(){try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>';
     var themeJs = '<script src="/theme.js"></script>';
+    var layoutJs = service.id === 'stock-manage' ? '<script src="/layout.js"></script>' : '';
     var themeBtn = '<button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题"><span class="navbar-theme-icon" aria-hidden="true">☀️</span><span class="label navbar-theme-label">日间</span></button>';
+    var layoutBtn = service.id === 'stock-manage'
+        ? '<button type="button" class="btn ghost navbar-layout-btn" aria-pressed="false" aria-label="全宽布局"><span class="label">全宽</span></button>'
+        : '';
     var baseTag = '';
     if (service.injectBase !== false) {
         baseTag = '<base href="' + service.path.replace(/\/$/, '') + '/">';
@@ -91,13 +95,13 @@ function injectPortalShell(html, service) {
     var bar = '<header class="navbar"><div class="navbar-inner">'
         + '<a class="navbar-brand" href="/"><span class="navbar-logo">⚡</span><span>服务导航</span></a>'
         + '<nav class="navbar-nav">' + navLinks + '</nav>'
-        + '<div class="navbar-actions">' + themeBtn + '</div>'
+        + '<div class="navbar-actions">' + layoutBtn + themeBtn + '</div>'
         + '</div></header>';
     var bodyClass = 'has-navbar';
     if (isToolbox) bodyClass += ' toolbox-proxied';
     if (service.id === 'stock-manage') bodyClass += ' stock-proxied';
     return html
-        .replace('<head>', '<head>' + themeBoot + baseTag + portalCss + themeJs)
+        .replace('<head>', '<head>' + themeBoot + baseTag + portalCss + themeJs + layoutJs)
         .replace(/<body([^>]*)>/, function(match, attrs) {
             var cls = bodyClass;
             if (/class="([^"]*)"/.test(attrs)) {
