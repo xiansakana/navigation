@@ -435,7 +435,7 @@ function initEditor(content) {
       Placeholder.configure({
         placeholder: function({ node }) {
           if (node.type.name === 'heading') return '标题';
-          return '输入 / 唤起块命令，或开始写作…';
+          return '输入 / 块命令，@ 提及笔记…';
         }
       }),
       NoteReference,
@@ -460,7 +460,13 @@ function initEditor(content) {
 
   blockEditorCleanup = setupBlockEditor(editor, {
     shell: $('note-editor-shell'),
-    onNoteRef: pickNoteForReference
+    onNoteRef: pickNoteForReference,
+    getNotes: function() {
+      return notes.filter(function(n) {
+        return n.notebookId === activeNotebookId && n.id !== activeNoteId;
+      });
+    },
+    insertNoteReference: insertNoteReference
   });
 
   updateToolbarState();
