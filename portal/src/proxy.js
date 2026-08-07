@@ -44,6 +44,9 @@ function rewriteLocation(location, service) {
             return prefix + loc.pathname + loc.search + loc.hash;
         }
     } catch (e) { /* ignore */ }
+    if (String(location).startsWith('/') && !String(location).startsWith('//')) {
+        return prefix + location;
+    }
     return String(location)
         .replace(/https?:\/\/127\.0\.0\.1:6099/g, prefix)
         .replace(/https?:\/\/[^/]+:6099/g, prefix);
@@ -62,6 +65,19 @@ function rewriteProxiedBody(text, service) {
             .replace(/(["'])\/app\.js/g, '$1' + prefix + '/app.js');
     }
     return out;
+}
+
+function injectSiyuanBackLink(html) {
+    var markup = '<style>'
+        + '.portal-siyuan-back{position:fixed;top:12px;left:12px;z-index:2147483646;display:inline-flex;align-items:center;padding:8px 12px;border-radius:8px;font:14px/1.4 system-ui,sans-serif;text-decoration:none;color:#e8edf5;background:rgba(15,17,21,.88);border:1px solid rgba(255,255,255,.12);box-shadow:0 4px 16px rgba(0,0,0,.25);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}'
+        + '.portal-siyuan-back:hover{background:rgba(23,27,34,.95)}'
+        + '@media (prefers-color-scheme:light){.portal-siyuan-back{color:#152033;background:rgba(255,255,255,.92);border-color:rgba(15,23,42,.12)}.portal-siyuan-back:hover{background:#fff}}'
+        + '</style>'
+        + '<a class="portal-siyuan-back" href="/">← 服务导航</a>';
+    if (!html.includes('<body')) return html;
+    return html.replace(/<body([^>]*)>/, function(match, attrs) {
+        return '<body' + attrs + '>' + markup;
+    });
 }
 
 function injectNapcatBackLink(html) {
@@ -95,9 +111,10 @@ function injectPortalShell(html, service) {
     var portalCss = '<link rel="stylesheet" href="/portal.css">';
     if (service.injectBar === false) {
         var headInject = themeBoot + themeJs + toastJs + dialogJs + baseTag;
-        if (!headInject && service.id !== 'napcat') return html;
+        if (!headInject && service.id !== 'napcat' && service.id !== 'notes') return html;
         if (headInject) html = html.replace('<head>', '<head>' + headInject);
         if (service.id === 'napcat') html = injectNapcatBackLink(html);
+        if (service.id === 'notes') html = injectSiyuanBackLink(html);
         return html;
     }
     var title = service.title || '服务';
@@ -221,6 +238,48 @@ export function findProxyService(services, pathname) {
     return matches.sort(function(a, b) { return b.path.length - a.path.length; })[0];
 }
 
+function findNotesService(services) {
+    return (services || []).find(function(service) {
+        return service.id === 'notes' && service.type === 'proxy';
+    });
+}
+
+/** SiYuan 使用根路径 /api、/ws、/stage 等，需在 portal 根路由反代 */
+var SIYUAN_ROOT_PREFIXES = [
+    '/ws',
+    '/api/',
+    '/stage/',
+    '/appearance/',
+    '/plugins/',
+    '/widgets/',
+    '/templates/',
+    '/emojis/',
+    '/snippets/',
+    '/assets/',
+    '/public/',
+    '/history/',
+    '/upload',
+    '/check-auth',
+    '/favicon.ico',
+    '/manifest.json',
+    '/manifest.webmanifest',
+    '/service-worker.js',
+    '/repo/'
+];
+
+function isSiyuanRootPath(pathname) {
+    if (pathname === '/upload') return true;
+    if (pathname === '/check-auth') return true;
+    if (pathname === '/favicon.ico') return true;
+    if (pathname === '/manifest.json' || pathname === '/manifest.webmanifest') return true;
+    if (pathname === '/service-worker.js') return true;
+    if (pathname === '/ws' || pathname.startsWith('/ws/')) return true;
+    return SIYUAN_ROOT_PREFIXES.some(function(prefix) {
+        if (prefix.endsWith('/')) return pathname.startsWith(prefix);
+        return false;
+    });
+}
+
 function findNapcatService(services) {
     return (services || []).find(function(service) {
         return service.id === 'napcat' && service.type === 'proxy';
@@ -232,6 +291,11 @@ export function resolveProxyContext(services, reqUrl) {
     var url = new URL(reqUrl, 'http://127.0.0.1');
     var service = findProxyService(services, url.pathname);
     if (service) return { service: service, proxyUrl: reqUrl };
+
+    var notes = findNotesService(services);
+    if (notes && isSiyuanRootPath(url.pathname)) {
+        return { service: notes, proxyUrl: url.pathname + url.search };
+    }
 
     var napcat = findNapcatService(services);
     if (napcat && (url.pathname === '/webui' || url.pathname.startsWith('/webui/'))) {

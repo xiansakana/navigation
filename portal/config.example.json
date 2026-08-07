@@ -34,12 +34,12 @@
     {
       "id": "notes",
       "title": "笔记",
-      "description": "块级富文本笔记，笔记本与文档管理",
+      "description": "思源笔记（SiYuan）— 块级引用、大纲、反链",
       "type": "proxy",
       "path": "/notes",
       "entryPath": "/",
-      "internalUrl": "http://127.0.0.1:5001",
-      "injectBar": true,
+      "internalUrl": "http://127.0.0.1:6806",
+      "injectBar": false,
       "injectBase": false,
       "icon": "📝"
     },
