@@ -32,6 +32,18 @@
       "icon": "📈"
     },
     {
+      "id": "notes",
+      "title": "笔记",
+      "description": "块级富文本笔记，笔记本与文档管理",
+      "type": "proxy",
+      "path": "/notes",
+      "entryPath": "/",
+      "internalUrl": "http://127.0.0.1:5001",
+      "injectBar": true,
+      "injectBase": false,
+      "icon": "📝"
+    },
+    {
       "id": "napcat",
       "title": "NapCat 管理",
       "description": "QQ 机器人 WebUI",
