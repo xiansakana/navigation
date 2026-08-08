@@ -473,6 +473,7 @@ export function canViewAdminResource(userPerms, resource) {
 export function authenticateUser(data, username, password) {
     var user = findUserByUsername(data, username);
     if (!user) return null;
+    if (!user.passwordHash || !user.salt) return null;
     if (!verifyPassword(password, user)) return null;
     return user;
 }
@@ -540,8 +541,60 @@ export function publicUser(user) {
         username: user.username,
         roleIds: user.roleIds || [],
         enabled: user.enabled !== false,
-        createdAt: user.createdAt || null
+        createdAt: user.createdAt || null,
+        oauthProviders: Object.keys(user.oauth || {})
     };
+}
+
+export function findUserByOAuth(data, provider, providerId) {
+    return (data.users || []).find(function(user) {
+        var link = (user.oauth || {})[provider];
+        return link && String(link.id) === String(providerId);
+    }) || null;
+}
+
+export function upsertOAuthUser(data, payload) {
+    var provider = payload.provider;
+    var providerId = String(payload.providerId || '');
+    if (!provider || !providerId) throw new Error('OAuth 用户信息不完整');
+
+    var existing = findUserByOAuth(data, provider, providerId);
+    if (existing) {
+        existing.oauth = existing.oauth || {};
+        existing.oauth[provider] = {
+            id: providerId,
+            login: payload.login || null,
+            email: payload.email || null,
+            name: payload.name || null
+        };
+        if (payload.email) existing.email = payload.email;
+        existing.enabled = true;
+        return existing;
+    }
+
+    var username = payload.username || (provider + ':' + providerId);
+    if (findUserByUsername(data, username)) {
+        username = provider + ':' + providerId;
+    }
+
+    var user = {
+        id: newId('usr'),
+        username: username,
+        roleIds: [payload.defaultRoleId || 'role_guest'],
+        enabled: true,
+        createdAt: new Date().toISOString(),
+        oauth: {}
+    };
+    user.oauth[provider] = {
+        id: providerId,
+        login: payload.login || null,
+        email: payload.email || null,
+        name: payload.name || null
+    };
+    if (payload.email) user.email = payload.email;
+    if (!data.users) data.users = [];
+    data.users.push(user);
+    return user;
 }
 
 export function sanitizeRbac(data) {

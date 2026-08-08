@@ -17,7 +17,9 @@
     </div>
     <div class="login-card">
         <h1>服务导航</h1>
-        <p class="subtitle">登录后管理 ECS 上的各项服务</p>
+        <p class="subtitle">密码登录，或使用 GitHub / Google 注册（默认仍为游客权限，管理员可在后台分配角色）</p>
+        <div class="oauth-buttons" id="oauth-buttons" hidden></div>
+        <p class="oauth-divider" id="oauth-divider" hidden>或</p>
         <form id="login-form">
             <label for="username">用户名</label>
             <input id="username" name="username" autocomplete="username" required>

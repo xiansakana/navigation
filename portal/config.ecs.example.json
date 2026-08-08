@@ -10,6 +10,21 @@
     "anonymousGuest": true,
     "guestUsername": "guest"
   },
+  "oauth": {
+    "defaultRoleId": "role_guest",
+    "github": {
+      "enabled": false,
+      "clientId": "",
+      "clientSecret": "",
+      "redirectUri": "http://123.56.235.12/api/oauth/github/callback"
+    },
+    "google": {
+      "enabled": false,
+      "clientId": "",
+      "clientSecret": "",
+      "redirectUri": "http://123.56.235.12/api/oauth/google/callback"
+    }
+  },
   "services": [
     {
       "id": "torn-toolbox",
