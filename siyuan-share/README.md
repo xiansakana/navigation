@@ -41,6 +41,8 @@ ECS 默认经 Portal 反代：**http://123.56.235.12/share**（管理页需 port
 
 分享链接形如：`http://123.56.235.12/share/s/xxxxxxxx`
 
+**分享链接前缀**由 Share 数据库 `site_base_url` 决定；`ecs-update` 会从 `.env` 的 `SIYUAN_SHARE_PUBLIC_URL` 自动同步（默认 `http://123.56.235.12/share`）。也可在 **http://123.56.235.12/share/admin#settings** 的「网站地址（分享链接前缀）」手动修改（须 Share 管理员）。
+
 - `data/storage/` — SQLite 与元数据
 - `data/uploads/` — 分享页资源
 

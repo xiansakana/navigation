@@ -146,15 +146,22 @@ function rewriteProxiedBody(text, service) {
             .replace(/(["'])\/app\.js/g, '$1' + prefix + '/app.js');
     }
     if (service.id === 'siyuan-share') {
-        out = rewriteShareProxiedBody(out, prefix);
+        out = rewriteShareProxiedBody(out, prefix, service.publicUrl);
     }
     return out;
 }
 
 /** 思源分享反代：绝对路径补 /share 前缀，公开链接与插件 API 响应中的 URL 一并修正 */
-function rewriteShareProxiedBody(text, prefix) {
+function rewriteShareProxiedBody(text, prefix, publicUrl) {
     var p = prefix.replace(/\/$/, '');
     if (!p) return text;
+    var out = text;
+    if (publicUrl) {
+        var pub = String(publicUrl).replace(/\/$/, '');
+        out = out
+            .replace(/https?:\/\/127\.0\.0\.1:6807(?=\/|"|\s|$)/g, pub)
+            .replace(/https?:\/\/127\.0\.0\.1(?=\/s\/|"|\s|$)/g, pub);
+    }
     var segments = [
         '/api/v1/', '/api/instances/', '/api-key/',
         '/assets/', '/uploads/', '/s/',
@@ -165,7 +172,6 @@ function rewriteShareProxiedBody(text, prefix) {
         '/login', '/register', '/forgot', '/reset', '/logout',
         '/dashboard', '/admin-home', '/admin', '/account', '/captcha', '/email-code'
     ];
-    var out = text;
     segments.forEach(function(seg) {
         var escaped = seg.replace(/\//g, '\\/');
         out = out.replace(new RegExp('(["\'`(])' + escaped, 'g'), '$1' + p + seg);
