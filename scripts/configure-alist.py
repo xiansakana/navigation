@@ -127,18 +127,10 @@ def list_storages(token):
     return data.get("content") or []
 
 
-def upsert_storage(token, payload, force_update=None):
-    """默认只创建缺失的存储，不覆盖你在后台已改过的挂载配置。"""
-    if force_update is None:
-        force_update = os.environ.get("ALIST_FORCE_STORAGE_UPDATE", "").strip() in (
-            "1", "true", "yes"
-        )
+def upsert_storage(token, payload):
     existing = {s.get("mount_path"): s for s in list_storages(token)}
     mount = payload["mount_path"]
     if mount in existing:
-        if not force_update:
-            print("storage exists, leave as-is:", mount)
-            return
         body = dict(existing[mount])
         body.update(payload)
         body["id"] = existing[mount]["id"]
@@ -157,6 +149,35 @@ def read_b2_from_piclist():
     if not b2.get("accessKeyID") or not b2.get("secretAccessKey") or not b2.get("bucketName"):
         return None
     return b2
+
+
+def apply_settings(token):
+    wanted = {
+        "site_title": "AList 网盘",
+        "announcement": "经 Portal /alist/ 访问；本地目录与 B2 图床桶已挂载。",
+        "pagination_type": "all",
+        "default_page_size": "50",
+        "allow_indexed": "false",
+        "allow_mounted_access": "true",
+        "hide_files": "/\\/README.md/i",
+    }
+    data = ensure_ok(api("GET", "/api/admin/setting/list", token), "list settings")
+    items = data if isinstance(data, list) else (data.get("content") or data or [])
+    by_key = {i.get("key"): i for i in items if isinstance(i, dict) and i.get("key")}
+    payload = []
+    for key, value in wanted.items():
+        if key not in by_key:
+            continue
+        item = dict(by_key[key])
+        if str(item.get("value")) == str(value):
+            continue
+        item["value"] = value
+        payload.append(item)
+    if not payload:
+        print("settings already up to date")
+        return
+    ensure_ok(api("POST", "/api/admin/setting/save", token, payload), "save settings")
+    print("settings updated:", ", ".join(i["key"] for i in payload))
 
 
 def resolve_admin_password():
@@ -186,7 +207,7 @@ def resolve_admin_password():
 def main():
     password = resolve_admin_password()
     token = login(password)
-    # 站点公告/分页等已在 AList sqlite 持久化；已有挂载默认也不覆盖
+    apply_settings(token)
 
     upsert_storage(
         token,
