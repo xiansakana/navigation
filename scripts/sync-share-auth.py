@@ -58,7 +58,7 @@ def main():
         return 0
 
     PORTAL_CFG.write_text(json.dumps(portal, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-    print('siyuan-share SSO credentials synced from siyuan-share/.env')
+    print('siyuan-share SSO credentials synced')
     return 0
 
 
