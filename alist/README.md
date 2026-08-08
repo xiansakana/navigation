@@ -10,7 +10,7 @@ cd /opt/navigation/alist
 bash deploy-ecs.sh
 ```
 
-首次启动后脚本会把 `data/config.json` 的 `site_url` 设为 `/alist`，并执行 `scripts/configure-alist.py`：
+首次启动后脚本会把 `data/config.json` 的 `site_url` 设为公网地址（默认 `http://123.56.235.12/alist`，可用环境变量 `ALIST_SITE_URL` 覆盖），并执行 `scripts/configure-alist.py`：
 
 - 挂载本地目录 `alist/files` → `/本地`
 - 复用 PicList 的 Backblaze B2 → `/B2图床`

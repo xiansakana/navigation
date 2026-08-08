@@ -243,6 +243,25 @@ function isPublicProxyService(service) {
     return !!(service && service.publicAccess);
 }
 
+/** AList 短链分享页/下载/公开 API/静态资源，无需 Portal 登录 */
+function isAlistPublicSharePath(pathname, method) {
+    var p = String(pathname || '');
+    var m = String(method || 'GET').toUpperCase();
+    if (p.startsWith('/alist/s/') || p.startsWith('/alist/sd/') || p.startsWith('/alist/sp/')) {
+        return true;
+    }
+    if (p.startsWith('/alist/api/public/share')) return true;
+    if ((m === 'GET' || m === 'HEAD') && (
+        p.startsWith('/alist/assets/')
+        || p.startsWith('/alist/static/')
+        || p === '/alist/favicon.ico'
+        || p === '/alist/manifest.json'
+    )) {
+        return true;
+    }
+    return false;
+}
+
 function proxyRouteOpts(req) {
     return { referer: req.headers.referer || req.headers.referrer || '' };
 }
@@ -266,9 +285,12 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
     var browserUrl = new URL(req.url, 'http://127.0.0.1');
 
     var proxySession = null;
-    if (isPublicProxyService(ctx.service)) {
+    var alistSharePublic = ctx.service.id === 'alist'
+        && isAlistPublicSharePath(browserUrl.pathname, req.method);
+    if (isPublicProxyService(ctx.service) || alistSharePublic) {
         // 无需 Portal 登录；读写限制由上游发布内核（:6808 只读模式）负责。
         // 思源 API 即使用 POST 拉取文档，不可在 Portal 层拦截 POST。
+        // AList /s/ /sd/ /sp/ 短链分享对访客开放。
     } else {
         proxySession = requireAuth(req, res);
         if (!proxySession) return true;
