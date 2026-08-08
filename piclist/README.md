@@ -63,7 +63,7 @@ ECS 默认对外端口：**http://123.56.235.12:36677**（需在安全组放行 
 
 默认通过自建插件 **`picgo-plugin-datetime-rename`** 重命名（`picgo-server` 不识别桌面版 `settings.autoRename`）。
 
-上传后文件名形如：`202608081950112.png`（`YYYYMMDDHHmmssSSS` + 扩展名）。
+上传后文件名形如：`202608081950112.png`（`YYYYMMDDHHmmss` + 毫秒百位，共 15 位数字 + 扩展名）。
 
 ```bash
 python3 scripts/sync-piclist-rename.py

@@ -1,6 +1,6 @@
 "use strict";
 
-/** PicList 自动时间戳格式：YYYYMMDDHHmmssSSS，如 202608081950112.png */
+/** PicList 时间戳：YYYYMMDDHHmmss + 毫秒百位，如 202608081950112.png（15 位） */
 function formatStamp(date) {
   const pad = (n, w) => String(n).padStart(w, "0");
   return (
@@ -10,7 +10,7 @@ function formatStamp(date) {
     pad(date.getHours(), 2) +
     pad(date.getMinutes(), 2) +
     pad(date.getSeconds(), 2) +
-    pad(date.getMilliseconds(), 3)
+    String(Math.floor(date.getMilliseconds() / 100))
   );
 }
 

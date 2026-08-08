@@ -64,7 +64,7 @@ def main():
         plugins[PLUGIN_NAME] = True
         settings["autoRename"] = False
         settings["rename"] = False
-        print("已启用", PLUGIN_NAME, "（格式: YYYYMMDDHHmmssSSS.ext）")
+        print("已启用", PLUGIN_NAME, "（格式: YYYYMMDDHHmmss + 毫秒百位，如 202608081950112.png）")
     else:
         plugins.pop(PLUGIN_NAME, None)
         print("已关闭时间戳重命名")
