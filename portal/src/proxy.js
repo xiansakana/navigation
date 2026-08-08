@@ -42,6 +42,10 @@ export function buildTargetUrl(service, reqUrl) {
         subPath = url.pathname || '/';
     }
     if (!subPath.startsWith('/')) subPath = '/' + subPath;
+    if (service.upstreamPathPrefix) {
+        var upPrefix = String(service.upstreamPathPrefix).replace(/\/$/, '');
+        subPath = subPath === '/' ? upPrefix + '/' : upPrefix + subPath;
+    }
     var target = new URL(subPath + url.search, base.origin);
     if (service.adminToken && !subPath.startsWith('/api/')) {
         target.searchParams.set('token', service.adminToken);
@@ -79,6 +83,13 @@ function rewriteLocation(location, service, userAgent) {
             if (service.id === 'napcat') {
                 return prefix + loc.pathname + stripTokenQuery(loc.search) + loc.hash;
             }
+            if (service.id === 'siyuan-publish') {
+                var pubPath = loc.pathname;
+                if (pubPath.startsWith('/publish')) {
+                    pubPath = pubPath.slice('/publish'.length) || '/';
+                }
+                return prefix + pubPath + loc.search + loc.hash;
+            }
             return prefix + loc.pathname + loc.search + loc.hash;
         }
     } catch (e) { /* ignore */ }
@@ -95,11 +106,21 @@ function rewriteLocation(location, service, userAgent) {
             var napSearch = napIdx >= 0 ? location.slice(napIdx) : '';
             return prefix + napPath + stripTokenQuery(napSearch);
         }
+        if (service.id === 'siyuan-publish' && String(location).startsWith('/publish')) {
+            var pubOnly = String(location).slice('/publish'.length) || '/';
+            return prefix + pubOnly;
+        }
         return prefix + location;
     }
-    return String(location)
+    var out = String(location)
         .replace(/https?:\/\/127\.0\.0\.1:6099/g, prefix)
         .replace(/https?:\/\/[^/]+:6099/g, prefix);
+    if (service.id === 'siyuan-publish') {
+        out = out
+            .replace(/https?:\/\/127\.0\.0\.1:6808/g, prefix)
+            .replace(/https?:\/\/[^"'\s]+:6808/g, prefix);
+    }
+    return out;
 }
 
 function rewriteProxiedBody(text, service) {
@@ -194,9 +215,9 @@ function injectPortalShell(html, service) {
     var portalCss = '<link rel="stylesheet" href="/portal.css">';
     if (service.injectBar === false) {
         var isSiyuanAuthPage = service.id === 'notes' && html.includes('id="authCode"');
-        var skipShell = service.id === 'napcat' || isSiyuanAuthPage;
+        var skipShell = service.id === 'napcat' || service.id === 'siyuan-publish' || isSiyuanAuthPage;
         var headInject = skipShell ? '' : themeBoot + themeJs + toastJs + dialogJs + baseTag;
-        if (!headInject && service.id !== 'napcat' && service.id !== 'notes') return html;
+        if (!headInject && service.id !== 'napcat' && service.id !== 'notes' && service.id !== 'siyuan-publish') return html;
         if (headInject) html = html.replace('<head>', '<head>' + headInject);
         if (service.id === 'napcat') {
             html = injectNapcatTokenShim(html, service.adminToken);

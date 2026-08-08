@@ -239,6 +239,10 @@ function isWriteMethod(method) {
     return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
 }
 
+function isPublicProxyService(service) {
+    return !!(service && service.publicAccess);
+}
+
 /** NapCat / 思源笔记需编辑权限才能进入；其余服务按查看权限 */
 function canAccessProxiedService(permissions, service) {
     if (service.id === 'napcat' || service.id === 'notes') {
@@ -257,26 +261,34 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
 
     var browserUrl = new URL(req.url, 'http://127.0.0.1');
 
-    var proxySession = requireAuth(req, res);
-    if (!proxySession) return true;
+    var proxySession = null;
+    if (isPublicProxyService(ctx.service)) {
+        if (isWriteMethod(req.method)) {
+            sendError(req, res, browserUrl, 403, '发布站为只读，不支持写入');
+            return true;
+        }
+    } else {
+        proxySession = requireAuth(req, res);
+        if (!proxySession) return true;
 
-    if (!canAccessProxiedService(proxySession.permissions, ctx.service)) {
-        var serviceTitle = ctx.service.title || ctx.service.id;
-        var hint = ctx.service.id === 'napcat'
-            ? 'NapCat 管理需编辑权限，请联系管理员分配。'
-            : ctx.service.id === 'notes'
-            ? '笔记需编辑权限，请联系管理员分配。'
-            : '如需访问，请联系管理员分配权限，或登录具备相应权限的账号。';
-        sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '无权访问该服务', {
-            title: '无权访问该服务',
-            message: '您没有访问「' + serviceTitle + '」的权限',
-            hint: hint
-        });
-        return true;
-    }
-    if (isWriteMethod(req.method) && !canEditService(proxySession.permissions, ctx.service.id)) {
-        sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '该服务为只读权限，无法修改');
-        return true;
+        if (!canAccessProxiedService(proxySession.permissions, ctx.service)) {
+            var serviceTitle = ctx.service.title || ctx.service.id;
+            var hint = ctx.service.id === 'napcat'
+                ? 'NapCat 管理需编辑权限，请联系管理员分配。'
+                : ctx.service.id === 'notes'
+                ? '笔记需编辑权限，请联系管理员分配。'
+                : '如需访问，请联系管理员分配权限，或登录具备相应权限的账号。';
+            sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '无权访问该服务', {
+                title: '无权访问该服务',
+                message: '您没有访问「' + serviceTitle + '」的权限',
+                hint: hint
+            });
+            return true;
+        }
+        if (isWriteMethod(req.method) && !canEditService(proxySession.permissions, ctx.service.id)) {
+            sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '该服务为只读权限，无法修改');
+            return true;
+        }
     }
 
     var proxyUrl = new URL(ctx.proxyUrl, 'http://127.0.0.1');
@@ -294,6 +306,14 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
         if (browserUrl.pathname === notesPrefix || browserUrl.pathname === notesPrefix + '/') {
             var notesEntry = new URL(getServiceEntryHref(ctx.service, req.headers['user-agent']), 'http://127.0.0.1');
             redirect(res, notesEntry.pathname + notesEntry.search);
+            return true;
+        }
+    }
+
+    if (ctx.service.id === 'siyuan-publish') {
+        var publishPrefix = ctx.service.path.replace(/\/$/, '');
+        if (browserUrl.pathname === publishPrefix) {
+            redirect(res, publishPrefix + '/');
             return true;
         }
     }
@@ -328,6 +348,7 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
     }
 
     var notesCanEdit = ctx.service.id === 'notes'
+        && proxySession
         && canEditService(proxySession.permissions, 'notes')
         && ctx.service.accessAuthCode;
 
@@ -443,13 +464,18 @@ var server = http.createServer(async function(req, res) {
 });
 
 server.on('upgrade', async function(req, socket, head) {
-    var ctx = resolveRequestUser(req, config);
-    if (!ctx) {
+    var proxyCtx = resolveProxyContext(config.services, req.url);
+    if (!proxyCtx) {
         socket.destroy();
         return;
     }
-    var proxyCtx = resolveProxyContext(config.services, req.url);
-    if (!proxyCtx) {
+    if (isPublicProxyService(proxyCtx.service)) {
+        req.url = proxyCtx.proxyUrl;
+        proxyWebSocket(proxyCtx.service, req, socket, head);
+        return;
+    }
+    var ctx = resolveRequestUser(req, config);
+    if (!ctx) {
         socket.destroy();
         return;
     }

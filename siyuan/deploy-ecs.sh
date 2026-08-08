@@ -37,5 +37,12 @@ else
     docker compose logs --tail 20
 fi
 
+if curl -sf -o /dev/null "http://127.0.0.1:6808/publish/"; then
+    echo "思源发布站已就绪（本机 127.0.0.1:6808，Portal /publish/）"
+else
+    echo "提示: 发布站端口 6808 未响应，请在思源 设置→发布服务 中开启"
+fi
+
 echo ""
-echo "请通过 Portal 访问: /notes/stage/build/desktop/"
+echo "编辑笔记: Portal /notes/"
+echo "公开发布: Portal /publish/ （需在思源设置中开启发布服务并标记公开笔记本）"
