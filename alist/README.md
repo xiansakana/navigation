@@ -19,11 +19,19 @@ bash deploy-ecs.sh
 
 ## 管理密码
 
+密码存在 `alist/data/data.db`（sqlite），**容器重启不会变**。  
+`data/.admin-password` 只是给运维脚本登录用的明文备份（已 gitignore），不会自动改密。
+
 ```bash
+# 查看脚本用的明文备份
 cat /opt/navigation/alist/data/.admin-password
+
+# 仅在你主动改密时执行（会同步写回 .admin-password）
+ALIST_RESET_PASSWORD=1 ALIST_ADMIN_PASSWORD='你的强密码' \
+  python3 /opt/navigation/scripts/configure-alist.py
+# 或：
 docker exec alist ./alist admin set '你的强密码'
-# 重置后重新跑配置脚本写入密码文件：
-ALIST_RESET_PASSWORD=1 python3 /opt/navigation/scripts/configure-alist.py
+echo '你的强密码' > /opt/navigation/alist/data/.admin-password
 ```
 
 ## 网盘 Token

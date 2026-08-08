@@ -180,22 +180,32 @@ def apply_settings(token):
     print("settings updated:", ", ".join(i["key"] for i in payload))
 
 
-def main():
+def resolve_admin_password():
+    """密码存在 AList sqlite 里，本身持久。脚本只读密码文件/环境变量登录，绝不因登录失败而改密。"""
     password = os.environ.get("ALIST_ADMIN_PASSWORD", "").strip()
     reset = os.environ.get("ALIST_RESET_PASSWORD", "").strip() in ("1", "true", "yes")
     if not password and PASSWORD_FILE.exists():
         password = PASSWORD_FILE.read_text(encoding="utf-8").strip()
-    if not password or reset:
+
+    if reset:
         password = password or gen_password()
         set_admin_password(password)
-    else:
-        # 尝试登录；失败则重置
-        try:
-            login(password)
-        except SystemExit:
-            password = gen_password()
-            set_admin_password(password)
+        print("admin password reset (ALIST_RESET_PASSWORD=1)")
+        return password
 
+    if not password:
+        raise SystemExit(
+            "缺少管理员密码。请任选其一：\n"
+            "  1) 把密码写入 %s\n"
+            "  2) 导出 ALIST_ADMIN_PASSWORD=...\n"
+            "  3) 仅在需要改密时: ALIST_RESET_PASSWORD=1 ALIST_ADMIN_PASSWORD=新密码 python3 %s"
+            % (PASSWORD_FILE, Path(__file__).name)
+        )
+    return password
+
+
+def main():
+    password = resolve_admin_password()
     token = login(password)
     apply_settings(token)
 

@@ -58,6 +58,6 @@ if [ -f "$ROOT/scripts/configure-alist.py" ]; then
 fi
 
 echo ""
-echo "管理密码文件: $ROOT/alist/data/.admin-password"
-echo "  docker exec alist ./alist admin set <新密码>"
+echo "管理密码持久存在 data/data.db；明文备份: $ROOT/alist/data/.admin-password"
+echo "改密请手动: ALIST_RESET_PASSWORD=1 ALIST_ADMIN_PASSWORD=... python3 scripts/configure-alist.py"
 echo "Portal 入口: http://<ECS>/alist/ （需登录且有查看权限）"
