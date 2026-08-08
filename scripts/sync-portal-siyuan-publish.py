@@ -15,7 +15,6 @@ PUBLISH_PROXY = {
     "path": "/publish",
     "entryPath": "/",
     "internalUrl": "http://127.0.0.1:6808",
-    "upstreamPathPrefix": "/publish",
     "publicAccess": True,
     "injectBar": False,
     "injectBase": False,
@@ -35,6 +34,7 @@ def main():
             continue
         merged = dict(svc)
         merged.update(PUBLISH_PROXY)
+        merged.pop("upstreamPathPrefix", None)
         if merged != svc:
             services[idx] = merged
             changed = True
