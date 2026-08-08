@@ -11,6 +11,8 @@ function pickHeaders(reqHeaders, extra, opts) {
         'content-type', 'authorization', 'x-api-key', 'accept', 'accept-language', 'cache-control',
         'cookie', 'user-agent', 'referer', 'origin',
         'range', 'if-range',
+        // AList 上传/操作依赖这些自定义头；丢掉 File-Path 会报 storage not found
+        'file-path', 'as-task', 'password', 'overwrite',
         'sec-websocket-key', 'sec-websocket-version', 'sec-websocket-extensions'
     ];
     if (options.allowEncoding) keys.push('accept-encoding');
