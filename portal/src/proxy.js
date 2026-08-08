@@ -10,6 +10,7 @@ function pickHeaders(reqHeaders, extra, opts) {
     var keys = [
         'content-type', 'authorization', 'x-api-key', 'accept', 'accept-language', 'cache-control',
         'cookie', 'user-agent', 'referer', 'origin',
+        'range', 'if-range',
         'sec-websocket-key', 'sec-websocket-version', 'sec-websocket-extensions'
     ];
     if (options.allowEncoding) keys.push('accept-encoding');
@@ -114,6 +115,10 @@ function injectSiyuanPublishShim(html, prefix) {
     return html.replace(/<head[^>]*>/i, function(m) { return m + shim; });
 }
 
+function alreadyUnderPrefix(pathname, prefix) {
+    return pathname === prefix || pathname.startsWith(prefix + '/') || pathname.startsWith(prefix + '?');
+}
+
 function rewriteLocation(location, service, userAgent) {
     if (!location) return location;
     var prefix = service.path.replace(/\/$/, '');
@@ -121,6 +126,13 @@ function rewriteLocation(location, service, userAgent) {
         var loc = new URL(location, service.internalUrl);
         var base = new URL(service.internalUrl);
         if (loc.origin === base.origin) {
+            // AList 等 site_url=/alist 时 Location 已带公开前缀，勿再叠一层
+            if (alreadyUnderPrefix(loc.pathname, prefix)) {
+                var keepSearch = service.id === 'napcat'
+                    ? stripTokenQuery(loc.search)
+                    : loc.search;
+                return loc.pathname + keepSearch + loc.hash;
+            }
             if (service.id === 'notes' && loc.pathname === '/check-auth') {
                 return prefix + loc.pathname + fixSiyuanAuthQuery(loc.search, userAgent);
             }
@@ -134,6 +146,15 @@ function rewriteLocation(location, service, userAgent) {
         }
     } catch (e) { /* ignore */ }
     if (String(location).startsWith('/') && !String(location).startsWith('//')) {
+        if (alreadyUnderPrefix(String(location), prefix)) {
+            if (service.id === 'napcat') {
+                var keepIdx = location.indexOf('?');
+                var keepPath = keepIdx >= 0 ? location.slice(0, keepIdx) : location;
+                var keepQ = keepIdx >= 0 ? location.slice(keepIdx) : '';
+                return keepPath + stripTokenQuery(keepQ);
+            }
+            return location;
+        }
         if (service.id === 'notes' && String(location).startsWith('/check-auth')) {
             var qIdx = location.indexOf('?');
             var path = qIdx >= 0 ? location.slice(0, qIdx) : location;
@@ -208,7 +229,8 @@ function injectProxiedBackLink(html, variant) {
     var positionByVariant = {
         notes: '.portal-proxied-back--notes{top:8px!important;left:172px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}',
         napcat: '.portal-proxied-back--napcat{top:8px!important;left:132px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}',
-        publish: '.portal-proxied-back--publish{top:8px!important;left:172px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}'
+        publish: '.portal-proxied-back--publish{top:8px!important;left:172px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}',
+        alist: '.portal-proxied-back--alist{top:10px!important;left:12px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}'
     };
     var positionRule = positionByVariant[variant] || positionByVariant.publish;
     var css = '<style>'
@@ -216,7 +238,7 @@ function injectProxiedBackLink(html, variant) {
         + '.portal-proxied-back:hover{background:rgba(23,27,34,.95)}'
         + '@media (prefers-color-scheme:light){.portal-proxied-back{color:#152033;background:rgba(255,255,255,.92);border-color:rgba(15,23,42,.12);box-shadow:0 4px 16px rgba(15,23,42,.12)}.portal-proxied-back:hover{background:#fff}}'
         + positionRule
-        + '@media (max-width:768px){.portal-proxied-back--notes,.portal-proxied-back--napcat,.portal-proxied-back--publish{top:auto!important;bottom:calc(12px + env(safe-area-inset-bottom,0px))!important;left:12px!important;right:auto!important;padding:8px 12px!important;font-size:14px!important;line-height:1.3!important}}'
+        + '@media (max-width:768px){.portal-proxied-back--notes,.portal-proxied-back--napcat,.portal-proxied-back--publish,.portal-proxied-back--alist{top:auto!important;bottom:calc(12px + env(safe-area-inset-bottom,0px))!important;left:12px!important;right:auto!important;padding:8px 12px!important;font-size:14px!important;line-height:1.3!important}}'
         + '</style>';
     var keeper = '<script>(function(){var c="portal-proxied-back portal-proxied-back--' + variant + '";function m(){var e=document.querySelector("."+c.split(" ")[0]);if(!e){e=document.createElement("a");e.className=c;e.href="/";e.textContent="← 服务导航";document.body.appendChild(e)}}m();new MutationObserver(m).observe(document.documentElement,{childList:true,subtree:true})})();</script>';
     if (html.includes('</head>')) html = html.replace('</head>', css + '</head>');
@@ -276,9 +298,11 @@ function injectPortalShell(html, service) {
     var portalCss = '<link rel="stylesheet" href="/portal.css">';
     if (service.injectBar === false) {
         var isSiyuanAuthPage = service.id === 'notes' && html.includes('id="authCode"');
-        var skipShell = service.id === 'napcat' || service.id === 'siyuan-publish' || isSiyuanAuthPage;
+        var skipShell = service.id === 'napcat' || service.id === 'siyuan-publish'
+            || service.id === 'alist' || isSiyuanAuthPage;
         var headInject = skipShell ? '' : themeBoot + themeJs + toastJs + dialogJs + baseTag;
-        if (!headInject && service.id !== 'napcat' && service.id !== 'notes' && service.id !== 'siyuan-publish') return html;
+        if (!headInject && service.id !== 'napcat' && service.id !== 'notes'
+            && service.id !== 'siyuan-publish' && service.id !== 'alist') return html;
         if (headInject) html = html.replace('<head>', '<head>' + headInject);
         if (service.id === 'napcat') {
             html = injectNapcatTokenShim(html, service.adminToken, service.path);
@@ -286,6 +310,7 @@ function injectPortalShell(html, service) {
         }
         if (service.id === 'notes' && !isSiyuanAuthPage) html = injectProxiedBackLink(html, 'notes');
         if (service.id === 'siyuan-publish') html = injectProxiedBackLink(html, 'publish');
+        if (service.id === 'alist') html = injectProxiedBackLink(html, 'alist');
         return html;
     }
     var title = service.title || '服务';
