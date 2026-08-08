@@ -6,12 +6,14 @@ import secrets
 import string
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ALIST_BASE = os.environ.get("ALIST_BASE", "http://127.0.0.1:5244").rstrip("/")
+# site_url=/alist 时管理 API 在 /alist/api/*（直连 :5244 也走此前缀）
+ALIST_BASE = os.environ.get("ALIST_BASE", "http://127.0.0.1:5244/alist").rstrip("/")
 PICLIST_CFG = Path(os.environ.get("PICLIST_CONFIG", str(ROOT / "piclist" / "data" / "config.json")))
 PASSWORD_FILE = Path(os.environ.get("ALIST_PASSWORD_FILE", str(ROOT / "alist" / "data" / ".admin-password")))
 
@@ -28,13 +30,21 @@ def api(method, path, token=None, body=None):
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
         raw = e.read().decode("utf-8", errors="replace")
         try:
             return json.loads(raw)
-        except json.JSONDecodeError:
+        except Exception:
             raise SystemExit("AList API %s %s -> HTTP %s: %s" % (method, path, e.code, raw[:300]))
+    except urllib.error.URLError as e:
+        raise SystemExit("AList API %s %s unreachable: %s" % (method, path, e))
+    if not raw.strip():
+        raise SystemExit("AList API %s %s returned empty body (check ALIST_BASE=%s)" % (method, path, ALIST_BASE))
+    try:
+        return json.loads(raw)
+    except Exception:
+        raise SystemExit("AList API %s %s bad JSON: %s" % (method, path, raw[:300]))
 
 
 def ensure_ok(resp, what):
@@ -64,6 +74,7 @@ def set_admin_password(password):
     except OSError:
         pass
     print("admin password written to", PASSWORD_FILE)
+    time.sleep(1)
 
 
 def login(password):
