@@ -16,6 +16,43 @@ ROOT = Path(__file__).resolve().parents[1]
 ALIST_BASE = os.environ.get("ALIST_BASE", "http://127.0.0.1:5244/alist").rstrip("/")
 PICLIST_CFG = Path(os.environ.get("PICLIST_CONFIG", str(ROOT / "piclist" / "data" / "config.json")))
 PASSWORD_FILE = Path(os.environ.get("ALIST_PASSWORD_FILE", str(ROOT / "alist" / "data" / ".admin-password")))
+TOKENS_ENV = Path(os.environ.get("ALIST_TOKENS_ENV", str(ROOT / "alist" / "tokens.env")))
+
+
+def load_env_file(path):
+    out = {}
+    if not path.exists():
+        return out
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        out[key.strip()] = val.strip().strip('"').strip("'")
+    return out
+
+
+def env_get(tokens, key, default=""):
+    return (os.environ.get(key) or tokens.get(key) or default).strip()
+
+
+def storage_base(mount_path, order, remark, driver, addition, webdav_policy="302_redirect"):
+    return {
+        "mount_path": mount_path,
+        "order": order,
+        "remark": remark,
+        "cache_expiration": 30,
+        "web_proxy": False,
+        "webdav_policy": webdav_policy,
+        "down_proxy_url": "",
+        "down_proxy_sign": True,
+        "extract_folder": "front",
+        "enable_sign": False,
+        "driver": driver,
+        "order_by": "name",
+        "order_direction": "asc",
+        "addition": json.dumps(addition, ensure_ascii=False),
+    }
 
 
 def api(method, path, token=None, body=None):
@@ -232,6 +269,152 @@ def main():
         )
     else:
         print("skip B2: piclist B2 credentials not found in", PICLIST_CFG)
+
+    tokens = load_env_file(TOKENS_ENV)
+    skipped = []
+
+    ali = env_get(tokens, "ALIYUN_REFRESH_TOKEN")
+    if ali:
+        upsert_storage(
+            token,
+            storage_base(
+                "/阿里云盘",
+                10,
+                "阿里云盘 Open",
+                "AliyundriveOpen",
+                {
+                    "drive_type": "default",
+                    "root_folder_id": "root",
+                    "refresh_token": ali,
+                    "order_by": "",
+                    "order_direction": "ASC",
+                    "oauth_token_url": "https://api.alistgo.com/alist/ali_open/token",
+                    "client_id": env_get(tokens, "ALIYUN_CLIENT_ID"),
+                    "client_secret": env_get(tokens, "ALIYUN_CLIENT_SECRET"),
+                    "remove_way": "trash",
+                    "rapid_upload": True,
+                    "internal_upload": False,
+                    "livp_download_format": "jpeg",
+                },
+            ),
+        )
+    else:
+        skipped.append("阿里云盘(ALIYUN_REFRESH_TOKEN)")
+
+    baidu = env_get(tokens, "BAIDU_REFRESH_TOKEN")
+    if baidu:
+        upsert_storage(
+            token,
+            storage_base(
+                "/百度网盘",
+                11,
+                "百度网盘",
+                "BaiduNetdisk",
+                {
+                    "refresh_token": baidu,
+                    "root_folder_path": "/",
+                    "order_by": "name",
+                    "order_direction": "asc",
+                    "download_api": "official",
+                    "client_id": env_get(
+                        tokens, "BAIDU_CLIENT_ID", "hq9yQ9w9kR4YHj1kyYafLygVocobh7Sf"
+                    ),
+                    "client_secret": env_get(
+                        tokens, "BAIDU_CLIENT_SECRET", "YH2VpZcFJHYNnV6vLfHQXDBhcE7ZChyE"
+                    ),
+                    "custom_crack_ua": "netdisk",
+                    "upload_thread": "3",
+                    "use_dynamic_upload_api": True,
+                },
+                webdav_policy="native_proxy",
+            ),
+        )
+    else:
+        skipped.append("百度网盘(BAIDU_REFRESH_TOKEN)")
+
+    od = env_get(tokens, "ONEDRIVE_REFRESH_TOKEN")
+    od_id = env_get(tokens, "ONEDRIVE_CLIENT_ID")
+    od_sec = env_get(tokens, "ONEDRIVE_CLIENT_SECRET")
+    if od and od_id and od_sec:
+        upsert_storage(
+            token,
+            storage_base(
+                "/OneDrive",
+                12,
+                "OneDrive",
+                "Onedrive",
+                {
+                    "root_folder_path": "/",
+                    "region": env_get(tokens, "ONEDRIVE_REGION", "global"),
+                    "is_sharepoint": False,
+                    "client_id": od_id,
+                    "client_secret": od_sec,
+                    "redirect_uri": env_get(
+                        tokens, "ONEDRIVE_REDIRECT_URI", "https://alistgo.com/tool/onedrive/callback"
+                    ),
+                    "refresh_token": od,
+                    "site_id": "",
+                    "chunk_size": 5,
+                    "custom_host": "",
+                },
+            ),
+        )
+    else:
+        skipped.append("OneDrive(ONEDRIVE_REFRESH_TOKEN+CLIENT_ID+SECRET)")
+
+    gdrive = env_get(tokens, "GOOGLE_REFRESH_TOKEN")
+    if gdrive:
+        upsert_storage(
+            token,
+            storage_base(
+                "/GoogleDrive",
+                13,
+                "Google Drive",
+                "GoogleDrive",
+                {
+                    "root_folder_id": "root",
+                    "refresh_token": gdrive,
+                    "order_by": "",
+                    "order_direction": "asc",
+                    "client_id": env_get(
+                        tokens,
+                        "GOOGLE_CLIENT_ID",
+                        "202264815644.apps.googleusercontent.com",
+                    ),
+                    "client_secret": env_get(
+                        tokens, "GOOGLE_CLIENT_SECRET", "X4Z3ca8xfWDb1Voo-F9a7ZxJ"
+                    ),
+                    "chunk_size": 5,
+                },
+                webdav_policy="native_proxy",
+            ),
+        )
+    else:
+        skipped.append("GoogleDrive(GOOGLE_REFRESH_TOKEN)")
+
+    open115 = env_get(tokens, "OPEN115_REFRESH_TOKEN")
+    if open115:
+        upsert_storage(
+            token,
+            storage_base(
+                "/115",
+                14,
+                "115 开放平台",
+                "115 Open",
+                {
+                    "root_folder_id": "0",
+                    "refresh_token": open115,
+                    "order_by": "file_name",
+                    "order_direction": "asc",
+                    "limit_rate": 1,
+                },
+            ),
+        )
+    else:
+        skipped.append("115(OPEN115_REFRESH_TOKEN)")
+
+    if skipped:
+        print("skip (fill alist/tokens.env):", ", ".join(skipped))
 
     ensure_ok(api("POST", "/api/admin/storage/load_all", token), "load_all")
     storages = list_storages(token)
