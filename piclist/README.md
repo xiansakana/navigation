@@ -59,6 +59,21 @@ ECS 默认对外端口：**http://123.56.235.12:36677**（需在安全组放行 
 
 `assets.saoyu.fun` 需在 Cloudflare 配置 SSL **完全（严格）** 与 URL 重写规则，否则外链可能 521/404（见 Hexo 文章《图床使用方案》）。
 
+## 文件名（时间戳）
+
+默认开启 **自动时间戳命名**（`settings.autoRename: true`），上传后文件名形如 `202508082014371.png`（格式 `YYYYMMDDHHmmssSSS` + 原扩展名）。
+
+```bash
+python3 scripts/sync-piclist-rename.py
+cd piclist && docker compose restart
+```
+
+自定义格式（高级重命名）：
+
+```bash
+PICLIST_RENAME_FORMAT='{Y}{m}{d}-{h}{i}{s}-{ms}-{str-3}' python3 scripts/sync-piclist-rename.py
+```
+
 ## 环境变量（`.env`）
 
 | 变量 | 默认 | 说明 |
