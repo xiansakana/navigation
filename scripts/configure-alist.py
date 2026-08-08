@@ -51,8 +51,9 @@ def gen_password(n=20):
 def set_admin_password(password):
     r = subprocess.run(
         ["docker", "exec", "alist", "./alist", "admin", "set", password],
-        capture_output=True,
-        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
     )
     if r.returncode != 0:
         raise SystemExit("set admin password failed: %s%s" % (r.stdout, r.stderr))
