@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-"""Fix portal torn-toolbox: hub + undercut/company proxy services (local or ECS)."""
+"""Fix portal torn-toolbox: hub + undercut/company proxy services (local or ECS).
+
+为何需要本脚本
+--------------
+portal/config.json 在 .gitignore 中，git pull 不会更新它。历史上 torn-toolbox 曾是
+直连 :8790 的 proxy；迁移为 hub 后，ECS 上的旧 config 会一直保留，直到被本脚本修正。
+
+常见复发原因
+------------
+1. ecs-deploy-from-local.ps1 scp 整目录，用本机旧 config.json 覆盖 ECS
+2. 仅 git pull + 重启 portal，未运行本脚本
+3. 从旧仓库 migrate-ecs-from-torn-scripts.sh 复制了 legacy config
+
+ecs-update.sh 在每次 portal 更新时会自动运行本脚本。
+"""
 import json
 import sys
 from pathlib import Path
