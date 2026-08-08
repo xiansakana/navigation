@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """在 ECS 上写入 PicList B2 凭证与 HTTP 密钥（勿把密钥提交 Git）。"""
-from __future__ import annotations
-
 import json
 import os
 import re
