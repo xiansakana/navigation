@@ -2,11 +2,12 @@
  * Portal 统一路由：请求分流优先级
  *
  * 1. Portal 自有 API（/api/oauth、/api/me、/api/admin 等）— 绝不反代
- * 2. 前缀反代（/stock-manage、/notes、/napcat、/torn-toolbox/...）
- * 3. 思源根路径（/api/{siyuan-ns}、/ws、/stage/ 等）
- * 4. NapCat 根路径（/webui、/api/{napcat-ns}，非思源且非 Portal 保留）
+ * 2. 前缀反代（/stock-manage、/notes、/napcat、/publish、/torn-toolbox/...）
+ * 3. NapCat 根路径（/webui、/plugin、/files、/api/{napcat-ns}；Referer=/napcat 时未知 /api 也进 NapCat）
+ * 4. 思源根路径 + Referer=/publish → siyuan-publish
+ * 5. 思源根路径（/api/{siyuan-ns}、/ws、/stage/ 等）→ notes
  *
- * 未知 /api/* 返回 not-found，避免误打到 NapCat。
+ * 未知 /api/*（无 NapCat Referer）返回 not-found，避免误吞。
  */
 
 function isMobileUserAgent(userAgent) {
@@ -58,8 +59,17 @@ export var NAPCAT_API_NAMESPACES = new Set([
     'Plugin',
     'Mirror',
     'NapCatConfig',
-    'test'
+    'test',
+    // WebUI 终端：WS /api/ws/terminal（非思源 /ws）
+    'ws'
 ]);
+
+/** NapCat 非 /api 根路径（WebUI 以绝对路径请求，需改写到 /napcat 前缀） */
+export var NAPCAT_ROOT_PREFIXES = [
+    '/webui',
+    '/plugin',
+    '/files'
+];
 
 /** 思源非 /api 根路径（块编辑器、静态资源、WebSocket 等） */
 export var SIYUAN_ROOT_PREFIXES = [
@@ -121,6 +131,24 @@ export function isNapcatApiPath(pathname) {
     return ns != null && NAPCAT_API_NAMESPACES.has(ns);
 }
 
+export function isNapcatRootPath(pathname) {
+    if (isNapcatApiPath(pathname)) return true;
+    return NAPCAT_ROOT_PREFIXES.some(function(prefix) {
+        return pathname === prefix || pathname.startsWith(prefix + '/');
+    });
+}
+
+function refererFromService(referer, servicePath) {
+    if (!referer || !servicePath) return false;
+    try {
+        var ref = new URL(referer, 'http://127.0.0.1');
+        var prefix = servicePath.replace(/\/$/, '');
+        return ref.pathname === prefix || ref.pathname.startsWith(prefix + '/');
+    } catch (e) {
+        return String(referer).indexOf(servicePath) >= 0;
+    }
+}
+
 /** Portal 自有 HTTP API（method + path）；新增接口只需在此登记 */
 export function isPortalApi(pathname, method) {
     if (pathname === '/api/oauth/providers' && method === 'GET') return true;
@@ -163,20 +191,11 @@ function findPublishService(services) {
     });
 }
 
-function refererFromPublish(referer, publishPath) {
-    if (!referer || !publishPath) return false;
-    try {
-        var ref = new URL(referer, 'http://127.0.0.1');
-        var prefix = publishPath.replace(/\/$/, '');
-        return ref.pathname === prefix || ref.pathname.startsWith(prefix + '/');
-    } catch (e) {
-        return String(referer).indexOf(publishPath) >= 0;
-    }
-}
-
 /**
  * 解析反代目标。仅处理需转发到上游的请求；Portal API 应在上层已拦截。
- * @param {{ referer?: string }} [opts] 可选 Referer，用于发布站页面发起的根路径 /api/* 回退到 siyuan-publish
+ * @param {{ referer?: string }} [opts] 可选 Referer：
+ *   - /publish/ 页面发起的思源根路径 → siyuan-publish
+ *   - /napcat/ 页面发起的 NapCat 根路径 → napcat（兜底）
  * @returns {{ service: object, proxyUrl: string } | null}
  */
 export function resolveProxyContext(services, reqUrl, opts) {
@@ -191,17 +210,21 @@ export function resolveProxyContext(services, reqUrl, opts) {
     if (service) return { service: service, proxyUrl: reqUrl };
 
     var napcat = findNapcatService(services);
-    if (napcat && (url.pathname === '/webui' || url.pathname.startsWith('/webui/'))) {
-        var webuiPrefix = napcat.path.replace(/\/$/, '');
-        return { service: napcat, proxyUrl: webuiPrefix + url.pathname + url.search };
+    if (napcat && isNapcatRootPath(url.pathname)) {
+        var napPrefix = napcat.path.replace(/\/$/, '');
+        return { service: napcat, proxyUrl: napPrefix + url.pathname + url.search };
     }
-    if (napcat && isNapcatApiPath(url.pathname)) {
-        var apiPrefix = napcat.path.replace(/\/$/, '');
-        return { service: napcat, proxyUrl: apiPrefix + url.pathname + url.search };
+    // 未知 /api/* 但来自 NapCat 页面：仍转发，避免 WebUI 新增命名空间再次 404
+    if (napcat
+        && url.pathname.startsWith('/api/')
+        && !isSiyuanApiPath(url.pathname)
+        && refererFromService(opts.referer, napcat.path)) {
+        var napApiPrefix = napcat.path.replace(/\/$/, '');
+        return { service: napcat, proxyUrl: napApiPrefix + url.pathname + url.search };
     }
 
     var publish = findPublishService(services);
-    if (publish && isSiyuanRootPath(url.pathname) && refererFromPublish(opts.referer, publish.path)) {
+    if (publish && isSiyuanRootPath(url.pathname) && refererFromService(opts.referer, publish.path)) {
         var pubPrefix = publish.path.replace(/\/$/, '');
         return { service: publish, proxyUrl: pubPrefix + url.pathname + url.search };
     }
