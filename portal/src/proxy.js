@@ -2,13 +2,16 @@ import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 
-function pickHeaders(reqHeaders, extra) {
-    var out = {};
-    [
+function pickHeaders(reqHeaders, extra, opts) {
+    var options = opts || {};
+    var keys = [
         'content-type', 'authorization', 'accept', 'accept-language', 'cache-control',
         'cookie', 'user-agent', 'referer', 'origin',
         'sec-websocket-key', 'sec-websocket-version', 'sec-websocket-extensions'
-    ].forEach(function(key) {
+    ];
+    if (options.allowEncoding) keys.push('accept-encoding');
+    var out = {};
+    keys.forEach(function(key) {
         var val = reqHeaders[key];
         if (val) out[key] = val;
     });
@@ -37,8 +40,11 @@ export function buildTargetUrl(service, reqUrl) {
     }
     if (!subPath.startsWith('/')) subPath = '/' + subPath;
     var target = new URL(subPath + url.search, base.origin);
-    if (service.adminToken && !subPath.startsWith('/api/')) {
-        target.searchParams.set('token', service.adminToken);
+    if (service.adminToken) {
+        var skipApi = subPath.startsWith('/api/') && service.id !== 'napcat';
+        if (!skipApi) {
+            target.searchParams.set('token', service.adminToken);
+        }
     }
     return target;
 }
@@ -58,12 +64,21 @@ function siyuanEntryPath(userAgent) {
         : '/stage/build/desktop/';
 }
 
+export { siyuanEntryPath };
+
 function fixSiyuanAuthQuery(search, userAgent) {
     var params = new URLSearchParams(search || '');
     var to = params.get('to');
     if (!to || to === '/') {
         params.set('to', siyuanEntryPath(userAgent));
     }
+    var q = params.toString();
+    return q ? '?' + q : '';
+}
+
+function stripTokenQuery(search) {
+    var params = new URLSearchParams(search || '');
+    params.delete('token');
     var q = params.toString();
     return q ? '?' + q : '';
 }
@@ -78,6 +93,9 @@ function rewriteLocation(location, service, userAgent) {
             if (service.id === 'notes' && loc.pathname === '/check-auth') {
                 return prefix + loc.pathname + fixSiyuanAuthQuery(loc.search, userAgent);
             }
+            if (service.id === 'napcat') {
+                return prefix + loc.pathname + stripTokenQuery(loc.search) + loc.hash;
+            }
             if (service.id === 'siyuan-share') {
                 return prefix + loc.pathname + loc.search + loc.hash;
             }
@@ -90,6 +108,12 @@ function rewriteLocation(location, service, userAgent) {
             var path = qIdx >= 0 ? location.slice(0, qIdx) : location;
             var search = qIdx >= 0 ? location.slice(qIdx) : '';
             return prefix + path + fixSiyuanAuthQuery(search, userAgent);
+        }
+        if (service.id === 'napcat') {
+            var napIdx = location.indexOf('?');
+            var napPath = napIdx >= 0 ? location.slice(0, napIdx) : location;
+            var napSearch = napIdx >= 0 ? location.slice(napIdx) : '';
+            return prefix + napPath + stripTokenQuery(napSearch);
         }
         return prefix + location;
     }
@@ -109,7 +133,11 @@ function rewriteProxiedBody(text, service) {
         out = out
             .replace(/basename:"\/webui\/"/g, 'basename:"' + webuiBase + '"')
             .replace(/basename:'\/webui\/'/g, "basename:'" + webuiBase + "'")
-            .replace(/const e="\/webui\/"/g, 'const e="' + webuiBase + '"');
+            .replace(/const e="\/webui\/"/g, 'const e="' + webuiBase + '"')
+            .replace(/([?&])token=[^&"'`\s)]+/g, '$1')
+            .replace(/\?&/g, '?')
+            .replace(/\?(?=[#'"`\s])/g, '')
+            .replace(/&(?=[#'"`\s])/g, '');
     }
     if (prefix.startsWith('/torn-toolbox/')) {
         out = out
@@ -173,6 +201,14 @@ function ensureViewportMeta(html) {
     return tag + html;
 }
 
+function injectNapcatTokenShim(html, token) {
+    if (!token || !html.includes('<head')) return html;
+    var shim = '<script>(function(){var t=' + JSON.stringify(token)
+        + ';var g=URLSearchParams.prototype.get;URLSearchParams.prototype.get=function(k){'
+        + 'if(k==="token")return g.call(this,k)||t;return g.call(this,k);};})();</script>';
+    return html.replace(/<head[^>]*>/i, function(m) { return m + shim; });
+}
+
 function injectPortalShell(html, service) {
     if (!html.includes('<body')) return html;
     html = ensureViewportMeta(html);
@@ -196,7 +232,10 @@ function injectPortalShell(html, service) {
         var headInject = skipShell ? '' : themeBoot + themeJs + toastJs + dialogJs + baseTag;
         if (!headInject && service.id !== 'napcat' && service.id !== 'notes') return html;
         if (headInject) html = html.replace('<head>', '<head>' + headInject);
-        if (service.id === 'napcat') html = injectProxiedBackLink(html, 'napcat');
+        if (service.id === 'napcat') {
+            html = injectNapcatTokenShim(html, service.adminToken);
+            html = injectProxiedBackLink(html, 'napcat');
+        }
         if (service.id === 'notes' && !isSiyuanAuthPage) html = injectProxiedBackLink(html, 'notes');
         if (service.id === 'siyuan-share') html = injectProxiedBackLink(html, 'share');
         return html;
@@ -233,15 +272,24 @@ function injectPortalShell(html, service) {
         });
 }
 
+function shouldPipeJsonResponse(service, reqUrl) {
+    if (service.id !== 'notes') return false;
+    var url = new URL(reqUrl, 'http://127.0.0.1');
+    if (url.pathname.startsWith('/api/')) return true;
+    var prefix = service.path.replace(/\/$/, '');
+    return url.pathname.startsWith(prefix + '/api/');
+}
+
 export async function proxyHttpRequest(service, req, res) {
     var target = buildTargetUrl(service, req.url);
     var lib = target.protocol === 'https:' ? https : http;
     var body = req.method === 'GET' || req.method === 'HEAD' ? null : await readBody(req);
+    var pipeJson = shouldPipeJsonResponse(service, req.url);
 
     await new Promise(function(resolve) {
         var upstream = lib.request(target, {
             method: req.method,
-            headers: pickHeaders(req.headers, { host: target.host })
+            headers: pickHeaders(req.headers, { host: target.host }, { allowEncoding: pipeJson })
         }, function(upstreamRes) {
             var headers = Object.assign({}, upstreamRes.headers);
             delete headers['content-security-policy'];
@@ -251,7 +299,8 @@ export async function proxyHttpRequest(service, req, res) {
             var ctype = String(upstreamRes.headers['content-type'] || '');
             var isHtml = ctype.includes('text/html') && upstreamRes.statusCode === 200;
             var isJs = (ctype.includes('javascript') || ctype.includes('text/js')) && upstreamRes.statusCode === 200;
-            var isJson = ctype.includes('json') && upstreamRes.statusCode === 200;
+            var isJson = ctype.includes('json') && upstreamRes.statusCode === 200
+                && !pipeJson;
             var isStream = ctype.includes('text/event-stream');
 
             if (isStream) {
