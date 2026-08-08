@@ -140,11 +140,30 @@ function findNapcatService(services) {
     });
 }
 
+function findPublishService(services) {
+    return (services || []).find(function(service) {
+        return service.id === 'siyuan-publish' && service.type === 'proxy';
+    });
+}
+
+function refererFromPublish(referer, publishPath) {
+    if (!referer || !publishPath) return false;
+    try {
+        var ref = new URL(referer, 'http://127.0.0.1');
+        var prefix = publishPath.replace(/\/$/, '');
+        return ref.pathname === prefix || ref.pathname.startsWith(prefix + '/');
+    } catch (e) {
+        return String(referer).indexOf(publishPath) >= 0;
+    }
+}
+
 /**
  * 解析反代目标。仅处理需转发到上游的请求；Portal API 应在上层已拦截。
+ * @param {{ referer?: string }} [opts] 可选 Referer，用于发布站页面发起的根路径 /api/* 回退到 siyuan-publish
  * @returns {{ service: object, proxyUrl: string } | null}
  */
-export function resolveProxyContext(services, reqUrl) {
+export function resolveProxyContext(services, reqUrl, opts) {
+    opts = opts || {};
     var url = new URL(reqUrl, 'http://127.0.0.1');
 
     if (url.pathname.startsWith('/api/') && isPortalApiNamespace(url.pathname)) {
@@ -164,6 +183,12 @@ export function resolveProxyContext(services, reqUrl) {
         return { service: napcat, proxyUrl: apiPrefix + url.pathname + url.search };
     }
 
+    var publish = findPublishService(services);
+    if (publish && isSiyuanRootPath(url.pathname) && refererFromPublish(opts.referer, publish.path)) {
+        var pubPrefix = publish.path.replace(/\/$/, '');
+        return { service: publish, proxyUrl: pubPrefix + url.pathname + url.search };
+    }
+
     var notes = findNotesService(services);
     if (notes && isSiyuanRootPath(url.pathname)) {
         return { service: notes, proxyUrl: url.pathname + url.search };
@@ -176,8 +201,9 @@ export function resolveProxyContext(services, reqUrl) {
  * 统一路由解析（HTTP 入口）
  * @returns {{ kind: 'portal-oauth'|'portal-api'|'proxy'|'not-found'|'pass', oauthProvider?: string, oauthAction?: string, service?: object, proxyUrl?: string }}
  */
-export function resolveRoute(services, pathname, method, search) {
+export function resolveRoute(services, pathname, method, search, opts) {
     search = search || '';
+    opts = opts || {};
 
     if (pathname.startsWith('/api/')) {
         if (pathname === '/api/oauth/providers' && method === 'GET') {
@@ -198,14 +224,14 @@ export function resolveRoute(services, pathname, method, search) {
             return { kind: 'not-found' };
         }
 
-        var proxyCtx = resolveProxyContext(services, pathname + search);
+        var proxyCtx = resolveProxyContext(services, pathname + search, opts);
         if (proxyCtx) {
             return { kind: 'proxy', service: proxyCtx.service, proxyUrl: proxyCtx.proxyUrl };
         }
         return { kind: 'not-found' };
     }
 
-    var nonApiProxy = resolveProxyContext(services, pathname + search);
+    var nonApiProxy = resolveProxyContext(services, pathname + search, opts);
     if (nonApiProxy) {
         return { kind: 'proxy', service: nonApiProxy.service, proxyUrl: nonApiProxy.proxyUrl };
     }

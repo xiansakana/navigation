@@ -243,6 +243,10 @@ function isPublicProxyService(service) {
     return !!(service && service.publicAccess);
 }
 
+function proxyRouteOpts(req) {
+    return { referer: req.headers.referer || req.headers.referrer || '' };
+}
+
 /** NapCat / 思源笔记需编辑权限才能进入；其余服务按查看权限 */
 function canAccessProxiedService(permissions, service) {
     if (service.id === 'napcat' || service.id === 'notes') {
@@ -256,7 +260,7 @@ function handleProxyRoute(req, res, presetCtx) {
 }
 
 async function handleProxyRouteAsync(req, res, presetCtx) {
-    var ctx = presetCtx || resolveProxyContext(config.services, req.url);
+    var ctx = presetCtx || resolveProxyContext(config.services, req.url, proxyRouteOpts(req));
     if (!ctx) return false;
 
     var browserUrl = new URL(req.url, 'http://127.0.0.1');
@@ -375,7 +379,7 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
 
 var server = http.createServer(async function(req, res) {
     var url = new URL(req.url, 'http://127.0.0.1');
-    var route = resolveRoute(config.services, url.pathname, req.method, url.search);
+    var route = resolveRoute(config.services, url.pathname, req.method, url.search, proxyRouteOpts(req));
 
     if (route.kind === 'portal-oauth') {
         if (route.oauthAction === 'providers') {
@@ -462,7 +466,7 @@ var server = http.createServer(async function(req, res) {
 });
 
 server.on('upgrade', async function(req, socket, head) {
-    var proxyCtx = resolveProxyContext(config.services, req.url);
+    var proxyCtx = resolveProxyContext(config.services, req.url, proxyRouteOpts(req));
     if (!proxyCtx) {
         socket.destroy();
         return;
