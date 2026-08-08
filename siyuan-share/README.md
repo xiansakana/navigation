@@ -21,7 +21,9 @@ ECS 默认经 Portal 反代：**http://123.56.235.12/share**（管理页需 port
 |------|-------------|------|
 | `/share/s/*` | 否 | 公开分享页 |
 | `/share/api/v1/*` | 否 | 思源插件 API（Share 自身校验 API Key） |
-| `/share/login`、`/dashboard` 等 | **是** | 须 portal 已登录 + `service:siyuan-share:view` |
+| `/share/login`、`/dashboard` 等 | **是** | 须 portal 已登录 + `service:siyuan-share:view`；**已登录 portal 后会自动进入 Share 控制台**（无需再输 Share 密码） |
+
+在 `siyuan-share/.env` 配置 `SHARE_SSO_USERNAME` / `SHARE_SSO_PASSWORD`（与 Share 管理员账号一致），`ecs-update` 会同步到 portal。
 
 插件 **服务端地址** 请填：`http://123.56.235.12/share`（不要再用 `:6807`）
 
@@ -31,7 +33,7 @@ ECS 默认经 Portal 反代：**http://123.56.235.12/share**（管理页需 port
 ## 插件配置
 
 1. `/notes/` 安装并启用集市插件 **「思源分享」**
-2. 登录 portal 后打开 **http://123.56.235.12/share/dashboard** → 在 Share 站注册/登录 → 生成 **API Key**
+2. 登录 portal 后打开 **http://123.56.235.12/share/dashboard**（自动登录 Share）→ 生成 **API Key**
 3. 插件设置：
    - **服务端地址**：`http://123.56.235.12/share`
    - **API Key**：粘贴上一步生成的密钥

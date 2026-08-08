@@ -69,6 +69,8 @@
       "path": "/share",
       "entryPath": "/dashboard",
       "internalUrl": "http://127.0.0.1:6807",
+      "shareUsername": "admin",
+      "sharePassword": "",
       "injectBar": false,
       "injectBase": true,
       "icon": "🔗"

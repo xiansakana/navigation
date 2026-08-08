@@ -97,6 +97,9 @@ if should_run portal; then
     if [ -f "$ROOT/scripts/sync-siyuan-auth.py" ]; then
         python3 "$ROOT/scripts/sync-siyuan-auth.py" || true
     fi
+    if [ -f "$ROOT/scripts/sync-share-auth.py" ]; then
+        python3 "$ROOT/scripts/sync-share-auth.py" || true
+    fi
     cd "$ROOT/portal"
     npm install --production
     if pm2 describe portal >/dev/null 2>&1; then
