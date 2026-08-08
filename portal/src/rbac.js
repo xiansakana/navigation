@@ -231,6 +231,23 @@ function normalizeMenuPermission(menu) {
     return menu;
 }
 
+function mergeServiceMenu(base, override) {
+    var menu = Object.assign({}, base, override || {});
+    menu.title = base.title;
+    menu.description = base.description;
+    menu.icon = base.icon;
+    menu.type = base.type;
+    menu.serviceId = base.serviceId;
+    menu.permission = base.permission;
+    if (base.path) menu.path = base.path;
+    if (base.url) menu.url = base.url;
+    if (override) {
+        if (override.sort != null) menu.sort = override.sort;
+        if (override.enabled != null) menu.enabled = override.enabled;
+    }
+    return normalizeMenuPermission(menu);
+}
+
 function buildMenusFromServices(services, overrides) {
     var overrideMap = {};
     (overrides || []).forEach(function(item) {
@@ -253,7 +270,7 @@ function buildMenusFromServices(services, overrides) {
             };
             if (service.type === 'external') base.url = service.url;
             else base.path = service.path;
-            return normalizeMenuPermission(Object.assign(base, overrideMap[id] || {}));
+            return mergeServiceMenu(base, overrideMap[id]);
         });
     var adminMenu = normalizeMenuPermission(Object.assign({
         id: 'menu_admin',
