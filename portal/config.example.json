@@ -61,6 +61,19 @@
       "icon": "📝"
     },
     {
+      "id": "siyuan-share",
+      "title": "笔记分享管理",
+      "description": "思源分享服务端（管理分享与 API Key）",
+      "type": "proxy",
+      "path": "/share",
+      "entryPath": "/dashboard",
+      "internalUrl": "http://127.0.0.1:6807",
+      "injectBar": false,
+      "injectBase": true,
+      "hidden": true,
+      "icon": "🔗"
+    },
+    {
       "id": "napcat",
       "title": "NapCat 管理",
       "description": "QQ 机器人 WebUI",
