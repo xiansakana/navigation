@@ -143,6 +143,9 @@ if should_run piclist; then
     if [ -f "$ROOT/scripts/fix-piclist-uploader.py" ]; then
         python3 "$ROOT/scripts/fix-piclist-uploader.py" || true
     fi
+    if [ -f "$ROOT/scripts/fix-piclist-b2-endpoint.py" ]; then
+        python3 "$ROOT/scripts/fix-piclist-b2-endpoint.py" || true
+    fi
     cd "$ROOT/piclist"
     bash deploy-ecs.sh
 fi
