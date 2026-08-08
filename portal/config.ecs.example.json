@@ -92,6 +92,15 @@
       "icon": "🔗"
     },
     {
+      "id": "piclist",
+      "title": "PicList 图床",
+      "description": "HTTP 上传服务（Typora / Obsidian / PicHoro）",
+      "type": "external",
+      "url": "http://123.56.235.12:36677/upload",
+      "newTab": true,
+      "icon": "🖼️"
+    },
+    {
       "id": "napcat",
       "title": "NapCat 管理",
       "description": "QQ 机器人 WebUI（网络配置、登录状态）",
