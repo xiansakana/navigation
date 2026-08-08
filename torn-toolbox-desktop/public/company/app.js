@@ -278,7 +278,7 @@ $('co-watchers').addEventListener('click', function(e) {
 });
 
 WUI.bindTargetTypeChange($('co-watchers'));
-WUI.handleTargetActions($('co-watchers'), companyWatchers, renderCompanyWatchers, syncCompanyWatchersFromDom);
+WUI.handleTargetActions($('co-watchers'), function() { return companyWatchers; }, renderCompanyWatchers, syncCompanyWatchersFromDom);
 
 loadState().then(connectEvents).catch(function(err) {
     $('global-status').textContent = err.message;

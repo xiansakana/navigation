@@ -133,13 +133,17 @@ window.WatcherUI = (function() {
         });
     }
 
-    function handleTargetActions(container, watchers, renderFn, syncFn) {
+    function resolveWatchers(getWatchers) {
+        return typeof getWatchers === 'function' ? getWatchers() : getWatchers;
+    }
+
+    function handleTargetActions(container, getWatchers, renderFn, syncFn) {
         container.addEventListener('click', function(e) {
             var card = e.target.closest('.watcher-card');
             if (!card) return;
             if (e.target.dataset.action === 'add-target') {
                 syncFn();
-                var watcher = watchers.find(function(w) { return w.id === card.dataset.id; });
+                var watcher = resolveWatchers(getWatchers).find(function(w) { return w.id === card.dataset.id; });
                 if (watcher) {
                     watcher.notify.qq.targets.push(defaultQqTarget());
                     renderFn();
@@ -149,7 +153,7 @@ window.WatcherUI = (function() {
             if (e.target.dataset.action === 'remove-target') {
                 syncFn();
                 var targetRow = e.target.closest('.notify-target');
-                var watcherRm = watchers.find(function(w) { return w.id === card.dataset.id; });
+                var watcherRm = resolveWatchers(getWatchers).find(function(w) { return w.id === card.dataset.id; });
                 if (watcherRm && targetRow) {
                     watcherRm.notify.qq.targets = watcherRm.notify.qq.targets.filter(function(t) {
                         return t.id !== targetRow.dataset.targetId;
