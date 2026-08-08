@@ -48,7 +48,7 @@ ECS 默认对外端口：**http://123.56.235.12:36677**（需在安全组放行 
 
 ## 图床存储（Backblaze B2）
 
-`data/config.json` 默认使用 **aws-s3** 兼容接口上传到桶 `xiansakana-assets`，返回链接前缀 `https://assets.saoyu.fun`。
+`data/config.json` 默认使用 **aws-s3-plist**（S3 兼容）上传到桶 `xiansakana-assets`，返回链接前缀 `https://assets.saoyu.fun`。
 
 需在 [Backblaze](https://www.backblaze.com) 创建 **Application Key**（仅需该桶读写权限），填入：
 
