@@ -129,6 +129,12 @@ export function isShareLoginPath(pathname, service) {
     return pathname === prefix + '/login' || pathname === prefix + '/login/';
 }
 
+export function isShareLogoutPath(pathname, service) {
+    if (!service || service.id !== 'siyuan-share') return false;
+    var prefix = service.path.replace(/\/$/, '');
+    return pathname === prefix + '/logout' || pathname === '/logout';
+}
+
 export function getShareDashboardPath(service) {
     return service.path.replace(/\/$/, '') + '/dashboard';
 }
