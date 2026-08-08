@@ -72,31 +72,34 @@ function stripTokenQuery(search) {
 
 function rewriteSiyuanPublishBody(text, prefix) {
     var pub = prefix.replace(/\/$/, '');
+    var pubEsc = pub.replace(/\//g, '\\/');
+    var rootAlt = 'api|stage|appearance|plugins|widgets|templates|emojis|snippets|assets|export|public|history|repo|manifest|favicon|protyle|ws|upload|check-auth';
     var out = String(text)
         .replace(/https?:\/\/127\.0\.0\.1:6808/g, pub)
         .replace(/https?:\/\/[^"'\s]+:6808/g, pub);
-    var roots = [
-        '/api/', '/ws', '/stage/', '/appearance/', '/plugins/', '/widgets/', '/templates/',
-        '/emojis/', '/snippets/', '/assets/', '/export/', '/public/', '/history/', '/repo/',
-        '/manifest', '/favicon', '/protyle/', '/upload', '/check-auth'
-    ];
-    var pubEsc = pub.replace(/\//g, '\\/');
-    roots.forEach(function(root) {
-        var rootEsc = root.replace(/\//g, '\\/');
-        out = out.replace(
-            new RegExp('((?:src|href|action)=["\'])(?!' + pubEsc + ')' + rootEsc, 'g'),
-            '$1' + pub + root
-        );
-        out = out.replace(
-            new RegExp('(fetch\\(["\'])(?!' + pubEsc + ')' + rootEsc, 'g'),
-            '$1' + pub + root
-        );
-        out = out.replace(
-            new RegExp('(["\'])((?!' + pubEsc + ')' + rootEsc + ')', 'g'),
-            '$1' + pub + root
-        );
-    });
+    // 压缩 JS 里大量 "/api/xxx" 字符串，需统一加 /publish 前缀
+    out = out.replace(
+        new RegExp('(["\'`])/(?!' + pubEsc + '/)(' + rootAlt + ')(?=/|["\'`])', 'g'),
+        '$1' + pub + '/$2'
+    );
     return out;
+}
+
+function injectSiyuanPublishShim(html, prefix) {
+    if (!html.includes('<head') || html.includes('portal-siyuan-publish-shim')) return html;
+    var pub = prefix.replace(/\/$/, '');
+    var shim = '<script id="portal-siyuan-publish-shim">(function(){'
+        + 'var P=' + JSON.stringify(pub) + ';'
+        + 'function fix(u){if(typeof u!=="string"||!u.startsWith("/")||u.startsWith(P+"/"))return u;'
+        + 'if(/^\\/(api|stage|appearance|plugins|widgets|templates|emojis|snippets|assets|export|public|history|repo|manifest|favicon|protyle|ws|upload|check-auth)(\\/|$)/.test(u))return P+u;return u;}'
+        + 'var f=window.fetch;window.fetch=function(i,o){'
+        + 'if(typeof i==="string")i=fix(i);'
+        + 'else if(i&&i.url){var u=fix(i.url);if(u!==i.url)i=new Request(u,i);}'
+        + 'return f.call(this,i,o);};'
+        + 'var WS=window.WebSocket;window.WebSocket=function(u,p){return new WS(fix(u),p);};'
+        + 'var xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u,a,s,t){return xo.call(this,m,fix(u),a,s,t);};'
+        + '})();</script>';
+    return html.replace(/<head[^>]*>/i, function(m) { return m + shim; });
 }
 
 function rewriteLocation(location, service, userAgent) {
@@ -289,11 +292,16 @@ function injectPortalShell(html, service) {
 }
 
 function shouldPipeJsonResponse(service, reqUrl) {
-    if (service.id !== 'notes') return false;
     var url = new URL(reqUrl, 'http://127.0.0.1');
-    if (url.pathname.startsWith('/api/')) return true;
     var prefix = service.path.replace(/\/$/, '');
-    return url.pathname.startsWith(prefix + '/api/');
+    if (service.id === 'notes') {
+        if (url.pathname.startsWith('/api/')) return true;
+        return url.pathname.startsWith(prefix + '/api/');
+    }
+    if (service.id === 'siyuan-publish') {
+        return url.pathname.startsWith(prefix + '/api/');
+    }
+    return false;
 }
 
 export async function proxyHttpRequest(service, req, res) {
@@ -338,7 +346,12 @@ export async function proxyHttpRequest(service, req, res) {
             upstreamRes.on('end', function() {
                 var buf = Buffer.concat(chunks);
                 var text = rewriteProxiedBody(buf.toString('utf8'), service);
-                if (isHtml) text = injectPortalShell(text, service);
+                if (isHtml) {
+                    text = injectPortalShell(text, service);
+                    if (service.id === 'siyuan-publish') {
+                        text = injectSiyuanPublishShim(text, service.path.replace(/\/$/, ''));
+                    }
+                }
                 headers['content-length'] = Buffer.byteLength(text, 'utf8');
                 res.writeHead(upstreamRes.statusCode, headers);
                 res.end(text);
