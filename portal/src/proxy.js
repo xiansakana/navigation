@@ -156,13 +156,23 @@ function rewriteShareProxiedBody(text, prefix) {
     var p = prefix.replace(/\/$/, '');
     if (!p) return text;
     var segments = [
-        '/api/v1/', '/assets/', '/uploads/', '/s/',
-        '/login', '/register', '/dashboard', '/admin', '/logout'
+        '/api/v1/', '/api/instances/', '/api-key/',
+        '/assets/', '/uploads/', '/s/',
+        '/login/', '/register/', '/forgot/', '/reset/', '/logout',
+        '/dashboard/', '/admin-home/', '/admin/', '/account/', '/captcha', '/email-code'
+    ];
+    var exact = [
+        '/login', '/register', '/forgot', '/reset', '/logout',
+        '/dashboard', '/admin-home', '/admin', '/account', '/captcha', '/email-code'
     ];
     var out = text;
     segments.forEach(function(seg) {
         var escaped = seg.replace(/\//g, '\\/');
         out = out.replace(new RegExp('(["\'`(])' + escaped, 'g'), '$1' + p + seg);
+    });
+    exact.forEach(function(seg) {
+        var escaped = seg.replace(/\//g, '\\/');
+        out = out.replace(new RegExp('(["\'`(])' + escaped + '(?=[\"\'`?#\\s])', 'g'), '$1' + p + seg);
     });
     out = out.replace(new RegExp(p + p + '(/|")', 'g'), p + '$1');
     out = out.replace(new RegExp('(https?:\\/\\/[^"\'\\s]+)' + p + '\\/s\\/', 'g'), '$1' + p + '/s/');
@@ -238,6 +248,12 @@ function injectPortalShell(html, service) {
         }
         if (service.id === 'notes' && !isSiyuanAuthPage) html = injectProxiedBackLink(html, 'notes');
         if (service.id === 'siyuan-share') html = injectProxiedBackLink(html, 'share');
+        if (service.id === 'siyuan-share' && service.injectBase !== false && !/<base[\s>]/i.test(html)) {
+            var shareBase = service.path.replace(/\/$/, '') + '/';
+            html = html.replace(/<head[^>]*>/i, function(match) {
+                return match + '<base href="' + shareBase + '">';
+            });
+        }
         return html;
     }
     var title = service.title || '服务';
@@ -439,12 +455,44 @@ function findNapcatService(services) {
     });
 }
 
-/** NapCat WebUI 使用绝对路径 /webui/...，需额外挂载到同一反代 */
-export function isSharePublicPath(pathname, service) {
-    if (!service || service.id !== 'siyuan-share') return false;
+function findShareService(services) {
+    return (services || []).find(function(service) {
+        return service.id === 'siyuan-share' && service.type === 'proxy';
+    });
+}
+
+/** Share 页面使用绝对路径；跳过与 portal 冲突的 /admin、/login */
+var SHARE_ROOT_BLOCKED = { '/admin': true, '/login': true };
+
+var SHARE_ROOT_EXACT = [
+    '/register', '/forgot', '/reset', '/logout',
+    '/dashboard', '/admin-home', '/account', '/captcha', '/email-code'
+];
+
+var SHARE_ROOT_PREFIXES = [
+    '/login/', '/register/', '/forgot/', '/reset/', '/logout',
+    '/dashboard/', '/admin-home/', '/admin/', '/account/', '/api-key/',
+    '/api/v1/', '/api/instances/', '/assets/', '/uploads/', '/s/'
+];
+
+export function isShareRootPath(pathname) {
+    if (SHARE_ROOT_BLOCKED[pathname]) return false;
+    if (SHARE_ROOT_EXACT.indexOf(pathname) >= 0) return true;
+    return SHARE_ROOT_PREFIXES.some(function(prefix) {
+        return pathname.startsWith(prefix);
+    });
+}
+
+function shareSubPath(pathname, service) {
     var prefix = service.path.replace(/\/$/, '');
-    if (pathname !== prefix && !pathname.startsWith(prefix + '/')) return false;
-    var sub = pathname.slice(prefix.length) || '/';
+    if (pathname === prefix || pathname.startsWith(prefix + '/')) {
+        return pathname.slice(prefix.length) || '/';
+    }
+    if (isShareRootPath(pathname)) return pathname;
+    return null;
+}
+
+function isSharePublicSubPath(sub) {
     if (sub === '/s' || sub.startsWith('/s/')) return true;
     if (sub.startsWith('/assets/')) return true;
     if (sub.startsWith('/uploads/')) return true;
@@ -452,17 +500,31 @@ export function isSharePublicPath(pathname, service) {
     return false;
 }
 
+/** NapCat WebUI 使用绝对路径 /webui/...，需额外挂载到同一反代 */
+export function isSharePublicPath(pathname, service) {
+    if (!service || service.id !== 'siyuan-share') return false;
+    var sub = shareSubPath(pathname, service);
+    if (!sub) return false;
+    return isSharePublicSubPath(sub);
+}
+
 export function resolveProxyContext(services, reqUrl) {
     var url = new URL(reqUrl, 'http://127.0.0.1');
     var service = findProxyService(services, url.pathname);
     if (service) return { service: service, proxyUrl: reqUrl };
+
+    var share = findShareService(services);
+    if (share && isShareRootPath(url.pathname)) {
+        var sharePrefix = share.path.replace(/\/$/, '');
+        return { service: share, proxyUrl: sharePrefix + url.pathname + url.search };
+    }
 
     var napcat = findNapcatService(services);
     if (napcat && (url.pathname === '/webui' || url.pathname.startsWith('/webui/'))) {
         var webuiPrefix = napcat.path.replace(/\/$/, '');
         return { service: napcat, proxyUrl: webuiPrefix + url.pathname + url.search };
     }
-    if (napcat && url.pathname.startsWith('/api/') && !isSiyuanApiPath(url.pathname)) {
+    if (napcat && url.pathname.startsWith('/api/') && !isSiyuanApiPath(url.pathname) && !isShareRootPath(url.pathname)) {
         var apiPrefix = napcat.path.replace(/\/$/, '');
         return { service: napcat, proxyUrl: apiPrefix + url.pathname + url.search };
     }
