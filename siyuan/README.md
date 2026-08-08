@@ -15,12 +15,18 @@ bash siyuan/deploy-ecs.sh
 ```
 
 - 数据目录：`siyuan/data/siyuan/`（挂载为 workspace）
-- 本地端口：`127.0.0.1:6806`（仅本机，经 portal 反代对外）
-- 门户路径：`/notes/`（保留原入口；手机浏览器会自动进入移动版 UI）
+- 本地端口：`127.0.0.1:6806`（仅本机，经 Portal 反代对外）
+- 门户路径：`/notes/`（须先登录 Portal；手机浏览器会自动进入移动版 UI）
+
+## 访问控制
+
+- **6806 / 6099 不对公网开放**，仅 Portal（`:80`）对外
+- Portal 登录 + RBAC 决定谁能看到/进入 `/notes/`、`/napcat/`
+- 思源自身仍有锁屏密码（`SIYUAN_ACCESS_AUTH_CODE`），NapCat 仍有 WebUI token
 
 ## 移动端
 
-- 经 portal 访问时，会根据浏览器 User-Agent 进入 `/stage/build/mobile/` 或 desktop 版
+- 经 portal 访问时，会根据浏览器 User-Agent 进入 mobile 或 desktop 版
 - 日常手机使用更推荐安装 **思源官方 App**，通过云端同步同一工作空间
 
 ## 鉴权
@@ -51,7 +57,7 @@ ECS 上每天凌晨 3 点自动备份 workspace（停容器 → tar → 启动�
 
 ## PicGo 图床插件（浏览器 / Docker）
 
-经 Portal 在**浏览器**里用思源时，插件跑在前端，**不能用「内置 PicGo」**（需要本机 Node），应走 ECS 上的 **远程 PicList**：
+经 Portal 在**浏览器**里用思源时，插件跑在前端，**不能用「内置 PicGo」**，应走 ECS 上的 **远程 PicList**：
 
 | 配置项 | 正确值 |
 |--------|--------|

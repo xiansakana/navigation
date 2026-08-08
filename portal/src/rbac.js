@@ -240,8 +240,13 @@ function mergeServiceMenu(base, override) {
     menu.type = base.type;
     menu.serviceId = base.serviceId;
     menu.permission = base.permission;
-    if (base.path) menu.path = base.path;
-    if (base.url) menu.url = base.url;
+    if (base.path) {
+        menu.path = base.path;
+        delete menu.url;
+    } else if (base.url) {
+        menu.url = base.url;
+        delete menu.path;
+    }
     if (override) {
         if (override.sort != null) menu.sort = override.sort;
         if (override.enabled != null) menu.enabled = override.enabled;

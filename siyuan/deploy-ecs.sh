@@ -16,7 +16,7 @@ if [ ! -f .env ]; then
     AUTH="$(openssl rand -hex 8 2>/dev/null || echo "siyuan-$(date +%s)")"
     sed -i "s/请改成强密码/${AUTH}/" .env
     echo "已创建 siyuan/.env，锁屏密码: ${AUTH}"
-    echo "（首次打开 /notes/ 时需在思源界面输入此密码）"
+    echo "（首次经 Portal /notes/ 打开时需在思源界面输入此密码）"
 fi
 
 mkdir -p data/siyuan
@@ -31,12 +31,11 @@ pm2 delete notes 2>/dev/null || true
 
 sleep 2
 if curl -sf -o /dev/null "http://127.0.0.1:6806/"; then
-    echo "思源笔记已就绪: http://127.0.0.1:6806"
+    echo "思源内核已就绪（本机 127.0.0.1:6806）"
 else
     echo "容器已启动，等待内核就绪…"
     docker compose logs --tail 20
 fi
 
 echo ""
-echo "请确保 portal config.json 中 notes 服务指向 http://127.0.0.1:6806"
-echo "然后通过门户 /notes/ 访问（portal 需重启）"
+echo "请通过 Portal 访问: /notes/stage/build/desktop/"

@@ -123,8 +123,8 @@ function menuToService(menu, userAgent) {
     };
     if (menu.url || (service && service.type === 'external')) {
         item.url = menu.url || (service && service.url);
-    } else if (menu.path) {
-        item.path = menu.path;
+    } else if (menu.path || (service && (service.type === 'proxy' || service.type === 'hub'))) {
+        item.path = menu.path || (service && service.path) || '/';
         if (service && (service.type === 'proxy' || service.type === 'hub')) {
             item.path = getServiceEntryHref(service, userAgent);
         }
@@ -291,6 +291,15 @@ async function handleProxyRouteAsync(req, res) {
         napcatTarget.searchParams.delete('token');
         redirect(res, napcatTarget.pathname + napcatTarget.search);
         return true;
+    }
+
+    if (ctx.service.id === 'notes') {
+        var notesPrefix = ctx.service.path.replace(/\/$/, '');
+        if (browserUrl.pathname === notesPrefix || browserUrl.pathname === notesPrefix + '/') {
+            var notesEntry = new URL(getServiceEntryHref(ctx.service, req.headers['user-agent']), 'http://127.0.0.1');
+            redirect(res, notesEntry.pathname + notesEntry.search);
+            return true;
+        }
     }
 
     if (browserUrl.pathname.endsWith('/web_login')) {
