@@ -21,7 +21,8 @@ import {
     getStockManagePrefs,
     updateUserPrefs
 } from './rbac.js';
-import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket, isSharePublicPath } from './proxy.js';
+import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket, isSharePublicPath, siyuanEntryPath } from './proxy.js';
+import { ensureSiyuanAuth, isSiyuanCheckAuthPath, resolveSiyuanRedirectTarget, hasSiyuanCookie, loginSiyuanSession, appendCookieHeader } from './siyuan-auth.js';
 import { handleAdminApi } from './admin-api.js';
 import { wantsJsonResponse, renderErrorPage, sendHtml } from './error-page.js';
 import { handleOAuthStart, handleOAuthCallback, listOAuthProviders } from './oauth.js';
@@ -244,7 +245,19 @@ function isWriteMethod(method) {
     return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
 }
 
+/** NapCat 为管理界面，需编辑权限；其余服务按查看权限 */
+function canAccessProxiedService(permissions, service) {
+    if (service.id === 'napcat') {
+        return canEditService(permissions, service.id);
+    }
+    return canViewService(permissions, service.id);
+}
+
 function handleProxyRoute(req, res) {
+    return handleProxyRouteAsync(req, res);
+}
+
+async function handleProxyRouteAsync(req, res) {
     var ctx = resolveProxyContext(config.services, req.url);
     if (!ctx) return false;
 
@@ -260,12 +273,15 @@ function handleProxyRoute(req, res) {
     var proxySession = requireAuth(req, res, authOptions);
     if (!proxySession) return true;
 
-    if (!canViewService(proxySession.permissions, ctx.service.id)) {
+    if (!canAccessProxiedService(proxySession.permissions, ctx.service)) {
         var serviceTitle = ctx.service.title || ctx.service.id;
+        var hint = ctx.service.id === 'napcat'
+            ? 'NapCat 管理需编辑权限，请联系管理员分配。'
+            : '如需访问，请联系管理员分配权限，或登录具备相应权限的账号。';
         sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '无权访问该服务', {
             title: '无权访问该服务',
             message: '您没有访问「' + serviceTitle + '」的权限',
-            hint: '如需访问，请联系管理员分配权限，或登录具备相应权限的账号。'
+            hint: hint
         });
         return true;
     }
@@ -279,31 +295,28 @@ function handleProxyRoute(req, res) {
     var napcatCanonical = napcatCanonicalWebuiPath(ctx.service, browserUrl.pathname);
     if (napcatCanonical) {
         var napcatTarget = new URL(napcatCanonical + browserUrl.search, 'http://127.0.0.1');
-        if (ctx.service.adminToken && !napcatTarget.searchParams.get('token')) {
-            napcatTarget.searchParams.set('token', ctx.service.adminToken);
-        }
+        napcatTarget.searchParams.delete('token');
         redirect(res, napcatTarget.pathname + napcatTarget.search);
         return true;
     }
 
     if (browserUrl.pathname.endsWith('/web_login')) {
-        if (ctx.service.id === 'napcat' && ctx.service.adminToken) {
-            if (!browserUrl.searchParams.get('token')) {
-                browserUrl.searchParams.set('token', ctx.service.adminToken);
-                redirect(res, browserUrl.pathname + browserUrl.search);
-                return true;
-            }
-        } else {
-            var entry = new URL(getServiceEntryHref(ctx.service, req.headers['user-agent']), 'http://127.0.0.1');
-            if (ctx.service.adminToken) entry.searchParams.set('token', ctx.service.adminToken);
-            redirect(res, entry.pathname + entry.search);
+        if (ctx.service.id === 'napcat') {
+            var napcatEntry = new URL(getServiceEntryHref(ctx.service, req.headers['user-agent']), 'http://127.0.0.1');
+            redirect(res, napcatEntry.pathname + napcatEntry.search);
             return true;
         }
+        var entry = new URL(getServiceEntryHref(ctx.service, req.headers['user-agent']), 'http://127.0.0.1');
+        if (ctx.service.adminToken && ctx.service.id !== 'napcat') {
+            entry.searchParams.set('token', ctx.service.adminToken);
+        }
+        redirect(res, entry.pathname + entry.search);
+        return true;
     }
 
-    if (ctx.service.adminToken && !proxyUrl.searchParams.get('token')) {
+    if (ctx.service.adminToken && ctx.service.id !== 'napcat' && !proxyUrl.searchParams.get('token')) {
         if (browserUrl.pathname.startsWith('/api/')) {
-            // NapCat API 不走 URL token 重定向，直接转发
+            // 非 NapCat API 不走 URL token 重定向，直接转发
         } else if (browserUrl.pathname === '/webui' || browserUrl.pathname.startsWith('/webui/')) {
             browserUrl.searchParams.set('token', ctx.service.adminToken);
             redirect(res, browserUrl.pathname + browserUrl.search);
@@ -313,6 +326,28 @@ function handleProxyRoute(req, res) {
         }
         if (!browserUrl.pathname.startsWith('/api/')) {
             return true;
+        }
+    }
+
+    var notesCanEdit = ctx.service.id === 'notes'
+        && canEditService(proxySession.permissions, 'notes')
+        && ctx.service.accessAuthCode;
+
+    if (notesCanEdit) {
+        if (isSiyuanCheckAuthPath(browserUrl.pathname, ctx.service) && req.method === 'GET') {
+            var authed = await ensureSiyuanAuth(ctx.service, req, res, true);
+            if (authed) {
+                var target = resolveSiyuanRedirectTarget(
+                    ctx.service,
+                    browserUrl,
+                    req.headers['user-agent'],
+                    siyuanEntryPath
+                );
+                redirect(res, target);
+                return true;
+            }
+        } else {
+            await ensureSiyuanAuth(ctx.service, req, res, true);
         }
     }
 
@@ -344,11 +379,11 @@ var server = http.createServer(async function(req, res) {
             if (!session) return;
             return handleApi(req, res, url, session);
         }
-        if (handleProxyRoute(req, res)) return;
+        if (await handleProxyRoute(req, res)) return;
         return json(res, 404, { ok: false, error: 'Not Found' });
     }
 
-    if (handleProxyRoute(req, res)) return;
+    if (await handleProxyRoute(req, res)) return;
 
     var hubPath = '/torn-toolbox';
     if (url.pathname === hubPath || url.pathname === hubPath + '/' || url.pathname === hubPath + '/index.html') {
@@ -405,7 +440,7 @@ var server = http.createServer(async function(req, res) {
     json(res, 404, { ok: false, error: 'Not Found' });
 });
 
-server.on('upgrade', function(req, socket, head) {
+server.on('upgrade', async function(req, socket, head) {
     var ctx = resolveRequestUser(req, config);
     if (!ctx) {
         socket.destroy();
@@ -416,9 +451,16 @@ server.on('upgrade', function(req, socket, head) {
         socket.destroy();
         return;
     }
-    if (!canViewService(ctx.permissions, proxyCtx.service.id)) {
+    if (!canAccessProxiedService(ctx.permissions, proxyCtx.service)) {
         socket.destroy();
         return;
+    }
+    if (proxyCtx.service.id === 'notes'
+        && canEditService(ctx.permissions, 'notes')
+        && proxyCtx.service.accessAuthCode
+        && !hasSiyuanCookie(req)) {
+        var setCookies = await loginSiyuanSession(proxyCtx.service);
+        if (setCookies) appendCookieHeader(req, setCookies);
     }
     req.url = proxyCtx.proxyUrl;
     proxyWebSocket(proxyCtx.service, req, socket, head);

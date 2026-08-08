@@ -159,8 +159,7 @@ function buildDefaultGuestPermissions(services) {
         'service:torn-undercut:view',
         'service:torn-company:view',
         'service:stock-manage:view',
-        'service:notes:view',
-        'service:napcat:view'
+        'service:notes:view'
     ]);
     (services || []).forEach(function(service) {
         if (!service.hidden && service.id && service.id !== 'siyuan-share') {
@@ -178,6 +177,7 @@ function ensureGuestAccess(data, config) {
     if (!data.users) data.users = [];
     var guestUsername = config?.auth?.guestUsername || 'guest';
     var guestPerms = buildDefaultGuestPermissions(config?.services);
+    var denyGuest = ['service:napcat:view', 'service:napcat:edit'];
 
     var guestRole = data.roles.find(function(r) { return r.id === 'role_guest'; });
     if (!guestRole) {
@@ -190,6 +190,7 @@ function ensureGuestAccess(data, config) {
         data.roles.push(guestRole);
     } else {
         var merged = new Set((guestRole.permissions || []).concat(guestPerms));
+        denyGuest.forEach(function(p) { merged.delete(p); });
         guestRole.permissions = Array.from(merged);
     }
 
