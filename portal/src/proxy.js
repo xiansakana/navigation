@@ -242,7 +242,17 @@ function injectProxiedBackLink(html, variant) {
         + positionRule
         + '@media (max-width:768px){.portal-proxied-back--notes,.portal-proxied-back--napcat,.portal-proxied-back--publish,.portal-proxied-back--alist{top:auto!important;bottom:calc(12px + env(safe-area-inset-bottom,0px))!important;left:12px!important;right:auto!important;padding:8px 12px!important;font-size:14px!important;line-height:1.3!important}}'
         + '</style>';
-    var keeper = '<script>(function(){var c="portal-proxied-back portal-proxied-back--' + variant + '";function m(){var e=document.querySelector("."+c.split(" ")[0]);if(!e){e=document.createElement("a");e.className=c;e.href="/";e.textContent="← 服务导航";document.body.appendChild(e)}}m();new MutationObserver(m).observe(document.documentElement,{childList:true,subtree:true})})();</script>';
+    // AList 等 SPA 会拦截 <a href="/"> 做前端路由 → 黑屏；必须强制整页跳转
+    var keeper = '<script>(function(){var c="portal-proxied-back portal-proxied-back--' + variant + '";'
+        + 'function go(ev){if(ev){ev.preventDefault();ev.stopPropagation();if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();}'
+        + 'window.location.assign("/");}'
+        + 'function bind(e){if(e.__portalHardNav)return;e.__portalHardNav=1;'
+        + 'e.addEventListener("click",go,true);}'
+        + 'function m(){var e=document.querySelector("a.portal-proxied-back");'
+        + 'if(!e){e=document.createElement("a");e.className=c;e.href="/";e.textContent="← 服务导航";'
+        + 'document.body.appendChild(e);}bind(e);}'
+        + 'm();new MutationObserver(m).observe(document.documentElement,{childList:true,subtree:true});'
+        + '})();</script>';
     if (html.includes('</head>')) html = html.replace('</head>', css + '</head>');
     else html = css + html;
     if (html.includes('</body>')) {
