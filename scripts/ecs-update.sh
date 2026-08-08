@@ -97,9 +97,6 @@ if should_run portal; then
     if [ -f "$ROOT/scripts/sync-siyuan-auth.py" ]; then
         python3 "$ROOT/scripts/sync-siyuan-auth.py" || true
     fi
-    if [ -f "$ROOT/scripts/sync-share-auth.py" ]; then
-        python3 "$ROOT/scripts/sync-share-auth.py" || true
-    fi
     if [ -f "$ROOT/scripts/sync-share-site-url.py" ]; then
         python3 "$ROOT/scripts/sync-share-site-url.py" || true
     fi
@@ -131,6 +128,12 @@ fi
 
 if should_run siyuan-share; then
     echo "==> siyuan-share"
+    if [ -f "$ROOT/scripts/sync-share-site-url.py" ]; then
+        python3 "$ROOT/scripts/sync-share-site-url.py" || true
+    fi
+    if [ -f "$ROOT/scripts/sync-share-registration.py" ]; then
+        python3 "$ROOT/scripts/sync-share-registration.py" || true
+    fi
     cd "$ROOT/siyuan-share"
     bash deploy-ecs.sh
 fi

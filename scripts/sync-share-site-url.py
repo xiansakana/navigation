@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""将 siyuan-share 对外访问地址同步到 Share DB 的 site_base_url 与 portal config.publicUrl。"""
+"""将 siyuan-share 对外地址同步到 Share DB site_base_url，并将 Portal 服务改为外链跳转。"""
 import json
 import os
 import sqlite3
@@ -10,7 +10,21 @@ ROOT = Path(__file__).resolve().parent.parent
 PORTAL_CFG = Path(os.environ.get('PORTAL_CONFIG', str(ROOT / 'portal' / 'config.json')))
 SHARE_ENV = Path(os.environ.get('SHARE_ENV', str(ROOT / 'siyuan-share' / '.env')))
 SHARE_DB = Path(os.environ.get('SHARE_DB', str(ROOT / 'siyuan-share' / 'data/storage/app.db')))
-DEFAULT_PUBLIC_URL = 'http://123.56.235.12/share'
+DEFAULT_PUBLIC_URL = 'http://123.56.235.12:6807'
+
+SHARE_EXTERNAL_SERVICE = {
+    'id': 'siyuan-share',
+    'title': '笔记分享',
+    'description': '思源笔记公开分享与 API Key 管理',
+    'type': 'external',
+    'newTab': True,
+    'icon': '🔗',
+}
+
+PROXY_ONLY_KEYS = (
+    'path', 'entryPath', 'internalUrl', 'publicUrl',
+    'shareUsername', 'sharePassword', 'injectBar', 'injectBase',
+)
 
 
 def read_env(path):
@@ -53,22 +67,29 @@ def sync_portal(public_url):
         print(f'portal config not found: {PORTAL_CFG}', file=sys.stderr)
         return False
     portal = json.loads(PORTAL_CFG.read_text(encoding='utf-8'))
+    dashboard_url = public_url.rstrip('/') + '/dashboard'
+    desired = dict(SHARE_EXTERNAL_SERVICE)
+    desired['url'] = dashboard_url
     updated = False
-    for svc in portal.get('services', []):
+    for idx, svc in enumerate(portal.get('services', [])):
         if svc.get('id') != 'siyuan-share':
             continue
-        if svc.get('publicUrl') != public_url:
-            svc['publicUrl'] = public_url
+        merged = dict(svc)
+        merged.update(desired)
+        for key in PROXY_ONLY_KEYS:
+            merged.pop(key, None)
+        if merged != svc:
+            portal['services'][idx] = merged
             updated = True
         break
     else:
-        print('siyuan-share service not found in portal config', file=sys.stderr)
-        return False
+        portal.setdefault('services', []).append(desired)
+        updated = True
     if not updated:
-        print('portal share publicUrl already up to date')
+        print('portal siyuan-share external link already up to date')
         return False
     PORTAL_CFG.write_text(json.dumps(portal, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
-    print('portal share publicUrl synced')
+    print('portal siyuan-share external link synced')
     return True
 
 

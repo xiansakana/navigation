@@ -1,7 +1,7 @@
 <?php
 return [
     'app_name' => '思源笔记分享',
-    'allow_registration' => true,
+    'allow_registration' => false,
     'default_storage_limit_mb' => 1024,
     'session_lifetime_days' => 30,
     'chunk_ttl_seconds' => 7200,

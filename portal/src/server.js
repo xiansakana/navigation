@@ -21,9 +21,8 @@ import {
     getStockManagePrefs,
     updateUserPrefs
 } from './rbac.js';
-import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyShareLogout, proxyWebSocket, isSharePublicPath, siyuanEntryPath } from './proxy.js';
+import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket, siyuanEntryPath } from './proxy.js';
 import { ensureSiyuanAuth, isSiyuanCheckAuthPath, resolveSiyuanRedirectTarget, hasSiyuanCookie, loginSiyuanSession, appendCookieHeader } from './siyuan-auth.js';
-import { ensureShareAuth, isShareLoginPath, isShareLogoutPath, getShareDashboardPath } from './share-auth.js';
 import { handleAdminApi } from './admin-api.js';
 import { wantsJsonResponse, renderErrorPage, sendHtml } from './error-page.js';
 import { handleOAuthStart, handleOAuthCallback, listOAuthProviders } from './oauth.js';
@@ -263,18 +262,8 @@ async function handleProxyRouteAsync(req, res) {
     if (!ctx) return false;
 
     var browserUrl = new URL(req.url, 'http://127.0.0.1');
-    var isShareLogout = ctx.service.id === 'siyuan-share'
-        && req.method === 'POST'
-        && isShareLogoutPath(browserUrl.pathname, ctx.service);
 
-    if (isSharePublicPath(browserUrl.pathname, ctx.service)) {
-        req.url = ctx.proxyUrl;
-        proxyHttpRequest(ctx.service, req, res);
-        return true;
-    }
-
-    var authOptions = ctx.service.id === 'siyuan-share' ? { requireLogin: true } : {};
-    var proxySession = requireAuth(req, res, authOptions);
+    var proxySession = requireAuth(req, res);
     if (!proxySession) return true;
 
     if (!canAccessProxiedService(proxySession.permissions, ctx.service)) {
@@ -289,14 +278,8 @@ async function handleProxyRouteAsync(req, res) {
         });
         return true;
     }
-    if (isWriteMethod(req.method) && !canEditService(proxySession.permissions, ctx.service.id) && !isShareLogout) {
+    if (isWriteMethod(req.method) && !canEditService(proxySession.permissions, ctx.service.id)) {
         sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '该服务为只读权限，无法修改');
-        return true;
-    }
-
-    if (isShareLogout) {
-        req.url = ctx.proxyUrl;
-        await proxyShareLogout(ctx.service, req, res);
         return true;
     }
 
@@ -358,24 +341,6 @@ async function handleProxyRouteAsync(req, res) {
             }
         } else {
             await ensureSiyuanAuth(ctx.service, req, res, true);
-        }
-    }
-
-    var shareCanSso = ctx.service.id === 'siyuan-share'
-        && !proxySession.isGuest
-        && canViewService(proxySession.permissions, 'siyuan-share')
-        && ctx.service.shareUsername
-        && ctx.service.sharePassword;
-
-    if (shareCanSso) {
-        if (isShareLoginPath(browserUrl.pathname, ctx.service) && req.method === 'GET') {
-            var shareAuthed = await ensureShareAuth(ctx.service, req, res, true);
-            if (shareAuthed) {
-                redirect(res, getShareDashboardPath(ctx.service));
-                return true;
-            }
-        } else {
-            await ensureShareAuth(ctx.service, req, res, true);
         }
     }
 

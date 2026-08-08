@@ -64,15 +64,10 @@
     {
       "id": "siyuan-share",
       "title": "笔记分享",
-      "description": "思源笔记公开分享与 API Key 管理",
-      "type": "proxy",
-      "path": "/share",
-      "entryPath": "/dashboard",
-      "internalUrl": "http://127.0.0.1:6807",
-      "shareUsername": "admin",
-      "sharePassword": "",
-      "injectBar": false,
-      "injectBase": true,
+      "description": "思源笔记公开分享与 API Key 管理（独立端口）",
+      "type": "external",
+      "url": "http://127.0.0.1:6807/dashboard",
+      "newTab": true,
       "icon": "🔗"
     },
     {

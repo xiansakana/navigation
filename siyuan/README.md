@@ -42,9 +42,10 @@ ECS 上每天凌晨 3 点自动备份 workspace（停容器 → tar → 启动�
 
 ## 分享（Siyuan Share 自建）
 
-- 管理/API Key：**http://123.56.235.12/share/dashboard**（须 portal 登录）
-- 公开分享页：**http://123.56.235.12/share/s/xxx**（无需登录）
-- 插件服务端地址填 `http://123.56.235.12/share`
+- 管理/API Key：**http://123.56.235.12:6807/dashboard**（Share 独立登录）
+- 公开分享页：**http://123.56.235.12:6807/s/xxx**
+- 插件服务端地址填 `http://123.56.235.12:6807`
+- Portal 首页仅提供跳转链接
 
 详见 [`siyuan-share/README.md`](../siyuan-share/README.md)。
 
