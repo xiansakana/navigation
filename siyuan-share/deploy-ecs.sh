@@ -29,13 +29,43 @@ fi
 mkdir -p data/storage data/uploads
 chmod -R 775 data/storage data/uploads 2>/dev/null || true
 
-echo "==> 拉取镜像 b8l8u8e8/siyuan-share-web:latest ..."
-if ! docker compose pull; then
-    echo "Docker Hub 拉取失败，尝试从 GitHub 源码构建（较慢）..."
-    BUILD_DIR="$(mktemp -d)"
-    trap 'rm -rf "$BUILD_DIR"' EXIT
-    git clone --depth 1 https://github.com/b8l8u8e8/siyuan-plugin-share.git "$BUILD_DIR/src"
-    docker build -t b8l8u8e8/siyuan-share-web:latest -f "$BUILD_DIR/src/php-site/Dockerfile" "$BUILD_DIR/src"
+build_share_image() {
+    local build_root="$ROOT/siyuan-share/.build"
+    local src_dir="$build_root/src"
+    mkdir -p "$build_root"
+    if [ ! -d "$src_dir/.git" ]; then
+        echo "==> 克隆 siyuan-plugin-share 源码..."
+        git clone --depth 1 https://github.com/b8l8u8e8/siyuan-plugin-share.git "$src_dir"
+    fi
+    local dockerfile="$src_dir/php-site/Dockerfile"
+    if ! grep -q 'mirrors.aliyun.com' "$dockerfile"; then
+        python3 - "$dockerfile" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+needle = "RUN set -eux; \\"
+insert = (
+    "RUN set -eux; \\\n"
+    "    sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories; \\"
+)
+if "mirrors.aliyun.com" not in text:
+    text = text.replace(needle, insert, 1)
+    open(path, "w", encoding="utf-8").write(text)
+PY
+        echo "已注入 Alpine 国内源（mirrors.aliyun.com）"
+    fi
+    echo "==> 构建镜像（ECS 国内源，约 3–8 分钟）..."
+    docker build -t b8l8u8e8/siyuan-share-web:latest -f "$dockerfile" "$src_dir"
+}
+
+if docker image inspect b8l8u8e8/siyuan-share-web:latest >/dev/null 2>&1; then
+    echo "==> 本地已有镜像，跳过拉取/构建"
+elif docker compose pull 2>/dev/null; then
+    echo "==> 已从 Docker Hub 拉取镜像"
+else
+    echo "Docker Hub 不可用，从源码构建..."
+    pkill -f 'docker build.*siyuan-share-web' 2>/dev/null || true
+    build_share_image
 fi
 
 echo "==> 启动思源分享服务（${PUBLIC_URL}）..."
@@ -54,4 +84,4 @@ echo "下一步："
 echo "  1. 浏览器打开 ${PUBLIC_URL} 注册账号"
 echo "  2. 登录后在网站生成 API Key"
 echo "  3. 思源 /notes/ → 插件「思源分享」→ 服务端地址填 ${PUBLIC_URL}，粘贴 API Key"
-echo "  4. 若外网无法访问，请在阿里云安全组放行 TCP ${PORT}"
+echo "  4. 分享链接形如 ${PUBLIC_URL}/s/xxxxxxxx"
