@@ -21,9 +21,9 @@ import {
     getStockManagePrefs,
     updateUserPrefs
 } from './rbac.js';
-import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket, isSharePublicPath, siyuanEntryPath } from './proxy.js';
+import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyShareLogout, proxyWebSocket, isSharePublicPath, siyuanEntryPath } from './proxy.js';
 import { ensureSiyuanAuth, isSiyuanCheckAuthPath, resolveSiyuanRedirectTarget, hasSiyuanCookie, loginSiyuanSession, appendCookieHeader } from './siyuan-auth.js';
-import { ensureShareAuth, isShareLoginPath, getShareDashboardPath } from './share-auth.js';
+import { ensureShareAuth, isShareLoginPath, isShareLogoutPath, getShareDashboardPath } from './share-auth.js';
 import { handleAdminApi } from './admin-api.js';
 import { wantsJsonResponse, renderErrorPage, sendHtml } from './error-page.js';
 import { handleOAuthStart, handleOAuthCallback, listOAuthProviders } from './oauth.js';
@@ -263,6 +263,9 @@ async function handleProxyRouteAsync(req, res) {
     if (!ctx) return false;
 
     var browserUrl = new URL(req.url, 'http://127.0.0.1');
+    var isShareLogout = ctx.service.id === 'siyuan-share'
+        && req.method === 'POST'
+        && isShareLogoutPath(browserUrl.pathname, ctx.service);
 
     if (isSharePublicPath(browserUrl.pathname, ctx.service)) {
         req.url = ctx.proxyUrl;
@@ -286,8 +289,14 @@ async function handleProxyRouteAsync(req, res) {
         });
         return true;
     }
-    if (isWriteMethod(req.method) && !canEditService(proxySession.permissions, ctx.service.id)) {
+    if (isWriteMethod(req.method) && !canEditService(proxySession.permissions, ctx.service.id) && !isShareLogout) {
         sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '该服务为只读权限，无法修改');
+        return true;
+    }
+
+    if (isShareLogout) {
+        req.url = ctx.proxyUrl;
+        await proxyShareLogout(ctx.service, req, res);
         return true;
     }
 

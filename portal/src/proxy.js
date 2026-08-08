@@ -1,6 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
+import { mergeSetCookie } from './siyuan-auth.js';
 
 function pickHeaders(reqHeaders, extra, opts) {
     var options = opts || {};
@@ -348,6 +349,42 @@ export async function proxyHttpRequest(service, req, res) {
                 headers['content-length'] = Buffer.byteLength(text, 'utf8');
                 res.writeHead(upstreamRes.statusCode, headers);
                 res.end(text);
+                resolve();
+            });
+        });
+
+        upstream.on('error', function(err) {
+            res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: '上游服务不可用: ' + err.message }));
+            resolve();
+        });
+
+        if (body && body.length) upstream.write(body);
+        upstream.end();
+    });
+}
+
+/** Share logout: upstream destroys PHP session then redirects to /. Send user to portal home instead of re-SSO into /share/. */
+export async function proxyShareLogout(service, req, res) {
+    var target = buildTargetUrl(service, req.url);
+    var lib = target.protocol === 'https:' ? https : http;
+    var body = await readBody(req);
+
+    await new Promise(function(resolve) {
+        var upstream = lib.request(target, {
+            method: 'POST',
+            headers: pickHeaders(req.headers, { host: target.host })
+        }, function(upstreamRes) {
+            var status = upstreamRes.statusCode;
+            var headers = {};
+            if (status >= 300 && status < 400) {
+                headers.location = '/';
+            }
+            mergeSetCookie(res, ['PHPSESSID=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax']);
+            res.writeHead(status, headers);
+            upstreamRes.resume();
+            upstreamRes.on('end', function() {
+                res.end();
                 resolve();
             });
         });
