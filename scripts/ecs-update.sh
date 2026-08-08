@@ -1,6 +1,6 @@
 #!/bin/bash
 # 在 ECS 上更新 navigation 仓库并重启服务
-# 用法: ./scripts/ecs-update.sh [--skip-pull] [--only undercut,company,qq-bot,portal,napcat,stock-manage,siyuan,siyuan-share,piclist]
+# 用法: ./scripts/ecs-update.sh [--skip-pull] [--only undercut,company,qq-bot,portal,napcat,stock-manage,siyuan,siyuan-share,piclist,alist]
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -103,6 +103,9 @@ if should_run portal; then
     if [ -f "$ROOT/scripts/sync-portal-siyuan-publish.py" ]; then
         python3 "$ROOT/scripts/sync-portal-siyuan-publish.py" "$ROOT/portal/config.json" || true
     fi
+    if [ -f "$ROOT/scripts/sync-portal-alist.py" ]; then
+        python3 "$ROOT/scripts/sync-portal-alist.py" "$ROOT/portal/config.json" || true
+    fi
     if [ -f "$ROOT/scripts/sync-share-site-url.py" ]; then
         python3 "$ROOT/scripts/sync-share-site-url.py" || true
     fi
@@ -174,6 +177,12 @@ if should_run piclist; then
     if [ -f "$ROOT/scripts/patch-siyuan-picgo-paste.py" ]; then
         python3 "$ROOT/scripts/patch-siyuan-picgo-paste.py" || true
     fi
+fi
+
+if should_run alist; then
+    echo "==> alist"
+    cd "$ROOT/alist"
+    bash deploy-ecs.sh
 fi
 
 if should_run napcat; then

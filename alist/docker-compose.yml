@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  alist:
+    image: xhofe/alist:latest
+    container_name: alist
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${ALIST_PORT:-5244}:5244"
+    volumes:
+      - ./data:/opt/alist/data
+    environment:
+      TZ: Asia/Shanghai
+      PUID: "0"
+      PGID: "0"
+      UMASK: "022"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:5244/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

@@ -20,3 +20,5 @@ piclist/.env
 piclist/data/node_modules/
 piclist/data/package.json
 piclist/data/package-lock.json
+alist/data/
+alist/.env
