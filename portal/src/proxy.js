@@ -195,15 +195,18 @@ function rewriteProxiedBody(text, service) {
 }
 
 function injectProxiedBackLink(html, variant) {
-    var positionRule = variant === 'notes'
-        ? '.portal-proxied-back--notes{top:8px!important;left:172px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}'
-        : '.portal-proxied-back--napcat{top:8px!important;left:132px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}';
+    var positionByVariant = {
+        notes: '.portal-proxied-back--notes{top:8px!important;left:172px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}',
+        napcat: '.portal-proxied-back--napcat{top:8px!important;left:132px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}',
+        publish: '.portal-proxied-back--publish{top:8px!important;left:12px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}'
+    };
+    var positionRule = positionByVariant[variant] || positionByVariant.publish;
     var css = '<style>'
         + '.portal-proxied-back{position:fixed;z-index:2147483647;display:inline-flex;align-items:center;padding:8px 12px;border-radius:8px;font:14px/1.4 system-ui,sans-serif;text-decoration:none;color:#e8edf5;background:rgba(15,17,21,.88);border:1px solid rgba(255,255,255,.12);box-shadow:0 4px 16px rgba(0,0,0,.25);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);pointer-events:auto}'
         + '.portal-proxied-back:hover{background:rgba(23,27,34,.95)}'
         + '@media (prefers-color-scheme:light){.portal-proxied-back{color:#152033;background:rgba(255,255,255,.92);border-color:rgba(15,23,42,.12);box-shadow:0 4px 16px rgba(15,23,42,.12)}.portal-proxied-back:hover{background:#fff}}'
         + positionRule
-        + '@media (max-width:768px){.portal-proxied-back--notes,.portal-proxied-back--napcat{top:auto!important;bottom:calc(12px + env(safe-area-inset-bottom,0px))!important;left:12px!important;right:auto!important;padding:8px 12px!important;font-size:14px!important;line-height:1.3!important}}'
+        + '@media (max-width:768px){.portal-proxied-back--notes,.portal-proxied-back--napcat,.portal-proxied-back--publish{top:auto!important;bottom:calc(12px + env(safe-area-inset-bottom,0px))!important;left:12px!important;right:auto!important;padding:8px 12px!important;font-size:14px!important;line-height:1.3!important}}'
         + '</style>';
     var keeper = '<script>(function(){var c="portal-proxied-back portal-proxied-back--' + variant + '";function m(){var e=document.querySelector("."+c.split(" ")[0]);if(!e){e=document.createElement("a");e.className=c;e.href="/";e.textContent="← 服务导航";document.body.appendChild(e)}}m();new MutationObserver(m).observe(document.documentElement,{childList:true,subtree:true})})();</script>';
     if (html.includes('</head>')) html = html.replace('</head>', css + '</head>');
@@ -269,6 +272,7 @@ function injectPortalShell(html, service) {
             html = injectProxiedBackLink(html, 'napcat');
         }
         if (service.id === 'notes' && !isSiyuanAuthPage) html = injectProxiedBackLink(html, 'notes');
+        if (service.id === 'siyuan-publish') html = injectProxiedBackLink(html, 'publish');
         return html;
     }
     var title = service.title || '服务';
