@@ -14,7 +14,7 @@ CFG_PATH = PICLIST_DIR / "data" / "config.json"
 
 def set_env_key(key: str) -> None:
     text = ENV_PATH.read_text(encoding="utf-8") if ENV_PATH.exists() else ""
-    line = f"PICLIST_SERVER_KEY={key}\n"
+    line = "PICLIST_SERVER_KEY={}\n".format(key)
     if re.search(r"^PICLIST_SERVER_KEY=", text, flags=re.M):
         text = re.sub(r"^PICLIST_SERVER_KEY=.*$", line.rstrip(), text, flags=re.M)
     else:
@@ -22,13 +22,16 @@ def set_env_key(key: str) -> None:
     ENV_PATH.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
 
 
+UPLOADER = "aws-s3-plist"
+
+
 def set_b2(access_key_id: str, secret_access_key: str) -> None:
     if not CFG_PATH.exists():
-        raise SystemExit(f"缺少 {CFG_PATH}，请先运行 piclist/deploy-ecs.sh")
+        raise SystemExit("缺少 {}，请先运行 piclist/deploy-ecs.sh".format(CFG_PATH))
     cfg = json.loads(CFG_PATH.read_text(encoding="utf-8"))
     b2 = {"accessKeyID": access_key_id, "secretAccessKey": secret_access_key}
-    cfg.setdefault("picBed", {}).setdefault("aws-s3", {}).update(b2)
-    for item in cfg.get("uploader", {}).get("aws-s3", {}).get("configList", []):
+    cfg.setdefault("picBed", {}).setdefault(UPLOADER, {}).update(b2)
+    for item in cfg.get("uploader", {}).get(UPLOADER, {}).get("configList", []):
         item.update(b2)
     CFG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -42,7 +45,7 @@ def main() -> None:
         sys.exit(1)
     set_b2(access_key_id, secret)
     set_env_key(server_key)
-    print(f"已更新 {CFG_PATH.name} 与 {ENV_PATH.name}")
+    print("已更新 {} 与 {}".format(CFG_PATH.name, ENV_PATH.name))
 
 
 if __name__ == "__main__":

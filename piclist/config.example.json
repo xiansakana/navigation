@@ -1,8 +1,8 @@
 {
   "picBed": {
-    "current": "aws-s3",
-    "uploader": "aws-s3",
-    "aws-s3": {
+    "current": "aws-s3-plist",
+    "uploader": "aws-s3-plist",
+    "aws-s3-plist": {
       "_id": "b2-xiansakana-assets",
       "_configName": "backblaze-b2-assets",
       "_createdAt": 0,
@@ -20,7 +20,7 @@
     }
   },
   "uploader": {
-    "aws-s3": {
+    "aws-s3-plist": {
       "configList": [
         {
           "_id": "b2-xiansakana-assets",
