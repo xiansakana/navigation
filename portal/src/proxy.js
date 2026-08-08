@@ -227,6 +227,34 @@ function ensureViewportMeta(html) {
     return tag + html;
 }
 
+function injectNapcatPathShim(html, prefix) {
+    if (!html.includes('<head') || html.includes('portal-napcat-path-shim')) return html;
+    var mount = prefix.replace(/\/$/, '');
+    var shim = '<script id="portal-napcat-path-shim">(function(){'
+        + 'var P=' + JSON.stringify(mount) + ';'
+        + 'var PORTAL=/^\\/api\\/(oauth|login|me|services|menus|logout|admin)(\\/|$)/;'
+        + 'var ROOT=/^\\/(api|webui|plugin|files)(\\/|$)/;'
+        + 'function fix(u){if(typeof u!=="string"||u.startsWith(P+"/"))return u;'
+        + 'if(PORTAL.test(u))return u;'
+        + 'if(u.startsWith("/")&&ROOT.test(u))return P+u;'
+        + 'try{var abs=new URL(u,location.href);'
+        + 'if(abs.origin===location.origin&&!PORTAL.test(abs.pathname)&&ROOT.test(abs.pathname))'
+        + 'return P+abs.pathname+abs.search+abs.hash;'
+        + '}catch(e){}'
+        + 'if(/^wss?:\\/\\//i.test(u)){try{var w=new URL(u);'
+        + 'if(w.host===location.host&&!PORTAL.test(w.pathname)&&ROOT.test(w.pathname))'
+        + '{w.pathname=P+w.pathname;return w.toString();}}catch(e){}}'
+        + 'return u;}'
+        + 'var f=window.fetch;window.fetch=function(i,o){'
+        + 'if(typeof i==="string")i=fix(i);'
+        + 'else if(i&&i.url){var u=fix(i.url);if(u!==i.url)i=new Request(u,i);}'
+        + 'return f.call(this,i,o);};'
+        + 'var WS=window.WebSocket;window.WebSocket=function(u,p){return new WS(fix(u),p);};'
+        + 'var xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u,a,s,t){return xo.call(this,m,fix(u),a,s,t);};'
+        + '})();</script>';
+    return html.replace(/<head[^>]*>/i, function(m) { return m + shim; });
+}
+
 function injectNapcatTokenShim(html, token) {
     if (!token || !html.includes('<head')) return html;
     var shim = '<script src="/sha256-fallback.js"></script>'
@@ -237,6 +265,7 @@ function injectNapcatTokenShim(html, token) {
         + 'if(window.crypto&&crypto.subtle){return crypto.subtle.digest("SHA-256",enc).then(function(buf){'
         + 'return Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");});}'
         + 'return Promise.resolve(window.portalSha256Hex(s));}'
+        // 经 path-shim 后也会变成 /napcat/api/auth/login；保留根路径由 shim/路由兜底
         + 'napcatSha256(t+".napcat").then(function(hash){return fetch("/api/auth/login",{method:"POST",headers:{'
         + '"Content-Type":"application/json"},body:JSON.stringify({hash:hash})});}).then(function(r){return r.json();})'
         + '.then(function(data){if(data&&data.code===0&&data.data&&data.data.Credential){'
@@ -268,6 +297,7 @@ function injectPortalShell(html, service) {
         if (!headInject && service.id !== 'napcat' && service.id !== 'notes' && service.id !== 'siyuan-publish') return html;
         if (headInject) html = html.replace('<head>', '<head>' + headInject);
         if (service.id === 'napcat') {
+            html = injectNapcatPathShim(html, service.path.replace(/\/$/, ''));
             html = injectNapcatTokenShim(html, service.adminToken);
             html = injectProxiedBackLink(html, 'napcat');
         }
