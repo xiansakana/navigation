@@ -61,18 +61,16 @@ ECS 默认对外端口：**http://123.56.235.12:36677**（需在安全组放行 
 
 ## 文件名（时间戳）
 
-默认开启 **自动时间戳命名**（`settings.autoRename: true`），上传后文件名形如 `202508082014371.png`（格式 `YYYYMMDDHHmmssSSS` + 原扩展名）。
+默认通过 **`picgo-plugin-rename`** 插件重命名（`picgo-server` 不识别桌面版的 `settings.autoRename`）。
+
+上传后文件名形如：`1734567890123-a1b2c3d4....png`（毫秒时间戳 + MD5 + 扩展名）。
 
 ```bash
-python3 scripts/sync-piclist-rename.py
+python3 scripts/sync-piclist-rename.py   # 安装插件并写入 config
 cd piclist && docker compose restart
 ```
 
-自定义格式（高级重命名）：
-
-```bash
-PICLIST_RENAME_FORMAT='{Y}{m}{d}-{h}{i}{s}-{ms}-{str-3}' python3 scripts/sync-piclist-rename.py
-```
+关闭时间戳命名：`PICLIST_AUTO_RENAME=0 python3 scripts/sync-piclist-rename.py`
 
 ## 环境变量（`.env`）
 
