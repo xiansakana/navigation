@@ -13,9 +13,9 @@
   "services": [
     {
       "id": "torn-toolbox",
-      "title": "Torn 压价助手",
-      "description": "Bazaar / Item Market 压价监听与公司申请提醒",
-      "type": "proxy",
+      "title": "Torn 工具箱",
+      "description": "压价助手与公司申请监听（独立进程）",
+      "type": "hub",
       "path": "/torn-toolbox",
       "entryPath": "/",
       "internalUrl": "http://127.0.0.1:8790",
