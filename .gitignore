@@ -11,3 +11,6 @@ data/navigation.db-wal
 data/navigation.db-shm
 siyuan/data/
 siyuan/.env
+siyuan-share/data/
+siyuan-share/config.php
+siyuan-share/.env

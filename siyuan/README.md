@@ -40,4 +40,8 @@ ECS 上每天凌晨 3 点自动备份 workspace（停容器 → tar → 启动�
 - 备份目录：`/opt/backups/siyuan/`
 - 日志：`/var/log/siyuan-backup.log`
 
+## 分享（Siyuan Share 自建）
+
+公开分享链接由独立服务提供，默认 **http://123.56.235.12:6807**（需安全组放行 6807）。详见 [`siyuan-share/README.md`](../siyuan-share/README.md)。
+
 参考源码：`d:\code\SiYuan`（siyuan-note/siyuan）

@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  siyuan-share-web:
+    image: b8l8u8e8/siyuan-share-web:latest
+    container_name: siyuan-share-web
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:${SIYUAN_SHARE_PORT:-6807}:80"
+    volumes:
+      - ./data/storage:/var/www/html/storage
+      - ./data/uploads:/var/www/html/uploads
+      - ./config.php:/var/www/html/config.php:ro
+    environment:
+      TZ: Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
