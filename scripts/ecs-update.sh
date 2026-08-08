@@ -94,6 +94,9 @@ if should_run portal; then
     if [ -f "$ROOT/scripts/patch-portal-config.py" ]; then
         python3 "$ROOT/scripts/patch-portal-config.py" "$ROOT/portal/config.json" || true
     fi
+    if [ -f "$ROOT/scripts/validate-portal-config.py" ]; then
+        python3 "$ROOT/scripts/validate-portal-config.py" "$ROOT/portal/config.json"
+    fi
     if [ -f "$ROOT/scripts/sync-portal-proxy-services.py" ]; then
         python3 "$ROOT/scripts/sync-portal-proxy-services.py" || true
     fi

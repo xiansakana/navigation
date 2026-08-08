@@ -1,4 +1,5 @@
 # 兜底：仅在 ECS git pull 失败时用 scp 同步（日常部署请 git push + ECS ./scripts/ecs-update.sh）
+# 注意：不同步各服务的 config.json，避免本机开发配置覆盖 ECS 生产配置（含 torn-toolbox hub 结构）
 # Usage:
 #   git push origin main
 #   ssh root@123.56.235.12 "cd /opt/navigation && ./scripts/ecs-update.sh"
@@ -17,7 +18,27 @@ $RemoteRoot = "/opt/navigation"
 
 $Dirs = @("portal", "qq-bot", "torn-toolbox-desktop", "stock-manage", "scripts", "shared")
 
-Write-Host "==> Sync to ECS: ${SshTarget}:${RemoteRoot}"
+$ExcludeConfigNames = @("config.json", "config.undercut.json", "config.company.json")
+
+function Sync-DirExcludingConfigs {
+    param(
+        [string]$LocalDir,
+        [string]$RemoteDir
+    )
+    $temp = Join-Path $env:TEMP ("ecs-deploy-" + [guid]::NewGuid().ToString("n"))
+    New-Item -ItemType Directory -Path $temp -Force | Out-Null
+    try {
+        $null = robocopy $LocalDir $temp /E /XF $ExcludeConfigNames /NFL /NDL /NJH /NJS /NC /NS
+        if ($LASTEXITCODE -ge 8) {
+            throw "robocopy failed with exit code $LASTEXITCODE"
+        }
+        scp -i $Key -r "$temp\*" "${SshTarget}:${RemoteDir}/"
+    } finally {
+        Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue
+    }
+}
+
+Write-Host "==> Sync to ECS: ${SshTarget}:${RemoteRoot} (config.json excluded)"
 foreach ($dir in $Dirs) {
     $localPath = Join-Path $RepoRoot $dir
     if (-not (Test-Path $localPath)) {
@@ -25,7 +46,7 @@ foreach ($dir in $Dirs) {
         continue
     }
     Write-Host "  - $dir"
-    scp -i $Key -r $localPath "${SshTarget}:${RemoteRoot}/"
+    Sync-DirExcludingConfigs -LocalDir $localPath -RemoteDir (Join-Path $RemoteRoot $dir)
 }
 
 $onlyArg = ""
