@@ -36,8 +36,9 @@ NEW = """    const writeClipboardText = async (text) => {
 def read_container_file():
     proc = subprocess.run(
         ["docker", "exec", CONTAINER, "cat", APP_JS],
-        capture_output=True,
-        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
     )
     if proc.returncode != 0:
         print(f"skip: cannot read {APP_JS} from {CONTAINER}", file=sys.stderr)
@@ -45,12 +46,13 @@ def read_container_file():
     return proc.stdout
 
 
-def write_container_file(content: str) -> bool:
+def write_container_file(content):
     proc = subprocess.run(
         ["docker", "exec", "-i", CONTAINER, "tee", APP_JS],
         input=content,
-        capture_output=True,
-        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
     )
     if proc.returncode != 0:
         print(proc.stderr.strip(), file=sys.stderr)
