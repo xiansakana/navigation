@@ -163,7 +163,7 @@ function buildDefaultGuestPermissions(services) {
         'service:napcat:view'
     ]);
     (services || []).forEach(function(service) {
-        if (!service.hidden && service.id) {
+        if (!service.hidden && service.id && service.id !== 'siyuan-share') {
             perms.add(serviceViewPermissionId(service.id));
         }
     });
