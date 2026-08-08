@@ -1,46 +1,85 @@
 #!/usr/bin/env python3
+"""Fix portal torn-toolbox: hub + undercut/company proxy services (local or ECS)."""
 import json
+import sys
+from pathlib import Path
 
-path = "/opt/navigation/portal/config.json"
-with open(path, encoding="utf-8") as f:
-    cfg = json.load(f)
+ROOT = Path(__file__).resolve().parents[1]
+CONFIG_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "portal" / "config.json"
 
-napcat = next(s for s in cfg["services"] if s["id"] == "napcat")
-cfg["services"] = [
-    {
-        "id": "torn-toolbox",
-        "title": "Torn 工具箱",
-        "description": "压价助手与公司申请监听（独立进程）",
-        "type": "hub",
-        "path": "/torn-toolbox",
-        "entryPath": "/",
-        "icon": "📊",
-    },
-    {
-        "id": "torn-undercut",
-        "title": "压价助手",
-        "hidden": True,
-        "type": "proxy",
-        "path": "/torn-toolbox/undercut",
-        "entryPath": "/",
-        "internalUrl": "http://127.0.0.1:8790",
-        "icon": "📉",
-    },
-    {
-        "id": "torn-company",
-        "title": "公司监听",
-        "hidden": True,
-        "type": "proxy",
-        "path": "/torn-toolbox/company",
-        "entryPath": "/",
-        "internalUrl": "http://127.0.0.1:8791",
-        "icon": "🏢",
-    },
-    napcat,
-]
 
-with open(path, "w", encoding="utf-8") as f:
-    json.dump(cfg, f, indent=2, ensure_ascii=False)
-    f.write("\n")
+def load_json(path, default=None):
+    if not path.exists():
+        return default
+    return json.loads(path.read_text(encoding="utf-8"))
 
-print("portal config updated")
+
+def is_real_token(val):
+    if not val or not isinstance(val, str):
+        return False
+    markers = ("相同", "换成", "change-me", "config.", "与 ", "请填")
+    return not any(m in val for m in markers)
+
+
+def read_token_from_file(name):
+    data = load_json(ROOT / "torn-toolbox-desktop" / name, {})
+    return (data.get("server") or {}).get("adminToken") or ""
+
+
+cfg = load_json(CONFIG_PATH, {})
+services = cfg.get("services") or []
+by_id = {s["id"]: s for s in services if s.get("id")}
+
+undercut_token = ""
+company_token = ""
+old_toolbox = by_id.get("torn-toolbox") or {}
+if is_real_token(old_toolbox.get("adminToken")):
+    undercut_token = old_toolbox["adminToken"]
+if is_real_token((by_id.get("torn-undercut") or {}).get("adminToken")):
+    undercut_token = by_id["torn-undercut"]["adminToken"]
+if is_real_token((by_id.get("torn-company") or {}).get("adminToken")):
+    company_token = by_id["torn-company"]["adminToken"]
+if not is_real_token(undercut_token):
+    undercut_token = read_token_from_file("config.undercut.json")
+if not is_real_token(company_token):
+    company_token = read_token_from_file("config.company.json")
+
+others = [s for s in services if s.get("id") not in ("torn-toolbox", "torn-undercut", "torn-company")]
+
+hub = {
+    "id": "torn-toolbox",
+    "title": "Torn 工具箱",
+    "description": "压价助手与公司申请监听（独立进程）",
+    "type": "hub",
+    "path": "/torn-toolbox",
+    "entryPath": "/",
+    "icon": "📊",
+}
+undercut = {
+    "id": "torn-undercut",
+    "title": "压价助手",
+    "hidden": True,
+    "type": "proxy",
+    "path": "/torn-toolbox/undercut",
+    "entryPath": "/",
+    "internalUrl": "http://127.0.0.1:8790",
+    "icon": "📉",
+}
+company = {
+    "id": "torn-company",
+    "title": "公司监听",
+    "hidden": True,
+    "type": "proxy",
+    "path": "/torn-toolbox/company",
+    "entryPath": "/",
+    "internalUrl": "http://127.0.0.1:8791",
+    "icon": "🏢",
+}
+if is_real_token(undercut_token):
+    undercut["adminToken"] = undercut_token
+if is_real_token(company_token):
+    company["adminToken"] = company_token
+
+cfg["services"] = [hub, undercut, company] + others
+CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+print("portal config: torn-toolbox hub + undercut + company restored ->", CONFIG_PATH)
