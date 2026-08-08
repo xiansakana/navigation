@@ -1,6 +1,9 @@
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
+import { siyuanEntryPath } from './router.js';
+
+export { siyuanEntryPath } from './router.js';
 
 function pickHeaders(reqHeaders, extra, opts) {
     var options = opts || {};
@@ -45,23 +48,6 @@ export function buildTargetUrl(service, reqUrl) {
     }
     return target;
 }
-
-function isMobileUserAgent(userAgent) {
-    var ua = String(userAgent || '');
-    if (!ua) return false;
-    if (ua.includes('Electron')) return false;
-    if (ua.includes('Pad')) return false;
-    if (ua.includes('Android') && !ua.includes('Mobile')) return false;
-    return /Mobile|iPhone|iPod|Android.*Mobile|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
-}
-
-function siyuanEntryPath(userAgent) {
-    return isMobileUserAgent(userAgent)
-        ? '/stage/build/mobile/'
-        : '/stage/build/desktop/';
-}
-
-export { siyuanEntryPath };
 
 function fixSiyuanAuthQuery(search, userAgent) {
     var params = new URLSearchParams(search || '');
@@ -339,130 +325,4 @@ export function proxyWebSocket(service, req, socket, head) {
     });
     proxySocket.on('error', function() { socket.destroy(); });
     socket.on('error', function() { proxySocket.destroy(); });
-}
-
-export function findProxyService(services, pathname) {
-    var matches = (services || []).filter(function(service) {
-        return service.type === 'proxy'
-            && service.path
-            && (pathname === service.path || pathname.startsWith(service.path + '/'));
-    });
-    if (!matches.length) return null;
-    return matches.sort(function(a, b) { return b.path.length - a.path.length; })[0];
-}
-
-function findNotesService(services) {
-    return (services || []).find(function(service) {
-        return service.id === 'notes' && service.type === 'proxy';
-    });
-}
-
-/** SiYuan 使用根路径 /ws、/stage 等，需在 portal 根路由反代；/api 按命名空间区分 */
-var SIYUAN_ROOT_PREFIXES = [
-    '/ws',
-    '/stage/',
-    '/appearance/',
-    '/plugins/',
-    '/widgets/',
-    '/templates/',
-    '/emojis/',
-    '/snippets/',
-    '/assets/',
-    '/export/',
-    '/public/',
-    '/history/',
-    '/upload',
-    '/check-auth',
-    '/favicon.ico',
-    '/manifest.json',
-    '/manifest.webmanifest',
-    '/service-worker.js',
-    '/repo/'
-];
-
-var SIYUAN_API_PREFIXES = [
-    '/api/account/', '/api/ai/', '/api/archive/', '/api/asset/', '/api/attr/', '/api/av/',
-    '/api/bazaar/', '/api/block/', '/api/bookmark/', '/api/broadcast/', '/api/clipboard/',
-    '/api/cloud/', '/api/convert/', '/api/export/', '/api/extension/', '/api/file/',
-    '/api/filetree/', '/api/format/', '/api/graph/', '/api/history/', '/api/icon/',
-    '/api/import/', '/api/inbox/', '/api/lute/', '/api/network/', '/api/notebook/',
-    '/api/notification/', '/api/outline/', '/api/petal/', '/api/plugin/', '/api/query/',
-    '/api/ref/', '/api/repo/', '/api/riff/', '/api/search/', '/api/setting/',
-    '/api/snippet/', '/api/sqlite/', '/api/storage/', '/api/sync/', '/api/system/',
-    '/api/tag/', '/api/template/', '/api/transactions/', '/api/ui/'
-];
-
-function isSiyuanApiPath(pathname) {
-    // 思源主保存接口为 /api/transactions（无尾斜杠），子路径如 /api/transactions/undo
-    if (pathname === '/api/transactions' || pathname.startsWith('/api/transactions/')) {
-        return true;
-    }
-    return SIYUAN_API_PREFIXES.some(function(prefix) {
-        return pathname.startsWith(prefix);
-    });
-}
-
-function isSiyuanRootPath(pathname) {
-    if (isSiyuanApiPath(pathname)) return true;
-    if (pathname === '/upload') return true;
-    if (pathname === '/check-auth') return true;
-    if (pathname === '/favicon.ico') return true;
-    if (pathname === '/manifest.json' || pathname === '/manifest.webmanifest') return true;
-    if (pathname === '/service-worker.js') return true;
-    if (pathname === '/ws' || pathname.startsWith('/ws/')) return true;
-    return SIYUAN_ROOT_PREFIXES.some(function(prefix) {
-        if (prefix.endsWith('/')) return pathname.startsWith(prefix);
-        return false;
-    });
-}
-
-function findNapcatService(services) {
-    return (services || []).find(function(service) {
-        return service.id === 'napcat' && service.type === 'proxy';
-    });
-}
-
-export function resolveProxyContext(services, reqUrl) {
-    var url = new URL(reqUrl, 'http://127.0.0.1');
-    var service = findProxyService(services, url.pathname);
-    if (service) return { service: service, proxyUrl: reqUrl };
-
-    var napcat = findNapcatService(services);
-    if (napcat && (url.pathname === '/webui' || url.pathname.startsWith('/webui/'))) {
-        var webuiPrefix = napcat.path.replace(/\/$/, '');
-        return { service: napcat, proxyUrl: webuiPrefix + url.pathname + url.search };
-    }
-    if (napcat && url.pathname.startsWith('/api/') && !isSiyuanApiPath(url.pathname)) {
-        var apiPrefix = napcat.path.replace(/\/$/, '');
-        return { service: napcat, proxyUrl: apiPrefix + url.pathname + url.search };
-    }
-
-    var notes = findNotesService(services);
-    if (notes && isSiyuanRootPath(url.pathname)) {
-        return { service: notes, proxyUrl: url.pathname + url.search };
-    }
-
-    return null;
-}
-
-export function getServiceEntryHref(service, userAgent) {
-    var base = service.path.replace(/\/$/, '');
-    var entry = service.entryPath || '/';
-    if (service.id === 'notes') {
-        if (!entry || entry === '/' || entry === '/stage/build/desktop/' || entry === '/stage/build/mobile/') {
-            entry = userAgent ? siyuanEntryPath(userAgent) : '/';
-        }
-    }
-    if (!entry.startsWith('/')) entry = '/' + entry;
-    return base + entry;
-}
-
-/** 兼容根路径 /webui，统一重定向到 /napcat/webui */
-export function napcatCanonicalWebuiPath(service, pathname) {
-    if (service.id !== 'napcat') return null;
-    if (pathname === '/webui' || pathname.startsWith('/webui/')) {
-        var mount = service.path.replace(/\/$/, '') + '/webui';
-        return mount + pathname.slice('/webui'.length) || mount + '/';
-    }
-    return null;
 }

@@ -21,7 +21,14 @@ import {
     getStockManagePrefs,
     updateUserPrefs
 } from './rbac.js';
-import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket, siyuanEntryPath } from './proxy.js';
+import {
+    resolveRoute,
+    resolveProxyContext,
+    getServiceEntryHref,
+    napcatCanonicalWebuiPath,
+    siyuanEntryPath
+} from './router.js';
+import { proxyHttpRequest, proxyWebSocket } from './proxy.js';
 import { ensureSiyuanAuth, isSiyuanCheckAuthPath, resolveSiyuanRedirectTarget, hasSiyuanCookie, loginSiyuanSession, appendCookieHeader } from './siyuan-auth.js';
 import { handleAdminApi } from './admin-api.js';
 import { wantsJsonResponse, renderErrorPage, sendHtml } from './error-page.js';
@@ -228,19 +235,6 @@ async function handleLoginApi(req, res) {
     }
 }
 
-function isPortalApi(pathname, method) {
-    if (pathname === '/api/oauth/providers' && method === 'GET') return true;
-    if (/^\/api\/oauth\/(github|google)\/(start|callback)$/.test(pathname) && method === 'GET') return true;
-    if (pathname === '/api/login' && method === 'POST') return true;
-    if (pathname === '/api/me' && method === 'GET') return true;
-    if (pathname === '/api/me/prefs' && method === 'PUT') return true;
-    if (pathname === '/api/services' && method === 'GET') return true;
-    if (pathname === '/api/menus' && method === 'GET') return true;
-    if (pathname === '/api/logout' && method === 'POST') return true;
-    if (pathname.startsWith('/api/admin/')) return true;
-    return false;
-}
-
 function isWriteMethod(method) {
     return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
 }
@@ -253,12 +247,12 @@ function canAccessProxiedService(permissions, service) {
     return canViewService(permissions, service.id);
 }
 
-function handleProxyRoute(req, res) {
-    return handleProxyRouteAsync(req, res);
+function handleProxyRoute(req, res, presetCtx) {
+    return handleProxyRouteAsync(req, res, presetCtx);
 }
 
-async function handleProxyRouteAsync(req, res) {
-    var ctx = resolveProxyContext(config.services, req.url);
+async function handleProxyRouteAsync(req, res, presetCtx) {
+    var ctx = presetCtx || resolveProxyContext(config.services, req.url);
     if (!ctx) return false;
 
     var browserUrl = new URL(req.url, 'http://127.0.0.1');
@@ -362,32 +356,36 @@ async function handleProxyRouteAsync(req, res) {
 
 var server = http.createServer(async function(req, res) {
     var url = new URL(req.url, 'http://127.0.0.1');
+    var route = resolveRoute(config.services, url.pathname, req.method, url.search);
 
-    if (url.pathname.startsWith('/api/')) {
-        if (url.pathname === '/api/oauth/providers' && req.method === 'GET') {
+    if (route.kind === 'portal-oauth') {
+        if (route.oauthAction === 'providers') {
             return json(res, 200, { ok: true, providers: listOAuthProviders(config) });
         }
-        var oauthMatch = url.pathname.match(/^\/api\/oauth\/(github|google)\/(start|callback)$/);
-        if (oauthMatch && req.method === 'GET') {
-            if (oauthMatch[2] === 'start') {
-                return handleOAuthStart(oauthMatch[1], req, res, config, getSessionSecret());
-            }
-            return handleOAuthCallback(oauthMatch[1], req, res, config, getSessionSecret());
+        if (route.oauthAction === 'start') {
+            return handleOAuthStart(route.oauthProvider, req, res, config, getSessionSecret());
         }
-        if (isPortalApi(url.pathname, req.method)) {
-            if (url.pathname === '/api/login') {
-                await handleLoginApi(req, res);
-                return;
-            }
-            var session = requireAuth(req, res);
-            if (!session) return;
-            return handleApi(req, res, url, session);
+        return handleOAuthCallback(route.oauthProvider, req, res, config, getSessionSecret());
+    }
+
+    if (route.kind === 'portal-api') {
+        if (url.pathname === '/api/login') {
+            await handleLoginApi(req, res);
+            return;
         }
-        if (await handleProxyRoute(req, res)) return;
+        var session = requireAuth(req, res);
+        if (!session) return;
+        return handleApi(req, res, url, session);
+    }
+
+    if (route.kind === 'proxy') {
+        if (await handleProxyRoute(req, res, { service: route.service, proxyUrl: route.proxyUrl })) return;
         return json(res, 404, { ok: false, error: 'Not Found' });
     }
 
-    if (await handleProxyRoute(req, res)) return;
+    if (route.kind === 'not-found') {
+        return json(res, 404, { ok: false, error: 'Not Found' });
+    }
 
     var hubPath = '/torn-toolbox';
     if (url.pathname === hubPath || url.pathname === hubPath + '/' || url.pathname === hubPath + '/index.html') {
