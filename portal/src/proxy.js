@@ -174,11 +174,14 @@ function ensureViewportMeta(html) {
 
 function injectNapcatTokenShim(html, token) {
     if (!token || !html.includes('<head')) return html;
-    var shim = '<script>(function(){var t=' + JSON.stringify(token)
+    var shim = '<script src="/sha256-fallback.js"></script>'
+        + '<script>(function(){var t=' + JSON.stringify(token)
         + ';var g=URLSearchParams.prototype.get;URLSearchParams.prototype.get=function(k){'
         + 'if(k==="token")return g.call(this,k)||t;return g.call(this,k);};'
-        + 'function napcatSha256(s){return crypto.subtle.digest("SHA-256",new TextEncoder().encode(s)).then(function(buf){'
+        + 'function napcatSha256(s){var enc=new TextEncoder().encode(s);'
+        + 'if(window.crypto&&crypto.subtle){return crypto.subtle.digest("SHA-256",enc).then(function(buf){'
         + 'return Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");});}'
+        + 'return Promise.resolve(window.portalSha256Hex(s));}'
         + 'napcatSha256(t+".napcat").then(function(hash){return fetch("/api/auth/login",{method:"POST",headers:{'
         + '"Content-Type":"application/json"},body:JSON.stringify({hash:hash})});}).then(function(r){return r.json();})'
         + '.then(function(data){if(data&&data.code===0&&data.data&&data.data.Credential){'

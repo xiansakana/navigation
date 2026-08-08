@@ -139,6 +139,9 @@ if should_run siyuan-share; then
     fi
     cd "$ROOT/siyuan-share"
     bash deploy-ecs.sh
+    if [ -f "$ROOT/scripts/patch-share-web-clipboard.py" ]; then
+        python3 "$ROOT/scripts/patch-share-web-clipboard.py" || true
+    fi
 fi
 
 if should_run piclist; then
