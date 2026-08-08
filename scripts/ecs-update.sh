@@ -148,6 +148,11 @@ if should_run piclist; then
     fi
     cd "$ROOT/piclist"
     bash deploy-ecs.sh
+    if [ -f "$ROOT/scripts/sync-siyuan-picgo-external.py" ] && [ -f "$ROOT/piclist/.env" ]; then
+        # shellcheck disable=SC1091
+        set -a && source "$ROOT/piclist/.env" && set +a
+        python3 "$ROOT/scripts/sync-siyuan-picgo-external.py" || true
+    fi
 fi
 
 if should_run napcat; then
