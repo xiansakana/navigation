@@ -59,6 +59,7 @@ function expectProxy(pathname, want, opts) {
 [
     ['/api/transactions', 'POST', { kind: 'proxy', id: 'notes' }],
     ['/api/auth/login', 'POST', { kind: 'proxy', id: 'napcat' }],
+    ['/api/QQLogin/GetQQLoginQrcode', 'POST', { kind: 'proxy', id: 'napcat' }],
     ['/stock-manage/api/health', 'GET', { kind: 'proxy', id: 'stock-manage' }],
     ['/ws', 'GET', { kind: 'proxy', id: 'notes' }],
 ].forEach(function(c) {
@@ -74,6 +75,7 @@ function expectProxy(pathname, want, opts) {
     { path: '/api/plugin', want: { id: 'notes', proxyPath: '/api/plugin' } },
     { path: '/api/block/insertBlock', want: { id: 'notes', proxyPath: '/api/block/insertBlock' } },
     { path: '/api/auth/login', want: { id: 'napcat', proxyPath: '/napcat/api/auth/login' } },
+    { path: '/api/QQLogin/GetQQLoginQrcode', want: { id: 'napcat', proxyPath: '/napcat/api/QQLogin/GetQQLoginQrcode' } },
     { path: '/webui/', want: { id: 'napcat', proxyPath: '/napcat/webui/' } },
     { path: '/stock-manage/api/health', want: { id: 'stock-manage', proxyPath: '/stock-manage/api/health' } },
     { path: '/torn-toolbox/undercut/api/state', want: { id: 'torn-undercut' } },
