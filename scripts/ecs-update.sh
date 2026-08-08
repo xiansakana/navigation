@@ -92,6 +92,7 @@ fi
 if should_run portal; then
     echo "==> portal"
     cd "$ROOT/portal"
+    npm install --production
     if pm2 describe portal >/dev/null 2>&1; then
         pm2 restart portal
     else

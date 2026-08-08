@@ -1,6 +1,6 @@
 # 股票管理（navigation 子服务）
 
-美股持仓、交易记录、盈亏统计。数据持久化在服务端 `data/portfolio.json`，通过 portal 登录后访问。
+美股持仓、交易记录、盈亏统计。运行时数据统一写入仓库根目录 `data/navigation.db`（与 Portal RBAC 共用）；首次启动会自动从 `data/portfolio.json` 导入（若 DB 为空）。
 
 ## 本地开发
 

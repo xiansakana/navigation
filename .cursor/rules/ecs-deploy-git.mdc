@@ -1,0 +1,29 @@
+---
+description: ECS deploy via git push and pull (not scp by default)
+alwaysApply: true
+---
+
+# ECS 部署：优先 Git 同步
+
+navigation 项目部署到 ECS 时，**默认通过 Git**，不要用 scp 同步代码。
+
+## 流程
+
+1. **本机**：改代码 → `git commit` → `git push origin main`
+2. **ECS**：`cd /opt/navigation && ./scripts/ecs-update.sh`（内部 `git pull` + 重启 pm2）
+
+## ECS 环境
+
+| 项 | 值 |
+|----|-----|
+| 路径 | `/opt/navigation` |
+| SSH | `root@123.56.235.12`，密钥 `~/.ssh/ecs_torn` |
+| 远程 | `git@github.com:xiansakana/navigation.git`（Deploy Key） |
+
+## 不要覆盖
+
+`portal/config.json`、`portal/data/` 等在 gitignore 中，pull 不会冲掉线上配置。
+
+## scp 仅作兜底
+
+只有 ECS 上 `git pull` / fetch 失败时，才用 `scripts/ecs-deploy-from-local.ps1`（scp + `--skip-pull`）。

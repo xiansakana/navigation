@@ -3,6 +3,7 @@
     "host": "127.0.0.1",
     "port": 5000
   },
+  "dbPath": "data/navigation.db",
   "dataFile": "data/portfolio.json",
   "finnhubApiKey": "",
   "polygonApiKey": ""

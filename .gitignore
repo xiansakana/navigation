@@ -6,5 +6,8 @@
 .DS_Store
 **/data/uploads/
 portal/data/
+data/navigation.db
+data/navigation.db-wal
+data/navigation.db-shm
 siyuan/data/
 siyuan/.env

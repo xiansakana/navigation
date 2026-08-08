@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import XLSX from 'xlsx';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, createStore, resolveDataPath } from './storage.js';
+import { loadConfig, createStore } from './storage.js';
 import { createQuoteService } from './quotes.js';
 import { parseImportBuffer } from './import-moomoo.js';
 import {
@@ -31,7 +31,7 @@ try {
   process.exit(1);
 }
 
-const store = createStore(resolveDataPath(config));
+const store = createStore(config);
 const quotes = createQuoteService(config);
 const app = express();
 
