@@ -316,16 +316,74 @@ function shouldPipeJsonResponse(service, reqUrl) {
     return false;
 }
 
+/** 发布站不对游客暴露的插件静态目录（含密钥/图床配置入口） */
+var PUBLISH_BLOCKED_PLUGIN_PREFIXES = [
+    '/plugins/siyuan-plugin-picgo',
+    '/plugins/siyuan-plugin-share'
+];
+
+function publishUpstreamPath(service, reqUrl) {
+    var target = buildTargetUrl(service, reqUrl);
+    return target.pathname || '/';
+}
+
+function isBlockedPublishPluginPath(subPath) {
+    return PUBLISH_BLOCKED_PLUGIN_PREFIXES.some(function(prefix) {
+        return subPath === prefix || subPath.startsWith(prefix + '/');
+    });
+}
+
+function forcePublishLoadPetalsBody(body, subPath) {
+    if (subPath !== '/api/petal/loadPetals' || !body || !body.length) return body;
+    try {
+        var json = JSON.parse(body.toString('utf8'));
+        if (!json || typeof json !== 'object' || Array.isArray(json)) return body;
+        json.frontend = 'publish';
+        return Buffer.from(JSON.stringify(json), 'utf8');
+    } catch (e) {
+        return body;
+    }
+}
+
+function sendPublishForbidden(res) {
+    var text = JSON.stringify({ ok: false, error: '发布站禁止访问该资源' });
+    res.writeHead(403, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': Buffer.byteLength(text, 'utf8')
+    });
+    res.end(text);
+}
+
 export async function proxyHttpRequest(service, req, res) {
     var target = buildTargetUrl(service, req.url);
     var lib = target.protocol === 'https:' ? https : http;
     var body = req.method === 'GET' || req.method === 'HEAD' ? null : await readBody(req);
     var pipeJson = shouldPipeJsonResponse(service, req.url);
 
+    if (service.id === 'siyuan-publish') {
+        var pubSubPath = publishUpstreamPath(service, req.url);
+        if (isBlockedPublishPluginPath(pubSubPath)) {
+            sendPublishForbidden(res);
+            return;
+        }
+        if (body) {
+            var nextBody = forcePublishLoadPetalsBody(body, pubSubPath);
+            if (nextBody !== body) {
+                body = nextBody;
+                req.headers['content-length'] = String(body.length);
+                delete req.headers['transfer-encoding'];
+            }
+        }
+    }
+
     await new Promise(function(resolve) {
+        var headersOut = pickHeaders(req.headers, { host: target.host }, { allowEncoding: pipeJson });
+        if (body && body.length) {
+            headersOut['content-length'] = String(body.length);
+        }
         var upstream = lib.request(target, {
             method: req.method,
-            headers: pickHeaders(req.headers, { host: target.host }, { allowEncoding: pipeJson })
+            headers: headersOut
         }, function(upstreamRes) {
             var headers = Object.assign({}, upstreamRes.headers);
             delete headers['content-security-policy'];

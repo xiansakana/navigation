@@ -28,6 +28,8 @@ bash siyuan/deploy-ecs.sh
 
 与 Siyuan Share（`:6807` 单篇分享）不同，发布站适合整站/多笔记本只读展示。
 
+Portal 对 `/publish/` 会强制 `loadPetals` 使用 `frontend=publish`（只加载思源发布白名单插件），并拦截 PicGo / 分享插件静态目录，避免游客看到图床密钥等配置入口。
+
 ## 访问控制
 
 - **6806 / 6099 不对公网开放**，仅 Portal（`:80`）对外
