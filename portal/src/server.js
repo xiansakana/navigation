@@ -245,9 +245,9 @@ function isWriteMethod(method) {
     return method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
 }
 
-/** NapCat 为管理界面，需编辑权限；其余服务按查看权限 */
+/** NapCat / 思源笔记需编辑权限才能进入；其余服务按查看权限 */
 function canAccessProxiedService(permissions, service) {
-    if (service.id === 'napcat') {
+    if (service.id === 'napcat' || service.id === 'notes') {
         return canEditService(permissions, service.id);
     }
     return canViewService(permissions, service.id);
@@ -270,6 +270,8 @@ async function handleProxyRouteAsync(req, res) {
         var serviceTitle = ctx.service.title || ctx.service.id;
         var hint = ctx.service.id === 'napcat'
             ? 'NapCat 管理需编辑权限，请联系管理员分配。'
+            : ctx.service.id === 'notes'
+            ? '笔记需编辑权限，请联系管理员分配。'
             : '如需访问，请联系管理员分配权限，或登录具备相应权限的账号。';
         sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '无权访问该服务', {
             title: '无权访问该服务',
