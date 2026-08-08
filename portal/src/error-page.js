@@ -23,6 +23,8 @@ function loadTemplate() {
 }
 
 export function wantsJsonResponse(req, url) {
+    // 浏览器地址栏/链接跳转应展示 HTML 错误页，而非 JSON
+    if (req.headers['sec-fetch-mode'] === 'navigate') return false;
     if (url.pathname.startsWith('/api/')) return true;
     var method = (req.method || 'GET').toUpperCase();
     if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
