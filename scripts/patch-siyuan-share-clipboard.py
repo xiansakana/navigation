@@ -14,6 +14,11 @@ PLUGIN_INDEX = Path(
     else ROOT / "siyuan" / "data" / "siyuan" / "data" / "plugins" / "siyuan-plugin-share" / "index.js"
 )
 MARKER = "/* share-clipboard-http-patch */"
+PREVIEW_MARKER = "/* share-preview-copy-http-patch */"
+
+PREVIEW_OLD = """            navigator.clipboard.writeText(text);"""
+
+PREVIEW_NEW = """            var _ta=document.createElement("textarea");_ta.value=text;_ta.style.cssText="position:fixed;top:-1000px;left:-1000px";document.body.appendChild(_ta);_ta.select();try{document.execCommand("copy")}finally{document.body.removeChild(_ta)}"""
 
 OLD = """  async tryCopyToClipboard(text) {
     try {
@@ -73,23 +78,40 @@ def main() -> int:
     if MARKER in text:
         text = text.replace(MARKER, "", 1)
 
-    if 'document.execCommand("copy")' in text and "empty clipboard text" in text:
-        print("already patched:", PLUGIN_INDEX)
-        return 0
+    patched = False
 
     if OLD in text:
         text = text.replace(OLD, NEW, 1)
+        patched = True
     elif OLD_MIN in text:
         text = text.replace(OLD_MIN, NEW_MIN, 1)
+        patched = True
     elif NEW in text or NEW_MIN in text:
-        print("tryCopyToClipboard already patched:", PLUGIN_INDEX)
-        return 0
+        pass
     else:
         print("error: tryCopyToClipboard pattern not found (plugin version changed?)", file=sys.stderr)
         return 1
 
+    if PREVIEW_MARKER in text:
+        text = text.replace(PREVIEW_MARKER, "", 1)
+
+    if PREVIEW_OLD in text:
+        text = text.replace(PREVIEW_OLD, PREVIEW_NEW, 1)
+        patched = True
+    elif PREVIEW_MARKER in text or "_ta.style.cssText=\"position:fixed;top:-1000px" in text:
+        pass
+    else:
+        print("warn: preview copy pattern not found (plugin version changed?)", file=sys.stderr)
+
+    if not patched and NEW in text and "_ta.style.cssText=\"position:fixed;top:-1000px" in text:
+        print("already patched:", PLUGIN_INDEX)
+        return 0
+
+    markers = MARKER
+    if PREVIEW_NEW in text and PREVIEW_MARKER not in text:
+        markers += PREVIEW_MARKER
     if MARKER not in text:
-        text = MARKER + text
+        text = markers + text
 
     PLUGIN_INDEX.write_text(text, encoding="utf-8")
     print("patched:", PLUGIN_INDEX)
