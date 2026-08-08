@@ -198,7 +198,7 @@ function injectProxiedBackLink(html, variant) {
     var positionByVariant = {
         notes: '.portal-proxied-back--notes{top:8px!important;left:172px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}',
         napcat: '.portal-proxied-back--napcat{top:8px!important;left:132px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}',
-        publish: '.portal-proxied-back--publish{top:8px!important;left:12px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}'
+        publish: '.portal-proxied-back--publish{top:8px!important;left:172px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}'
     };
     var positionRule = positionByVariant[variant] || positionByVariant.publish;
     var css = '<style>'
