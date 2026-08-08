@@ -262,9 +262,8 @@ function ensureViewportMeta(html) {
 }
 
 /**
- * AList 前端 bug：切换每页条数时 effect 会先 recordHistory 写回旧列表，
- * handlePathChange 再 recover 历史（key 不含 per_page），导致不重新请求。
- * 拦截 HistoryMap 的 set：per_page 变化后短暂禁止写入历史，让列表按新条数重新拉取渲染。
+ * AList 前端 bug：历史缓存 key 不含 per_page，切换每页条数会 recover 旧列表而不请求。
+ * 策略：per_page 变化时清空 HistoryMap、短暂让 has() 对历史失效，并点击工具栏 refresh(force)。
  */
 function injectAlistPaginationShim(html) {
     if (!html.includes('<head')) return html;
@@ -272,17 +271,32 @@ function injectAlistPaginationShim(html) {
         + 'function perPage(){try{return new URLSearchParams(location.search).get("per_page")||""}catch(e){return""}}'
         + 'function isHist(v){return!!(v&&typeof v==="object"&&typeof v.page==="number"'
         + '&&typeof v.scroll==="number"&&v.obj&&typeof v.obj==="object"&&Array.isArray(v.obj.objs))}'
+        + 'function clearPathHistory(){if(!histMap)return;'
+        + 'var path=(location.pathname.replace(/^\\/alist(?=\\/|$)/,"")||"/").split("?")[0];'
+        + 'var del=[];histMap.forEach(function(v,k){'
+        + 'if(typeof k==="string"&&k.split("?")[0]===path)del.push(k)});'
+        + 'del.forEach(function(k){histMap.delete(k)})}'
+        + 'function clickRefresh(){'
+        + 'var root=document.querySelector(".left-toolbar-in");'
+        + 'if(root){var b=root.querySelector("button");if(b){b.click();return true}}'
+        + 'var all=document.querySelectorAll("button");'
+        + 'for(var i=0;i<all.length;i++){'
+        + 'var lab=((all[i].getAttribute("aria-label")||all[i].title||"")+"").toLowerCase();'
+        + 'if(lab.indexOf("refresh")>=0||lab.indexOf("刷新")>=0){all[i].click();return true}}'
+        + 'return false}'
+        + 'function forceListRefresh(){clearPathHistory();'
+        + 'if(!clickRefresh())setTimeout(clickRefresh,100)}'
         + 'var prev=perPage(),skipUntil=0,histMap=null;'
-        + 'var origSet=Map.prototype.set;'
+        + 'var origSet=Map.prototype.set,origHas=Map.prototype.has;'
         + 'Map.prototype.set=function(k,v){'
         + 'if(isHist(v)){histMap=this;if(Date.now()<skipUntil)return this}'
         + 'return origSet.call(this,k,v)};'
+        + 'Map.prototype.has=function(k){'
+        + 'if(histMap===this&&Date.now()<skipUntil&&typeof k==="string")return false;'
+        + 'return origHas.call(this,k)};'
         + 'function onNav(){var next=perPage();if(next===prev)return;prev=next;'
-        + 'skipUntil=Date.now()+2000;'
-        + 'if(histMap){var path=location.pathname.replace(/^\\/alist(?=\\/|$)/,\"\")||\"/\";'
-        + 'var base=path.split(\"?\")[0];var del=[];'
-        + 'histMap.forEach(function(v,k){if(typeof k===\"string\"&&k.split(\"?\")[0]===base)del.push(k)});'
-        + 'del.forEach(function(k){histMap.delete(k)})}}'
+        + 'skipUntil=Date.now()+3000;clearPathHistory();'
+        + 'setTimeout(forceListRefresh,0);setTimeout(forceListRefresh,80)}'
         + 'var ps=history.pushState,rs=history.replaceState;'
         + 'history.pushState=function(){var r=ps.apply(this,arguments);onNav();return r};'
         + 'history.replaceState=function(){var r=rs.apply(this,arguments);onNav();return r};'
