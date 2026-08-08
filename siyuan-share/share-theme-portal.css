@@ -1,344 +1,500 @@
-/* 思源分享 · 对齐 Portal 深色主题
- * 粘贴到 http://<host>:6807/admin#settings → 自定义 CSS
- * 或执行: python3 scripts/sync-share-theme.py
+/* 思源分享 · Portal 深色主题 v2
+ * 覆盖 Share 内置硬编码浅色（input #fff、admin-hero 渐变等）
+ * 维护：siyuan-share/share-theme-portal.css → scripts/sync-share-theme.py
  */
 
 :root {
   color-scheme: dark;
   --bg: #0f1115;
-  --bg-strong: #1a2233;
+  --bg-strong: #151b28;
   --surface: #171b22;
   --surface-muted: #1e2430;
   --panel-bg: #141820;
   --text: #e8edf5;
   --muted: #9aa4b2;
   --primary: #5b9cff;
-  --primary-700: #3d7fe6;
+  --primary-700: #7eb6ff;
   --accent: #3ddc84;
   --danger: #ff7b7b;
   --border: #2a3140;
-  --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
   --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.22);
   --radius-lg: 14px;
   --radius-md: 10px;
   --radius-sm: 8px;
-  --font-display: "Segoe UI", system-ui, "Noto Sans SC", "Microsoft YaHei", sans-serif;
-  --font-body: "Segoe UI", system-ui, "Noto Sans SC", "Microsoft YaHei", sans-serif;
 }
 
-html,
-body {
-  background: var(--bg);
-  color: var(--text);
-}
-
+/* ── 布局底色：去掉默认灰蓝渐变 ── */
 body.layout-app,
 body.layout-public {
-  background: var(--bg);
-  background-image:
-    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(91, 156, 255, 0.12), transparent),
-    radial-gradient(ellipse 60% 40% at 100% 0%, rgba(61, 220, 132, 0.06), transparent);
-}
-
-body.layout-auth {
-  background: linear-gradient(145deg, #0f1115 0%, #151b28 45%, #1a2744 100%);
+  background: var(--bg) !important;
+  background-image: none !important;
+  color: var(--text);
 }
 
 body.layout-share {
-  background: var(--bg);
-  background-image: none;
-}
-
-a {
-  color: var(--primary);
-}
-
-a:hover {
-  color: #7eb6ff;
-}
-
-.card,
-.auth-card,
-.modal-card,
-.share-side-panel,
-.share-doc-nav,
-.share-toc-panel {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-soft);
-}
-
-.input,
-textarea.input,
-select.input,
-.auth-input,
-.kb-search-input {
-  background: #0f131a;
-  border: 1px solid var(--border);
+  background: var(--bg) !important;
+  background-image: none !important;
   color: var(--text);
 }
 
-.input:focus,
-.auth-input:focus,
-.kb-search-input:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(91, 156, 255, 0.18);
-  outline: none;
+body.layout-auth {
+  background: linear-gradient(145deg, #0f1115 0%, #151b28 50%, #1a2744 100%) !important;
 }
 
-.input::placeholder,
-.auth-input::placeholder {
-  color: #6b7688;
+/* ── 表单（内置 background:#fff 必须打掉）── */
+body.layout-app .input,
+body.layout-app select,
+body.layout-app textarea,
+body.layout-app .code-input,
+body.layout-auth .auth-input,
+body.layout-public .input {
+  background: #0f131a !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
 }
 
-.button,
-button.button {
-  border-radius: var(--radius-sm);
-  font-weight: 500;
+body.layout-app .input::placeholder,
+body.layout-app textarea::placeholder,
+body.layout-auth .auth-input::placeholder {
+  color: #6b7688 !important;
 }
 
-.button.primary,
-button.button.primary {
-  background: linear-gradient(180deg, #6aa8ff 0%, var(--primary) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #fff;
-  box-shadow: 0 4px 14px rgba(91, 156, 255, 0.25);
+body.layout-app .input:focus,
+body.layout-app select:focus,
+body.layout-app textarea:focus,
+body.layout-app .code-input:focus {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 3px rgba(91, 156, 255, 0.18) !important;
+  outline: none !important;
 }
 
-.button.primary:hover,
-button.button.primary:hover {
-  background: linear-gradient(180deg, #7eb6ff 0%, #4a8ef0 100%);
-}
-
-.button:not(.primary),
-button.button:not(.primary) {
-  background: var(--surface-muted);
-  border: 1px solid var(--border);
-  color: var(--text);
-}
-
-.button:not(.primary):hover {
-  background: #252c3a;
-  border-color: #3a4458;
-}
-
-.muted,
-.auth-subtitle,
-.share-footer,
-.help-text {
+body.layout-app label,
+body.layout-auth label {
   color: var(--muted) !important;
 }
 
-.app-shell,
-.app-layout {
+/* ── 按钮 ── */
+body.layout-app .button.primary,
+body.layout-auth .button.primary {
+  background: linear-gradient(180deg, #6aa8ff 0%, #4a8ef0 100%) !important;
+  color: #fff !important;
+  border: none !important;
+  box-shadow: 0 4px 14px rgba(91, 156, 255, 0.28) !important;
+}
+
+body.layout-app .button.ghost,
+body.layout-auth .button.ghost {
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: var(--muted) !important;
+  border-color: var(--border) !important;
+}
+
+body.layout-app .button:not(.primary):not(.ghost):not(.danger),
+body.layout-auth .button:not(.primary) {
+  color: var(--primary) !important;
+  border-color: rgba(91, 156, 255, 0.45) !important;
+  background: transparent !important;
+}
+
+body.layout-app .button.danger {
+  color: var(--danger) !important;
+  border-color: rgba(255, 123, 123, 0.45) !important;
+  background: rgba(255, 123, 123, 0.08) !important;
+}
+
+body.layout-app .link-button {
+  color: var(--primary) !important;
+}
+
+/* ── App 外壳 ── */
+body.layout-app .app-shell {
+  background: var(--bg);
+}
+
+body.layout-app .app-sidebar {
+  background: var(--panel-bg) !important;
+  border-right-color: var(--border) !important;
+  box-shadow: none !important;
+}
+
+body.layout-app .app-logo {
+  color: var(--primary) !important;
+}
+
+body.layout-app .app-topbar {
+  background: rgba(15, 17, 21, 0.92) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom-color: var(--border) !important;
+}
+
+body.layout-app .topbar-title {
+  color: var(--text) !important;
+}
+
+body.layout-app .topbar-version {
+  color: var(--muted) !important;
+}
+
+body.layout-app .user-pill {
+  background: rgba(91, 156, 255, 0.12) !important;
+  color: #9ec5ff !important;
+}
+
+body.layout-app .app-side-trigger {
+  background: var(--surface) !important;
+  border-color: var(--border) !important;
+  color: var(--primary) !important;
+}
+
+body.layout-app .app-content {
   background: transparent;
 }
 
-.app-sidebar,
-.sidebar,
-.share-sidebar {
-  background: var(--panel-bg);
-  border-right: 1px solid var(--border);
+body.layout-app .app-footer {
+  color: var(--muted) !important;
+  border-top-color: var(--border) !important;
 }
 
-.app-topbar,
-.topbar,
-.share-header {
-  background: rgba(15, 17, 21, 0.88);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border);
+/* ── 侧栏导航 ── */
+body.layout-app .nav-item {
+  color: var(--muted) !important;
 }
 
-.nav-item,
-.sidebar-link,
-.app-nav a {
-  color: var(--muted);
-  border-radius: var(--radius-sm);
+body.layout-app .nav-item:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: var(--text) !important;
 }
 
-.nav-item:hover,
-.sidebar-link:hover,
-.app-nav a:hover,
-.nav-item.active,
-.sidebar-link.active {
-  background: rgba(255, 255, 255, 0.05);
+body.layout-app .nav-item.is-active {
+  background: rgba(91, 156, 255, 0.14) !important;
+  color: var(--primary) !important;
+}
+
+body.layout-app .nav-item.is-active .nav-dot {
+  background: var(--primary) !important;
+}
+
+body.layout-app .nav-dot {
+  background: rgba(91, 156, 255, 0.35) !important;
+}
+
+/* ── 卡片 / 表格 ── */
+body.layout-app .card,
+body.layout-auth .auth-card {
+  background: var(--surface) !important;
+  border-color: var(--border) !important;
+  box-shadow: var(--shadow-soft) !important;
   color: var(--text);
 }
 
-.nav-item.active,
-.sidebar-link.active {
-  background: rgba(91, 156, 255, 0.12);
-  color: var(--primary);
+body.layout-app .card h2,
+body.layout-app .card h3,
+body.layout-app .card h4 {
+  color: var(--text) !important;
 }
 
-table,
-.table {
-  background: var(--surface);
-  border: 1px solid var(--border);
+body.layout-app .card.danger-zone {
+  border-color: rgba(255, 123, 123, 0.35) !important;
+  background: rgba(255, 123, 123, 0.06) !important;
 }
 
-table th,
-.table th {
-  background: var(--surface-muted);
-  color: var(--muted);
-  border-bottom: 1px solid var(--border);
+body.layout-app .muted,
+body.layout-app .custom-help-body,
+body.layout-auth .auth-subtitle,
+body.layout-auth .auth-footer {
+  color: var(--muted) !important;
 }
 
-table td,
-.table td {
-  border-bottom: 1px solid var(--border);
+body.layout-app .table th {
+  background: var(--surface-muted) !important;
+  color: var(--muted) !important;
+  border-bottom-color: var(--border) !important;
 }
 
-table tr:hover td,
-.table tr:hover td {
-  background: rgba(255, 255, 255, 0.03);
+body.layout-app .table td {
+  border-bottom-color: var(--border) !important;
+  color: var(--text) !important;
 }
 
-.badge,
-.tag,
-.chip {
-  background: rgba(91, 156, 255, 0.14);
-  color: #9ec5ff;
-  border: 1px solid rgba(91, 156, 255, 0.22);
+body.layout-app .table tr:hover td {
+  background: rgba(255, 255, 255, 0.03) !important;
 }
 
-.alert-error,
-.flash-error {
-  background: rgba(255, 123, 123, 0.12);
-  border-color: rgba(255, 123, 123, 0.35);
-  color: #ffb4b4;
+body.layout-app .table-scroll::-webkit-scrollbar-thumb {
+  background: #3a4458 !important;
 }
 
-.alert-success,
-.flash-info {
-  background: rgba(61, 220, 132, 0.1);
-  border-color: rgba(61, 220, 132, 0.28);
-  color: #8aebb0;
+/* ── 后台首页 KPI / 图表区 ── */
+body.layout-app .admin-hero {
+  background: linear-gradient(120deg, #171b22 0%, #1a2233 55%, #1e2430 100%) !important;
 }
 
-/* 登录 / 注册 */
+body.layout-app .admin-hero::after {
+  background: radial-gradient(circle, rgba(91, 156, 255, 0.18), transparent) !important;
+}
+
+body.layout-app .admin-hero__eyebrow,
+body.layout-app .admin-hero__meta {
+  color: var(--muted) !important;
+}
+
+body.layout-app .admin-hero__title {
+  color: var(--text) !important;
+}
+
+body.layout-app .admin-hero__panel {
+  background: var(--surface-muted) !important;
+  border-color: var(--border) !important;
+}
+
+body.layout-app .admin-hero__panel-value {
+  color: var(--text) !important;
+}
+
+body.layout-app .admin-hero__panel-meta,
+body.layout-app .admin-hero__panel-label {
+  color: var(--muted) !important;
+}
+
+body.layout-app .admin-kpi,
+body.layout-app .admin-chart-card {
+  background: var(--surface) !important;
+  border-color: var(--border) !important;
+}
+
+body.layout-app .admin-kpi__label,
+body.layout-app .admin-chart-card__meta {
+  color: var(--muted) !important;
+}
+
+body.layout-app .admin-kpi__value,
+body.layout-app .admin-chart-card__title,
+body.layout-app .admin-governance__value {
+  color: var(--text) !important;
+}
+
+body.layout-app .admin-kpi__icon {
+  background: rgba(91, 156, 255, 0.12) !important;
+  color: var(--primary) !important;
+}
+
+body.layout-app .admin-kpi__progress {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+body.layout-app .admin-kpi__progress span {
+  background: var(--primary) !important;
+}
+
+body.layout-app .admin-chart__grid line {
+  stroke: var(--border) !important;
+}
+
+body.layout-app .admin-chart text,
+body.layout-app .admin-chart__axis text {
+  fill: var(--muted) !important;
+}
+
+body.layout-app .admin-governance {
+  background: var(--surface-muted) !important;
+}
+
+body.layout-app .admin-governance__label {
+  color: var(--muted) !important;
+}
+
+/* ── 控制台 / 知识库常见块 ── */
+body.layout-app .hero-card,
+body.layout-app .kb-side-panel,
+body.layout-app .kb-sidebar,
+body.layout-app .comment-card,
+body.layout-app .modal-card {
+  background: var(--surface) !important;
+  border-color: var(--border) !important;
+}
+
+body.layout-app .kb-search-input-wrap {
+  background: #0f131a !important;
+  border-color: var(--border) !important;
+}
+
+body.layout-app .kb-search-input {
+  background: transparent !important;
+  color: var(--text) !important;
+}
+
+body.layout-app .kb-side-tab.is-active,
+body.layout-app .kb-chip.is-active {
+  background: rgba(91, 156, 255, 0.14) !important;
+  color: var(--primary) !important;
+}
+
+body.layout-app .report-trigger.kb-chip:hover {
+  background: rgba(91, 156, 255, 0.1) !important;
+}
+
+/* ── 提示条 ── */
+body.layout-app .flash-error,
+body.layout-auth .flash-error {
+  background: rgba(255, 123, 123, 0.12) !important;
+  border-color: rgba(255, 123, 123, 0.35) !important;
+  color: #ffb4b4 !important;
+}
+
+body.layout-app .flash-info,
+body.layout-app .flash-success,
+body.layout-auth .flash-info {
+  background: rgba(61, 220, 132, 0.1) !important;
+  border-color: rgba(61, 220, 132, 0.28) !important;
+  color: #8aebb0 !important;
+}
+
+body.layout-app .flash-warning {
+  background: rgba(251, 191, 36, 0.1) !important;
+  border-color: rgba(251, 191, 36, 0.28) !important;
+  color: #fcd34d !important;
+}
+
+/* ── 登录 / 注册 ── */
 body.layout-auth .auth-card {
-  background: rgba(23, 27, 34, 0.92);
+  background: rgba(23, 27, 34, 0.94) !important;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
 }
 
 body.layout-auth .auth-logo,
 body.layout-auth .auth-title {
-  color: var(--text);
+  color: var(--text) !important;
 }
 
-/* 控制台 / 后台 */
-body.layout-app .page-title,
-body.layout-app h1,
-body.layout-app h2,
-body.layout-app .card h2 {
-  color: var(--text);
+body.layout-auth .auth-tab.is-active {
+  color: var(--primary) !important;
+  border-color: var(--primary) !important;
 }
 
-body.layout-app .stat-card,
-body.layout-app .metric-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
+/* ── 公开首页 ── */
+body.layout-public .home-hero,
+body.layout-public .home-card {
+  background: transparent !important;
 }
 
-/* 公开分享页 */
+body.layout-public .home-title {
+  color: var(--text) !important;
+}
+
+body.layout-public .home-lead,
+body.layout-public .home-hero__meta,
+body.layout-public .home-tip {
+  color: var(--muted) !important;
+}
+
+body.layout-public .home-badge {
+  background: rgba(91, 156, 255, 0.14) !important;
+  color: #9ec5ff !important;
+  border: 1px solid rgba(91, 156, 255, 0.25) !important;
+}
+
+body.layout-public .home-metric {
+  background: var(--surface) !important;
+  border-color: var(--border) !important;
+}
+
+/* ── 分享阅读页 ── */
 body.layout-share .share-page {
-  background: var(--bg);
+  background: var(--bg) !important;
 }
 
 body.layout-share .share-header,
-body.layout-share .share-toolbar {
-  background: rgba(15, 17, 21, 0.9);
-  border-bottom: 1px solid var(--border);
+body.layout-share .share-toolbar,
+body.layout-share .kb-sidebar,
+body.layout-share .share-side-trigger,
+body.layout-share .scroll-top {
+  background: var(--surface) !important;
+  border-color: var(--border) !important;
+  color: var(--text) !important;
+}
+
+body.layout-share .share-nav-item.is-active,
+body.layout-share .share-toc-link.is-active {
+  background: rgba(91, 156, 255, 0.12) !important;
+  color: var(--primary) !important;
 }
 
 body.layout-share .markdown-body {
-  color: #dfe6f0;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 24px 28px;
-  box-shadow: var(--shadow-soft);
+  color: #dfe6f0 !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
 }
 
 body.layout-share .markdown-body h1,
 body.layout-share .markdown-body h2,
-body.layout-share .markdown-body h3 {
-  color: var(--text);
-  border-bottom-color: var(--border);
+body.layout-share .markdown-body h3,
+body.layout-share .markdown-body h4 {
+  color: var(--text) !important;
+  border-bottom-color: var(--border) !important;
 }
 
 body.layout-share .markdown-body code {
-  background: #0f131a;
-  color: #9ec5ff;
+  background: #0f131a !important;
+  color: #9ec5ff !important;
 }
 
 body.layout-share .markdown-body pre {
-  background: #0f131a;
-  border: 1px solid var(--border);
+  background: #0f131a !important;
+  border: 1px solid var(--border) !important;
+}
+
+body.layout-share .markdown-body pre code {
+  color: #dfe6f0 !important;
 }
 
 body.layout-share .markdown-body blockquote {
-  border-left-color: var(--primary);
-  color: var(--muted);
+  border-left-color: var(--primary) !important;
+  color: var(--muted) !important;
 }
 
-body.layout-share .share-side-trigger,
-body.layout-share .scroll-top {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text);
-  box-shadow: var(--shadow-soft);
+body.layout-share .markdown-body table th,
+body.layout-share .markdown-body table td {
+  border-color: var(--border) !important;
+}
+
+body.layout-share .markdown-body table tr {
+  background: var(--surface) !important;
+}
+
+body.layout-share .markdown-body table tr:nth-child(2n) {
+  background: var(--surface-muted) !important;
 }
 
 body.layout-share .share-footer {
-  border-top: 1px solid var(--border);
-  background: transparent;
+  color: var(--muted) !important;
+  border-top-color: var(--border) !important;
 }
 
-body.layout-share .share-footer a {
-  color: var(--muted);
-}
-
-/* 首页 */
-body.layout-public .home-hero {
-  background: transparent;
-}
-
-body.layout-public .home-title {
-  color: var(--text);
-}
-
-body.layout-public .home-lead,
-body.layout-public .home-hero__meta {
-  color: var(--muted);
-}
-
-body.layout-public .home-badge {
-  background: rgba(91, 156, 255, 0.14);
-  color: #9ec5ff;
-  border: 1px solid rgba(91, 156, 255, 0.25);
-}
-
-/* 滚动条（WebKit） */
-::-webkit-scrollbar {
+/* ── 滚动条 ── */
+body.layout-app ::-webkit-scrollbar,
+body.layout-share ::-webkit-scrollbar,
+body.layout-auth ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
-::-webkit-scrollbar-track {
+body.layout-app ::-webkit-scrollbar-track,
+body.layout-share ::-webkit-scrollbar-track,
+body.layout-auth ::-webkit-scrollbar-track {
   background: var(--bg);
 }
 
-::-webkit-scrollbar-thumb {
+body.layout-app ::-webkit-scrollbar-thumb,
+body.layout-share ::-webkit-scrollbar-thumb,
+body.layout-auth ::-webkit-scrollbar-thumb {
   background: #3a4458;
   border-radius: 999px;
 }
 
-::-webkit-scrollbar-thumb:hover {
+body.layout-app ::-webkit-scrollbar-thumb:hover,
+body.layout-share ::-webkit-scrollbar-thumb:hover {
   background: #4d5870;
 }
