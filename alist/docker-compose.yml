@@ -9,6 +9,7 @@ services:
       - "127.0.0.1:${ALIST_PORT:-5244}:5244"
     volumes:
       - ./data:/opt/alist/data
+      - ./files:/data/files
     environment:
       TZ: Asia/Shanghai
       PUID: "0"

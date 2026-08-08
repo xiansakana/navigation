@@ -18,7 +18,8 @@ if [ -f .env ]; then
 fi
 PORT="${ALIST_PORT:-5244}"
 
-mkdir -p data
+mkdir -p data files
+chmod 755 files 2>/dev/null || true
 
 echo "==> 启动 AList（127.0.0.1:${PORT}）..."
 if docker image inspect xhofe/alist:latest >/dev/null 2>&1; then
@@ -51,8 +52,12 @@ else
     docker compose logs --tail 40
 fi
 
+if [ -f "$ROOT/scripts/configure-alist.py" ]; then
+    echo "==> 配置 AList 存储与站点设置..."
+    python3 "$ROOT/scripts/configure-alist.py" || true
+fi
+
 echo ""
-echo "管理密码（首次随机生成，可重置）:"
-echo "  docker exec alist ./alist admin"
+echo "管理密码文件: $ROOT/alist/data/.admin-password"
 echo "  docker exec alist ./alist admin set <新密码>"
 echo "Portal 入口: http://<ECS>/alist/ （需登录且有查看权限）"
