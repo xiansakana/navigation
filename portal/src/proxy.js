@@ -70,6 +70,35 @@ function stripTokenQuery(search) {
     return q ? '?' + q : '';
 }
 
+function rewriteSiyuanPublishBody(text, prefix) {
+    var pub = prefix.replace(/\/$/, '');
+    var out = String(text)
+        .replace(/https?:\/\/127\.0\.0\.1:6808/g, pub)
+        .replace(/https?:\/\/[^"'\s]+:6808/g, pub);
+    var roots = [
+        '/api/', '/ws', '/stage/', '/appearance/', '/plugins/', '/widgets/', '/templates/',
+        '/emojis/', '/snippets/', '/assets/', '/export/', '/public/', '/history/', '/repo/',
+        '/manifest', '/favicon', '/protyle/', '/upload', '/check-auth'
+    ];
+    var pubEsc = pub.replace(/\//g, '\\/');
+    roots.forEach(function(root) {
+        var rootEsc = root.replace(/\//g, '\\/');
+        out = out.replace(
+            new RegExp('((?:src|href|action)=["\'])(?!' + pubEsc + ')' + rootEsc, 'g'),
+            '$1' + pub + root
+        );
+        out = out.replace(
+            new RegExp('(fetch\\(["\'])(?!' + pubEsc + ')' + rootEsc, 'g'),
+            '$1' + pub + root
+        );
+        out = out.replace(
+            new RegExp('(["\'])((?!' + pubEsc + ')' + rootEsc + ')', 'g'),
+            '$1' + pub + root
+        );
+    });
+    return out;
+}
+
 function rewriteLocation(location, service, userAgent) {
     if (!location) return location;
     var prefix = service.path.replace(/\/$/, '');
@@ -84,11 +113,7 @@ function rewriteLocation(location, service, userAgent) {
                 return prefix + loc.pathname + stripTokenQuery(loc.search) + loc.hash;
             }
             if (service.id === 'siyuan-publish') {
-                var pubPath = loc.pathname;
-                if (pubPath.startsWith('/publish')) {
-                    pubPath = pubPath.slice('/publish'.length) || '/';
-                }
-                return prefix + pubPath + loc.search + loc.hash;
+                return prefix + loc.pathname + loc.search + loc.hash;
             }
             return prefix + loc.pathname + loc.search + loc.hash;
         }
@@ -106,9 +131,11 @@ function rewriteLocation(location, service, userAgent) {
             var napSearch = napIdx >= 0 ? location.slice(napIdx) : '';
             return prefix + napPath + stripTokenQuery(napSearch);
         }
-        if (service.id === 'siyuan-publish' && String(location).startsWith('/publish')) {
-            var pubOnly = String(location).slice('/publish'.length) || '/';
-            return prefix + pubOnly;
+        if (service.id === 'siyuan-publish') {
+            var pubIdx = location.indexOf('?');
+            var pubPath = pubIdx >= 0 ? location.slice(0, pubIdx) : location;
+            var pubSearch = pubIdx >= 0 ? location.slice(pubIdx) : '';
+            return prefix + pubPath + pubSearch;
         }
         return prefix + location;
     }
@@ -139,6 +166,9 @@ function rewriteProxiedBody(text, service) {
             .replace(/\?&/g, '?')
             .replace(/\?(?=[#'"`\s])/g, '')
             .replace(/&(?=[#'"`\s])/g, '');
+    }
+    if (service.id === 'siyuan-publish') {
+        return rewriteSiyuanPublishBody(out, prefix);
     }
     if (prefix.startsWith('/torn-toolbox/')) {
         out = out

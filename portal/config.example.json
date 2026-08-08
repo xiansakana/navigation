@@ -69,7 +69,6 @@
       "path": "/publish",
       "entryPath": "/",
       "internalUrl": "http://127.0.0.1:6808",
-      "upstreamPathPrefix": "/publish",
       "publicAccess": true,
       "injectBar": false,
       "injectBase": false,
