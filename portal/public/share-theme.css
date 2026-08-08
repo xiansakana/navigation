@@ -1,0 +1,264 @@
+/* Share 页深/浅色主题 — 与 Portal 共用 localStorage portal-theme + data-theme */
+
+:root[data-theme="dark"],
+:root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0f1115;
+    --bg-strong: #1a2030;
+    --surface: #171b22;
+    --surface-muted: #1e2430;
+    --panel-bg: #141820;
+    --text: #e8edf5;
+    --muted: #9aa4b2;
+    --primary: #5b9cff;
+    --primary-700: #3d7fd9;
+    --accent: #3ddc84;
+    --danger: #ff7b7b;
+    --border: #2a3140;
+    --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+    --shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.25);
+}
+
+:root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f3f6fa;
+    --bg-strong: #6f9dff;
+    --surface: #ffffff;
+    --surface-muted: #f1f5ff;
+    --panel-bg: #f9fafc;
+    --text: #152033;
+    --muted: #5c6b7f;
+    --primary: #2563eb;
+    --primary-700: #1d4ed8;
+    --accent: #059669;
+    --danger: #dc2626;
+    --border: #d8e0ea;
+    --shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+    --shadow-soft: 0 12px 30px rgba(15, 23, 42, 0.08);
+}
+
+body.layout-auth {
+    background: linear-gradient(135deg, #1a2030 0%, #0f1115 50%, #141820 100%);
+}
+
+:root[data-theme="light"] body.layout-auth {
+    background: linear-gradient(135deg, #6f9dff 0%, #83b0ff 48%, #cfe0ff 100%);
+}
+
+body.layout-app,
+body.layout-public {
+    background-color: var(--bg);
+    background-image:
+        radial-gradient(circle at 10% 20%, rgba(91, 156, 255, 0.08), transparent 45%),
+        radial-gradient(circle at 80% 0%, rgba(61, 220, 132, 0.05), transparent 40%);
+}
+
+:root[data-theme="light"] body.layout-app,
+:root[data-theme="light"] body.layout-public {
+    background-image:
+        radial-gradient(circle at 10% 20%, rgba(37, 99, 235, 0.07), transparent 45%),
+        radial-gradient(circle at 80% 0%, rgba(5, 150, 105, 0.06), transparent 40%);
+}
+
+body.layout-share {
+    background: var(--bg);
+    background-image: none;
+}
+
+.card,
+.auth-card,
+.app-sidebar,
+.app-topbar,
+.app-footer,
+.share-header,
+.kb-sidebar,
+.kb-side-body,
+.share-gate-card,
+.notice,
+.flash,
+.filter-form,
+.report-panel,
+.comment-form,
+.comment-item,
+.share-comments,
+.user-pill {
+    background: var(--surface);
+    border-color: var(--border);
+    color: var(--text);
+}
+
+.app-sidebar,
+.kb-sidebar {
+    background: var(--surface);
+}
+
+.app-logo,
+.topbar-title,
+.auth-title,
+.share-header h1,
+.kb-side-title {
+    color: var(--text);
+}
+
+.auth-subtitle,
+.muted,
+.share-footer,
+.kb-chip,
+.nav-item:not(.is-active) {
+    color: var(--muted);
+}
+
+.input,
+.auth-input,
+textarea.input,
+select.input,
+.code-input {
+    background: #0f131a;
+    border-color: var(--border);
+    color: var(--text);
+}
+
+:root[data-theme="light"] .input,
+:root[data-theme="light"] .auth-input,
+:root[data-theme="light"] textarea.input,
+:root[data-theme="light"] select.input,
+:root[data-theme="light"] .code-input {
+    background: #ffffff;
+}
+
+.nav-item.is-active {
+    background: rgba(91, 156, 255, 0.14);
+    color: var(--primary);
+}
+
+:root[data-theme="light"] .nav-item.is-active {
+    background: rgba(37, 99, 235, 0.1);
+}
+
+.button.ghost {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--muted);
+}
+
+:root[data-theme="light"] .button.ghost {
+    background: #f2f4ff;
+}
+
+.button.primary {
+    background: linear-gradient(135deg, var(--primary), #7eb6ff);
+    color: #fff;
+    border: none;
+}
+
+:root[data-theme="light"] .button.primary {
+    background: linear-gradient(135deg, var(--primary), #5b8def);
+}
+
+/* Markdown 阅读页 */
+:root[data-theme="dark"] .markdown-body,
+:root:not([data-theme="light"]) .markdown-body {
+    color: var(--text);
+    background: transparent;
+}
+
+:root[data-theme="dark"] .markdown-body pre,
+:root:not([data-theme="light"]) .markdown-body pre,
+:root[data-theme="dark"] .markdown-body code,
+:root:not([data-theme="light"]) .markdown-body code {
+    background: #0f131a;
+    color: #e8edf5;
+}
+
+:root[data-theme="dark"] .markdown-body table th,
+:root:not([data-theme="light"]) .markdown-body table th,
+:root[data-theme="dark"] .markdown-body table tr,
+:root:not([data-theme="light"]) .markdown-body table tr {
+    background: var(--surface-muted);
+    border-color: var(--border);
+}
+
+:root[data-theme="dark"] .markdown-body blockquote,
+:root:not([data-theme="light"]) .markdown-body blockquote {
+    border-left-color: var(--primary);
+    color: var(--muted);
+}
+
+.share-article,
+.kb-main,
+.share-page {
+    background: var(--bg);
+}
+
+.share-footer {
+    border-top: 1px solid var(--border);
+}
+
+/* Portal 注入：返回 + 主题切换 */
+.portal-proxied-back {
+    color: #e8edf5;
+    background: rgba(15, 17, 21, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.portal-proxied-back:hover {
+    background: rgba(23, 27, 34, 0.95);
+}
+
+:root[data-theme="light"] .portal-proxied-back {
+    color: #152033;
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(15, 23, 42, 0.12);
+}
+
+:root[data-theme="light"] .portal-proxied-back:hover {
+    background: #fff;
+}
+
+.portal-share-theme-btn {
+    position: fixed;
+    z-index: 2147483647;
+    top: 12px;
+    right: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font: 13px/1.4 system-ui, sans-serif;
+    cursor: pointer;
+    color: #e8edf5;
+    background: rgba(15, 17, 21, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.portal-share-theme-btn:hover {
+    background: rgba(23, 27, 34, 0.95);
+}
+
+:root[data-theme="light"] .portal-share-theme-btn {
+    color: #152033;
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(15, 23, 42, 0.12);
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
+}
+
+:root[data-theme="light"] .portal-share-theme-btn:hover {
+    background: #fff;
+}
+
+@media (max-width: 768px) {
+    .portal-share-theme-btn {
+        top: auto;
+        bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        right: 12px;
+        padding: 8px 12px;
+        font-size: 14px;
+    }
+
+    .portal-proxied-back--share {
+        bottom: calc(52px + env(safe-area-inset-bottom, 0px)) !important;
+    }
+}
