@@ -191,7 +191,7 @@ function injectShareChrome(html) {
         + 'if(t!=="light"&&t!=="dark")t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";'
         + 'document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>';
     var headInject = themeBoot
-        + '<link rel="stylesheet" href="/share-theme.css">'
+        + '<link rel="stylesheet" href="/share-theme.css?v=2">'
         + '<script src="/theme.js"></script>';
     if (/<\/head>/i.test(html)) {
         html = html.replace(/<\/head>/i, headInject + '</head>');
