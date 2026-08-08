@@ -1,0 +1,46 @@
+{
+  "picBed": {
+    "current": "aws-s3",
+    "uploader": "aws-s3",
+    "aws-s3": {
+      "_id": "b2-xiansakana-assets",
+      "_configName": "backblaze-b2-assets",
+      "_createdAt": 0,
+      "_updatedAt": 0,
+      "accessKeyID": "Backblaze B2 Application Key ID",
+      "secretAccessKey": "Backblaze B2 Application Key",
+      "bucketName": "xiansakana-assets",
+      "uploadPath": "",
+      "region": "us-west-004",
+      "endpoint": "https://s3.us-west-004.backblazeb2.com",
+      "urlPrefix": "https://assets.saoyu.fun",
+      "pathStyleAccess": true,
+      "acl": "public-read",
+      "disableBucketPrefixToURL": true
+    }
+  },
+  "uploader": {
+    "aws-s3": {
+      "configList": [
+        {
+          "_id": "b2-xiansakana-assets",
+          "_configName": "backblaze-b2-assets",
+          "_createdAt": 0,
+          "_updatedAt": 0,
+          "accessKeyID": "Backblaze B2 Application Key ID",
+          "secretAccessKey": "Backblaze B2 Application Key",
+          "bucketName": "xiansakana-assets",
+          "uploadPath": "",
+          "region": "us-west-004",
+          "endpoint": "https://s3.us-west-004.backblazeb2.com",
+          "urlPrefix": "https://assets.saoyu.fun",
+          "pathStyleAccess": true,
+          "acl": "public-read",
+          "disableBucketPrefixToURL": true
+        }
+      ],
+      "defaultId": "b2-xiansakana-assets"
+    }
+  },
+  "picgoPlugins": {}
+}

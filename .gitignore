@@ -15,3 +15,5 @@ siyuan-share/data/
 siyuan-share/.build/
 siyuan-share/config.php
 siyuan-share/.env
+piclist/data/
+piclist/.env

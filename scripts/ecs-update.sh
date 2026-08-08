@@ -1,6 +1,6 @@
 #!/bin/bash
 # 在 ECS 上更新 navigation 仓库并重启服务
-# 用法: ./scripts/ecs-update.sh [--skip-pull] [--only undercut,company,qq-bot,portal,napcat,stock-manage,siyuan,siyuan-share]
+# 用法: ./scripts/ecs-update.sh [--skip-pull] [--only undercut,company,qq-bot,portal,napcat,stock-manage,siyuan,siyuan-share,piclist]
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -135,6 +135,12 @@ if should_run siyuan-share; then
         python3 "$ROOT/scripts/sync-share-registration.py" || true
     fi
     cd "$ROOT/siyuan-share"
+    bash deploy-ecs.sh
+fi
+
+if should_run piclist; then
+    echo "==> piclist"
+    cd "$ROOT/piclist"
     bash deploy-ecs.sh
 fi
 
