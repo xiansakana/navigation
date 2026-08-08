@@ -30,13 +30,15 @@ def main():
         return 1
 
     env = read_env(SHARE_ENV)
-    username = env.get('SHARE_SSO_USERNAME', 'admin')
-    password = env.get('SHARE_SSO_PASSWORD', '')
+    portal = json.loads(PORTAL_CFG.read_text(encoding='utf-8'))
+    portal_auth = portal.get('auth') or {}
+
+    username = env.get('SHARE_SSO_USERNAME') or portal_auth.get('username') or 'admin'
+    password = env.get('SHARE_SSO_PASSWORD') or portal_auth.get('password') or ''
     if not password:
-        print(f'no SHARE_SSO_PASSWORD in {SHARE_ENV}', file=sys.stderr)
+        print('no SHARE_SSO_PASSWORD in .env and no portal auth password', file=sys.stderr)
         return 1
 
-    portal = json.loads(PORTAL_CFG.read_text(encoding='utf-8'))
     updated = False
     for svc in portal.get('services', []):
         if svc.get('id') == 'siyuan-share':

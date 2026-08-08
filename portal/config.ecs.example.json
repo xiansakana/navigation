@@ -90,8 +90,8 @@
       "path": "/share",
       "entryPath": "/dashboard",
       "internalUrl": "http://127.0.0.1:6807",
-      "shareUsername": "admin",
-      "sharePassword": "与 siyuan-share/.env 的 SHARE_SSO_PASSWORD 相同",
+      "shareUsername": "留空则 sync 时用 portal admin 用户名",
+      "sharePassword": "留空则 sync 时用 portal admin 密码（须与 Share 管理员密码一致）",
       "injectBar": false,
       "injectBase": true,
       "icon": "🔗"
