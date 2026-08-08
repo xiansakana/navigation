@@ -49,4 +49,27 @@ ECS 上每天凌晨 3 点自动备份 workspace（停容器 → tar → 启动�
 
 详见 [`siyuan-share/README.md`](../siyuan-share/README.md)。
 
+## PicGo 图床插件（浏览器 / Docker）
+
+经 Portal 在**浏览器**里用思源时，插件跑在前端，**不能用「内置 PicGo」**（需要本机 Node），应走 ECS 上的 **远程 PicList**：
+
+| 配置项 | 正确值 |
+|--------|--------|
+| 使用内置 PicGo | **关**（`useBundledPicgo: false`） |
+| PicGo 类型 | **App**（`picgoType: app`） |
+| PicList API 地址 | `http://123.56.235.12:36677/upload`（须含 `/upload`） |
+| PicList API 密钥 | 与 `piclist/.env` 的 `PICLIST_SERVER_KEY` 一致（当前 `siyuan-web`） |
+
+工作空间配置文件：`data/storage/syp/picgo/external-picgo-cfg.json`
+
+ECS 一键同步：
+
+```bash
+PICLIST_SERVER_KEY=siyuan-web python3 scripts/sync-siyuan-picgo-external.py
+```
+
+`ecs-update` 在更新 piclist 后会自动执行（从 `piclist/.env` 读取密钥）。
+
+**勿填** `http://127.0.0.1:36677` 作为远程地址——那是你**自己电脑**上的 PicGo，浏览器访问云端思源时连不到。
+
 参考源码：`d:\code\SiYuan`（siyuan-note/siyuan）
