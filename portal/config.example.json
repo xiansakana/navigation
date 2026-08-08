@@ -62,6 +62,20 @@
       "icon": "📝"
     },
     {
+      "id": "siyuan-publish",
+      "title": "笔记发布站",
+      "description": "思源公开只读站点（在思源 设置→发布服务 中开启）",
+      "type": "proxy",
+      "path": "/publish",
+      "entryPath": "/",
+      "internalUrl": "http://127.0.0.1:6808",
+      "upstreamPathPrefix": "/publish",
+      "publicAccess": true,
+      "injectBar": false,
+      "injectBase": false,
+      "icon": "🌐"
+    },
+    {
       "id": "siyuan-share",
       "title": "笔记分享",
       "description": "思源笔记公开分享与 API Key 管理（独立端口）",

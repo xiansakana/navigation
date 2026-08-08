@@ -100,6 +100,9 @@ if should_run portal; then
     if [ -f "$ROOT/scripts/sync-portal-proxy-services.py" ]; then
         python3 "$ROOT/scripts/sync-portal-proxy-services.py" || true
     fi
+    if [ -f "$ROOT/scripts/sync-portal-siyuan-publish.py" ]; then
+        python3 "$ROOT/scripts/sync-portal-siyuan-publish.py" "$ROOT/portal/config.json" || true
+    fi
     if [ -f "$ROOT/scripts/sync-share-site-url.py" ]; then
         python3 "$ROOT/scripts/sync-share-site-url.py" || true
     fi

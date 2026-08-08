@@ -77,6 +77,7 @@ function expectProxy(pathname, want) {
     { path: '/webui/', want: { id: 'napcat', proxyPath: '/napcat/webui/' } },
     { path: '/stock-manage/api/health', want: { id: 'stock-manage', proxyPath: '/stock-manage/api/health' } },
     { path: '/torn-toolbox/undercut/api/state', want: { id: 'torn-undercut' } },
+    { path: '/publish/', want: { id: 'siyuan-publish' } },
     { path: '/notes/stage/build/desktop/', want: { id: 'notes' } },
     { path: '/api/me', want: { id: null } },
     { path: '/api/state', want: { id: null } },

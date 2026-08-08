@@ -7,6 +7,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:6806:6806"
+      - "127.0.0.1:6808:6808"
     volumes:
       - ./data/siyuan:/siyuan/workspace
     environment:
