@@ -5,7 +5,7 @@ import net from 'node:net';
 function pickHeaders(reqHeaders, extra, opts) {
     var options = opts || {};
     var keys = [
-        'content-type', 'authorization', 'accept', 'accept-language', 'cache-control',
+        'content-type', 'authorization', 'x-api-key', 'accept', 'accept-language', 'cache-control',
         'cookie', 'user-agent', 'referer', 'origin',
         'sec-websocket-key', 'sec-websocket-version', 'sec-websocket-extensions'
     ];
