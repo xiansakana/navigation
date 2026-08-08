@@ -90,6 +90,8 @@
       "path": "/share",
       "entryPath": "/dashboard",
       "internalUrl": "http://127.0.0.1:6807",
+      "shareUsername": "admin",
+      "sharePassword": "与 siyuan-share/.env 的 SHARE_SSO_PASSWORD 相同",
       "injectBar": false,
       "injectBase": true,
       "icon": "🔗"

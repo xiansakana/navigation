@@ -23,6 +23,7 @@ import {
 } from './rbac.js';
 import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket, isSharePublicPath, siyuanEntryPath } from './proxy.js';
 import { ensureSiyuanAuth, isSiyuanCheckAuthPath, resolveSiyuanRedirectTarget, hasSiyuanCookie, loginSiyuanSession, appendCookieHeader } from './siyuan-auth.js';
+import { ensureShareAuth, isShareLoginPath, getShareDashboardPath } from './share-auth.js';
 import { handleAdminApi } from './admin-api.js';
 import { wantsJsonResponse, renderErrorPage, sendHtml } from './error-page.js';
 import { handleOAuthStart, handleOAuthCallback, listOAuthProviders } from './oauth.js';
@@ -348,6 +349,24 @@ async function handleProxyRouteAsync(req, res) {
             }
         } else {
             await ensureSiyuanAuth(ctx.service, req, res, true);
+        }
+    }
+
+    var shareCanSso = ctx.service.id === 'siyuan-share'
+        && !proxySession.isGuest
+        && canViewService(proxySession.permissions, 'siyuan-share')
+        && ctx.service.shareUsername
+        && ctx.service.sharePassword;
+
+    if (shareCanSso) {
+        if (isShareLoginPath(browserUrl.pathname, ctx.service) && req.method === 'GET') {
+            var shareAuthed = await ensureShareAuth(ctx.service, req, res, true);
+            if (shareAuthed) {
+                redirect(res, getShareDashboardPath(ctx.service));
+                return true;
+            }
+        } else {
+            await ensureShareAuth(ctx.service, req, res, true);
         }
     }
 
