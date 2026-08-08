@@ -263,10 +263,8 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
 
     var proxySession = null;
     if (isPublicProxyService(ctx.service)) {
-        if (isWriteMethod(req.method)) {
-            sendError(req, res, browserUrl, 403, '发布站为只读，不支持写入');
-            return true;
-        }
+        // 无需 Portal 登录；读写限制由上游发布内核（:6808 只读模式）负责。
+        // 思源 API 即使用 POST 拉取文档，不可在 Portal 层拦截 POST。
     } else {
         proxySession = requireAuth(req, res);
         if (!proxySession) return true;
