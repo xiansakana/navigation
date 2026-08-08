@@ -23,7 +23,7 @@ ECS 默认经 Portal 反代：**http://123.56.235.12/share**（管理页需 port
 | `/share/api/v1/*` | 否 | 思源插件 API（Share 自身校验 API Key） |
 | `/share/login`、`/dashboard` 等 | **是** | 须 portal 已登录 + `service:siyuan-share:view`；**已登录 portal 后会自动进入 Share 控制台**（无需再输 Share 密码） |
 
-在 `siyuan-share/.env` 配置 `SHARE_SSO_USERNAME` / `SHARE_SSO_PASSWORD`（与 Share 管理员账号一致），`ecs-update` 会同步到 portal。
+在 `siyuan-share/.env` 可配置 `SHARE_SSO_USERNAME` / `SHARE_SSO_PASSWORD`；**留空则默认使用 portal 的 admin 账号密码**（须与 Share 站管理员密码一致）。
 
 插件 **服务端地址** 请填：`http://123.56.235.12/share`（不要再用 `:6807`）
 
