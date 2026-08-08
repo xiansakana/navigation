@@ -1,10 +1,13 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { getDatabase } from '../../shared/db/index.js';
+import { loadRbacBlob, saveRbacBlob } from '../../shared/db/rbac-store.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const RBAC_PATH = path.resolve(__dirname, '../data/rbac.json');
+var rbacCache = null;
+var rbacCacheConfigKey = null;
+
+function configServicesKey(config) {
+    return JSON.stringify((config.services || []).map(function(s) { return s.id; }));
+}
 
 var STOCK_MANAGE_SERVICE_ID = 'stock-manage';
 
@@ -232,18 +235,29 @@ function createDefaultRbac(config) {
 }
 
 export function loadRbac(config) {
-    if (!fs.existsSync(RBAC_PATH)) {
-        var created = createDefaultRbac(config);
-        saveRbac(created);
-        return created;
+    var key = configServicesKey(config);
+    if (rbacCache && rbacCacheConfigKey === key) {
+        return rbacCache;
     }
-    var data = JSON.parse(fs.readFileSync(RBAC_PATH, 'utf8'));
-    return syncRbacPermissions(data, config);
+    var db = getDatabase();
+    var data = loadRbacBlob(db);
+    if (!data) {
+        data = createDefaultRbac(config);
+        saveRbac(data);
+        rbacCache = data;
+        rbacCacheConfigKey = key;
+        return data;
+    }
+    data = syncRbacPermissions(data, config);
+    rbacCache = data;
+    rbacCacheConfigKey = key;
+    return data;
 }
 
 export function saveRbac(data) {
-    fs.mkdirSync(path.dirname(RBAC_PATH), { recursive: true });
-    fs.writeFileSync(RBAC_PATH, JSON.stringify(data, null, 2), 'utf8');
+    var db = getDatabase();
+    saveRbacBlob(db, data);
+    rbacCache = data;
 }
 
 function migrateRolePermissions(permissions) {
@@ -267,6 +281,7 @@ function migrateRolePermissions(permissions) {
 }
 
 export function syncRbacPermissions(data, config) {
+    var before = JSON.stringify(data);
     var servicePerms = buildServicePermissions(config.services);
     var stockManagePerms = buildStockManagePermissions();
     var known = {};
@@ -297,7 +312,9 @@ export function syncRbacPermissions(data, config) {
         });
     }
     if (!data.userPrefs) data.userPrefs = {};
-    saveRbac(data);
+    if (JSON.stringify(data) !== before) {
+        saveRbac(data);
+    }
     return data;
 }
 

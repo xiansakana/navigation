@@ -1,9 +1,9 @@
-# Sync navigation repo to ECS when git pull on ECS is unreliable.
+# 兜底：仅在 ECS git pull 失败时用 scp 同步（日常部署请 git push + ECS ./scripts/ecs-update.sh）
 # Usage:
-#   git push
+#   git push origin main
+#   ssh root@123.56.235.12 "cd /opt/navigation && ./scripts/ecs-update.sh"
+# 兜底 scp:
 #   .\scripts\ecs-deploy-from-local.ps1
-#   .\scripts\ecs-deploy-from-local.ps1 -Only undercut,company
-
 param(
     [string]$Only = ""
 )
@@ -15,7 +15,7 @@ $Key = Join-Path $env:USERPROFILE ".ssh\ecs_torn"
 $SshTarget = "root@123.56.235.12"
 $RemoteRoot = "/opt/navigation"
 
-$Dirs = @("portal", "qq-bot", "torn-toolbox-desktop", "stock-manage", "scripts")
+$Dirs = @("portal", "qq-bot", "torn-toolbox-desktop", "stock-manage", "scripts", "shared")
 
 Write-Host "==> Sync to ECS: ${SshTarget}:${RemoteRoot}"
 foreach ($dir in $Dirs) {
