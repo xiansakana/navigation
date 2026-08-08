@@ -193,10 +193,10 @@ function injectShareChrome(html) {
     var headInject = themeBoot
         + '<link rel="stylesheet" href="/share-theme.css">'
         + '<script src="/theme.js"></script>';
-    if (html.includes('</head>')) {
-        html = html.replace('</head>', headInject + '</head>');
-    } else if (html.includes('<head>')) {
-        html = html.replace('<head>', '<head>' + headInject);
+    if (/<\/head>/i.test(html)) {
+        html = html.replace(/<\/head>/i, headInject + '</head>');
+    } else if (/<head[^>]*>/i.test(html)) {
+        html = html.replace(/<head[^>]*>/i, function(match) { return match + headInject; });
     } else {
         html = headInject + html;
     }
@@ -347,7 +347,7 @@ export async function proxyHttpRequest(service, req, res) {
                 headers.location = rewriteLocation(headers.location, service, req.headers['user-agent']);
             }
             var ctype = String(upstreamRes.headers['content-type'] || '');
-            var isHtml = ctype.includes('text/html') && upstreamRes.statusCode === 200;
+            var isHtml = ctype.includes('text/html') && upstreamRes.statusCode >= 200 && upstreamRes.statusCode < 500;
             var isJs = (ctype.includes('javascript') || ctype.includes('text/js')) && upstreamRes.statusCode === 200;
             var isJson = ctype.includes('json') && upstreamRes.statusCode === 200
                 && !pipeJson;
