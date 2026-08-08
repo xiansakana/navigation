@@ -32,8 +32,18 @@ if [ ! -f data/config.json ]; then
     echo "已创建 data/config.json（请填入 Backblaze B2 Application Key）"
 fi
 
-echo "==> 拉取镜像并启动 PicList（${PUBLIC_URL}）..."
-docker compose pull
+build_piclist_image() {
+    echo "==> 从 npm 构建 PicList 镜像（国内源，约 2–5 分钟）..."
+    docker compose build --pull=false
+}
+
+if docker image inspect piclist-server:local >/dev/null 2>&1; then
+    echo "==> 本地已有镜像 piclist-server:local，跳过构建"
+else
+    build_piclist_image
+fi
+
+echo "==> 启动 PicList（${PUBLIC_URL}）..."
 docker compose up -d
 
 sleep 3
