@@ -176,22 +176,20 @@ function ensureGuestAccess(data, config) {
     if (!data.roles) data.roles = [];
     if (!data.users) data.users = [];
     var guestUsername = config?.auth?.guestUsername || 'guest';
-    var guestPerms = buildDefaultGuestPermissions(config?.services);
     var denyGuest = ['service:napcat:view', 'service:napcat:edit'];
 
     var guestRole = data.roles.find(function(r) { return r.id === 'role_guest'; });
     if (!guestRole) {
+        var guestPerms = buildDefaultGuestPermissions(config?.services);
+        var initial = new Set(guestPerms);
+        denyGuest.forEach(function(p) { initial.delete(p); });
         guestRole = {
             id: 'role_guest',
             name: '游客',
             description: '未登录访客的默认权限',
-            permissions: guestPerms
+            permissions: Array.from(initial)
         };
         data.roles.push(guestRole);
-    } else {
-        var merged = new Set((guestRole.permissions || []).concat(guestPerms));
-        denyGuest.forEach(function(p) { merged.delete(p); });
-        guestRole.permissions = Array.from(merged);
     }
 
     var guestUser = data.users.find(function(u) { return u.username === guestUsername; });
