@@ -82,6 +82,10 @@ function rewriteSiyuanPublishBody(text, prefix) {
         new RegExp('(["\'`])/(?!' + pubEsc + '/)(' + rootAlt + ')(?=/|["\'`])', 'g'),
         '$1' + pub + '/$2'
     );
+    out = out.replace(
+        new RegExp('(["\'`])/(?!' + pubEsc + '/)manifest(?=\\.)', 'g'),
+        '$1' + pub + '/manifest'
+    );
     return out;
 }
 
