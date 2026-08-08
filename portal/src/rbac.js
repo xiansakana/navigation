@@ -153,6 +153,63 @@ function defaultUserRole() {
     };
 }
 
+function buildDefaultGuestPermissions(services) {
+    var perms = new Set([
+        'service:torn-toolbox:view',
+        'service:torn-undercut:view',
+        'service:torn-company:view',
+        'service:stock-manage:view',
+        'service:notes:view',
+        'service:napcat:view'
+    ]);
+    (services || []).forEach(function(service) {
+        if (!service.hidden && service.id) {
+            perms.add(serviceViewPermissionId(service.id));
+        }
+    });
+    buildStockManagePermissions().forEach(function(item) {
+        if (item.action === 'view') perms.add(item.id);
+    });
+    return Array.from(perms);
+}
+
+function ensureGuestAccess(data, config) {
+    if (!data.roles) data.roles = [];
+    if (!data.users) data.users = [];
+    var guestUsername = config?.auth?.guestUsername || 'guest';
+    var guestPerms = buildDefaultGuestPermissions(config?.services);
+
+    var guestRole = data.roles.find(function(r) { return r.id === 'role_guest'; });
+    if (!guestRole) {
+        guestRole = {
+            id: 'role_guest',
+            name: '游客',
+            description: '未登录访客的默认权限',
+            permissions: guestPerms
+        };
+        data.roles.push(guestRole);
+    } else {
+        var merged = new Set((guestRole.permissions || []).concat(guestPerms));
+        guestRole.permissions = Array.from(merged);
+    }
+
+    var guestUser = data.users.find(function(u) { return u.username === guestUsername; });
+    if (!guestUser) {
+        data.users.push({
+            id: 'usr_guest',
+            username: guestUsername,
+            roleIds: ['role_guest'],
+            enabled: true,
+            createdAt: new Date().toISOString()
+        });
+    } else {
+        guestUser.enabled = true;
+        if (!(guestUser.roleIds || []).includes('role_guest')) {
+            guestUser.roleIds = ['role_guest'];
+        }
+    }
+}
+
 function normalizeMenuPermission(menu) {
     if (!menu) return menu;
     if (menu.serviceId) {
@@ -232,6 +289,8 @@ function createDefaultRbac(config) {
         permissions: SYSTEM_PERMISSIONS.concat(servicePerms).concat(stockManagePerms),
         userPrefs: {}
     };
+    ensureGuestAccess(created, config);
+    return created;
 }
 
 export function loadRbac(config) {
@@ -312,6 +371,7 @@ export function syncRbacPermissions(data, config) {
         });
     }
     if (!data.userPrefs) data.userPrefs = {};
+    ensureGuestAccess(data, config);
     if (JSON.stringify(data) !== before) {
         saveRbac(data);
     }
