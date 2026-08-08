@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add siyuan-share proxy service to portal config.json."""
+"""Add or update siyuan-share proxy service in portal config.json."""
 import json
 import sys
 from pathlib import Path
@@ -9,15 +9,14 @@ CONFIG_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "portal" / "con
 
 SHARE_SERVICE = {
     "id": "siyuan-share",
-    "title": "笔记分享管理",
-    "description": "思源分享服务端（管理分享与 API Key）",
+    "title": "笔记分享",
+    "description": "思源笔记公开分享与 API Key 管理",
     "type": "proxy",
     "path": "/share",
     "entryPath": "/dashboard",
     "internalUrl": "http://127.0.0.1:6807",
     "injectBar": False,
     "injectBase": True,
-    "hidden": True,
     "icon": "🔗",
 }
 
@@ -28,15 +27,20 @@ def main():
         return
     cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     services = cfg.get("services") or []
-    if any(s.get("id") == "siyuan-share" for s in services):
-        print("siyuan-share service already present")
-        return
-    insert_at = len(services)
-    for i, s in enumerate(services):
-        if s.get("id") == "napcat":
-            insert_at = i
+    updated = False
+    for s in services:
+        if s.get("id") == "siyuan-share":
+            s.update(SHARE_SERVICE)
+            s.pop("hidden", None)
+            updated = True
             break
-    services.insert(insert_at, SHARE_SERVICE)
+    if not updated:
+        insert_at = len(services)
+        for i, s in enumerate(services):
+            if s.get("id") == "napcat":
+                insert_at = i
+                break
+        services.insert(insert_at, SHARE_SERVICE)
     cfg["services"] = services
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"patched {CONFIG_PATH}")
