@@ -39,9 +39,26 @@ export var SIYUAN_API_NAMESPACES = new Set([
     'transactions', 'ui'
 ]);
 
-/** NapCat WebUI 使用的根 /api 命名空间（allowlist，避免吞掉未知 API） */
+/**
+ * NapCat WebUI 根路径 /api/{ns}（与 napcat-webui-backend router 同步）。
+ * 仅放行这些命名空间，避免未知 /api/* 误打到 NapCat。
+ * 注意大小写：思源多为小写（file/plugin），NapCat 多为 PascalCase（File/Plugin）。
+ */
 export var NAPCAT_API_NAMESPACES = new Set([
-    'auth'
+    'auth',
+    'base',
+    'QQLogin',
+    'OB11Config',
+    'Log',
+    'File',
+    'WebUIConfig',
+    'UpdateNapCat',
+    'Debug',
+    'Process',
+    'Plugin',
+    'Mirror',
+    'NapCatConfig',
+    'test'
 ]);
 
 /** 思源非 /api 根路径（块编辑器、静态资源、WebSocket 等） */
