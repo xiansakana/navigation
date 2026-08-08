@@ -421,7 +421,21 @@ export async function proxyHttpRequest(service, req, res) {
     }
 
     await new Promise(function(resolve) {
-        var headersOut = pickHeaders(req.headers, { host: target.host }, { allowEncoding: pipeJson });
+        var fwdHost = req.headers['x-forwarded-host'] || req.headers.host || target.host;
+        var fwdProto = req.headers['x-forwarded-proto']
+            || (req.socket && req.socket.encrypted ? 'https' : 'http');
+        var fwdFor = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+        var headersOut = pickHeaders(req.headers, {
+            host: target.host,
+            'x-forwarded-host': fwdHost,
+            'x-forwarded-proto': fwdProto,
+            'x-forwarded-for': fwdFor,
+            'x-real-ip': req.socket.remoteAddress || ''
+        }, { allowEncoding: pipeJson });
+        // AList 用 Host/site_url 拼分享链接；有公网 Host 时优先传给上游
+        if (service.id === 'alist' && fwdHost && !String(fwdHost).includes('127.0.0.1')) {
+            headersOut.host = fwdHost;
+        }
         if (body && body.length) {
             headersOut['content-length'] = String(body.length);
         }
