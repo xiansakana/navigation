@@ -21,7 +21,7 @@ import {
     getStockManagePrefs,
     updateUserPrefs
 } from './rbac.js';
-import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket } from './proxy.js';
+import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket, isSharePublicPath } from './proxy.js';
 import { handleAdminApi } from './admin-api.js';
 import { wantsJsonResponse, renderErrorPage, sendHtml } from './error-page.js';
 import { handleOAuthStart, handleOAuthCallback, listOAuthProviders } from './oauth.js';
@@ -248,7 +248,16 @@ function handleProxyRoute(req, res) {
     var ctx = resolveProxyContext(config.services, req.url);
     if (!ctx) return false;
 
-    var proxySession = requireAuth(req, res);
+    var browserUrl = new URL(req.url, 'http://127.0.0.1');
+
+    if (isSharePublicPath(browserUrl.pathname, ctx.service)) {
+        req.url = ctx.proxyUrl;
+        proxyHttpRequest(ctx.service, req, res);
+        return true;
+    }
+
+    var authOptions = ctx.service.id === 'siyuan-share' ? { requireLogin: true } : {};
+    var proxySession = requireAuth(req, res, authOptions);
     if (!proxySession) return true;
 
     if (!canViewService(proxySession.permissions, ctx.service.id)) {
@@ -266,7 +275,6 @@ function handleProxyRoute(req, res) {
     }
 
     var proxyUrl = new URL(ctx.proxyUrl, 'http://127.0.0.1');
-    var browserUrl = new URL(req.url, 'http://127.0.0.1');
 
     var napcatCanonical = napcatCanonicalWebuiPath(ctx.service, browserUrl.pathname);
     if (napcatCanonical) {
