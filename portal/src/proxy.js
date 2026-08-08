@@ -262,27 +262,16 @@ function ensureViewportMeta(html) {
 }
 
 /**
- * AList 前端 bug：切换每页条数时 effect 会先 recordHistory 写回旧列表，
- * handlePathChange 再 recover 历史（key 不含 per_page），导致不重新请求。
- * 拦截 HistoryMap 的 set：per_page 变化后短暂禁止写入历史，让列表按新条数重新拉取渲染。
+ * AList 前端 bug：切换每页条数(50/100/…)时 Obj 的 effect 会先 recordHistory 写回旧列表，
+ * 随后 handlePathChange 命中 history 缓存直接 recover，不再按新 per_page 请求。
+ * 历史 key 不含 per_page，故改条数无效。检测到 per_page 变化后整页重载以强制刷新列表。
  */
 function injectAlistPaginationShim(html) {
     if (!html.includes('<head')) return html;
     var shim = '<script>(function(){'
         + 'function perPage(){try{return new URLSearchParams(location.search).get("per_page")||""}catch(e){return""}}'
-        + 'function isHist(v){return!!(v&&typeof v==="object"&&typeof v.page==="number"'
-        + '&&typeof v.scroll==="number"&&v.obj&&typeof v.obj==="object"&&Array.isArray(v.obj.objs))}'
-        + 'var prev=perPage(),skipUntil=0,histMap=null;'
-        + 'var origSet=Map.prototype.set;'
-        + 'Map.prototype.set=function(k,v){'
-        + 'if(isHist(v)){histMap=this;if(Date.now()<skipUntil)return this}'
-        + 'return origSet.call(this,k,v)};'
-        + 'function onNav(){var next=perPage();if(next===prev)return;prev=next;'
-        + 'skipUntil=Date.now()+2000;'
-        + 'if(histMap){var path=location.pathname.replace(/^\\/alist(?=\\/|$)/,\"\")||\"/\";'
-        + 'var base=path.split(\"?\")[0];var del=[];'
-        + 'histMap.forEach(function(v,k){if(typeof k===\"string\"&&k.split(\"?\")[0]===base)del.push(k)});'
-        + 'del.forEach(function(k){histMap.delete(k)})}}'
+        + 'var prev=perPage();'
+        + 'function onNav(){var next=perPage();if(next===prev)return;prev=next;location.reload()}'
         + 'var ps=history.pushState,rs=history.replaceState;'
         + 'history.pushState=function(){var r=ps.apply(this,arguments);onNav();return r};'
         + 'history.replaceState=function(){var r=rs.apply(this,arguments);onNav();return r};'
