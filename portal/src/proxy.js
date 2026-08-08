@@ -185,34 +185,6 @@ function rewriteShareProxiedBody(text, prefix, publicUrl) {
     return out;
 }
 
-function injectShareChrome(html) {
-    html = injectProxiedBackLink(html, 'share');
-    var themeBoot = '<script>(function(){try{var k="portal-theme";var t=localStorage.getItem(k);'
-        + 'if(t!=="light"&&t!=="dark")t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";'
-        + 'document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>';
-    var headInject = themeBoot
-        + '<link rel="stylesheet" href="/share-theme.css?v=2">'
-        + '<script src="/theme.js"></script>';
-    if (/<\/head>/i.test(html)) {
-        html = html.replace(/<\/head>/i, headInject + '</head>');
-    } else if (/<head[^>]*>/i.test(html)) {
-        html = html.replace(/<head[^>]*>/i, function(match) { return match + headInject; });
-    } else {
-        html = headInject + html;
-    }
-    var themeKeeper = '<script>(function(){var c="portal-share-theme-btn navbar-theme-btn";'
-        + 'function m(){var e=document.querySelector(".portal-share-theme-btn");'
-        + 'if(!e){e=document.createElement("button");e.type="button";e.className=c;'
-        + 'e.innerHTML=\'<span class="navbar-theme-icon" aria-hidden="true">☀️</span><span class="navbar-theme-label">日间</span>\';'
-        + 'document.body.appendChild(e)}}m();'
-        + 'new MutationObserver(m).observe(document.documentElement,{childList:true,subtree:true});'
-        + '})();</script>';
-    if (html.includes('</body>')) {
-        html = html.replace('</body>', themeKeeper + '</body>');
-    }
-    return html;
-}
-
 function injectProxiedBackLink(html, variant) {
     var positionRule = variant === 'notes'
         ? '.portal-proxied-back--notes{top:8px!important;left:172px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}'
@@ -281,7 +253,7 @@ function injectPortalShell(html, service) {
             html = injectProxiedBackLink(html, 'napcat');
         }
         if (service.id === 'notes' && !isSiyuanAuthPage) html = injectProxiedBackLink(html, 'notes');
-        if (service.id === 'siyuan-share') html = injectShareChrome(html);
+        if (service.id === 'siyuan-share') html = injectProxiedBackLink(html, 'share');
         if (service.id === 'siyuan-share' && service.injectBase !== false && !/<base[\s>]/i.test(html)) {
             var shareBase = service.path.replace(/\/$/, '') + '/';
             html = html.replace(/<head[^>]*>/i, function(match) {
