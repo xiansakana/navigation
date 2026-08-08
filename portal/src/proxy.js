@@ -274,7 +274,7 @@ function injectPortalShell(html, service) {
         var isSiyuanAuthPage = service.id === 'notes' && html.includes('id="authCode"');
         var skipShell = service.id === 'napcat' || service.id === 'siyuan-share' || isSiyuanAuthPage;
         var headInject = skipShell ? '' : themeBoot + themeJs + toastJs + dialogJs + baseTag;
-        if (!headInject && service.id !== 'napcat' && service.id !== 'notes') return html;
+        if (!headInject && service.id !== 'napcat' && service.id !== 'notes' && service.id !== 'siyuan-share') return html;
         if (headInject) html = html.replace('<head>', '<head>' + headInject);
         if (service.id === 'napcat') {
             html = injectNapcatTokenShim(html, service.adminToken);
