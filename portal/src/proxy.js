@@ -1,7 +1,6 @@
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
-import { mergeSetCookie } from './siyuan-auth.js';
 
 function pickHeaders(reqHeaders, extra, opts) {
     var options = opts || {};
@@ -41,11 +40,8 @@ export function buildTargetUrl(service, reqUrl) {
     }
     if (!subPath.startsWith('/')) subPath = '/' + subPath;
     var target = new URL(subPath + url.search, base.origin);
-    if (service.adminToken) {
-        var skipApi = subPath.startsWith('/api/') && service.id !== 'napcat';
-        if (!skipApi) {
-            target.searchParams.set('token', service.adminToken);
-        }
+    if (service.adminToken && !subPath.startsWith('/api/')) {
+        target.searchParams.set('token', service.adminToken);
     }
     return target;
 }
@@ -97,9 +93,6 @@ function rewriteLocation(location, service, userAgent) {
             if (service.id === 'napcat') {
                 return prefix + loc.pathname + stripTokenQuery(loc.search) + loc.hash;
             }
-            if (service.id === 'siyuan-share') {
-                return prefix + loc.pathname + loc.search + loc.hash;
-            }
             return prefix + loc.pathname + loc.search + loc.hash;
         }
     } catch (e) { /* ignore */ }
@@ -146,58 +139,19 @@ function rewriteProxiedBody(text, service) {
             .replace(/(["'])\/shared\//g, '$1' + prefix + '/shared/')
             .replace(/(["'])\/app\.js/g, '$1' + prefix + '/app.js');
     }
-    if (service.id === 'siyuan-share') {
-        out = rewriteShareProxiedBody(out, prefix, service.publicUrl);
-    }
-    return out;
-}
-
-/** 思源分享反代：绝对路径补 /share 前缀，公开链接与插件 API 响应中的 URL 一并修正 */
-function rewriteShareProxiedBody(text, prefix, publicUrl) {
-    var p = prefix.replace(/\/$/, '');
-    if (!p) return text;
-    var out = text;
-    if (publicUrl) {
-        var pub = String(publicUrl).replace(/\/$/, '');
-        out = out
-            .replace(/https?:\/\/127\.0\.0\.1:6807(?=\/|"|\s|$)/g, pub)
-            .replace(/https?:\/\/127\.0\.0\.1(?=\/s\/|"|\s|$)/g, pub);
-    }
-    var segments = [
-        '/api/v1/', '/api/instances/', '/api-key/',
-        '/assets/', '/uploads/', '/s/',
-        '/login/', '/register/', '/forgot/', '/reset/', '/logout',
-        '/dashboard/', '/admin-home/', '/admin/', '/account/', '/captcha', '/email-code'
-    ];
-    var exact = [
-        '/login', '/register', '/forgot', '/reset', '/logout',
-        '/dashboard', '/admin-home', '/admin', '/account', '/captcha', '/email-code'
-    ];
-    segments.forEach(function(seg) {
-        var escaped = seg.replace(/\//g, '\\/');
-        out = out.replace(new RegExp('(["\'`(])' + escaped, 'g'), '$1' + p + seg);
-    });
-    exact.forEach(function(seg) {
-        var escaped = seg.replace(/\//g, '\\/');
-        out = out.replace(new RegExp('(["\'`(])' + escaped + '(?=[\"\'`?#\\s])', 'g'), '$1' + p + seg);
-    });
-    out = out.replace(new RegExp(p + p + '(/|")', 'g'), p + '$1');
-    out = out.replace(new RegExp('(https?:\\/\\/[^"\'\\s]+)' + p + '\\/s\\/', 'g'), '$1' + p + '/s/');
     return out;
 }
 
 function injectProxiedBackLink(html, variant) {
     var positionRule = variant === 'notes'
         ? '.portal-proxied-back--notes{top:8px!important;left:172px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}'
-        : variant === 'share'
-            ? '.portal-proxied-back--share{top:12px!important;left:12px!important;right:auto!important;padding:6px 10px;font-size:13px;line-height:1.2}'
-            : '.portal-proxied-back--napcat{top:8px!important;left:132px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}';
+        : '.portal-proxied-back--napcat{top:8px!important;left:132px!important;right:auto!important;padding:5px 10px;font-size:13px;line-height:1.2}';
     var css = '<style>'
         + '.portal-proxied-back{position:fixed;z-index:2147483647;display:inline-flex;align-items:center;padding:8px 12px;border-radius:8px;font:14px/1.4 system-ui,sans-serif;text-decoration:none;color:#e8edf5;background:rgba(15,17,21,.88);border:1px solid rgba(255,255,255,.12);box-shadow:0 4px 16px rgba(0,0,0,.25);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);pointer-events:auto}'
         + '.portal-proxied-back:hover{background:rgba(23,27,34,.95)}'
         + '@media (prefers-color-scheme:light){.portal-proxied-back{color:#152033;background:rgba(255,255,255,.92);border-color:rgba(15,23,42,.12);box-shadow:0 4px 16px rgba(15,23,42,.12)}.portal-proxied-back:hover{background:#fff}}'
         + positionRule
-        + '@media (max-width:768px){.portal-proxied-back--notes,.portal-proxied-back--napcat,.portal-proxied-back--share{top:auto!important;bottom:calc(12px + env(safe-area-inset-bottom,0px))!important;left:12px!important;right:auto!important;padding:8px 12px!important;font-size:14px!important;line-height:1.3!important}}'
+        + '@media (max-width:768px){.portal-proxied-back--notes,.portal-proxied-back--napcat{top:auto!important;bottom:calc(12px + env(safe-area-inset-bottom,0px))!important;left:12px!important;right:auto!important;padding:8px 12px!important;font-size:14px!important;line-height:1.3!important}}'
         + '</style>';
     var keeper = '<script>(function(){var c="portal-proxied-back portal-proxied-back--' + variant + '";function m(){var e=document.querySelector("."+c.split(" ")[0]);if(!e){e=document.createElement("a");e.className=c;e.href="/";e.textContent="← 服务导航";document.body.appendChild(e)}}m();new MutationObserver(m).observe(document.documentElement,{childList:true,subtree:true})})();</script>';
     if (html.includes('</head>')) html = html.replace('</head>', css + '</head>');
@@ -222,7 +176,13 @@ function injectNapcatTokenShim(html, token) {
     if (!token || !html.includes('<head')) return html;
     var shim = '<script>(function(){var t=' + JSON.stringify(token)
         + ';var g=URLSearchParams.prototype.get;URLSearchParams.prototype.get=function(k){'
-        + 'if(k==="token")return g.call(this,k)||t;return g.call(this,k);};})();</script>';
+        + 'if(k==="token")return g.call(this,k)||t;return g.call(this,k);};'
+        + 'function napcatSha256(s){return crypto.subtle.digest("SHA-256",new TextEncoder().encode(s)).then(function(buf){'
+        + 'return Array.from(new Uint8Array(buf)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");});}'
+        + 'napcatSha256(t+".napcat").then(function(hash){return fetch("/api/auth/login",{method:"POST",headers:{'
+        + '"Content-Type":"application/json"},body:JSON.stringify({hash:hash})});}).then(function(r){return r.json();})'
+        + '.then(function(data){if(data&&data.code===0&&data.data&&data.data.Credential){'
+        + 'localStorage.setItem("token",JSON.stringify(data.data.Credential));}}).catch(function(){});})();</script>';
     return html.replace(/<head[^>]*>/i, function(m) { return m + shim; });
 }
 
@@ -245,22 +205,15 @@ function injectPortalShell(html, service) {
     var portalCss = '<link rel="stylesheet" href="/portal.css">';
     if (service.injectBar === false) {
         var isSiyuanAuthPage = service.id === 'notes' && html.includes('id="authCode"');
-        var skipShell = service.id === 'napcat' || service.id === 'siyuan-share' || isSiyuanAuthPage;
+        var skipShell = service.id === 'napcat' || isSiyuanAuthPage;
         var headInject = skipShell ? '' : themeBoot + themeJs + toastJs + dialogJs + baseTag;
-        if (!headInject && service.id !== 'napcat' && service.id !== 'notes' && service.id !== 'siyuan-share') return html;
+        if (!headInject && service.id !== 'napcat' && service.id !== 'notes') return html;
         if (headInject) html = html.replace('<head>', '<head>' + headInject);
         if (service.id === 'napcat') {
             html = injectNapcatTokenShim(html, service.adminToken);
             html = injectProxiedBackLink(html, 'napcat');
         }
         if (service.id === 'notes' && !isSiyuanAuthPage) html = injectProxiedBackLink(html, 'notes');
-        if (service.id === 'siyuan-share') html = injectProxiedBackLink(html, 'share');
-        if (service.id === 'siyuan-share' && service.injectBase !== false && !/<base[\s>]/i.test(html)) {
-            var shareBase = service.path.replace(/\/$/, '') + '/';
-            html = html.replace(/<head[^>]*>/i, function(match) {
-                return match + '<base href="' + shareBase + '">';
-            });
-        }
         return html;
     }
     var title = service.title || '服务';
@@ -349,42 +302,6 @@ export async function proxyHttpRequest(service, req, res) {
                 headers['content-length'] = Buffer.byteLength(text, 'utf8');
                 res.writeHead(upstreamRes.statusCode, headers);
                 res.end(text);
-                resolve();
-            });
-        });
-
-        upstream.on('error', function(err) {
-            res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
-            res.end(JSON.stringify({ ok: false, error: '上游服务不可用: ' + err.message }));
-            resolve();
-        });
-
-        if (body && body.length) upstream.write(body);
-        upstream.end();
-    });
-}
-
-/** Share logout: upstream destroys PHP session then redirects to /. Send user to portal home instead of re-SSO into /share/. */
-export async function proxyShareLogout(service, req, res) {
-    var target = buildTargetUrl(service, req.url);
-    var lib = target.protocol === 'https:' ? https : http;
-    var body = await readBody(req);
-
-    await new Promise(function(resolve) {
-        var upstream = lib.request(target, {
-            method: 'POST',
-            headers: pickHeaders(req.headers, { host: target.host })
-        }, function(upstreamRes) {
-            var status = upstreamRes.statusCode;
-            var headers = {};
-            if (status >= 300 && status < 400) {
-                headers.location = '/';
-            }
-            mergeSetCookie(res, ['PHPSESSID=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax']);
-            res.writeHead(status, headers);
-            upstreamRes.resume();
-            upstreamRes.on('end', function() {
-                res.end();
                 resolve();
             });
         });
@@ -498,76 +415,17 @@ function findNapcatService(services) {
     });
 }
 
-function findShareService(services) {
-    return (services || []).find(function(service) {
-        return service.id === 'siyuan-share' && service.type === 'proxy';
-    });
-}
-
-/** Share 页面使用绝对路径；跳过与 portal 冲突的 /admin、/login */
-var SHARE_ROOT_BLOCKED = { '/admin': true, '/login': true };
-
-var SHARE_ROOT_EXACT = [
-    '/register', '/forgot', '/reset', '/logout',
-    '/dashboard', '/admin-home', '/account', '/captcha', '/email-code'
-];
-
-var SHARE_ROOT_PREFIXES = [
-    '/login/', '/register/', '/forgot/', '/reset/', '/logout',
-    '/dashboard/', '/admin-home/', '/admin/', '/account/', '/api-key/',
-    '/api/v1/', '/api/instances/', '/assets/', '/uploads/', '/s/'
-];
-
-export function isShareRootPath(pathname) {
-    if (SHARE_ROOT_BLOCKED[pathname]) return false;
-    if (SHARE_ROOT_EXACT.indexOf(pathname) >= 0) return true;
-    return SHARE_ROOT_PREFIXES.some(function(prefix) {
-        return pathname.startsWith(prefix);
-    });
-}
-
-function shareSubPath(pathname, service) {
-    var prefix = service.path.replace(/\/$/, '');
-    if (pathname === prefix || pathname.startsWith(prefix + '/')) {
-        return pathname.slice(prefix.length) || '/';
-    }
-    if (isShareRootPath(pathname)) return pathname;
-    return null;
-}
-
-function isSharePublicSubPath(sub) {
-    if (sub === '/s' || sub.startsWith('/s/')) return true;
-    if (sub.startsWith('/assets/')) return true;
-    if (sub.startsWith('/uploads/')) return true;
-    if (sub.startsWith('/api/v1/')) return true;
-    return false;
-}
-
-/** NapCat WebUI 使用绝对路径 /webui/...，需额外挂载到同一反代 */
-export function isSharePublicPath(pathname, service) {
-    if (!service || service.id !== 'siyuan-share') return false;
-    var sub = shareSubPath(pathname, service);
-    if (!sub) return false;
-    return isSharePublicSubPath(sub);
-}
-
 export function resolveProxyContext(services, reqUrl) {
     var url = new URL(reqUrl, 'http://127.0.0.1');
     var service = findProxyService(services, url.pathname);
     if (service) return { service: service, proxyUrl: reqUrl };
-
-    var share = findShareService(services);
-    if (share && isShareRootPath(url.pathname)) {
-        var sharePrefix = share.path.replace(/\/$/, '');
-        return { service: share, proxyUrl: sharePrefix + url.pathname + url.search };
-    }
 
     var napcat = findNapcatService(services);
     if (napcat && (url.pathname === '/webui' || url.pathname.startsWith('/webui/'))) {
         var webuiPrefix = napcat.path.replace(/\/$/, '');
         return { service: napcat, proxyUrl: webuiPrefix + url.pathname + url.search };
     }
-    if (napcat && url.pathname.startsWith('/api/') && !isSiyuanApiPath(url.pathname) && !isShareRootPath(url.pathname)) {
+    if (napcat && url.pathname.startsWith('/api/') && !isSiyuanApiPath(url.pathname)) {
         var apiPrefix = napcat.path.replace(/\/$/, '');
         return { service: napcat, proxyUrl: apiPrefix + url.pathname + url.search };
     }

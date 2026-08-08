@@ -6,7 +6,7 @@ services:
     container_name: siyuan-share-web
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${SIYUAN_SHARE_PORT:-6807}:80"
+      - "${SIYUAN_SHARE_PORT:-6807}:80"
     volumes:
       - ./data/storage:/var/www/html/storage
       - ./data/uploads:/var/www/html/uploads

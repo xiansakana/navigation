@@ -69,3 +69,4 @@ if (fs.existsSync(CONFIG_PATH)) {
 }
 
 console.log('admin password reset to:', NEW_PASSWORD);
+console.log('run: pm2 restart portal  (required to reload in-memory RBAC cache)');
