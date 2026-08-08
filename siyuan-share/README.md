@@ -52,3 +52,12 @@ Portal 首页仅提供跳转链接（新标签打开），不再经 `/share` 反
 ## 账号与注册
 
 自建默认 **关闭公开注册**（`.env` 中 `SIYUAN_SHARE_ALLOW_REGISTRATION=0`）。管理员在 **http://123.56.235.12:6807/login** 登录即可；也可在管理后台 **设置** 里勾选「允许注册」临时开放。
+
+## 界面主题
+
+仓库自带 **Portal 深色对齐主题**：[`share-theme-portal.css`](share-theme-portal.css)
+
+- **手动**：管理员 → **http://123.56.235.12:6807/admin#settings** → 自定义 CSS → 粘贴该文件内容 → 勾选「启用自定义 CSS」
+- **自动**：`python3 scripts/sync-share-theme.py`（`ecs-update` 在更新 siyuan-share 时会执行）
+
+可在该 CSS 顶部改 `:root` 变量微调配色；Share 官方也在同一页提供自定义 CSS/JS 说明与示例。

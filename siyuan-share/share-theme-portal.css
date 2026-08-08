@@ -1,0 +1,344 @@
+/* 思源分享 · 对齐 Portal 深色主题
+ * 粘贴到 http://<host>:6807/admin#settings → 自定义 CSS
+ * 或执行: python3 scripts/sync-share-theme.py
+ */
+
+:root {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --bg-strong: #1a2233;
+  --surface: #171b22;
+  --surface-muted: #1e2430;
+  --panel-bg: #141820;
+  --text: #e8edf5;
+  --muted: #9aa4b2;
+  --primary: #5b9cff;
+  --primary-700: #3d7fe6;
+  --accent: #3ddc84;
+  --danger: #ff7b7b;
+  --border: #2a3140;
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.22);
+  --radius-lg: 14px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
+  --font-display: "Segoe UI", system-ui, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-body: "Segoe UI", system-ui, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+body.layout-app,
+body.layout-public {
+  background: var(--bg);
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(91, 156, 255, 0.12), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 0%, rgba(61, 220, 132, 0.06), transparent);
+}
+
+body.layout-auth {
+  background: linear-gradient(145deg, #0f1115 0%, #151b28 45%, #1a2744 100%);
+}
+
+body.layout-share {
+  background: var(--bg);
+  background-image: none;
+}
+
+a {
+  color: var(--primary);
+}
+
+a:hover {
+  color: #7eb6ff;
+}
+
+.card,
+.auth-card,
+.modal-card,
+.share-side-panel,
+.share-doc-nav,
+.share-toc-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+}
+
+.input,
+textarea.input,
+select.input,
+.auth-input,
+.kb-search-input {
+  background: #0f131a;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.input:focus,
+.auth-input:focus,
+.kb-search-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(91, 156, 255, 0.18);
+  outline: none;
+}
+
+.input::placeholder,
+.auth-input::placeholder {
+  color: #6b7688;
+}
+
+.button,
+button.button {
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+
+.button.primary,
+button.button.primary {
+  background: linear-gradient(180deg, #6aa8ff 0%, var(--primary) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(91, 156, 255, 0.25);
+}
+
+.button.primary:hover,
+button.button.primary:hover {
+  background: linear-gradient(180deg, #7eb6ff 0%, #4a8ef0 100%);
+}
+
+.button:not(.primary),
+button.button:not(.primary) {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.button:not(.primary):hover {
+  background: #252c3a;
+  border-color: #3a4458;
+}
+
+.muted,
+.auth-subtitle,
+.share-footer,
+.help-text {
+  color: var(--muted) !important;
+}
+
+.app-shell,
+.app-layout {
+  background: transparent;
+}
+
+.app-sidebar,
+.sidebar,
+.share-sidebar {
+  background: var(--panel-bg);
+  border-right: 1px solid var(--border);
+}
+
+.app-topbar,
+.topbar,
+.share-header {
+  background: rgba(15, 17, 21, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-item,
+.sidebar-link,
+.app-nav a {
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+}
+
+.nav-item:hover,
+.sidebar-link:hover,
+.app-nav a:hover,
+.nav-item.active,
+.sidebar-link.active {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+.nav-item.active,
+.sidebar-link.active {
+  background: rgba(91, 156, 255, 0.12);
+  color: var(--primary);
+}
+
+table,
+.table {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+table th,
+.table th {
+  background: var(--surface-muted);
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+table td,
+.table td {
+  border-bottom: 1px solid var(--border);
+}
+
+table tr:hover td,
+.table tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.badge,
+.tag,
+.chip {
+  background: rgba(91, 156, 255, 0.14);
+  color: #9ec5ff;
+  border: 1px solid rgba(91, 156, 255, 0.22);
+}
+
+.alert-error,
+.flash-error {
+  background: rgba(255, 123, 123, 0.12);
+  border-color: rgba(255, 123, 123, 0.35);
+  color: #ffb4b4;
+}
+
+.alert-success,
+.flash-info {
+  background: rgba(61, 220, 132, 0.1);
+  border-color: rgba(61, 220, 132, 0.28);
+  color: #8aebb0;
+}
+
+/* 登录 / 注册 */
+body.layout-auth .auth-card {
+  background: rgba(23, 27, 34, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+body.layout-auth .auth-logo,
+body.layout-auth .auth-title {
+  color: var(--text);
+}
+
+/* 控制台 / 后台 */
+body.layout-app .page-title,
+body.layout-app h1,
+body.layout-app h2,
+body.layout-app .card h2 {
+  color: var(--text);
+}
+
+body.layout-app .stat-card,
+body.layout-app .metric-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+/* 公开分享页 */
+body.layout-share .share-page {
+  background: var(--bg);
+}
+
+body.layout-share .share-header,
+body.layout-share .share-toolbar {
+  background: rgba(15, 17, 21, 0.9);
+  border-bottom: 1px solid var(--border);
+}
+
+body.layout-share .markdown-body {
+  color: #dfe6f0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 24px 28px;
+  box-shadow: var(--shadow-soft);
+}
+
+body.layout-share .markdown-body h1,
+body.layout-share .markdown-body h2,
+body.layout-share .markdown-body h3 {
+  color: var(--text);
+  border-bottom-color: var(--border);
+}
+
+body.layout-share .markdown-body code {
+  background: #0f131a;
+  color: #9ec5ff;
+}
+
+body.layout-share .markdown-body pre {
+  background: #0f131a;
+  border: 1px solid var(--border);
+}
+
+body.layout-share .markdown-body blockquote {
+  border-left-color: var(--primary);
+  color: var(--muted);
+}
+
+body.layout-share .share-side-trigger,
+body.layout-share .scroll-top {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  box-shadow: var(--shadow-soft);
+}
+
+body.layout-share .share-footer {
+  border-top: 1px solid var(--border);
+  background: transparent;
+}
+
+body.layout-share .share-footer a {
+  color: var(--muted);
+}
+
+/* 首页 */
+body.layout-public .home-hero {
+  background: transparent;
+}
+
+body.layout-public .home-title {
+  color: var(--text);
+}
+
+body.layout-public .home-lead,
+body.layout-public .home-hero__meta {
+  color: var(--muted);
+}
+
+body.layout-public .home-badge {
+  background: rgba(91, 156, 255, 0.14);
+  color: #9ec5ff;
+  border: 1px solid rgba(91, 156, 255, 0.25);
+}
+
+/* 滚动条（WebKit） */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3a4458;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4d5870;
+}

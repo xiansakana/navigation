@@ -134,6 +134,9 @@ if should_run siyuan-share; then
     if [ -f "$ROOT/scripts/sync-share-registration.py" ]; then
         python3 "$ROOT/scripts/sync-share-registration.py" || true
     fi
+    if [ -f "$ROOT/scripts/sync-share-theme.py" ] && [ -f "$ROOT/siyuan-share/share-theme-portal.css" ]; then
+        python3 "$ROOT/scripts/sync-share-theme.py" || true
+    fi
     cd "$ROOT/siyuan-share"
     bash deploy-ecs.sh
 fi
