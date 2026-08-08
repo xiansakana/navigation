@@ -394,6 +394,33 @@ input {
     color: #fff;
 }
 
+.oauth-buttons {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.oauth-btn {
+    width: 100%;
+    text-align: center;
+    text-decoration: none;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+}
+
+.oauth-btn--github:hover,
+.oauth-btn--google:hover {
+    border-color: var(--accent);
+}
+
+.oauth-divider {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0 0 12px;
+}
+
 .error-page {
     display: grid;
     place-items: center;

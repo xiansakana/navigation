@@ -24,6 +24,7 @@ import {
 import { resolveProxyContext, getServiceEntryHref, napcatCanonicalWebuiPath, proxyHttpRequest, proxyWebSocket } from './proxy.js';
 import { handleAdminApi } from './admin-api.js';
 import { wantsJsonResponse, renderErrorPage, sendHtml } from './error-page.js';
+import { handleOAuthStart, handleOAuthCallback, listOAuthProviders } from './oauth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -227,6 +228,8 @@ async function handleLoginApi(req, res) {
 }
 
 function isPortalApi(pathname, method) {
+    if (pathname === '/api/oauth/providers' && method === 'GET') return true;
+    if (/^\/api\/oauth\/(github|google)\/(start|callback)$/.test(pathname) && method === 'GET') return true;
     if (pathname === '/api/login' && method === 'POST') return true;
     if (pathname === '/api/me' && method === 'GET') return true;
     if (pathname === '/api/me/prefs' && method === 'PUT') return true;
@@ -314,6 +317,16 @@ var server = http.createServer(async function(req, res) {
     var url = new URL(req.url, 'http://127.0.0.1');
 
     if (url.pathname.startsWith('/api/')) {
+        if (url.pathname === '/api/oauth/providers' && req.method === 'GET') {
+            return json(res, 200, { ok: true, providers: listOAuthProviders(config) });
+        }
+        var oauthMatch = url.pathname.match(/^\/api\/oauth\/(github|google)\/(start|callback)$/);
+        if (oauthMatch && req.method === 'GET') {
+            if (oauthMatch[2] === 'start') {
+                return handleOAuthStart(oauthMatch[1], req, res, config, getSessionSecret());
+            }
+            return handleOAuthCallback(oauthMatch[1], req, res, config, getSessionSecret());
+        }
         if (isPortalApi(url.pathname, req.method)) {
             if (url.pathname === '/api/login') {
                 await handleLoginApi(req, res);
