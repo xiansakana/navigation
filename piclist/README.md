@@ -14,7 +14,9 @@ bash deploy-ecs.sh
 
 ECS 默认对外端口：**http://123.56.235.12:36677**（需在安全组放行 **36677**）
 
-仓库根目录执行 `./scripts/ecs-update.sh --only piclist` 可更新镜像并重启容器。
+仓库根目录执行 `./scripts/ecs-update.sh --only piclist` 可重建镜像并重启容器。
+
+若 ECS 可访问 Docker Hub，也可改用官方镜像：在 `docker-compose.yml` 中将 `image` 改为 `kuingsmile/piclist:latest` 并删除 `build: .`。
 
 ## 公网访问
 
