@@ -42,9 +42,11 @@
       "defaultId": "b2-xiansakana-assets"
     }
   },
-  "picgoPlugins": {},
+  "picgoPlugins": {
+    "picgo-plugin-rename": true
+  },
   "settings": {
-    "autoRename": true,
+    "autoRename": false,
     "rename": false
   }
 }
