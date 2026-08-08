@@ -108,5 +108,5 @@ export function resolveSiyuanRedirectTarget(service, browserUrl, userAgent, siyu
     if (!to.startsWith('/')) to = '/' + to;
     var prefix = service.path.replace(/\/$/, '');
     if (to.startsWith(prefix + '/') || to === prefix) return to;
-    return to;
+    return prefix + to;
 }

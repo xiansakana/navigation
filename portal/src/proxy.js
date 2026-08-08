@@ -390,6 +390,10 @@ var SIYUAN_API_PREFIXES = [
 ];
 
 function isSiyuanApiPath(pathname) {
+    // 思源主保存接口为 /api/transactions（无尾斜杠），子路径如 /api/transactions/undo
+    if (pathname === '/api/transactions' || pathname.startsWith('/api/transactions/')) {
+        return true;
+    }
     return SIYUAN_API_PREFIXES.some(function(prefix) {
         return pathname.startsWith(prefix);
     });

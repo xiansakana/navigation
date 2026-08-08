@@ -91,11 +91,8 @@ fi
 
 if should_run portal; then
     echo "==> portal"
-    if [ -f "$ROOT/scripts/sync-napcat-token.py" ]; then
-        python3 "$ROOT/scripts/sync-napcat-token.py" || true
-    fi
-    if [ -f "$ROOT/scripts/sync-siyuan-auth.py" ]; then
-        python3 "$ROOT/scripts/sync-siyuan-auth.py" || true
+    if [ -f "$ROOT/scripts/sync-portal-proxy-services.py" ]; then
+        python3 "$ROOT/scripts/sync-portal-proxy-services.py" || true
     fi
     if [ -f "$ROOT/scripts/sync-share-site-url.py" ]; then
         python3 "$ROOT/scripts/sync-share-site-url.py" || true
@@ -155,6 +152,9 @@ if should_run piclist; then
         # shellcheck disable=SC1091
         set -a && source "$ROOT/piclist/.env" && set +a
         python3 "$ROOT/scripts/sync-siyuan-picgo-external.py" || true
+    fi
+    if [ -f "$ROOT/scripts/patch-siyuan-picgo-paste.py" ]; then
+        python3 "$ROOT/scripts/patch-siyuan-picgo-paste.py" || true
     fi
 fi
 
