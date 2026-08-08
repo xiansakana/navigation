@@ -59,10 +59,12 @@ function shareLooksLoggedIn(html) {
 export async function verifyShareSession(service, cookieHeader) {
     if (!cookieHeader || !cookieHeader.includes(SHARE_SESSION)) return false;
     var base = new URL(service.internalUrl);
+    // Use /account instead of /dashboard: dashboard reads flash('api_key') once,
+    // which would consume the key before the user's browser loads the page.
     var res = await httpRequest({
         hostname: base.hostname,
         port: base.port || 80,
-        path: '/dashboard',
+        path: '/account',
         method: 'GET',
         headers: { Cookie: cookieHeader }
     });
