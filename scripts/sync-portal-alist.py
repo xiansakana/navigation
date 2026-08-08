@@ -10,7 +10,7 @@ CONFIG_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "portal" / "con
 ALIST_PROXY = {
     "id": "alist",
     "title": "AList 网盘",
-    "description": "网盘聚合（AList，经 Portal 反代，仅本机 :5244）",
+    "description": "网盘聚合与文件浏览",
     "type": "proxy",
     "path": "/alist",
     "entryPath": "/",
