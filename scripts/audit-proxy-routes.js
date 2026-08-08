@@ -28,8 +28,8 @@ function expectRoute(pathname, method, want) {
     if (fail) failed.push(fail);
 }
 
-function expectProxy(pathname, want) {
-    var ctx = resolveProxyContext(services, pathname);
+function expectProxy(pathname, want, opts) {
+    var ctx = resolveProxyContext(services, pathname, opts || {});
     var got = ctx ? ctx.service.id : null;
     var proxyPath = ctx ? new URL(ctx.proxyUrl, 'http://127.0.0.1').pathname : null;
     var ok = got === want.id;
@@ -83,6 +83,15 @@ function expectProxy(pathname, want) {
     { path: '/api/state', want: { id: null } },
     { path: '/api/health', want: { id: null } },
 ].forEach(function(c) { expectProxy(c.path, c.want); });
+
+expectProxy('/api/file/getFile', { id: 'notes', proxyPath: '/api/file/getFile' });
+expectProxy('/api/file/getFile', {
+    id: 'siyuan-publish',
+    proxyPath: '/publish/api/file/getFile'
+}, { referer: 'http://127.0.0.1/publish/stage/build/desktop/' });
+expectProxy('/ws', { id: 'siyuan-publish', proxyPath: '/publish/ws' }, {
+    referer: 'http://127.0.0.1/publish/'
+});
 
 if (failed.length) {
     console.error('FAILED ' + failed.length + ' check(s):');
