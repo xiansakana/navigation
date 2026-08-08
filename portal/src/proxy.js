@@ -261,6 +261,24 @@ function ensureViewportMeta(html) {
     return tag + html;
 }
 
+/**
+ * AList 前端 bug：切换每页条数(50/100/…)时 Obj 的 effect 会先 recordHistory 写回旧列表，
+ * 随后 handlePathChange 命中 history 缓存直接 recover，不再按新 per_page 请求。
+ * 历史 key 不含 per_page，故改条数无效。检测到 per_page 变化后整页重载以强制刷新列表。
+ */
+function injectAlistPaginationShim(html) {
+    if (!html.includes('<head')) return html;
+    var shim = '<script>(function(){'
+        + 'function perPage(){try{return new URLSearchParams(location.search).get("per_page")||""}catch(e){return""}}'
+        + 'var prev=perPage();'
+        + 'function onNav(){var next=perPage();if(next===prev)return;prev=next;location.reload()}'
+        + 'var ps=history.pushState,rs=history.replaceState;'
+        + 'history.pushState=function(){var r=ps.apply(this,arguments);onNav();return r};'
+        + 'history.replaceState=function(){var r=rs.apply(this,arguments);onNav();return r};'
+        + '})();</script>';
+    return html.replace(/<head[^>]*>/i, function(m) { return m + shim; });
+}
+
 function injectNapcatTokenShim(html, token, mountPath) {
     if (!token || !html.includes('<head')) return html;
     var mount = (mountPath || '/napcat').replace(/\/$/, '');
@@ -312,7 +330,10 @@ function injectPortalShell(html, service) {
         }
         if (service.id === 'notes' && !isSiyuanAuthPage) html = injectProxiedBackLink(html, 'notes');
         if (service.id === 'siyuan-publish') html = injectProxiedBackLink(html, 'publish');
-        if (service.id === 'alist') html = injectProxiedBackLink(html, 'alist');
+        if (service.id === 'alist') {
+            html = injectAlistPaginationShim(html);
+            html = injectProxiedBackLink(html, 'alist');
+        }
         return html;
     }
     var title = service.title || '服务';
