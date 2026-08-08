@@ -26,6 +26,16 @@ docker exec alist ./alist admin set '你的强密码'
 ALIST_RESET_PASSWORD=1 python3 /opt/navigation/scripts/configure-alist.py
 ```
 
+## 网盘 Token
+
+复制 `tokens.example.env` → `tokens.env`，按注释链接扫码拿到 refresh_token 后填写，再执行：
+
+```bash
+python3 /opt/navigation/scripts/configure-alist.py
+```
+
+可挂载：阿里云盘 / 百度网盘 / OneDrive / GoogleDrive / 115（有 token 才创建）。
+
 ## Portal
 
 服务项由 `scripts/sync-portal-alist.py` 写入 `portal/config.json`（`type: proxy`，`upstreamPathPrefix: /alist`）。
