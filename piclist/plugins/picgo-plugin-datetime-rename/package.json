@@ -1,0 +1,9 @@
+{
+  "name": "picgo-plugin-datetime-rename",
+  "version": "1.0.0",
+  "description": "Rename uploads to YYYYMMDDHHmmssSSS.ext for PicList server",
+  "main": "index.js",
+  "picgoPlugin": {
+    "name": "datetime-rename"
+  }
+}

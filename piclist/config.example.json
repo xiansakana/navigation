@@ -43,7 +43,7 @@
     }
   },
   "picgoPlugins": {
-    "picgo-plugin-rename": true
+    "picgo-plugin-datetime-rename": true
   },
   "settings": {
     "autoRename": false,
