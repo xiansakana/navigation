@@ -165,7 +165,11 @@ function rewriteLocation(location, service, userAgent) {
     return out;
 }
 
-function rewriteProxiedBody(text, service) {
+/**
+ * @param {string} kind 'html' | 'js' | 'css' | 'json' | ''
+ * 注意：绝不能对 JS 做「去掉 ?token=」类全局替换，会把三元运算 cond?"a":"b" 弄成 SyntaxError。
+ */
+function rewriteProxiedBody(text, service, kind) {
     var prefix = service.path.replace(/\/$/, '');
     var out = String(text)
         .replace(/https?:\/\/127\.0\.0\.1:6099/g, prefix)
@@ -177,10 +181,16 @@ function rewriteProxiedBody(text, service) {
             .replace(/basename:"\/webui\/"/g, 'basename:"' + webuiBase + '"')
             .replace(/basename:'\/webui\/'/g, "basename:'" + webuiBase + "'")
             .replace(/const e="\/webui\/"/g, 'const e="' + webuiBase + '"')
-            .replace(/([?&])token=[^&"'`\s)]+/g, '$1')
-            .replace(/\?&/g, '?')
-            .replace(/\?(?=[#'"`\s])/g, '')
-            .replace(/&(?=[#'"`\s])/g, '');
+            // CSS: url(/webui/fonts/...) 无引号
+            .replace(/url\(\/webui\//g, 'url(' + prefix + '/webui/');
+        // 仅 HTML 清理 URL 里的 token，禁止作用于 JS
+        if (kind === 'html') {
+            out = out
+                .replace(/([?&])token=[^&"'`\s)]+/g, '$1')
+                .replace(/\?&/g, '?')
+                .replace(/\?(?=[#'"`\s])/g, '')
+                .replace(/&(?=[#'"`\s])/g, '');
+        }
     }
     if (service.id === 'siyuan-publish') {
         return rewriteSiyuanPublishBody(out, prefix);
@@ -400,9 +410,12 @@ export async function proxyHttpRequest(service, req, res) {
             var ctype = String(upstreamRes.headers['content-type'] || '');
             var isHtml = ctype.includes('text/html') && upstreamRes.statusCode >= 200 && upstreamRes.statusCode < 500;
             var isJs = (ctype.includes('javascript') || ctype.includes('text/js')) && upstreamRes.statusCode === 200;
+            var isCss = ctype.includes('text/css') && upstreamRes.statusCode === 200
+                && service.id === 'napcat';
             var isJson = ctype.includes('json') && upstreamRes.statusCode === 200
                 && !pipeJson;
             var isStream = ctype.includes('text/event-stream');
+            var rewriteKind = isHtml ? 'html' : isJs ? 'js' : isCss ? 'css' : isJson ? 'json' : '';
 
             if (isStream) {
                 res.writeHead(upstreamRes.statusCode, headers);
@@ -411,18 +424,22 @@ export async function proxyHttpRequest(service, req, res) {
                 return;
             }
 
-            if (!isHtml && !isJs && !isJson) {
+            if (!rewriteKind) {
                 res.writeHead(upstreamRes.statusCode, headers);
                 upstreamRes.pipe(res);
                 upstreamRes.on('end', resolve);
                 return;
             }
 
+            // 缓冲改写时去掉压缩标记，避免 Content-Encoding 与明文 body 不一致
+            delete headers['content-encoding'];
+            delete headers['transfer-encoding'];
+
             var chunks = [];
             upstreamRes.on('data', function(chunk) { chunks.push(chunk); });
             upstreamRes.on('end', function() {
                 var buf = Buffer.concat(chunks);
-                var text = rewriteProxiedBody(buf.toString('utf8'), service);
+                var text = rewriteProxiedBody(buf.toString('utf8'), service, rewriteKind);
                 if (isHtml) {
                     text = injectPortalShell(text, service);
                     if (service.id === 'siyuan-publish') {
