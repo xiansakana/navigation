@@ -121,6 +121,9 @@ if should_run siyuan; then
     echo "==> siyuan"
     cd "$ROOT/siyuan"
     docker compose up -d
+    if [ -f "$ROOT/scripts/patch-siyuan-share-clipboard.py" ]; then
+        python3 "$ROOT/scripts/patch-siyuan-share-clipboard.py" || true
+    fi
 fi
 
 if should_run siyuan-share; then
