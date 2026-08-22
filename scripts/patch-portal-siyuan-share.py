@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "portal" / "config.json"
-PUBLIC_URL = sys.argv[2].rstrip('/') if len(sys.argv) > 2 else 'http://123.56.235.12:6807'
+PUBLIC_URL = sys.argv[2].rstrip('/') if len(sys.argv) > 2 else 'https://share.saoyu.fun'
 
 SHARE_SERVICE = {
     "id": "siyuan-share",

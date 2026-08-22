@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/siyuan-share"
 
 PORT="${SIYUAN_SHARE_PORT:-6807}"
-PUBLIC_URL="${SIYUAN_SHARE_PUBLIC_URL:-http://123.56.235.12:${PORT}}"
+PUBLIC_URL="${SIYUAN_SHARE_PUBLIC_URL:-https://share.saoyu.fun}"
 
 if ! command -v docker >/dev/null 2>&1; then
     echo "请先安装 Docker"
@@ -19,7 +19,7 @@ fi
 # shellcheck disable=SC1091
 source .env 2>/dev/null || true
 PORT="${SIYUAN_SHARE_PORT:-6807}"
-PUBLIC_URL="${SIYUAN_SHARE_PUBLIC_URL:-http://123.56.235.12:${PORT}}"
+PUBLIC_URL="${SIYUAN_SHARE_PUBLIC_URL:-https://share.saoyu.fun}"
 
 if [ ! -f config.php ]; then
     cp config.example.php config.php

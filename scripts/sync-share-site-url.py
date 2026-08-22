@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PORTAL_CFG = Path(os.environ.get('PORTAL_CONFIG', str(ROOT / 'portal' / 'config.json')))
 SHARE_ENV = Path(os.environ.get('SHARE_ENV', str(ROOT / 'siyuan-share' / '.env')))
 SHARE_DB = Path(os.environ.get('SHARE_DB', str(ROOT / 'siyuan-share' / 'data/storage/app.db')))
-DEFAULT_PUBLIC_URL = 'http://123.56.235.12:6807'
+DEFAULT_PUBLIC_URL = 'https://share.saoyu.fun'
 
 SHARE_EXTERNAL_SERVICE = {
     'id': 'siyuan-share',

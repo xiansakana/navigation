@@ -121,11 +121,13 @@ function alreadyUnderPrefix(pathname, prefix) {
     return pathname === prefix || pathname.startsWith(prefix + '/') || pathname.startsWith(prefix + '?');
 }
 
-function rewriteLocation(location, service, userAgent) {
+function rewriteLocation(location, service, userAgent, upstreamUrl) {
     if (!location) return location;
     var prefix = service.path.replace(/\/$/, '');
     try {
-        var loc = new URL(location, service.internalUrl);
+        // 相对 Location（如 desktop/）必须相对「当前上游 URL」解析，
+        // 不能相对 internalUrl 根，否则 /stage/build/desktop → /desktop/。
+        var loc = new URL(location, upstreamUrl || service.internalUrl);
         var base = new URL(service.internalUrl);
         if (loc.origin === base.origin) {
             // AList 等 site_url=/alist 时 Location 已带公开前缀，勿再叠一层
@@ -456,7 +458,12 @@ export async function proxyHttpRequest(service, req, res) {
             var headers = Object.assign({}, upstreamRes.headers);
             delete headers['content-security-policy'];
             if (headers.location) {
-                headers.location = rewriteLocation(headers.location, service, req.headers['user-agent']);
+                headers.location = rewriteLocation(
+                    headers.location,
+                    service,
+                    req.headers['user-agent'],
+                    target.href
+                );
             }
             var ctype = String(upstreamRes.headers['content-type'] || '');
             var isHtml = ctype.includes('text/html') && upstreamRes.statusCode >= 200 && upstreamRes.statusCode < 500;
