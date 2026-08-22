@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "alist" / "data" / "config.json"
 # 完整公网基址；仅 /alist 时分享链接会跟请求 Host 变成 127.0.0.1:5244
-SITE_URL = os.environ.get("ALIST_SITE_URL", "http://123.56.235.12/alist").rstrip("/")
+SITE_URL = os.environ.get("ALIST_SITE_URL", "https://saoyu.fun/alist").rstrip("/")
 
 
 def main():

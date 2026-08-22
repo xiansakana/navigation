@@ -16,13 +16,13 @@
       "enabled": false,
       "clientId": "",
       "clientSecret": "",
-      "redirectUri": "http://123.56.235.12/api/oauth/github/callback"
+      "redirectUri": "https://saoyu.fun/api/oauth/github/callback"
     },
     "google": {
       "enabled": false,
       "clientId": "",
       "clientSecret": "",
-      "redirectUri": "http://123.56.235.12/api/oauth/google/callback"
+      "redirectUri": "https://saoyu.fun/api/oauth/google/callback"
     }
   },
   "services": [
@@ -100,7 +100,7 @@
       "title": "笔记分享",
       "description": "思源笔记公开分享与 API Key 管理（独立端口）",
       "type": "external",
-      "url": "http://123.56.235.12:6807/dashboard",
+      "url": "https://share.saoyu.fun/dashboard",
       "newTab": true,
       "icon": "🔗"
     },
