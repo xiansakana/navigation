@@ -11,6 +11,44 @@ const fmtCommission = (n) => Number.isFinite(n) && n > 0 ? '-$' + fmt(n) : '—'
 const fmtPct = (n) => Number.isFinite(n) ? n.toFixed(2) + '%' : '—';
 const cls = (n) => n > 0 ? 'pos' : n < 0 ? 'neg' : '';
 const MASK = '<span class="sm-mask">—</span>';
+const pad2 = (n) => String(n).padStart(2, '0');
+
+function localDateParts(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  if (Number.isNaN(d.getTime())) return null;
+  return {
+    y: d.getFullYear(),
+    m: pad2(d.getMonth() + 1),
+    day: pad2(d.getDate()),
+    h: pad2(d.getHours()),
+    min: pad2(d.getMinutes()),
+    s: pad2(d.getSeconds())
+  };
+}
+
+function formatLocalDateTime(iso) {
+  const p = localDateParts(iso);
+  return p ? `${p.y}-${p.m}-${p.day} ${p.h}:${p.min}:${p.s}` : (iso || '—');
+}
+
+function localDateKey(iso) {
+  const p = localDateParts(iso);
+  return p ? `${p.y}-${p.m}-${p.day}` : String(iso || '').slice(0, 10);
+}
+
+function toDatetimeLocalValue(iso) {
+  const p = localDateParts(iso);
+  return p ? `${p.y}-${p.m}-${p.day}T${p.h}:${p.min}` : '';
+}
+
+function datetimeLocalToIso(value) {
+  const m = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return new Date().toISOString();
+  return new Date(
+    Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+    Number(m[4]), Number(m[5]), Number(m[6] || 0)
+  ).toISOString();
+}
 
 const toastErr = (msg) => window.portalToast?.error(msg) ?? window.alert(msg);
 const toastWarn = (msg) => window.portalToast?.warn(msg) ?? window.alert(msg);
@@ -380,41 +418,94 @@ async function loadPortfolio() {
   applyPortfolio(await api('/portfolio?' + q.toString()));
 }
 
-function closeModal() { $('#modal-root').innerHTML = ''; }
+function closeModal(layerEl) {
+  const root = $('#modal-root');
+  const target = layerEl || root.querySelector('.sm-modal-backdrop:last-of-type');
+  if (!target) return;
+  if (target === window._tradeHistoryLayer) {
+    window._refreshTradeModal = null;
+    window._tradeHistoryLayer = null;
+  }
+  target.remove();
+}
+
+function setModalBusy(layer, busy, label) {
+  if (!layer) return;
+  layer.dataset.busy = busy ? '1' : '0';
+  layer.classList.toggle('is-busy', busy);
+  const busyEl = layer.querySelector('.sm-modal-busy');
+  const labelEl = layer.querySelector('.sm-modal-busy-label');
+  if (labelEl && label) labelEl.textContent = label;
+  if (busyEl) busyEl.hidden = !busy;
+  layer.querySelectorAll('button, input, select, textarea').forEach((el) => {
+    if (el.closest('.sm-modal-busy')) return;
+    if (busy) {
+      el.dataset.wasDisabled = el.disabled ? '1' : '0';
+      el.disabled = true;
+    } else if (el.dataset.wasDisabled != null) {
+      el.disabled = el.dataset.wasDisabled === '1';
+      delete el.dataset.wasDisabled;
+    }
+  });
+}
 
 function openModal(title, bodyHtml, footHtml, onSubmit, opts = {}) {
   const sizeClass = opts.size === 'trade' ? ' sm-modal--trade'
     : opts.size === 'xl' ? ' sm-modal--xl' : ' sm-modal--wide';
   const bodyClass = opts.size === 'trade' ? ' sm-modal-body--trade' : '';
   const root = $('#modal-root');
-  root.innerHTML = `
-    <div class="sm-modal-backdrop">
-      <div class="sm-modal${sizeClass}" role="dialog">
+  const layer = document.createElement('div');
+  layer.className = 'sm-modal-backdrop';
+  layer.style.zIndex = String(1100 + root.querySelectorAll('.sm-modal-backdrop').length * 10);
+  layer.innerHTML = `
+      <div class="sm-modal${sizeClass}" role="dialog" aria-modal="true">
         <div class="sm-modal-head"><h3>${title}</h3><button type="button" class="btn link" data-close>关闭</button></div>
-        <div class="sm-modal-body${bodyClass}" id="modal-body">${bodyHtml}</div>
+        <div class="sm-modal-body${bodyClass}">${bodyHtml}</div>
         <div class="sm-modal-foot">${footHtml || `
           <button type="button" class="btn ghost" data-close>取消</button>
-          <button type="button" class="btn primary" id="modal-save">保存</button>`}</div>
-      </div>
-    </div>`;
-  const backdrop = root.querySelector('.sm-modal-backdrop');
-  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
-  root.querySelectorAll('[data-close]').forEach((el) => el.addEventListener('click', closeModal));
+          <button type="button" class="btn primary" data-modal-save>保存</button>`}</div>
+        <div class="sm-modal-busy" hidden>
+          <div class="sm-spinner" aria-hidden="true"></div>
+          <span class="sm-modal-busy-label">保存中…</span>
+        </div>
+      </div>`;
+  root.appendChild(layer);
+  // 必须按下和松开都在遮罩上才关闭；弹窗内按下、外面松开不能关。
+  let pointerDownOnBackdrop = false;
+  layer.addEventListener('pointerdown', (e) => {
+    pointerDownOnBackdrop = e.button === 0 && e.target === layer;
+  });
+  layer.addEventListener('pointerup', (e) => {
+    const shouldClose = pointerDownOnBackdrop && e.button === 0 && e.target === layer && layer.dataset.busy !== '1';
+    pointerDownOnBackdrop = false;
+    if (shouldClose) closeModal(layer);
+  });
+  layer.querySelectorAll('[data-close]').forEach((el) => el.addEventListener('click', () => {
+    if (layer.dataset.busy === '1') return;
+    closeModal(layer);
+  }));
   if (onSubmit) {
-    $('#modal-save')?.addEventListener('click', async () => {
+    layer.querySelector('[data-modal-save]')?.addEventListener('click', async () => {
+      if (layer.dataset.busy === '1') return;
+      setModalBusy(layer, true, opts.busyLabel || '保存中…');
       try {
-        const msg = await onSubmit();
-        closeModal();
+        const msg = await onSubmit(layer);
+        closeModal(layer);
         toastOk(msg || opts.successMessage || '已保存');
         if (opts.reload !== false) await loadPortfolio();
-      } catch (err) { toastErr(err.message); }
+        window._refreshTradeModal?.();
+      } catch (err) {
+        setModalBusy(layer, false);
+        toastErr(err.message);
+      }
     });
   }
+  return layer;
 }
 
 function tradeFormFields(trade = {}) {
   const type = trade.type || trade.prefillType || 'buy';
-  const dt = (trade.trade_date || new Date().toISOString()).slice(0, 16);
+  const dt = toDatetimeLocalValue(trade.trade_date || Date.now());
   return `
     <form id="trade-form" class="sm-form-grid">
       <label>类型<select name="type" id="trade-type">
@@ -448,7 +539,7 @@ function formToTrade(fd, existing = {}) {
   return {
     type, symbol: String(fd.get('symbol') || '').trim(), name: String(fd.get('name') || '').trim(),
     commission: Number(fd.get('commission')) || 0,
-    trade_date: new Date(fd.get('trade_date')).toISOString(), id: existing.id,
+    trade_date: datetimeLocalToIso(fd.get('trade_date')), id: existing.id,
     ...(type === 'other'
       ? { other_category: String(fd.get('other_category') || '').trim(), total_amount: Number(fd.get('total_amount')) }
       : { shares: Number(fd.get('shares')), price: Number(fd.get('price')) })
@@ -456,14 +547,19 @@ function formToTrade(fd, existing = {}) {
 }
 
 function openTradeModal(trade = {}) {
-  openModal(trade.id ? '编辑交易' : '记一笔', tradeFormFields(trade), null, async () => {
-    const fd = new FormData($('#trade-form'));
+  const layer = openModal(trade.id ? '编辑交易' : '记一笔', tradeFormFields(trade), null, async (modal) => {
+    const form = modal.querySelector('#trade-form');
+    const fd = new FormData(form);
     const body = formToTrade(fd, trade);
     if (trade.id) await api('/trades/' + trade.id, { method: 'PUT', body });
     else await api('/trades', { method: 'POST', body });
     return trade.id ? '交易已更新' : '交易已保存';
   }, { reload: true });
-  bindTradeForm($('#modal-body'));
+  bindTradeForm(layer.querySelector('.sm-modal-body'));
+  layer.querySelector('#trade-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    layer.querySelector('[data-modal-save]')?.click();
+  });
 }
 
 const importState = { buffer: null, count: 0, preview: [], error: null, mode: 'merge' };
@@ -473,7 +569,7 @@ function renderImportPreviewSection() {
   if (!importState.count) return '';
   const rows = importState.preview.map((t) => `
     <tr>
-      <td>${(t.trade_date || '').slice(0, 19).replace('T', ' ')}</td>
+      <td>${formatLocalDateTime(t.trade_date)}</td>
       <td>${typeLabel(t)}</td>
       <td>${t.symbol}</td>
       <td>${t.name || ''}</td>
@@ -495,9 +591,9 @@ function renderImportPreviewSection() {
     </div>`;
 }
 
-function bindImportModal() {
-  $('#import-mode')?.addEventListener('change', (e) => { importState.mode = e.target.value; });
-  $('#import-file')?.addEventListener('change', async (e) => {
+function bindImportModal(layer) {
+  $('#import-mode', layer)?.addEventListener('change', (e) => { importState.mode = e.target.value; });
+  $('#import-file', layer)?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     importState.buffer = await file.arrayBuffer();
@@ -518,9 +614,9 @@ function bindImportModal() {
       importState.error = err.message;
       toastErr(err.message);
     }
-    const area = $('#import-preview-area');
+    const area = $('#import-preview-area', layer);
     if (area) area.innerHTML = renderImportPreviewSection();
-    const btn = $('#import-confirm');
+    const btn = $('#import-confirm', layer);
     if (btn) {
       btn.disabled = importState.count === 0;
       btn.textContent = importState.count > 0 ? `导入 (${importState.count} 条)` : '导入';
@@ -534,7 +630,7 @@ function openImportModal() {
   importState.preview = [];
   importState.error = null;
   importState.mode = 'merge';
-  openModal('导入交易', `
+  const layer = openModal('导入交易', `
     <p class="hint">支持 Moomoo 历史 xlsx 或本应用导出的「交易记录」xlsx。选择文件后将显示预览，确认后再导入。</p>
     <form id="import-form" class="sm-form-grid">
       <label>导入模式<select name="mode" id="import-mode">
@@ -546,9 +642,11 @@ function openImportModal() {
     <div id="import-preview-area"></div>`, `
     <button type="button" class="btn ghost" data-close>取消</button>
     <button type="button" class="btn primary" id="import-confirm" disabled>导入</button>`, null, { size: 'wide' });
-  bindImportModal();
-  $('#import-confirm')?.addEventListener('click', async () => {
+  bindImportModal(layer);
+  $('#import-confirm', layer)?.addEventListener('click', async () => {
     if (!importState.buffer || !importState.count) return;
+    if (layer.dataset.busy === '1') return;
+    setModalBusy(layer, true, '导入中…');
     try {
       const res = await fetch('./api/trades/import?mode=' + encodeURIComponent(importState.mode), {
         method: 'POST',
@@ -557,10 +655,12 @@ function openImportModal() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '导入失败');
-      closeModal();
+      closeModal(layer);
       applyPortfolio(data);
       toastOk(`已导入 ${importState.count} 条交易`);
+      window._refreshTradeModal?.();
     } catch (err) {
+      setModalBusy(layer, false);
       toastErr(err.message);
     }
   });
@@ -572,7 +672,7 @@ function filteredTrades() {
     if (f.symbol && !t.symbol.toUpperCase().includes(f.symbol.toUpperCase())) return false;
     if (f.type !== 'all' && t.type !== f.type) return false;
     if (f.otherCategory && t.type === 'other' && !(t.other_category || '').includes(f.otherCategory)) return false;
-    const d = (t.trade_date || '').slice(0, 10);
+    const d = localDateKey(t.trade_date);
     if (f.start && d < f.start) return false;
     if (f.end && d > f.end) return false;
     return true;
@@ -615,7 +715,7 @@ function renderTradeListTab() {
           </tr></thead>
           <tbody>${pageRows.length ? pageRows.map((t) => `
             <tr>
-              <td>${(t.trade_date || '').slice(0, 19).replace('T', ' ')}</td>
+              <td>${formatLocalDateTime(t.trade_date)}</td>
               <td>${typeLabel(t)}</td>
               <td>${t.symbol}</td>
               <td>${t.name || ''}</td>
@@ -694,13 +794,16 @@ async function renderTradeModalBody() {
 async function openTradeHistoryModal(symbol = '') {
   if (symbol) ui.tradeFilter.symbol = symbol;
   ui.tradePage = 1;
-  openModal('交易记录', '<div id="trade-modal-content">加载中…</div>', '<button type="button" class="btn ghost" data-close>关闭</button>', null, { size: 'trade' });
+  const layer = openModal('交易记录', '<div id="trade-modal-content">加载中…</div>', '<button type="button" class="btn ghost" data-close>关闭</button>', null, { size: 'trade' });
   const refresh = async () => {
-    $('#trade-modal-content').innerHTML = await renderTradeModalBody();
-    bindTradeModalEvents();
+    const box = $('#trade-modal-content', layer);
+    if (!box) return;
+    box.innerHTML = await renderTradeModalBody();
+    bindTradeModalEvents(layer);
   };
-  await refresh();
+  window._tradeHistoryLayer = layer;
   window._refreshTradeModal = refresh;
+  await refresh();
 }
 
 function openTradeHistoryForRange(start, end) {
@@ -709,13 +812,13 @@ function openTradeHistoryForRange(start, end) {
   openTradeHistoryModal();
 }
 
-function bindTradeModalEvents() {
-  const root = $('#trade-modal-content');
+function bindTradeModalEvents(layer) {
+  const root = $('#trade-modal-content', layer);
   if (!root) return;
   root.querySelectorAll('[data-tab]').forEach((btn) => btn.addEventListener('click', async () => {
     ui.tradeTab = btn.dataset.tab;
-    $('#trade-modal-content').innerHTML = await renderTradeModalBody();
-    bindTradeModalEvents();
+    root.innerHTML = await renderTradeModalBody();
+    bindTradeModalEvents(layer);
   }));
   root.querySelectorAll('[data-filter]').forEach((el) => {
     el.addEventListener('change', () => {
@@ -734,7 +837,7 @@ function bindTradeModalEvents() {
       }
     });
   });
-  $('#filter-reset')?.addEventListener('click', () => {
+  $('#filter-reset', layer)?.addEventListener('click', () => {
     ui.tradeFilter = { symbol: '', type: 'all', otherCategory: '', start: '', end: '' };
     ui.tradePage = 1;
     window._refreshTradeModal?.();
@@ -748,14 +851,14 @@ function bindTradeModalEvents() {
     else ui.tradePage = Number(v);
     window._refreshTradeModal?.();
   }));
-  $('#page-size')?.addEventListener('change', (e) => {
+  $('#page-size', layer)?.addEventListener('change', (e) => {
     ui.tradePageSize = Number(e.target.value);
     ui.tradePage = 1;
     window._refreshTradeModal?.();
   });
   root.querySelectorAll('[data-edit]').forEach((btn) => btn.addEventListener('click', () => {
     const trade = state.trades.find((t) => t.id === btn.dataset.edit);
-    if (trade) { closeModal(); openTradeModal(trade); }
+    if (trade) openTradeModal(trade);
   }));
   root.querySelectorAll('[data-del]').forEach((btn) => btn.addEventListener('click', async () => {
     const ok = window.portalDialog?.confirm
@@ -770,9 +873,9 @@ function bindTradeModalEvents() {
       toastErr(err.message);
     }
   }));
-  $('#modal-add-other')?.addEventListener('click', () => { closeModal(); openTradeModal({ type: 'other' }); });
-  $('#modal-import')?.addEventListener('click', () => { closeModal(); openImportModal(); });
-  $('#modal-export')?.addEventListener('click', () => {
+  $('#modal-add-other', layer)?.addEventListener('click', () => { openTradeModal({ type: 'other' }); });
+  $('#modal-import', layer)?.addEventListener('click', () => { openImportModal(); });
+  $('#modal-export', layer)?.addEventListener('click', () => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(ui.tradeFilter)) {
       if (v && v !== 'all') q.set(k, v);

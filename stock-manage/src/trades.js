@@ -17,13 +17,50 @@ export function cashDelta(trade) {
   return roundMoney(amt - fee);
 }
 
+export const APP_TIME_ZONE = process.env.STOCK_TZ || 'Asia/Shanghai';
+
+export function zonedDateKey(date = new Date(), timeZone = APP_TIME_ZONE) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+}
+
+export function tradeCalendarDate(iso, timeZone = APP_TIME_ZONE) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) {
+    const s = String(iso || '').slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  }
+  return zonedDateKey(d, timeZone);
+}
+
+export function formatZonedDateTime(iso, timeZone = APP_TIME_ZONE) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso || '');
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    hourCycle: 'h23'
+  }).formatToParts(d);
+  const g = (type) => parts.find((p) => p.type === type)?.value || '';
+  return `${g('year')}-${g('month')}-${g('day')} ${g('hour')}:${g('minute')}:${g('second')}`;
+}
+
 function tradeTime(t) {
   return new Date(t).getTime();
 }
 
 function dateKey(t) {
-  const d = String(t.trade_date || '').slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+  return tradeCalendarDate(t.trade_date);
 }
 
 function applyFifoSellToQueue(buyQueue, sellShares, sellPrice, symbol) {
@@ -363,7 +400,7 @@ export function computeDailySummary(holdingRows, trades) {
       hasMarket = true;
     }
   }
-  const today = new Date().toISOString().slice(0, 10);
+  const today = zonedDateKey();
   const sparse = buildDailyCumulativeSeries(trades);
   const todayPoint = sparse.find((p) => p.date === today);
   const tradeDaily = todayPoint?.dayNet ?? 0;
