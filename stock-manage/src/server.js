@@ -17,7 +17,9 @@ import {
   normalizeTrade,
   recalcCashFromTrades,
   roundMoney,
-  cashDelta
+  cashDelta,
+  tradeCalendarDate,
+  formatZonedDateTime
 } from './trades.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -213,11 +215,11 @@ app.get('/api/trades/export', (req, res) => {
   const end = req.query.end;
   if (sym) trades = trades.filter((t) => t.symbol.toUpperCase().includes(sym));
   if (type && type !== 'all') trades = trades.filter((t) => t.type === type);
-  if (start) trades = trades.filter((t) => t.trade_date.slice(0, 10) >= start);
-  if (end) trades = trades.filter((t) => t.trade_date.slice(0, 10) <= end);
+  if (start) trades = trades.filter((t) => (tradeCalendarDate(t.trade_date) || '') >= start);
+  if (end) trades = trades.filter((t) => (tradeCalendarDate(t.trade_date) || '') <= end);
 
   const rows = trades.map((t) => ({
-    时间: t.trade_date,
+    时间: formatZonedDateTime(t.trade_date),
     类型: t.type === 'buy' ? '买入' : t.type === 'sell' ? '卖出' : '其它',
     其它类别: t.other_category || '',
     代码: t.symbol,
