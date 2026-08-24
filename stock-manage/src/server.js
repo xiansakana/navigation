@@ -10,8 +10,6 @@ import {
   computePnl,
   computeSymbolSummaries,
   buildDailyCumulativeSeries,
-  expandDailySeries,
-  sliceSeries,
   enrichHoldings,
   computeDailySummary,
   normalizeTrade,
@@ -46,8 +44,6 @@ function buildPortfolio(data, pnlOpts = {}) {
   const enriched = enrichHoldings(holdings, data.quotes, data.cash, data.holdingsMeta);
   const pnl = computePnl(data.trades, pnlOpts);
   const sparse = buildDailyCumulativeSeries(data.trades);
-  const expanded = expandDailySeries(sparse);
-  const chartSeries = sliceSeries(expanded, pnlOpts.startDate, pnlOpts.endDate);
   const daily = computeDailySummary(enriched.rows, data.trades);
   return {
     cash: data.cash,
@@ -56,7 +52,6 @@ function buildPortfolio(data, pnlOpts = {}) {
     holdingsMeta: data.holdingsMeta,
     holdings: enriched.rows,
     chartSparse: sparse,
-    chartExpandedFull: expanded,
     summary: {
       stockMv: enriched.stockMv,
       optionMv: enriched.optionMv,
@@ -66,19 +61,25 @@ function buildPortfolio(data, pnlOpts = {}) {
       totalPnl: enriched.unrealized,
       ...pnl,
       ...daily
-    },
-    chartSeries
+    }
   };
 }
 
-function sendPortfolio(res, pnlOpts = {}) {
-  res.json(buildPortfolio(store.read(), pnlOpts));
+function pnlOptsFromReq(req) {
+  return {
+    startDate: req.query?.start || undefined,
+    endDate: req.query?.end || undefined
+  };
+}
+
+function sendPortfolio(res, req) {
+  res.json(buildPortfolio(store.read(), pnlOptsFromReq(req)));
 }
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 app.get('/api/portfolio', (req, res) => {
-  sendPortfolio(res, { startDate: req.query.start, endDate: req.query.end });
+  sendPortfolio(res, req);
 });
 
 app.put('/api/cash', (req, res) => {
@@ -87,7 +88,7 @@ app.put('/api/cash', (req, res) => {
   const data = store.read();
   data.cash = cash;
   store.write(data);
-  sendPortfolio(res);
+  sendPortfolio(res, req);
 });
 
 app.put('/api/holdings-meta/:symbol', (req, res) => {
@@ -111,7 +112,7 @@ app.put('/api/holdings-meta/:symbol', (req, res) => {
   }
   data.holdingsMeta[symbol] = next;
   store.write(data);
-  sendPortfolio(res);
+  sendPortfolio(res, req);
 });
 
 app.post('/api/trades', (req, res) => {
@@ -121,7 +122,7 @@ app.post('/api/trades', (req, res) => {
     data.trades.push(trade);
     data.cash = roundMoney(data.cash + cashDelta(trade));
     store.write(data);
-    sendPortfolio(res);
+    sendPortfolio(res, req);
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -137,7 +138,7 @@ app.put('/api/trades/:id', (req, res) => {
     data.trades[i] = { ...trade, id: req.params.id, created_at: old.created_at || trade.created_at };
     data.cash = roundMoney(data.cash - cashDelta(old) + cashDelta(trade));
     store.write(data);
-    sendPortfolio(res);
+    sendPortfolio(res, req);
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -151,7 +152,7 @@ app.delete('/api/trades/:id', (req, res) => {
   data.trades.splice(i, 1);
   data.cash = roundMoney(data.cash - cashDelta(old));
   store.write(data);
-  sendPortfolio(res);
+  sendPortfolio(res, req);
 });
 
 app.post('/api/trades/import/preview', express.raw({
@@ -184,7 +185,7 @@ app.post('/api/trades/import', express.raw({
     else data.trades = data.trades.concat(imported);
     data.cash = recalcCashFromTrades(data.trades, 0);
     store.write(data);
-    sendPortfolio(res);
+    sendPortfolio(res, req);
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -284,10 +285,7 @@ app.post('/api/quotes/refresh', async (req, res) => {
   }
   data.quotes = updated;
   store.write(data);
-  const payload = buildPortfolio(data, {
-    startDate: req.query?.start,
-    endDate: req.query?.end
-  });
+  const payload = buildPortfolio(data, pnlOptsFromReq(req));
   payload.refresh = { ok, failed: errors.length, errors };
   if (!ok && errors.length) {
     return res.status(502).json({ error: '行情刷新全部失败', ...payload });
@@ -295,6 +293,9 @@ app.post('/api/quotes/refresh', async (req, res) => {
   res.json(payload);
 });
 
+app.get('/vendor/echarts.min.js', (_req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'node_modules', 'echarts', 'dist', 'echarts.min.js'));
+});
 app.use(express.static(PUBLIC));
 app.get('*', (_req, res) => {
   res.sendFile(path.join(PUBLIC, 'index.html'));

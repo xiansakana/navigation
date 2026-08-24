@@ -1,5 +1,5 @@
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
-import { renderPnlVisualization } from './js/pnl-viz.js';
+import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js';
 import { loadPortalContext, can, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js';
 
@@ -91,6 +91,14 @@ async function api(path, opts = {}) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
+}
+
+function pnlQuery() {
+  const q = new URLSearchParams();
+  if (pnlStart) q.set('start', pnlStart);
+  if (pnlEnd) q.set('end', pnlEnd);
+  const s = q.toString();
+  return s ? '?' + s : '';
 }
 
 function canCol(key) {
@@ -232,7 +240,7 @@ function bindCashInput() {
   el.dataset.cashBound = '1';
   el.addEventListener('change', async (e) => {
     try {
-      applyPortfolio(await api('/cash', { method: 'PUT', body: { cash: Number(e.target.value) } }));
+      applyPortfolio(await api('/cash' + pnlQuery(), { method: 'PUT', body: { cash: Number(e.target.value) } }));
       toastOk('现金已更新');
     } catch (err) { toastErr(err.message); }
   });
@@ -384,6 +392,7 @@ function renderPnl() {
   ].join('');
   const chartEl = $('#pnl-chart');
   if (!pnlVisible) {
+    disposePnlChart();
     chartEl.innerHTML = '<p class="hint sm-muted">盈亏数据已隐藏</p>';
     return;
   }
@@ -437,7 +446,7 @@ function setModalBusy(layer, busy, label) {
   const labelEl = layer.querySelector('.sm-modal-busy-label');
   if (labelEl && label) labelEl.textContent = label;
   if (busyEl) busyEl.hidden = !busy;
-  layer.querySelectorAll('button, input, select, textarea').forEach((el) => {
+  layer.querySelectorAll('button').forEach((el) => {
     if (el.closest('.sm-modal-busy')) return;
     if (busy) {
       el.dataset.wasDisabled = el.disabled ? '1' : '0';
@@ -487,6 +496,8 @@ function openModal(title, bodyHtml, footHtml, onSubmit, opts = {}) {
   if (onSubmit) {
     layer.querySelector('[data-modal-save]')?.addEventListener('click', async () => {
       if (layer.dataset.busy === '1') return;
+      const form = layer.querySelector('form');
+      if (form) layer._formData = new FormData(form);
       setModalBusy(layer, true, opts.busyLabel || '保存中…');
       try {
         const msg = await onSubmit(layer);
@@ -549,12 +560,14 @@ function formToTrade(fd, existing = {}) {
 function openTradeModal(trade = {}) {
   const layer = openModal(trade.id ? '编辑交易' : '记一笔', tradeFormFields(trade), null, async (modal) => {
     const form = modal.querySelector('#trade-form');
-    const fd = new FormData(form);
+    const fd = modal._formData || new FormData(form);
     const body = formToTrade(fd, trade);
-    if (trade.id) await api('/trades/' + trade.id, { method: 'PUT', body });
-    else await api('/trades', { method: 'POST', body });
+    const data = trade.id
+      ? await api('/trades/' + trade.id + pnlQuery(), { method: 'PUT', body })
+      : await api('/trades' + pnlQuery(), { method: 'POST', body });
+    applyPortfolio(data);
     return trade.id ? '交易已更新' : '交易已保存';
-  }, { reload: true });
+  }, { reload: false });
   bindTradeForm(layer.querySelector('.sm-modal-body'));
   layer.querySelector('#trade-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -866,7 +879,7 @@ function bindTradeModalEvents(layer) {
       : confirm('确定删除？');
     if (!ok) return;
     try {
-      applyPortfolio(await api('/trades/' + btn.dataset.del, { method: 'DELETE' }));
+      applyPortfolio(await api('/trades/' + btn.dataset.del + pnlQuery(), { method: 'DELETE' }));
       toastOk('已删除');
       window._refreshTradeModal?.();
     } catch (err) {
@@ -887,7 +900,7 @@ function bindTradeModalEvents(layer) {
 
 async function saveMeta(symbol, patch) {
   if (!can('meta')) throw new Error('无权修改');
-  applyPortfolio(await api('/holdings-meta/' + encodeURIComponent(symbol), { method: 'PUT', body: patch }));
+  applyPortfolio(await api('/holdings-meta/' + encodeURIComponent(symbol) + pnlQuery(), { method: 'PUT', body: patch }));
 }
 
 function applyLayoutPrefs() {
@@ -939,7 +952,7 @@ async function refreshQuotes(symbol) {
   rowBtns.forEach((el) => { el.disabled = true; });
   try {
     const body = symbol ? { symbol } : undefined;
-    const data = await api('/quotes/refresh', { method: 'POST', body });
+    const data = await api('/quotes/refresh' + pnlQuery(), { method: 'POST', body });
     applyPortfolio(data);
     const r = data.refresh;
     if (r?.failed) {

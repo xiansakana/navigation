@@ -1,29 +1,19 @@
-const MIN_POINTS = 8;
-const VIEW_W = 1000;
-const VIEW_H = 220;
-const PAD_L = 76;
-const PAD_R = 54;
-const PAD_T = 14;
-const PAD_B = 48;
-const INNER_W = VIEW_W - PAD_L - PAD_R;
+const DEFAULT_WINDOW_DAYS = 90;
 
 let vizMode = 'line';
 let calGranularity = 'month';
 let calYM = '';
 let calYearFocus = '';
 let viewFingerprint = '';
-let viewport = { startFloat: 0, span: 0 };
-let lastFullLen = 0;
-let hoverModel = null;
-let hoverCleanup = null;
-let panDragging = false;
-let panLastX = 0;
-let panPointerId = -1;
-let gradSeq = 0;
-let renderRaf = false;
+let zoomRange = null;
 let lastContainer = null;
 let lastGetData = null;
 let lastCallbacks = null;
+let cachedDayNet = new Map();
+let cachedTotalAssets = 0;
+let lineChart = null;
+let resizeObs = null;
+let lastSeriesFp = '';
 
 function fmt(n) {
   return Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
@@ -63,35 +53,29 @@ function rangeFingerprint(series) {
   return `${series.length}\u0001${series[0].date}\u0001${series[series.length - 1].date}`;
 }
 
-function clampViewport(vp, len) {
-  if (len <= 0) return { startFloat: 0, span: 0 };
-  const minSpan = Math.min(len, MIN_POINTS);
-  let span = vp.span;
-  if (!Number.isFinite(span) || span <= 0) span = minSpan;
-  span = Math.min(Math.max(span, minSpan), len);
-  let startFloat = Number.isFinite(vp.startFloat) ? vp.startFloat : 0;
-  startFloat = Math.min(Math.max(0, startFloat), Math.max(0, len - span));
-  return { startFloat, span };
+function defaultZoom(n) {
+  if (n <= DEFAULT_WINDOW_DAYS) return { start: 0, end: 100 };
+  const start = ((n - DEFAULT_WINDOW_DAYS) / n) * 100;
+  return { start, end: 100 };
 }
 
-function zoomViewport(prev, len, pivotT, zoomOut) {
-  if (len <= MIN_POINTS) return { startFloat: 0, span: len };
-  const vp = clampViewport(prev, len);
-  const factor = zoomOut ? 1.14 : 0.87;
-  let newSpan = Math.min(len, Math.max(MIN_POINTS, Math.round(vp.span * factor)));
-  const t = Math.min(1, Math.max(0, pivotT));
-  const denomOld = Math.max(1, vp.span - 1);
-  const denomNew = Math.max(1, newSpan - 1);
-  const pivotPos = vp.startFloat + t * denomOld;
-  let newStart = pivotPos - t * denomNew;
-  newStart = Math.min(Math.max(0, newStart), Math.max(0, len - newSpan));
-  return clampViewport({ startFloat: newStart, span: newSpan }, len);
+function cssVar(name, fallback) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
 }
 
-function panViewportByDx(vp, len, dxPx, plotWpx) {
-  if (len <= MIN_POINTS || plotWpx <= 0) return vp;
-  const c = clampViewport(vp, len);
-  return clampViewport({ startFloat: c.startFloat + (-dxPx / plotWpx) * c.span, span: c.span }, len);
+function chartColors() {
+  return {
+    text: cssVar('--text', '#e8edf5'),
+    muted: cssVar('--muted', '#9aa4b2'),
+    accent: cssVar('--accent', '#5b9cff'),
+    border: cssVar('--border', '#2a3140'),
+    card: cssVar('--card', '#171b22')
+  };
+}
+
+function getEcharts() {
+  return globalThis.echarts;
 }
 
 function effectiveYM() {
@@ -201,68 +185,6 @@ function calTone(net, has) {
   return net > 0 ? 'pos' : 'neg';
 }
 
-function buildLineSvg(points, hint, panFraction, totalAssets) {
-  if (!points.length) return '<div class="sm-pnl-empty">暂无数据</div>';
-  const w = VIEW_W;
-  const h = VIEW_H;
-  const innerH = h - PAD_T - PAD_B;
-  const vals = points.map((p) => p.cumulativeNet);
-  const minV = Math.min(0, ...vals);
-  const maxV = Math.max(0, ...vals);
-  const vSpan = maxV - minV || 1;
-  const n = points.length;
-  const panF = Math.min(1, Math.max(0, panFraction));
-  const denom = n <= 1 ? 1 : n - 1;
-  const stepPx = n <= 1 ? INNER_W / 2 : INNER_W / denom;
-  const shiftPx = n <= 1 ? 0 : panF * stepPx;
-  const xs = points.map((_, i) => PAD_L + (n <= 1 ? INNER_W / 2 : (i / denom) * INNER_W) - shiftPx);
-  const ys = points.map((p) => PAD_T + innerH - ((p.cumulativeNet - minV) / vSpan) * innerH);
-  const line = xs.map((x, i) => `${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
-  const yMid = minV + vSpan / 2;
-  gradSeq += 1;
-  const gid = `smGrad${gradSeq}`;
-  const cid = `smClip${gradSeq}`;
-  let zeroLine = '';
-  if (minV < 0 && maxV > 0) {
-    const zy = PAD_T + innerH - ((0 - minV) / vSpan) * innerH;
-    zeroLine = `<line x1="${PAD_L}" y1="${zy.toFixed(1)}" x2="${PAD_L + INNER_W}" y2="${zy.toFixed(1)}" stroke="#334155" stroke-dasharray="4 4"/>`;
-  }
-  const area = `${xs[0].toFixed(1)},${PAD_T + innerH} ${line} ${xs[n - 1].toFixed(1)},${PAD_T + innerH}`;
-  const firstLbl = points[0].date.slice(5).replace('-', '/');
-  const lastLbl = points[n - 1].date.slice(5).replace('-', '/');
-
-  return `
-    <div class="sm-pnl-line-wrap">
-      <svg class="sm-pnl-line-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" aria-label="累计净盈亏折线">
-        <defs>
-          <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#5b9cff" stop-opacity="0.25"/>
-            <stop offset="100%" stop-color="#5b9cff" stop-opacity="0.02"/>
-          </linearGradient>
-          <clipPath id="${cid}"><rect x="${PAD_L}" y="${PAD_T}" width="${INNER_W}" height="${innerH}"/></clipPath>
-        </defs>
-        <text x="${PAD_L - 4}" y="${PAD_T + 12}" text-anchor="end" fill="#9aa4b2" font-size="12">$${fmt(maxV)}</text>
-        <text x="${PAD_L - 4}" y="${PAD_T + innerH / 2 + 4}" text-anchor="end" fill="#9aa4b2" font-size="12">$${fmt(yMid)}</text>
-        <text x="${PAD_L - 4}" y="${PAD_T + innerH + 2}" text-anchor="end" fill="#9aa4b2" font-size="12">$${fmt(minV)}</text>
-        <text x="${w - 4}" y="${PAD_T + 12}" text-anchor="end" fill="#64748b" font-size="11">${fmtPct(maxV, totalAssets, maxV)}</text>
-        <text x="${w - 4}" y="${PAD_T + innerH / 2 + 4}" text-anchor="end" fill="#64748b" font-size="11">${fmtPct(yMid, totalAssets, yMid)}</text>
-        <text x="${w - 4}" y="${PAD_T + innerH + 2}" text-anchor="end" fill="#64748b" font-size="11">${fmtPct(minV, totalAssets, minV)}</text>
-        <g clip-path="url(#${cid})">
-          ${zeroLine}
-          <polygon points="${area}" fill="url(#${gid})"/>
-          <polyline points="${line}" fill="none" stroke="#5b9cff" stroke-width="2.25" stroke-linejoin="round"/>
-          <circle cx="${xs[n - 1].toFixed(1)}" cy="${ys[n - 1].toFixed(1)}" r="4.5" fill="#5b9cff" stroke="#fff" stroke-width="1.5"/>
-        </g>
-        <text x="${PAD_L}" y="${h - 8}" fill="#9aa4b2" font-size="11">${firstLbl}</text>
-        <text x="${PAD_L + INNER_W}" y="${h - 8}" fill="#9aa4b2" font-size="11" text-anchor="end">${lastLbl}</text>
-      </svg>
-      <div class="sm-pnl-line-hint">
-        <span>${hint}</span>
-        <button type="button" class="btn ghost sm-btn-sm" data-pnl-reset>复位视窗</button>
-      </div>
-    </div>`;
-}
-
 function buildMonthCal(y, mo, dayNet, expanded, totalAssets, pnlStart, pnlEnd) {
   const dim = daysInMonth(y, mo);
   let maxAbs = 0;
@@ -350,211 +272,327 @@ function buildYearCal(y, dayNet, expanded, totalAssets, pnlStart, pnlEnd) {
 }
 
 function scheduleRender() {
-  if (renderRaf || !lastContainer || !lastGetData) return;
-  renderRaf = true;
-  requestAnimationFrame(() => {
-    renderRaf = false;
-    renderPnlVisualization(lastContainer, lastGetData, lastCallbacks);
-  });
+  if (!lastContainer || !lastGetData) return;
+  renderPnlVisualization(lastContainer, lastGetData, lastCallbacks);
 }
 
-function detachPan() {
-  document.removeEventListener('pointermove', onPanMove);
-  document.removeEventListener('pointerup', onPanEnd);
-  document.removeEventListener('pointercancel', onPanEnd);
-}
-
-function onPanMove(ev) {
-  if (!panDragging || ev.pointerId !== panPointerId) return;
-  const dx = ev.clientX - panLastX;
-  panLastX = ev.clientX;
-  const svg = lastContainer?.querySelector('.sm-pnl-line-svg');
-  if (!(svg instanceof SVGSVGElement) || lastFullLen <= MIN_POINTS) return;
-  const rect = svg.getBoundingClientRect();
-  if (rect.width <= 0) return;
-  const plotWpx = rect.width * (INNER_W / VIEW_W);
-  viewport = panViewportByDx(viewport, lastFullLen, dx, plotWpx);
-  scheduleRender();
-}
-
-function onPanEnd(ev) {
-  if (!panDragging || ev.pointerId !== panPointerId) return;
-  panDragging = false;
-  panPointerId = -1;
-  detachPan();
-}
-
-function clearInteractions() {
-  hoverCleanup?.();
-  hoverCleanup = null;
-  if (panDragging) {
-    panDragging = false;
-    detachPan();
+function eachCalendarDay(start, end) {
+  if (!start || !end || start > end) return [];
+  let y = +start.slice(0, 4);
+  let mo = +start.slice(5, 7);
+  let day = +start.slice(8, 10);
+  const out = [];
+  for (;;) {
+    const key = `${y}-${String(mo).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    out.push(key);
+    if (key === end) break;
+    const d = new Date(y, mo - 1, day + 1);
+    y = d.getFullYear();
+    mo = d.getMonth() + 1;
+    day = d.getDate();
   }
+  return out;
 }
 
-function setupLineInteractions(container) {
-  clearInteractions();
-  if (!hoverModel?.points.length) return;
-  const svg = container.querySelector('.sm-pnl-line-svg');
-  const wrap = container.querySelector('.sm-pnl-line-wrap');
-  if (!svg || !wrap) return;
+function expandDailySeries(sparse) {
+  if (!sparse.length) return [];
+  const map = new Map(sparse.map((p) => [p.date, p.cumulativeNet]));
+  const start = sparse[0].date;
+  const end = sparse[sparse.length - 1].date;
+  let run = 0;
+  return eachCalendarDay(start, end).map((d) => {
+    if (map.has(d)) run = map.get(d);
+    return { date: d, cumulativeNet: run };
+  });
+}
 
-  let tip = wrap.querySelector('.sm-pnl-tooltip');
-  if (!tip) {
-    tip = document.createElement('div');
-    tip.className = 'sm-pnl-tooltip';
-    wrap.appendChild(tip);
+function sliceSeries(series, startDate, endDate) {
+  if (!startDate && !endDate) return series;
+  return series.filter((p) => {
+    if (startDate && p.date < startDate) return false;
+    if (endDate && p.date > endDate) return false;
+    return true;
+  });
+}
+
+function disposeLineChart() {
+  resizeObs?.disconnect();
+  resizeObs = null;
+  lineChart?.dispose();
+  lineChart = null;
+  lastSeriesFp = '';
+}
+
+export function disposePnlChart() {
+  disposeLineChart();
+}
+
+function resetLineZoom() {
+  if (!lineChart) {
+    zoomRange = { start: 0, end: 100 };
+    return;
   }
+  zoomRange = { start: 0, end: 100 };
+  lineChart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
+}
 
-  const m = hoverModel;
-  const innerW = m.viewW - m.padL - m.padR;
-  const hideTip = () => { tip.style.opacity = '0'; tip.style.visibility = 'hidden'; };
-
-  const nearest = (svgX) => {
-    const n = m.points.length;
-    if (n <= 1) return 0;
-    const step = innerW / Math.max(1, n - 1);
-    const shift = m.slicePanFraction * step;
-    return Math.min(n - 1, Math.max(0, Math.round((svgX - m.padL + shift) / step)));
-  };
-
-  const onMove = (ev) => {
-    if (panDragging) return;
-    const rect = svg.getBoundingClientRect();
-    const relX = ((ev.clientX - rect.left) / rect.width) * m.viewW;
-    if (relX < m.padL || relX > m.viewW - m.padR) { hideTip(); return; }
-    const p = m.points[nearest(relX)];
-    if (!p) return;
-    const dayNet = m.dayNetByDate.get(p.date);
-    tip.innerHTML = `
-      <div class="sm-pnl-tooltip-date">${p.date}</div>
-      <div>累计净盈亏 <strong>${fmtUsdSigned(p.cumulativeNet)}</strong></div>
-      <div class="sm-pnl-tooltip-sub">名义收益率 ${fmtPct(p.cumulativeNet, m.totalAssets, p.cumulativeNet)}</div>
-      ${dayNet !== undefined ? `<div class="sm-pnl-tooltip-sub">当日净变动 ${fmtUsdSigned(dayNet)}</div>` : ''}`;
-    const wr = wrap.getBoundingClientRect();
-    const lx = ev.clientX - wr.left;
-    const ly = ev.clientY - wr.top;
-    tip.style.left = `${Math.min(Math.max(8, lx - tip.offsetWidth / 2), wrap.clientWidth - tip.offsetWidth - 8)}px`;
-    tip.style.top = `${Math.max(8, ly - 54)}px`;
-    tip.style.opacity = '1';
-    tip.style.visibility = 'visible';
-  };
-
-  const onWheel = (ev) => {
-    if (m.fullSeriesLength <= MIN_POINTS) return;
-    ev.preventDefault();
-    const wr = wrap.getBoundingClientRect();
-    const relX = ((ev.clientX - wr.left) / wr.width) * m.viewW;
-    const pivotT = (Math.min(m.viewW - m.padR, Math.max(m.padL, relX)) - m.padL) / innerW;
-    viewport = zoomViewport(viewport, m.fullSeriesLength, pivotT, ev.deltaY > 0);
-    scheduleRender();
-    hideTip();
-  };
-
-  const onDown = (ev) => {
-    if (ev.button !== 0 || m.fullSeriesLength <= MIN_POINTS) return;
-    if (ev.target instanceof Element && ev.target.closest('button')) return;
-    ev.preventDefault();
-    panDragging = true;
-    panLastX = ev.clientX;
-    panPointerId = ev.pointerId;
-    hideTip();
-    wrap.style.cursor = 'grabbing';
-    document.addEventListener('pointermove', onPanMove);
-    document.addEventListener('pointerup', onPanEnd);
-    document.addEventListener('pointercancel', onPanEnd);
-  };
-
-  const onDbl = (ev) => {
-    ev.preventDefault();
-    viewport = clampViewport({ startFloat: 0, span: lastFullLen }, lastFullLen);
-    scheduleRender();
-  };
-
-  svg.addEventListener('mousemove', onMove);
-  svg.addEventListener('mouseleave', hideTip);
-  wrap.addEventListener('wheel', onWheel, { passive: false });
-  wrap.addEventListener('pointerdown', onDown);
-  wrap.addEventListener('dblclick', onDbl);
-
-  hoverCleanup = () => {
-    svg.removeEventListener('mousemove', onMove);
-    svg.removeEventListener('mouseleave', hideTip);
-    wrap.removeEventListener('wheel', onWheel);
-    wrap.removeEventListener('pointerdown', onDown);
-    wrap.removeEventListener('dblclick', onDbl);
-    wrap.style.cursor = '';
+function buildChartOption(rangeSlice, totalAssets) {
+  const colors = chartColors();
+  const dates = rangeSlice.map((p) => p.date);
+  const values = rangeSlice.map((p) => p.cumulativeNet);
+  const n = dates.length;
+  const zoom = zoomRange && Number.isFinite(zoomRange.start)
+    ? zoomRange
+    : defaultZoom(n);
+  return {
+    animation: false,
+    backgroundColor: 'transparent',
+    grid: { left: 72, right: 56, top: 24, bottom: 64, containLabel: false },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: colors.card,
+      borderColor: colors.border,
+      textStyle: { color: colors.text, fontSize: 13 },
+      formatter: (params) => {
+        const p = Array.isArray(params) ? params[0] : params;
+        if (!p) return '';
+        const date = p.axisValue;
+        const v = Number(p.data);
+        const dayNet = cachedDayNet.get(date);
+        const dayHtml = dayNet !== undefined
+          ? `<div style="margin-top:4px;color:${colors.muted}">当日净变动 ${fmtUsdSigned(dayNet)}</div>`
+          : '';
+        return `<div style="color:${colors.muted};margin-bottom:4px">${date}</div>
+          <div>累计净盈亏 <b>${fmtUsdSigned(v)}</b></div>
+          <div style="margin-top:4px;color:${colors.muted}">名义收益率 ${fmtPct(v, cachedTotalAssets, v)}</div>
+          ${dayHtml}`;
+      }
+    },
+    xAxis: {
+      type: 'category',
+      data: dates,
+      boundaryGap: false,
+      axisLine: { lineStyle: { color: colors.border } },
+      axisLabel: {
+        color: colors.muted,
+        hideOverlap: true,
+        formatter: (d) => (typeof d === 'string' && d.length >= 10 ? d.slice(5).replace('-', '/') : d)
+      },
+      axisTick: { show: false }
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      splitLine: { lineStyle: { color: colors.border, opacity: 0.55 } },
+      axisLabel: {
+        color: colors.muted,
+        formatter: (v) => `$${fmt(v)}`
+      }
+    },
+    dataZoom: [
+      {
+        type: 'inside',
+        xAxisIndex: 0,
+        filterMode: 'none',
+        zoomOnMouseWheel: true,
+        moveOnMouseMove: true,
+        moveOnMouseWheel: false,
+        preventDefaultMouseMove: true,
+        start: zoom.start,
+        end: zoom.end
+      },
+      {
+        type: 'slider',
+        xAxisIndex: 0,
+        filterMode: 'none',
+        height: 22,
+        bottom: 8,
+        borderColor: colors.border,
+        fillerColor: 'rgba(91, 156, 255, 0.22)',
+        handleStyle: { color: colors.accent, borderColor: colors.accent },
+        moveHandleStyle: { color: colors.accent },
+        emphasis: { handleStyle: { color: colors.accent } },
+        textStyle: { color: colors.muted },
+        start: zoom.start,
+        end: zoom.end
+      }
+    ],
+    series: [{
+      type: 'line',
+      name: '累计净盈亏',
+      data: values,
+      showSymbol: false,
+      sampling: 'lttb',
+      lineStyle: { color: colors.accent, width: 2.25 },
+      areaStyle: {
+        color: {
+          type: 'linear',
+          x: 0,
+          y: 0,
+          x2: 0,
+          y2: 1,
+          colorStops: [
+            { offset: 0, color: 'rgba(91, 156, 255, 0.28)' },
+            { offset: 1, color: 'rgba(91, 156, 255, 0.02)' }
+          ]
+        }
+      },
+      markLine: {
+        silent: true,
+        symbol: 'none',
+        lineStyle: { color: '#334155', type: 'dashed', width: 1 },
+        data: [{ yAxis: 0, label: { show: false } }]
+      }
+    }]
   };
 }
 
-function bindControls(container, callbacks) {
-  container.querySelectorAll('[data-pnl-mode]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      vizMode = btn.dataset.pnlMode;
-      scheduleRender();
-    });
-  });
-  container.querySelectorAll('[data-cal-gran]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      calGranularity = btn.dataset.calGran;
-      scheduleRender();
-    });
-  });
-  container.querySelector('[data-pnl-reset]')?.addEventListener('click', () => {
-    viewport = clampViewport({ startFloat: 0, span: lastFullLen }, lastFullLen);
-    scheduleRender();
-  });
-  container.querySelector('[data-cal-prev]')?.addEventListener('click', () => {
-    const { y, m } = ymParts();
-    const dt = new Date(y, m - 2, 1);
-    calYM = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
-    calYearFocus = `${dt.getFullYear()}`;
-    scheduleRender();
-  });
-  container.querySelector('[data-cal-next]')?.addEventListener('click', () => {
-    const { y, m } = ymParts();
-    const dt = new Date(y, m, 1);
-    calYM = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
-    calYearFocus = `${dt.getFullYear()}`;
-    scheduleRender();
-  });
-  container.querySelector('[data-cal-reset]')?.addEventListener('click', () => {
-    calYM = '';
-    calYearFocus = '';
-    scheduleRender();
-  });
-  container.querySelector('#pnl-cal-year')?.addEventListener('change', (e) => {
-    const y = +e.target.value;
-    const mo = ymParts().m;
-    calYM = `${y}-${String(mo).padStart(2, '0')}`;
-    calYearFocus = `${y}`;
-    scheduleRender();
-  });
-  container.querySelector('#pnl-cal-month')?.addEventListener('change', (e) => {
-    const { y } = ymParts();
-    calYM = `${y}-${String(+e.target.value).padStart(2, '0')}`;
-    scheduleRender();
-  });
-  container.querySelector('#pnl-cal-year-only')?.addEventListener('change', (e) => {
-    calYearFocus = `${+e.target.value}`;
-    scheduleRender();
-  });
-  container.querySelectorAll('[data-cal-day]').forEach((el) => {
-    el.addEventListener('click', () => callbacks?.onCalendarDay?.(el.dataset.calDay));
-    el.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' || ev.key === ' ') {
-        ev.preventDefault();
-        callbacks?.onCalendarDay?.(el.dataset.calDay);
+function seriesFingerprint(rangeSlice) {
+  if (!rangeSlice.length) return '';
+  const last = rangeSlice[rangeSlice.length - 1];
+  return `${rangeSlice.length}\u0001${rangeSlice[0].date}\u0001${last.date}\u0001${last.cumulativeNet}`;
+}
+
+function mountLineChart(host, rangeSlice, totalAssets) {
+  const echarts = getEcharts();
+  if (!echarts) {
+    host.innerHTML = '<div class="sm-pnl-empty">图表组件未加载，请刷新页面。</div>';
+    return;
+  }
+  if (lineChart && (!document.contains(lineChart.getDom()) || lineChart.getDom() !== host)) {
+    disposeLineChart();
+  }
+  const fp = seriesFingerprint(rangeSlice);
+  if (lineChart && lineChart.getDom() === host && lastSeriesFp === fp) {
+    requestAnimationFrame(() => lineChart?.resize());
+    return;
+  }
+  if (!lineChart) {
+    host.innerHTML = '';
+    lineChart = echarts.init(host, null, { renderer: 'canvas' });
+    lineChart.on('dataZoom', () => {
+      const opt = lineChart.getOption();
+      const z = opt?.dataZoom?.[0];
+      if (z && Number.isFinite(z.start) && Number.isFinite(z.end)) {
+        zoomRange = { start: z.start, end: z.end };
       }
     });
+    lineChart.getZr().on('dblclick', () => resetLineZoom());
+    resizeObs = new ResizeObserver(() => lineChart?.resize());
+    resizeObs.observe(host);
+  }
+  lastSeriesFp = fp;
+  lineChart.setOption(buildChartOption(rangeSlice, totalAssets), { notMerge: true });
+  requestAnimationFrame(() => lineChart?.resize());
+}
+
+function bindShell(container) {
+  if (container.dataset.pnlBound === '1') return;
+  container.dataset.pnlBound = '1';
+  container.addEventListener('click', (e) => {
+    const modeBtn = e.target.closest('[data-pnl-mode]');
+    if (modeBtn) {
+      vizMode = modeBtn.dataset.pnlMode;
+      scheduleRender();
+      return;
+    }
+    const granBtn = e.target.closest('[data-cal-gran]');
+    if (granBtn) {
+      calGranularity = granBtn.dataset.calGran;
+      scheduleRender();
+      return;
+    }
+    if (e.target.closest('[data-pnl-reset]')) {
+      resetLineZoom();
+      return;
+    }
+    if (e.target.closest('[data-cal-prev]')) {
+      const { y, m } = ymParts();
+      const dt = new Date(y, m - 2, 1);
+      calYM = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+      calYearFocus = `${dt.getFullYear()}`;
+      scheduleRender();
+      return;
+    }
+    if (e.target.closest('[data-cal-next]')) {
+      const { y, m } = ymParts();
+      const dt = new Date(y, m, 1);
+      calYM = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+      calYearFocus = `${dt.getFullYear()}`;
+      scheduleRender();
+      return;
+    }
+    if (e.target.closest('[data-cal-reset]')) {
+      calYM = '';
+      calYearFocus = '';
+      scheduleRender();
+      return;
+    }
+    const dayEl = e.target.closest('[data-cal-day]');
+    if (dayEl) {
+      lastCallbacks?.onCalendarDay?.(dayEl.dataset.calDay);
+      return;
+    }
+    const moEl = e.target.closest('[data-cal-month]');
+    if (moEl) {
+      const [yy, mo] = moEl.dataset.calMonth.split('-').map(Number);
+      lastCallbacks?.onCalendarMonth?.(yy, mo);
+    }
   });
-  container.querySelectorAll('[data-cal-month]').forEach((el) => {
-    el.addEventListener('click', () => {
-      const [yy, mo] = el.dataset.calMonth.split('-').map(Number);
-      callbacks?.onCalendarMonth?.(yy, mo);
-    });
+  container.addEventListener('change', (e) => {
+    if (e.target.id === 'pnl-cal-year') {
+      const y = +e.target.value;
+      const mo = ymParts().m;
+      calYM = `${y}-${String(mo).padStart(2, '0')}`;
+      calYearFocus = `${y}`;
+      scheduleRender();
+    } else if (e.target.id === 'pnl-cal-month') {
+      const { y } = ymParts();
+      calYM = `${y}-${String(+e.target.value).padStart(2, '0')}`;
+      scheduleRender();
+    } else if (e.target.id === 'pnl-cal-year-only') {
+      calYearFocus = `${+e.target.value}`;
+      scheduleRender();
+    }
   });
+  container.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const dayEl = e.target.closest('[data-cal-day]');
+    if (!dayEl) return;
+    e.preventDefault();
+    lastCallbacks?.onCalendarDay?.(dayEl.dataset.calDay);
+  });
+}
+
+function ensureShell(container) {
+  if (container.querySelector('.sm-pnl-viz')) {
+    bindShell(container);
+    return;
+  }
+  disposeLineChart();
+  container.innerHTML = `
+    <div class="sm-pnl-viz">
+      <div class="sm-pnl-viz-head">
+        <div class="sm-pnl-viz-tabs">
+          <span class="sm-pnl-viz-label">累计盈亏</span>
+          <div class="sm-seg">
+            <button type="button" class="sm-seg-btn" data-pnl-mode="line">折线</button>
+            <button type="button" class="sm-seg-btn" data-pnl-mode="calendar">日历</button>
+          </div>
+        </div>
+        <span class="sm-muted sm-pnl-cum-badge"></span>
+      </div>
+      <div class="sm-pnl-line-block">
+        <div class="sm-pnl-echarts" id="sm-pnl-echarts"></div>
+        <div class="sm-pnl-line-hint">
+          <span>按住拖动平移 · 滚轮缩放 · 底部滑条也可拖动 · 双击或复位视窗</span>
+          <button type="button" class="btn ghost sm-btn-sm" data-pnl-reset>复位视窗</button>
+        </div>
+      </div>
+      <div class="sm-pnl-empty hidden" id="sm-pnl-empty"></div>
+      <div class="sm-cal-block hidden"></div>
+    </div>`;
+  bindShell(container);
 }
 
 export function renderPnlVisualization(container, getData, callbacks = {}) {
@@ -563,61 +601,72 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
   lastCallbacks = callbacks;
 
   const data = getData();
-  const { chartSeries = [], chartSparse = [], chartExpandedFull = [], totalAssets = 0, pnlStart = '', pnlEnd = '' } = data;
+  const { chartSparse = [], totalAssets = 0, pnlStart = '', pnlEnd = '' } = data;
   if (!chartSparse.length) {
-    clearInteractions();
+    disposeLineChart();
     container.innerHTML = '<div class="sm-pnl-empty">暂无盈亏数据</div>';
     return;
   }
 
   const dayNet = new Map(chartSparse.map((p) => [p.date, p.dayNet]));
   const lastCum = chartSparse[chartSparse.length - 1]?.cumulativeNet ?? 0;
-  const rangeSlice = chartSeries;
+  const chartExpandedFull = expandDailySeries(chartSparse);
+  const rangeSlice = sliceSeries(chartExpandedFull, pnlStart, pnlEnd);
   const isLine = vizMode === 'line';
   const { y: dispY, m: dispM } = ymParts();
   const yEff = effectiveYear();
   const bounds = yearBounds(chartSparse);
-  let minYo = Math.min(bounds.minY, dispY, yEff);
-  let maxYo = Math.max(bounds.maxY, dispY, yEff);
+  const minYo = Math.min(bounds.minY, dispY, yEff);
+  const maxYo = Math.max(bounds.maxY, dispY, yEff);
 
-  let lineHtml = '';
-  hoverModel = null;
-  if (isLine) {
-    if (!rangeSlice.length) {
-      lineHtml = '<div class="sm-pnl-empty">当前查询时间段与有数据的日期无交集，请调整起止日期或重置。</div>';
-    } else {
-      const nFull = rangeSlice.length;
-      const fp = rangeFingerprint(rangeSlice);
-      if (fp !== viewFingerprint) {
-        viewFingerprint = fp;
-        viewport = clampViewport({ startFloat: 0, span: nFull }, nFull);
-      }
-      lastFullLen = nFull;
-      viewport = clampViewport(viewport, nFull);
-      const i0 = Math.floor(viewport.startFloat);
-      const panF = viewport.startFloat - i0;
-      const viewPoints = rangeSlice.slice(i0, i0 + viewport.span);
-      if (!viewPoints.length) {
-        lineHtml = '<div class="sm-pnl-empty">视窗为空，请点击「复位视窗」。</div>';
-      } else {
-        const hint = `视窗 ${viewPoints[0].date}～${viewPoints[viewPoints.length - 1].date}（${viewPoints.length}/${nFull} 日）· 滚轮缩放 · 拖拽平移 · 双击复位`;
-        lineHtml = buildLineSvg(viewPoints, hint, panF, totalAssets);
-        hoverModel = {
-          points: viewPoints,
-          fullSeriesLength: nFull,
-          slicePanFraction: panF,
-          dayNetByDate: dayNet,
-          totalAssets,
-          viewW: VIEW_W,
-          padL: PAD_L,
-          padR: PAD_R
-        };
-      }
-    }
+  cachedDayNet = dayNet;
+  cachedTotalAssets = totalAssets;
+
+  const fp = rangeFingerprint(rangeSlice);
+  if (fp !== viewFingerprint) {
+    viewFingerprint = fp;
+    zoomRange = defaultZoom(rangeSlice.length);
   }
+
+  ensureShell(container);
 
   const cumEnd = rangeSlice.length ? rangeSlice[rangeSlice.length - 1].cumulativeNet : null;
   const cumBadge = cumEnd == null ? '—' : `<strong class="${cumEnd >= 0 ? 'pos' : 'neg'}">${fmtUsdSigned(cumEnd)}</strong>`;
+  const badge = container.querySelector('.sm-pnl-cum-badge');
+  if (badge) {
+    badge.innerHTML = `${pnlStart || pnlEnd ? '查询区间期末' : '当前'}累计 ${cumBadge} · 全历史 ${fmtUsdSigned(lastCum)}`;
+  }
+  container.querySelectorAll('[data-pnl-mode]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.pnlMode === vizMode);
+  });
+
+  const lineBlock = container.querySelector('.sm-pnl-line-block');
+  const emptyEl = container.querySelector('#sm-pnl-empty');
+  const calBlock = container.querySelector('.sm-cal-block');
+
+  if (isLine) {
+    calBlock?.classList.add('hidden');
+    if (!rangeSlice.length) {
+      disposeLineChart();
+      lineBlock?.classList.add('hidden');
+      if (emptyEl) {
+        emptyEl.classList.remove('hidden');
+        emptyEl.textContent = '当前查询时间段与有数据的日期无交集，请调整起止日期或重置。';
+      }
+      return;
+    }
+    emptyEl?.classList.add('hidden');
+    lineBlock?.classList.remove('hidden');
+    const host = container.querySelector('#sm-pnl-echarts');
+    if (host) mountLineChart(host, rangeSlice, totalAssets);
+    return;
+  }
+
+  disposeLineChart();
+  lineBlock?.classList.add('hidden');
+  emptyEl?.classList.add('hidden');
+  if (!calBlock) return;
+  calBlock.classList.remove('hidden');
 
   let yearOpts = '';
   for (let oy = minYo; oy <= maxYo; oy++) {
@@ -634,67 +683,47 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
 
   let calHtml = '';
   let calGranNetHtml = '';
-  if (!isLine) {
-    if (calGranularity === 'month') {
-      const monthNet = sumMonthNet(dayNet, dispY, dispM, pnlStart, pnlEnd);
-      calGranNetHtml = fmtNetBadge(monthNet, `${dispY}年${dispM}月`);
-      calHtml = `
-        <div class="sm-cal-toolbar">
-          <button type="button" class="btn ghost sm-btn-sm" data-cal-prev>上月</button>
-          <button type="button" class="btn ghost sm-btn-sm" data-cal-next>下月</button>
-          <label class="sm-cal-toolbar-field">
-            <span class="sm-cal-toolbar-label">年</span>
-            <select id="pnl-cal-year">${yearOpts}</select>
-          </label>
-          <label class="sm-cal-toolbar-field">
-            <span class="sm-cal-toolbar-label">月</span>
-            <select id="pnl-cal-month">${monthOpts}</select>
-          </label>
-          <button type="button" class="btn ghost sm-btn-sm" data-cal-reset>回到当月</button>
-        </div>
-        ${buildMonthCal(dispY, dispM, dayNet, chartExpandedFull, totalAssets, pnlStart, pnlEnd)}`;
-    } else {
-      const yearNet = sumYearNet(dayNet, yEff, pnlStart, pnlEnd);
-      calGranNetHtml = fmtNetBadge(yearNet, `${yEff}年`);
-      calHtml = `
-        <div class="sm-cal-toolbar">
-          <label class="sm-cal-toolbar-field">
-            <span class="sm-cal-toolbar-label">年</span>
-            <select id="pnl-cal-year-only">${yearOnlyOpts}</select>
-          </label>
-        </div>
-        ${buildYearCal(yEff, dayNet, chartExpandedFull, totalAssets, pnlStart, pnlEnd)}`;
-    }
+  if (calGranularity === 'month') {
+    const monthNet = sumMonthNet(dayNet, dispY, dispM, pnlStart, pnlEnd);
+    calGranNetHtml = fmtNetBadge(monthNet, `${dispY}年${dispM}月`);
+    calHtml = `
+      <div class="sm-cal-toolbar">
+        <button type="button" class="btn ghost sm-btn-sm" data-cal-prev>上月</button>
+        <button type="button" class="btn ghost sm-btn-sm" data-cal-next>下月</button>
+        <label class="sm-cal-toolbar-field">
+          <span class="sm-cal-toolbar-label">年</span>
+          <select id="pnl-cal-year">${yearOpts}</select>
+        </label>
+        <label class="sm-cal-toolbar-field">
+          <span class="sm-cal-toolbar-label">月</span>
+          <select id="pnl-cal-month">${monthOpts}</select>
+        </label>
+        <button type="button" class="btn ghost sm-btn-sm" data-cal-reset>回到当月</button>
+      </div>
+      ${buildMonthCal(dispY, dispM, dayNet, chartExpandedFull, totalAssets, pnlStart, pnlEnd)}`;
+  } else {
+    const yearNet = sumYearNet(dayNet, yEff, pnlStart, pnlEnd);
+    calGranNetHtml = fmtNetBadge(yearNet, `${yEff}年`);
+    calHtml = `
+      <div class="sm-cal-toolbar">
+        <label class="sm-cal-toolbar-field">
+          <span class="sm-cal-toolbar-label">年</span>
+          <select id="pnl-cal-year-only">${yearOnlyOpts}</select>
+        </label>
+      </div>
+      ${buildYearCal(yEff, dayNet, chartExpandedFull, totalAssets, pnlStart, pnlEnd)}`;
   }
 
-  container.innerHTML = `
-    <div class="sm-pnl-viz">
-      <div class="sm-pnl-viz-head">
-        <div class="sm-pnl-viz-tabs">
-          <span class="sm-pnl-viz-label">累计盈亏</span>
-          <div class="sm-seg">
-            <button type="button" class="sm-seg-btn ${isLine ? 'active' : ''}" data-pnl-mode="line">折线</button>
-            <button type="button" class="sm-seg-btn ${!isLine ? 'active' : ''}" data-pnl-mode="calendar">日历</button>
-          </div>
+  calBlock.innerHTML = `
+    <div class="sm-cal-gran">
+      <div class="sm-cal-gran-left">
+        <span class="sm-muted">粒度</span>
+        <div class="sm-seg">
+          <button type="button" class="sm-seg-btn ${calGranularity === 'month' ? 'active' : ''}" data-cal-gran="month">按月</button>
+          <button type="button" class="sm-seg-btn ${calGranularity === 'year' ? 'active' : ''}" data-cal-gran="year">按年</button>
         </div>
-        <span class="sm-muted sm-pnl-cum-badge">${pnlStart || pnlEnd ? '查询区间期末' : '当前'}累计 ${cumBadge} · 全历史 ${fmtUsdSigned(lastCum)}</span>
       </div>
-      ${isLine ? lineHtml : `
-        <div class="sm-cal-block">
-          <div class="sm-cal-gran">
-            <div class="sm-cal-gran-left">
-              <span class="sm-muted">粒度</span>
-              <div class="sm-seg">
-                <button type="button" class="sm-seg-btn ${calGranularity === 'month' ? 'active' : ''}" data-cal-gran="month">按月</button>
-                <button type="button" class="sm-seg-btn ${calGranularity === 'year' ? 'active' : ''}" data-cal-gran="year">按年</button>
-              </div>
-            </div>
-            ${calGranNetHtml}
-          </div>
-          ${calHtml}
-        </div>`}
-    </div>`;
-
-  bindControls(container, callbacks);
-  if (isLine) setupLineInteractions(container);
+      ${calGranNetHtml}
+    </div>
+    ${calHtml}`;
 }
