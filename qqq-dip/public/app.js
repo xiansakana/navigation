@@ -161,7 +161,7 @@ function renderAmmo() {
       <div class="hint">袋 ${fmtUsd(bags?.right)}</div></div>
     <div class="sm-summary-card"><div class="label">VXN</div>
       <div class="value">${ev?.vxn != null ? ev.vxn.toFixed(2) : '—'}</div>
-      <div class="hint">T2≥25 ${ev?.vxnGates?.t2?.ok ? '过' : '未过'} · T3≥32 ${ev?.vxnGates?.t3?.ok ? '过' : '未过'}</div></div>
+      <div class="hint">T2≥25 ${ev?.vxnGates?.t2?.ok ? '过' : '未过'} · T3≥32 ${ev?.vxnGates?.t3?.ok ? '过' : '未过'}${state.quotes?.VXN?.asOf ? ` · 收盘 ${state.quotes.VXN.asOf}` : ''}</div></div>
     <div class="sm-summary-card"><div class="label">规则</div>
       <label class="hint"><input type="checkbox" id="opt-vboost" ${state.settings.variant === 'vBoost' ? 'checked' : ''}> V 型加强 55/20/25</label>
       <label class="hint"><input type="checkbox" id="opt-soxl" ${state.settings.soxlEnabled ? 'checked' : ''}> 启用 SOXL 芯片观点</label>

@@ -1,6 +1,8 @@
 const FETCH_TIMEOUT_MS = 12000;
 const FETCH_RETRIES = 2;
 const RETRY_BASE_MS = 500;
+const POLYGON_429_BASE_MS = 2000;
+const CANDLE_CACHE = new Map();
 
 function parseOptionSymbol(symbol) {
   const m = String(symbol).toUpperCase().match(/^([A-Z]+)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
@@ -51,12 +53,50 @@ async function fetchJson(url, headers = {}) {
         err.status = res.status;
         lastErr = err;
         if (attempt < FETCH_RETRIES && isRetryable(err, res.status)) {
-          await new Promise((r) => setTimeout(r, RETRY_BASE_MS * (attempt + 1)));
+          const waitMs = res.status === 429
+            ? POLYGON_429_BASE_MS * (attempt + 1)
+            : RETRY_BASE_MS * (attempt + 1);
+          await new Promise((r) => setTimeout(r, waitMs));
           continue;
         }
         throw err;
       }
       return await res.json();
+    } catch (e) {
+      lastErr = e;
+      if (attempt < FETCH_RETRIES && isRetryable(e, e.status)) {
+        const waitMs = e.status === 429
+          ? POLYGON_429_BASE_MS * (attempt + 1)
+          : RETRY_BASE_MS * (attempt + 1);
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
+      throw new Error(formatFetchError(e));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error(formatFetchError(lastErr));
+}
+
+async function fetchText(url, headers = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= FETCH_RETRIES; attempt++) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: ac.signal, headers });
+      if (!res.ok) {
+        const err = new Error(`HTTP ${res.status}`);
+        err.status = res.status;
+        lastErr = err;
+        if (attempt < FETCH_RETRIES && isRetryable(err, res.status)) {
+          await new Promise((r) => setTimeout(r, RETRY_BASE_MS * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      }
+      return await res.text();
     } catch (e) {
       lastErr = e;
       if (attempt < FETCH_RETRIES && isRetryable(e, e.status)) {
@@ -158,14 +198,20 @@ export function createQuoteService(config) {
   }
 
   async function getCandles(symbol, days = 90) {
+    const sym = String(symbol).toUpperCase();
+    const today = new Date().toISOString().slice(0, 10);
+    const cacheKey = `${sym}:${days}`;
+    const cached = CANDLE_CACHE.get(cacheKey);
+    if (cached?.date === today) return cached.candles;
+
+    let candles;
     if (polygonKey) {
-      try {
-        return await getCandlesFromPolygon(symbol, days);
-      } catch (e) {
-        if (!finnhubKey) throw e;
-      }
+      candles = await getCandlesFromPolygon(sym, days);
+    } else {
+      candles = await getCandlesFromFinnhub(sym, days);
     }
-    return getCandlesFromFinnhub(symbol, days);
+    CANDLE_CACHE.set(cacheKey, { date: today, candles });
+    return candles;
   }
 
   async function getYahooQuote(yahooSymbol) {
@@ -190,20 +236,40 @@ export function createQuoteService(config) {
     };
   }
 
+  async function getVxnFromFred() {
+    const text = await fetchText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=VXNCLS');
+    const lines = text.trim().split(/\r?\n/);
+    for (let i = lines.length - 1; i >= 1; i--) {
+      const [date, raw] = lines[i].split(',');
+      const price = Number(raw);
+      if (date && Number.isFinite(price) && price > 0) {
+        return {
+          symbol: 'VXN',
+          price,
+          close: price,
+          prevClose: price,
+          change: 0,
+          changePercent: 0,
+          high: price,
+          low: price,
+          source: 'fred',
+          asOf: date
+        };
+      }
+    }
+    throw new Error('无有效收盘数据');
+  }
+
   async function getVxn() {
     const errors = [];
-    if (finnhubKey) {
-      for (const sym of ['VXN', '^VXN']) {
-        try {
-          return { ...(await getStock(sym)), symbol: 'VXN' };
-        } catch (e) {
-          errors.push(`${sym}: ${e.message}`);
-        }
-      }
+    try {
+      return await getVxnFromFred();
+    } catch (e) {
+      errors.push(`FRED: ${e.message}`);
     }
     try {
       const q = await getYahooQuote('^VXN');
-      return { ...q, symbol: 'VXN' };
+      return { ...q, symbol: 'VXN', source: 'yahoo' };
     } catch (e) {
       errors.push(`Yahoo: ${e.message}`);
       throw new Error(`VXN 不可用（${errors.join('; ')}）`);
@@ -293,11 +359,13 @@ export function createQuoteService(config) {
     const errors = {};
     for (const symbol of symbols) {
       try {
-        const [quote, candles] = await Promise.all([getStock(symbol), getCandles(symbol, 90)]);
+        const quote = await getStock(symbol);
+        const candles = await getCandles(symbol, 90);
         out[symbol] = { ...quote, candles };
       } catch (e) {
         errors[symbol] = e.message;
       }
+      await new Promise((r) => setTimeout(r, 200));
     }
     try {
       out.VXN = await getVxn();
