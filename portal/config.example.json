@@ -49,6 +49,18 @@
       "icon": "📈"
     },
     {
+      "id": "qqq-dip",
+      "title": "抄底监控",
+      "hidden": true,
+      "type": "proxy",
+      "path": "/stock-manage/dip",
+      "entryPath": "/",
+      "internalUrl": "http://127.0.0.1:5001",
+      "injectBar": true,
+      "injectBase": false,
+      "icon": "📉"
+    },
+    {
       "id": "notes",
       "title": "笔记",
       "description": "思源笔记（SiYuan）— 块级引用、大纲、反链",

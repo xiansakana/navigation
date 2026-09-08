@@ -10,6 +10,7 @@ ECS 服务导航与自托管应用（portal 统一入口 :80）。
 | `qq-bot/` | QQ 通知桥接 → NapCat |
 | `torn-toolbox-desktop/` | Torn 压价助手 + 公司监听（独立进程） |
 | `stock-manage/` | 美股持仓管理（:5000，服务端持久化） |
+| `qqq-dip/` | QQQ 抄底监控与 QQ 提醒（:5001，独立库） |
 | `alist/` | AList 网盘聚合（本机 :5244 → Portal `/alist/`） |
 | `scripts/` | ECS 部署与运维脚本 |
 

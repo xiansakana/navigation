@@ -159,6 +159,7 @@ function buildDefaultGuestPermissions(services) {
         'service:torn-undercut:view',
         'service:torn-company:view',
         'service:stock-manage:view',
+        'service:qqq-dip:view',
         'service:notes:view'
     ]);
     (services || []).forEach(function(service) {
@@ -179,6 +180,13 @@ function ensureGuestAccess(data, config) {
     var denyGuest = ['service:napcat:view', 'service:napcat:edit'];
 
     var guestRole = data.roles.find(function(r) { return r.id === 'role_guest'; });
+    if (guestRole) {
+        var guestPerms = new Set(guestRole.permissions || []);
+        if (guestPerms.has('service:stock-manage:view')) {
+            guestPerms.add('service:qqq-dip:view');
+        }
+        guestRole.permissions = Array.from(guestPerms);
+    }
     if (!guestRole) {
         var guestPerms = buildDefaultGuestPermissions(config?.services);
         var initial = new Set(guestPerms);

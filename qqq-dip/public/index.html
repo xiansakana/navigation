@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>抄底监控</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="sm-app" id="app">
+    <nav class="sm-feature-tabs" id="feature-tabs" aria-label="股票功能"></nav>
+
+    <section id="panel-monitor">
+      <div class="sm-panel-head">
+        <h2>抄底监控</h2>
+        <div class="sm-panel-head-actions">
+          <span class="sm-market-pill" id="market-pill">—</span>
+          <button type="button" class="btn ghost sm-btn-sm" id="btn-refresh">刷新行情</button>
+          <button type="button" class="btn primary sm-btn-sm" id="btn-monitor-toggle">开始监听</button>
+        </div>
+      </div>
+      <p class="hint" id="monitor-hint">规则来自 QQQ 抄底手册。不是投资建议。弹药 B 与持仓现金互不影响。</p>
+      <p class="hint sm-error" id="error-line" hidden></p>
+
+      <div class="sm-dashboard" id="ammo-cards"></div>
+
+      <section class="sm-panel">
+        <div class="sm-panel-head"><h2>当前推荐</h2></div>
+        <div id="primary-rec" class="sm-rec"></div>
+      </section>
+
+      <section class="sm-panel">
+        <div class="sm-panel-head"><h2>标的与档位</h2></div>
+        <div class="sm-table-wrap">
+          <table class="sm-table" id="symbol-table">
+            <thead>
+              <tr>
+                <th>代码</th><th>现价</th><th>当日涨跌幅</th><th>相对 H 回撤</th><th>H / 下一档</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="sm-table-wrap" style="margin-top:16px">
+          <table class="sm-table" id="tier-table">
+            <thead>
+              <tr>
+                <th>档</th><th>袋</th><th>触发价</th><th>占 B</th><th>金额</th><th>状态</th><th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="hint" id="leap-hint"></p>
+      </section>
+
+      <section class="sm-panel">
+        <div class="sm-panel-head">
+          <h2>抄底仓位（止盈）</h2>
+          <button type="button" class="btn ghost sm-btn-sm" id="btn-add-lot">登记仓位</button>
+        </div>
+        <div class="sm-table-wrap">
+          <table class="sm-table" id="lot-table">
+            <thead>
+              <tr>
+                <th>标的</th><th>类型</th><th>成本</th><th>现价</th><th>倍数</th><th>止盈</th><th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="sm-panel">
+        <div class="sm-panel-head">
+          <h2>操作记录</h2>
+          <div class="sm-panel-head-actions">
+            <select id="action-filter">
+              <option value="all">全部</option>
+              <option value="auto">自动</option>
+              <option value="user">手动</option>
+            </select>
+            <button type="button" class="btn ghost sm-btn-sm" id="btn-add-note">记一笔</button>
+          </div>
+        </div>
+        <div id="action-list" class="sm-action-list"></div>
+      </section>
+    </section>
+
+    <section id="panel-qq" hidden>
+      <div class="sm-panel-head">
+        <h2>QQ 提醒</h2>
+        <div class="sm-panel-head-actions">
+          <button type="button" class="btn ghost sm-btn-sm" id="btn-test-qq">测试通知</button>
+          <button type="button" class="btn primary sm-btn-sm" id="btn-save-qq">保存配置</button>
+        </div>
+      </div>
+      <p class="hint">推送到 qq-bot（默认 http://127.0.0.1:8787/notify），配置方式与 Torn 工具箱相同。</p>
+
+      <section class="sm-panel">
+        <h3>全局设置</h3>
+        <div class="sm-checks">
+          <label><input type="checkbox" id="qq-enabled"> 启用 QQ 通知</label>
+          <label><input type="checkbox" id="auto-start"> 进程启动后自动监听</label>
+        </div>
+        <div class="sm-grid">
+          <label class="field">QQ 推送地址
+            <input type="text" id="qq-url" placeholder="http://127.0.0.1:8787/notify">
+          </label>
+          <label class="field">QQ 推送 Token
+            <input type="password" id="qq-token" placeholder="与 qq-bot notifyToken 一致；留空则保留原值">
+          </label>
+          <label class="field">轮询间隔（秒）
+            <input type="number" id="interval-sec" min="10" max="300" value="30">
+          </label>
+        </div>
+      </section>
+
+      <section class="sm-panel">
+        <div class="sm-panel-head">
+          <h3>通知目标</h3>
+          <button type="button" class="btn ghost sm-btn-sm" id="btn-add-target">＋ 添加方式</button>
+        </div>
+        <div id="qq-targets"></div>
+      </section>
+
+      <section class="sm-panel">
+        <h3>事件类型</h3>
+        <div class="sm-checks" id="event-checks"></div>
+      </section>
+
+      <section class="sm-panel">
+        <h3>监听状态</h3>
+        <p id="qq-monitor-status" class="hint">—</p>
+        <div class="sm-panel-head-actions">
+          <button type="button" class="btn primary sm-btn-sm" id="btn-qq-start">开始监听</button>
+          <button type="button" class="btn ghost sm-btn-sm" id="btn-qq-stop">停止</button>
+        </div>
+      </section>
+    </section>
+  </div>
+
+  <div id="modal-root"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

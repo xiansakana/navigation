@@ -16,7 +16,7 @@ $Key = Join-Path $env:USERPROFILE ".ssh\ecs_torn"
 $SshTarget = "root@123.56.235.12"
 $RemoteRoot = "/opt/navigation"
 
-$Dirs = @("portal", "qq-bot", "torn-toolbox-desktop", "stock-manage", "scripts", "shared")
+$Dirs = @("portal", "qq-bot", "torn-toolbox-desktop", "stock-manage", "qqq-dip", "scripts", "shared")
 
 $ExcludeConfigNames = @("config.json", "config.undercut.json", "config.company.json")
 
@@ -55,6 +55,6 @@ if ($Only) {
 }
 
 Write-Host "==> Restart services (skip ECS git pull)"
-ssh -i $Key $SshTarget "cd $RemoteRoot; find . -name '*.sh' -exec sed -i 's/\r$//' {} +; chmod +x scripts/*.sh portal/deploy-ecs.sh qq-bot/deploy-ecs.sh torn-toolbox-desktop/deploy-ecs.sh stock-manage/deploy-ecs.sh; bash scripts/ecs-update.sh --skip-pull$onlyArg"
+ssh -i $Key $SshTarget "cd $RemoteRoot; find . -name '*.sh' -exec sed -i 's/\r$//' {} +; chmod +x scripts/*.sh portal/deploy-ecs.sh qq-bot/deploy-ecs.sh torn-toolbox-desktop/deploy-ecs.sh stock-manage/deploy-ecs.sh qqq-dip/deploy-ecs.sh; bash scripts/ecs-update.sh --skip-pull$onlyArg"
 
 Write-Host "==> Deploy done"

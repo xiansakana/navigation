@@ -1,0 +1,17 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 5001
+  },
+  "dbPath": "data/qqq-dip.db",
+  "finnhubApiKey": "",
+  "polygonApiKey": "",
+  "notify": {
+    "desktop": false,
+    "qq": {
+      "enabled": true,
+      "url": "http://127.0.0.1:8787/notify",
+      "token": ""
+    }
+  }
+}

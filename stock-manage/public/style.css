@@ -403,6 +403,30 @@ body.has-navbar {
 .sm-cal-year-pct { font-size: 11px; margin-top: 4px; line-height: 1.35; }
 
 .sm-modal-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.sm-feature-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+.sm-feature-tab {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 14px;
+    background: var(--card);
+}
+.sm-feature-tab:hover { color: var(--text); border-color: var(--accent); }
+.sm-feature-tab.active {
+    color: var(--text);
+    border-color: var(--accent);
+    background: rgba(91, 156, 255, 0.12);
+}
+
 .sm-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
 .sm-tab {
     background: transparent;
