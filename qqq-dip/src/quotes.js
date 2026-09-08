@@ -105,7 +105,34 @@ export function createQuoteService(config) {
     return mapQuote(sym, q);
   }
 
-  async function getCandles(symbol, days = 90) {
+  async function getCandlesFromPolygon(symbol, days = 90) {
+    if (!polygonKey) throw new Error('未配置 Polygon API Key');
+    const sym = String(symbol).toUpperCase();
+    const to = new Date();
+    const from = new Date(to.getTime() - days * 86400000);
+    const fmt = (d) => d.toISOString().slice(0, 10);
+    const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(sym)}/range/1/day/${fmt(from)}/${fmt(to)}?adjusted=true&sort=asc&limit=${days}&apiKey=${polygonKey}`;
+    let data;
+    try {
+      data = await fetchJson(url);
+    } catch (e) {
+      throw new Error(`Polygon K线 ${e.message}`);
+    }
+    const rows = data?.results;
+    if (!Array.isArray(rows) || !rows.length) {
+      throw new Error(`无日线 ${sym}`);
+    }
+    return rows.map((r) => ({
+      t: Math.floor(r.t / 1000),
+      o: r.o,
+      h: r.h,
+      l: r.l,
+      c: r.c,
+      v: r.v
+    }));
+  }
+
+  async function getCandlesFromFinnhub(symbol, days = 90) {
     if (!finnhubKey) throw new Error('未配置 Finnhub API Key');
     const sym = String(symbol).toUpperCase();
     const to = Math.floor(Date.now() / 1000);
@@ -128,6 +155,17 @@ export function createQuoteService(config) {
       c: data.c[i],
       v: data.v?.[i]
     }));
+  }
+
+  async function getCandles(symbol, days = 90) {
+    if (polygonKey) {
+      try {
+        return await getCandlesFromPolygon(symbol, days);
+      } catch (e) {
+        if (!finnhubKey) throw e;
+      }
+    }
+    return getCandlesFromFinnhub(symbol, days);
   }
 
   async function getYahooQuote(yahooSymbol) {
