@@ -5,10 +5,15 @@ services:
   napcat:
     image: mlikiowa/napcat-docker:latest
     container_name: napcat
+    hostname: napcat
     restart: always
+    # 固定 MAC，避免容器重建后被腾讯当成新设备、无法快速登录
+    mac_address: "02:42:ac:11:00:02"
     environment:
       - NAPCAT_UID=${NAPCAT_UID:-0}
       - NAPCAT_GID=${NAPCAT_GID:-0}
+      - ACCOUNT=${ACCOUNT:-}
+      - NAPCAT_QUICK_ACCOUNT=${ACCOUNT:-}
     ports:
       - "127.0.0.1:3000:3000"   # HTTP API，仅本机（qq-bot 调用）
       - "127.0.0.1:3001:3001"   # WebSocket（可选）

@@ -82,3 +82,7 @@ export async function sendMessage(napcatConfig, target, message) {
 export async function getLoginInfo(baseUrl, accessToken) {
     return callNapCat(baseUrl, accessToken, 'get_login_info', {});
 }
+
+export async function getStatus(baseUrl, accessToken) {
+    return callNapCat(baseUrl, accessToken, 'get_status', {});
+}
