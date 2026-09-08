@@ -87,8 +87,8 @@ QQ 协议不能在腾讯要求扫码时完全无人值守。能做的是：
 
 1. **持久化登录态**：`./ntqq` 挂载到容器 `/app/.config/QQ`（已配置）
 2. **固定 MAC**：`docker-compose` 里 `mac_address`，减少被当成新设备
-3. **快速登录账号**：`/opt/napcat/.env` 中设置 `ACCOUNT=QQ号`
-4. **掉线看门狗**：`config.json` 里 `napcat.watchdog.enabled=true` 后，qq-bot 会轮询在线状态，连续掉线则 `docker restart napcat`，触发已保存的快速/密码登录
+3. **账号密码自动登录**：在 `/opt/napcat/.env` 写 `ACCOUNT` 和 `NAPCAT_QUICK_PASSWORD`（不要提交 git）。启动/重启时会走密码登录；若腾讯要求新设备验证，仍需扫一次码。
+4. **掉线看门狗**：`config.json` 里 `napcat.watchdog.enabled=true` 后，qq-bot 会轮询在线状态，连续掉线则 `docker restart napcat`，再次走快速/密码登录
 
 若腾讯弹出「新设备验证」二维码，仍需打开 Portal 的 NapCat WebUI 扫一次。
 
