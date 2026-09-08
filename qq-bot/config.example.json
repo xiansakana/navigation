@@ -1,7 +1,14 @@
 {
   "napcat": {
     "baseUrl": "http://127.0.0.1:3000",
-    "accessToken": ""
+    "accessToken": "",
+    "watchdog": {
+      "enabled": false,
+      "intervalMs": 60000,
+      "failBeforeRestart": 2,
+      "cooldownMs": 600000,
+      "restartCommand": ["docker", "restart", "napcat"]
+    }
   },
   "defaultTarget": {
     "type": "group",

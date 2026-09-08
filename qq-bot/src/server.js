@@ -9,6 +9,7 @@
 import http from 'node:http';
 import { loadConfig } from './config.js';
 import { sendMessage } from './napcat.js';
+import { startLoginWatchdog } from './watchdog.js';
 
 function readJson(req) {
     return new Promise(function(resolve, reject) {
@@ -82,6 +83,8 @@ async function main() {
             json(res, 500, { ok: false, error: err.message });
         }
     });
+
+    startLoginWatchdog(config);
 
     server.listen(port, host, function() {
         console.log('QQ 推送服务已启动: http://' + host + ':' + port);

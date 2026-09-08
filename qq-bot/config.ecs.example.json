@@ -1,7 +1,14 @@
 {
   "napcat": {
     "baseUrl": "http://127.0.0.1:3000",
-    "accessToken": "填写ECS上NapCat的HTTP_Token"
+    "accessToken": "填写ECS上NapCat的HTTP_Token",
+    "watchdog": {
+      "enabled": true,
+      "intervalMs": 60000,
+      "failBeforeRestart": 2,
+      "cooldownMs": 600000,
+      "restartCommand": ["docker", "restart", "napcat"]
+    }
   },
   "defaultTarget": {
     "type": "group",

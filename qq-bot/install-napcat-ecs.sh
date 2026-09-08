@@ -26,10 +26,14 @@ services:
   napcat:
     image: mlikiowa/napcat-docker:latest
     container_name: napcat
+    hostname: napcat
     restart: always
+    mac_address: "02:42:ac:11:00:02"
     environment:
       - NAPCAT_UID=0
       - NAPCAT_GID=0
+      - ACCOUNT=${ACCOUNT:-}
+      - NAPCAT_QUICK_ACCOUNT=${ACCOUNT:-}
     ports:
       - "127.0.0.1:3000:3000"
       - "127.0.0.1:3001:3001"
