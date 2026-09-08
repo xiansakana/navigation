@@ -2,6 +2,8 @@
 
 美股持仓、交易记录、盈亏统计。运行时数据统一写入仓库根目录 `data/navigation.db`（与 Portal RBAC 共用）；首次启动会自动从 `data/portfolio.json` 导入（若 DB 为空）。
 
+抄底监控与 QQ 提醒是独立服务 `qqq-dip`（:5001），从页面顶部 Tab 进入 `/stock-manage/dip/`，不读写本服务的持仓与现金。
+
 ## 本地开发
 
 ```bash

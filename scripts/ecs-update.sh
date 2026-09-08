@@ -1,6 +1,6 @@
 #!/bin/bash
 # 在 ECS 上更新 navigation 仓库并重启服务
-# 用法: ./scripts/ecs-update.sh [--skip-pull] [--only undercut,company,qq-bot,portal,napcat,stock-manage,siyuan,siyuan-share,piclist,alist]
+# 用法: ./scripts/ecs-update.sh [--skip-pull] [--only undercut,company,qq-bot,portal,napcat,stock-manage,qqq-dip,siyuan,siyuan-share,piclist,alist]
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -126,6 +126,17 @@ if should_run stock-manage; then
         TRUST_PROXY=1 pm2 restart stock-manage --update-env
     else
         echo "stock-manage 未运行，请先配置 config.json 并执行 ./deploy-ecs.sh"
+    fi
+fi
+
+if should_run qqq-dip; then
+    echo "==> qqq-dip"
+    cd "$ROOT/qqq-dip"
+    npm install --production
+    if pm2 describe qqq-dip >/dev/null 2>&1; then
+        TRUST_PROXY=1 pm2 restart qqq-dip --update-env
+    else
+        echo "qqq-dip 未运行，请先配置 config.json 并执行 ./deploy-ecs.sh"
     fi
 fi
 

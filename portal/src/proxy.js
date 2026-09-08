@@ -300,9 +300,10 @@ function injectPortalShell(html, service) {
     var themeJs = '<script src="/theme.js"></script>';
     var toastJs = '<script src="/toast.js"></script>';
     var dialogJs = '<script src="/dialog.js"></script>';
-    var layoutJs = service.id === 'stock-manage' ? '<script src="/layout.js"></script>' : '';
+    var stockLike = service.id === 'stock-manage' || service.id === 'qqq-dip';
+    var layoutJs = stockLike ? '<script src="/layout.js"></script>' : '';
     var themeBtn = '<button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题"><span class="navbar-theme-icon" aria-hidden="true">☀️</span><span class="label navbar-theme-label">日间</span></button>';
-    var layoutBtn = service.id === 'stock-manage'
+    var layoutBtn = stockLike
         ? '<button type="button" class="btn ghost navbar-layout-btn" aria-pressed="false" aria-label="全宽布局"><span class="label">全宽</span></button>'
         : '';
     var baseTag = '';
@@ -344,7 +345,7 @@ function injectPortalShell(html, service) {
         + '</div></header>';
     var bodyClass = 'has-navbar';
     if (isToolbox) bodyClass += ' toolbox-proxied';
-    if (service.id === 'stock-manage') bodyClass += ' stock-proxied';
+    if (service.id === 'stock-manage' || service.id === 'qqq-dip') bodyClass += ' stock-proxied';
     if (service.id === 'notes') bodyClass += ' notes-proxied';
     return html
         .replace('<head>', '<head>' + themeBoot + baseTag + portalCss + themeJs + toastJs + dialogJs + layoutJs)
