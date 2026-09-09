@@ -15,13 +15,16 @@ import {
 
 const H = 540.81;
 
-test('tier trigger text covers left / crisis / right', () => {
-  assert.match(tierTriggerText('T1'), /−8%/);
-  assert.match(tierTriggerText('T2'), /VXN≥25/);
-  assert.match(tierTriggerText('T4'), /盘中/);
-  assert.match(tierTriggerText('T5'), /危机袋/);
-  assert.match(tierTriggerText('R1'), /20 日线/);
-  assert.match(tierTriggerText('R2'), /假右侧/);
+test('tier trigger text matches 手册 §D 触发列', () => {
+  assert.equal(tierTriggerText('T1'), '−8%');
+  assert.equal(tierTriggerText('T2'), '−12% 且 VXN≥25');
+  assert.equal(tierTriggerText('T3'), '−18% 且 VXN≥32');
+  assert.equal(tierTriggerText('T4'), '收盘 −22% 或盘中 0.75H 限价');
+  assert.equal(tierTriggerText('T5'), '−30%');
+  assert.equal(tierTriggerText('T6'), '−40%');
+  assert.equal(tierTriggerText('T7'), '−50%');
+  assert.equal(tierTriggerText('R1'), '已出现过 −22%；收盘站上 20 日线且收盘创 5 日新高');
+  assert.equal(tierTriggerText('R2'), 'R1 后 15–20 日未破前低，或 −30% 之后的新 20 日线突破');
 });
 
 test('T1–T4 trigger prices from 2025-02-19 high', () => {
