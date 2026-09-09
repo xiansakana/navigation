@@ -1,7 +1,7 @@
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js';
-import { loadPortalContext, can, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js';
+import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const fmt = (n) => Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
@@ -154,6 +154,16 @@ function applyPortalPrefs() {
   pnlVisible = loadJson(LS_PNL_VISIBLE, true);
 }
 
+function applyDipTabs() {
+  const nav = document.querySelector('.sm-feature-tabs');
+  if (!nav) return;
+  nav.querySelectorAll('a.sm-feature-tab').forEach((a) => {
+    const href = a.getAttribute('href') || '';
+    if (href.includes('tab=qq')) a.hidden = !canDip('tab-qq');
+    else if (href.includes('/dip/')) a.hidden = !canDip('tab-monitor');
+  });
+}
+
 function applyPermissions() {
   $('#section-pnl')?.classList.toggle('hidden', !can('pnl'));
   const dashBlock = $('#section-dashboard');
@@ -161,9 +171,9 @@ function applyPermissions() {
   document.querySelector('.sm-dashboard-toggle')?.classList.toggle('hidden', !can('dashboard'));
   document.querySelector('.sm-pnl-visible-toggle')?.classList.toggle('hidden', !can('pnl-toggle'));
   $('#btn-trades').hidden = !can('trades');
-  $('#btn-import').hidden = !can('import');
-  $('#btn-add').hidden = !can('trade');
-  $('#btn-refresh').hidden = !can('refresh');
+  $('#btn-import').hidden = !can('import', 'edit');
+  $('#btn-add').hidden = !can('trade', 'edit');
+  $('#btn-refresh').hidden = !can('refresh', 'edit');
   $('#btn-col-toggle').hidden = !can('columns');
   $('#col-toggle-panel')?.classList.toggle('hidden', !can('columns'));
 }
@@ -198,7 +208,7 @@ function renderDashboard() {
   const dailyDisplay = dailyVal == null ? '—' : fmtUsdSigned(dailyVal);
   const cashField = !dashboardVisible
     ? `<div class="value">${MASK}</div>`
-    : can('cash')
+    : can('cash', 'edit')
       ? `<div class="sm-cash-input-wrap"><span>$</span><input type="number" step="0.01" id="cash-input" value="${state.cash}"></div>`
       : `<div class="value">${fmtUsd(state.cash)}</div>`;
   el.innerHTML = `
@@ -236,7 +246,7 @@ function renderDashboard() {
 
 function bindCashInput() {
   const el = $('#cash-input');
-  if (!el || el.dataset.cashBound === '1' || !can('cash')) return;
+  if (!el || el.dataset.cashBound === '1' || !can('cash', 'edit')) return;
   el.dataset.cashBound = '1';
   el.addEventListener('change', async (e) => {
     try {
@@ -278,8 +288,12 @@ function holdingsCellContent(h, key, ctx) {
       return maskCol('shares', h.shares);
     case 'cost':
       return maskCol('cost', fmtUsd(h.avgCost) + lots);
-    case 'price':
-      return maskCol('price', `<span>${fmtUsd(h.price)}</span>${can('refresh') ? ` <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>` : ''}`);
+    case 'price': {
+      const delayHint = h.delayed
+        ? ` <span class="hint" title="期权实时快照未授权，当前为 Polygon 延时日线${h.quoteAsOf ? `（截至 ${h.quoteAsOf}）` : ''}">延时</span>`
+        : '';
+      return maskCol('price', `<span>${fmtUsd(h.price)}</span>${delayHint}${can('refresh', 'edit') ? ` <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>` : ''}`);
+    }
     case 'pnl':
       return maskCol('pnl', h.pnl == null ? '—' : fmtUsdSigned(h.pnl));
     case 'pnlPct':
@@ -293,13 +307,13 @@ function holdingsCellContent(h, key, ctx) {
     case 'weight':
       return maskCol('weight', fmtPct(h.weight));
     case 'target':
-      return maskCol('target', `<input class="sm-cell-input" data-meta="target" data-symbol="${h.symbol}" type="number" step="any" value="${h.targetPrice ?? ''}" placeholder="—" ${can('meta') ? '' : 'readonly'}>`);
+      return maskCol('target', `<input class="sm-cell-input" data-meta="target" data-symbol="${h.symbol}" type="number" step="any" value="${h.targetPrice ?? ''}" placeholder="—" ${can('meta', 'edit') ? '' : 'readonly'}>`);
     case 'optinfo':
       return maskCol('optinfo', optStr);
     case 'signal':
-      return maskCol('signal', `<select class="sm-cell-select" data-meta="signal" data-symbol="${h.symbol}" ${can('meta') ? '' : 'disabled'}>${signalOptions(h.signal)}</select>`);
+      return maskCol('signal', `<select class="sm-cell-select" data-meta="signal" data-symbol="${h.symbol}" ${can('meta', 'edit') ? '' : 'disabled'}>${signalOptions(h.signal)}</select>`);
     case 'actions':
-      return maskCol('actions', can('row-trade') ? `
+      return maskCol('actions', can('row-trade', 'edit') ? `
         <button type="button" class="btn link" data-trade="buy" data-symbol="${h.symbol}">买</button>
         <button type="button" class="btn link" data-trade="sell" data-symbol="${h.symbol}">卖</button>
         <button type="button" class="btn link" data-history="${h.symbol}">记录</button>` : '—');
@@ -736,7 +750,7 @@ function renderTradeListTab() {
               <td>${t.type === 'other' ? '—' : fmtUsd(t.price)}</td>
               <td>${fmtUsd(t.total_amount)}</td>
               <td>${fmtCommission(t.commission)}</td>
-              <td>${can('trade') ? `
+              <td>${can('trade', 'edit') ? `
                 <button type="button" class="btn link" data-edit="${t.id}">编辑</button>
                 <button type="button" class="btn link" data-del="${t.id}">删除</button>` : '—'}
               </td>
@@ -796,8 +810,8 @@ async function renderTradeModalBody() {
       <button type="button" class="sm-tab ${ui.tradeTab === 'summary' ? 'active' : ''}" data-tab="summary">盈亏汇总</button>
     </div>
     <div class="sm-modal-toolbar">
-      ${can('trade') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-add-other">＋ 其它收支</button>' : ''}
-      ${can('import') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-import">导入</button>' : ''}
+      ${can('trade', 'edit') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-add-other">＋ 其它收支</button>' : ''}
+      ${can('import', 'edit') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-import">导入</button>' : ''}
       ${can('export') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-export">导出 xlsx</button>' : ''}
     </div>`;
   const content = ui.tradeTab === 'summary' ? await renderTradeSummaryTab() : renderTradeListTab();
@@ -899,7 +913,7 @@ function bindTradeModalEvents(layer) {
 }
 
 async function saveMeta(symbol, patch) {
-  if (!can('meta')) throw new Error('无权修改');
+  if (!can('meta', 'edit')) throw new Error('无权修改');
   applyPortfolio(await api('/holdings-meta/' + encodeURIComponent(symbol) + pnlQuery(), { method: 'PUT', body: patch }));
 }
 
@@ -944,7 +958,7 @@ $('#col-toggle-panel').addEventListener('change', (e) => {
 });
 
 async function refreshQuotes(symbol) {
-  if (quotesRefreshBusy || !can('refresh')) return;
+  if (quotesRefreshBusy || !can('refresh', 'edit')) return;
   quotesRefreshBusy = true;
   const btn = $('#btn-refresh');
   const rowBtns = [...document.querySelectorAll('[data-refresh]')];
@@ -1017,7 +1031,7 @@ $('#holdings-body').addEventListener('dragover', (e) => {
 $('#holdings-body').addEventListener('dragend', () => { dragSourceSymbol = null; });
 
 $('#holdings-body').addEventListener('drop', async (e) => {
-  if (!can('meta')) return;
+  if (!can('meta', 'edit')) return;
   const targetEl = e.target.closest('[data-drag]');
   if (!targetEl) return;
   e.preventDefault();
@@ -1037,7 +1051,7 @@ $('#holdings-body').addEventListener('drop', async (e) => {
 $('#holdings-body').addEventListener('click', async (e) => {
   const clearSym = e.target.closest('[data-clear-group]')?.dataset.clearGroup;
   if (clearSym) {
-    if (!can('meta')) return;
+    if (!can('meta', 'edit')) return;
     try {
       await saveMeta(clearSym, { groupWith: '' });
       toastOk('已恢复自动分组');
@@ -1061,7 +1075,7 @@ $('#holdings-body').addEventListener('click', async (e) => {
 
 $('#holdings-body').addEventListener('change', async (e) => {
   const el = e.target.closest('[data-meta]');
-  if (!el || !can('meta')) return;
+  if (!el || !can('meta', 'edit')) return;
   const symbol = el.dataset.symbol;
   const field = el.dataset.meta;
   const body = (field === 'target' || field === 'targetPrice')
@@ -1079,6 +1093,7 @@ async function init() {
   await loadPortalContext();
   applyPortalPrefs();
   applyPermissions();
+  applyDipTabs();
   renderColToggle();
   $('#toggle-dashboard').checked = dashboardVisible;
   $('#toggle-pnl-visible').checked = pnlVisible;
