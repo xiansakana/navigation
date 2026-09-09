@@ -3,7 +3,7 @@ import { loadPortalContext, can, isPortalMode } from './js/portal-auth.js';
 const EVENT_LABELS = {
   T1: 'T1', T2: 'T2', T3: 'T3', T4: 'T4', T5: 'T5', T6: 'T6', T7: 'T7',
   R1: 'R1', R2: 'R2', T4_intraday: 'T4 盘中限价', takeProfit: '止盈',
-  fakeRight: '假右侧', reset: '高点重置', openSummary: '开盘摘要',
+  fakeRight: '假右侧', reset: '高点重置', openSummary: '开盘摘要（每交易日首检）',
   sleeveTqqq: 'TQQQ 袖仓', sleeveSoxl: 'SOXL 袖仓'
 };
 
