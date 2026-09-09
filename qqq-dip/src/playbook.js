@@ -259,7 +259,8 @@ function allocationText(tier, vxnGate, spot, B, usd, pctB, variant = 'default') 
   const bandS = shallowOtmBand(spot);
   const leaps = januaryLeapExpiries();
   const leapHint = leaps.length ? leaps.map((x) => x.expiry).join(' / ') : '下一期有量 1 月 LEAP';
-  const money = `$${usd.toFixed(2)}（${formatPctB(pctB)}%B）`;
+  // Percent of B only — dollar amounts belong in the masked「金额」column.
+  const budgetPct = `动用 ${formatPctB(pctB)}%B。`;
   const rightPct = formatPctB((BAG_RATIOS[variant] || BAG_RATIOS.default).right);
   const vxnNote = vxnGate.blocked
     ? `VXN ${vxnGate.missing ? '未知' : vxnGate.value} 未达门槛 ${vxnGate.min}：本档全部改买正股，档位仍算触发。`
@@ -282,7 +283,7 @@ function allocationText(tier, vxnGate, spot, B, usd, pctB, variant = 'default') 
       : `正股为主；VXN≥25 时可加不超过本档一半的中浅虚值 Call。禁止打完 ${rightPct}%B 右侧。`,
     R2: `只加 QQQ 正股。禁止追已经大涨、IV 已塌的深虚值彩票。`
   };
-  return [`动用 ${money}。`, map[tier], vxnNote].filter(Boolean).join(' ');
+  return [budgetPct, map[tier], vxnNote].filter(Boolean).join(' ');
 }
 
 export function evaluateSleeves(tqqq, soxl, B, soxlEnabled) {
