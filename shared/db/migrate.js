@@ -2,8 +2,16 @@ import fs from 'node:fs';
 import { defaultPortfolioJsonPath, defaultRbacJsonPath } from './path.js';
 
 function normalizePortfolio(raw) {
+  const cashUsd = Number.isFinite(Number(raw?.cashUsd))
+    ? Number(raw.cashUsd)
+    : (Number(raw?.cash) || 0);
+  const cashCny = Number(raw?.cashCny) || 0;
+  const usdCnyRate = Number(raw?.usdCnyRate) > 0 ? Number(raw.usdCnyRate) : 7.2;
   return {
-    cash: Number(raw?.cash) || 0,
+    cash: cashUsd,
+    cashUsd,
+    cashCny,
+    usdCnyRate,
     trades: Array.isArray(raw?.trades) ? raw.trades : [],
     quotes: raw?.quotes && typeof raw.quotes === 'object' ? raw.quotes : {},
     holdingsMeta: raw.holdingsMeta && typeof raw.holdingsMeta === 'object' ? raw.holdingsMeta : {}
@@ -24,7 +32,11 @@ export function importPortfolioJson(db, jsonPath) {
   if (!raw) return false;
 
   const tx = db.transaction(function importPortfolio(data) {
-    db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('cash', ?)").run(String(data.cash));
+    const setMeta = db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)');
+    setMeta.run('cash', String(data.cashUsd ?? data.cash ?? 0));
+    setMeta.run('cashUsd', String(data.cashUsd ?? data.cash ?? 0));
+    setMeta.run('cashCny', String(data.cashCny ?? 0));
+    setMeta.run('usdCnyRate', String(data.usdCnyRate ?? 7.2));
     db.prepare('DELETE FROM trades').run();
     db.prepare('DELETE FROM quotes').run();
     db.prepare('DELETE FROM holdings_meta').run();

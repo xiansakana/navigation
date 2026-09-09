@@ -1,8 +1,44 @@
-const EMPTY = { cash: 0, trades: [], quotes: {}, holdingsMeta: {} };
+const DEFAULT_USD_CNY_RATE = 7.2;
+
+const EMPTY = {
+  cashUsd: 0,
+  cashCny: 0,
+  usdCnyRate: DEFAULT_USD_CNY_RATE,
+  cash: 0,
+  trades: [],
+  quotes: {},
+  holdingsMeta: {}
+};
+
+function roundMoney(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
 
 function normalizePortfolio(raw) {
+  let cashUsd;
+  let cashCny;
+  if (raw && (raw.cashUsd != null || raw.cashCny != null)) {
+    cashUsd = Number(raw.cashUsd);
+    if (!Number.isFinite(cashUsd)) cashUsd = Number(raw.cash) || 0;
+    cashCny = Number(raw.cashCny);
+    if (!Number.isFinite(cashCny)) cashCny = 0;
+  } else {
+    cashUsd = Number(raw?.cash) || 0;
+    cashCny = 0;
+  }
+
+  let usdCnyRate = Number(raw?.usdCnyRate);
+  if (!Number.isFinite(usdCnyRate) || usdCnyRate <= 0) usdCnyRate = DEFAULT_USD_CNY_RATE;
+
+  cashUsd = roundMoney(cashUsd);
+  cashCny = roundMoney(cashCny);
+  const cash = roundMoney(cashUsd + cashCny / usdCnyRate);
+
   return {
-    cash: Number(raw?.cash) || 0,
+    cashUsd,
+    cashCny,
+    usdCnyRate,
+    cash,
     trades: Array.isArray(raw?.trades) ? raw.trades : [],
     quotes: raw?.quotes && typeof raw.quotes === 'object' ? raw.quotes : {},
     holdingsMeta: raw?.holdingsMeta && typeof raw.holdingsMeta === 'object' ? raw.holdingsMeta : {}
@@ -10,8 +46,8 @@ function normalizePortfolio(raw) {
 }
 
 export function createPortfolioStore(db) {
-  const getCash = db.prepare("SELECT value FROM meta WHERE key = 'cash'");
-  const setCash = db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('cash', ?)");
+  const getMeta = db.prepare('SELECT value FROM meta WHERE key = ?');
+  const setMeta = db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)');
   const allTrades = db.prepare("SELECT data FROM trades ORDER BY json_extract(data, '$.trade_date') ASC, id ASC");
   const upsertTrade = db.prepare('INSERT OR REPLACE INTO trades (id, data) VALUES (?, ?)');
   const clearTrades = db.prepare('DELETE FROM trades');
@@ -22,25 +58,55 @@ export function createPortfolioStore(db) {
   const upsertMeta = db.prepare('INSERT OR REPLACE INTO holdings_meta (symbol, data) VALUES (?, ?)');
   const clearMeta = db.prepare('DELETE FROM holdings_meta');
 
+  function metaNumber(key, fallback) {
+    const row = getMeta.get(key);
+    if (!row) return fallback;
+    const n = Number(row.value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
   function read() {
-    const cashRow = getCash.get();
+    const legacyCash = metaNumber('cash', null);
+    const cashUsdRaw = getMeta.get('cashUsd');
+    const cashCnyRaw = getMeta.get('cashCny');
+    const rateRaw = getMeta.get('usdCnyRate');
+
+    let cashUsd;
+    let cashCny;
+    if (cashUsdRaw || cashCnyRaw) {
+      cashUsd = cashUsdRaw ? Number(cashUsdRaw.value) : 0;
+      cashCny = cashCnyRaw ? Number(cashCnyRaw.value) : 0;
+    } else {
+      cashUsd = legacyCash != null ? legacyCash : 0;
+      cashCny = 0;
+    }
+    let usdCnyRate = rateRaw ? Number(rateRaw.value) : DEFAULT_USD_CNY_RATE;
+    if (!Number.isFinite(usdCnyRate) || usdCnyRate <= 0) usdCnyRate = DEFAULT_USD_CNY_RATE;
+
     const trades = allTrades.all().map(function(row) { return JSON.parse(row.data); });
     const quotes = {};
     allQuotes.all().forEach(function(row) { quotes[row.symbol] = JSON.parse(row.data); });
     const holdingsMeta = {};
     allMeta.all().forEach(function(row) { holdingsMeta[row.symbol] = JSON.parse(row.data); });
+
     return normalizePortfolio({
-      cash: cashRow ? Number(cashRow.value) : 0,
-      trades: trades,
-      quotes: quotes,
-      holdingsMeta: holdingsMeta
+      cashUsd,
+      cashCny,
+      usdCnyRate,
+      trades,
+      quotes,
+      holdingsMeta
     });
   }
 
   function write(data) {
     const payload = normalizePortfolio(data);
     const tx = db.transaction(function persistPortfolio() {
-      setCash.run(String(payload.cash));
+      setMeta.run('cashUsd', String(payload.cashUsd));
+      setMeta.run('cashCny', String(payload.cashCny));
+      setMeta.run('usdCnyRate', String(payload.usdCnyRate));
+      // Keep legacy `cash` as USD-equivalent for older readers / JSON exports.
+      setMeta.run('cash', String(payload.cash));
       clearTrades.run();
       payload.trades.forEach(function(t) {
         if (!t?.id) return;
@@ -62,4 +128,4 @@ export function createPortfolioStore(db) {
   return { read, write };
 }
 
-export { EMPTY, normalizePortfolio };
+export { EMPTY, normalizePortfolio, DEFAULT_USD_CNY_RATE };

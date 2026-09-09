@@ -15,10 +15,14 @@ import {
   normalizeTrade,
   recalcCashFromTrades,
   roundMoney,
-  cashDelta,
+  applyCashDelta,
+  undoCashDelta,
+  cashUsdEquivalent,
   tradeCalendarDate,
   formatZonedDateTime
 } from './trades.js';
+import { normalizeSymbol } from './markets.js';
+import { DEFAULT_USD_CNY_RATE } from '../../shared/db/portfolio-store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -40,13 +44,24 @@ if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 app.use(express.json({ limit: '2mb' }));
 
 function buildPortfolio(data, pnlOpts = {}) {
+  const rate = Number(data.usdCnyRate) > 0 ? Number(data.usdCnyRate) : DEFAULT_USD_CNY_RATE;
+  const fxOpts = { ...pnlOpts, usdCnyRate: rate };
   const holdings = deriveHoldings(data.trades);
-  const enriched = enrichHoldings(holdings, data.quotes, data.cash, data.holdingsMeta);
-  const pnl = computePnl(data.trades, pnlOpts);
-  const sparse = buildDailyCumulativeSeries(data.trades);
-  const daily = computeDailySummary(enriched.rows, data.trades);
+  const cashState = {
+    cashUsd: Number(data.cashUsd) || 0,
+    cashCny: Number(data.cashCny) || 0,
+    usdCnyRate: rate
+  };
+  const enriched = enrichHoldings(holdings, data.quotes, cashState, data.holdingsMeta);
+  const pnl = computePnl(data.trades, fxOpts);
+  const sparse = buildDailyCumulativeSeries(data.trades, fxOpts);
+  const daily = computeDailySummary(enriched.rows, data.trades, fxOpts);
+  const cashEq = cashUsdEquivalent(cashState.cashUsd, cashState.cashCny, rate);
   return {
-    cash: data.cash,
+    cash: cashEq,
+    cashUsd: cashState.cashUsd,
+    cashCny: cashState.cashCny,
+    usdCnyRate: rate,
     trades: data.trades,
     quotes: data.quotes,
     holdingsMeta: data.holdingsMeta,
@@ -55,10 +70,12 @@ function buildPortfolio(data, pnlOpts = {}) {
     summary: {
       stockMv: enriched.stockMv,
       optionMv: enriched.optionMv,
+      ashareMv: enriched.ashareMv,
       totalMv: enriched.totalMv,
       totalAssets: enriched.totalAssets,
       unrealized: enriched.unrealized,
       totalPnl: enriched.unrealized,
+      cashUsdEq: cashEq,
       ...pnl,
       ...daily
     }
@@ -83,16 +100,44 @@ app.get('/api/portfolio', (req, res) => {
 });
 
 app.put('/api/cash', (req, res) => {
-  const cash = roundMoney(req.body?.cash);
-  if (!Number.isFinite(cash)) return res.status(400).json({ error: '无效现金' });
   const data = store.read();
-  data.cash = cash;
+  const body = req.body || {};
+  let cashUsd = data.cashUsd;
+  let cashCny = data.cashCny;
+  let usdCnyRate = data.usdCnyRate;
+
+  if ('cashUsd' in body || 'cashCny' in body || 'usdCnyRate' in body) {
+    if ('cashUsd' in body) {
+      cashUsd = roundMoney(Number(body.cashUsd));
+      if (!Number.isFinite(cashUsd)) return res.status(400).json({ error: '无效美元现金' });
+    }
+    if ('cashCny' in body) {
+      cashCny = roundMoney(Number(body.cashCny));
+      if (!Number.isFinite(cashCny)) return res.status(400).json({ error: '无效人民币现金' });
+    }
+    if ('usdCnyRate' in body && body.usdCnyRate != null && body.usdCnyRate !== '') {
+      usdCnyRate = Number(body.usdCnyRate);
+      if (!Number.isFinite(usdCnyRate) || usdCnyRate <= 0) {
+        return res.status(400).json({ error: '无效汇率' });
+      }
+    }
+  } else if ('cash' in body) {
+    cashUsd = roundMoney(Number(body.cash));
+    if (!Number.isFinite(cashUsd)) return res.status(400).json({ error: '无效现金' });
+  } else {
+    return res.status(400).json({ error: '无效现金' });
+  }
+
+  data.cashUsd = cashUsd;
+  data.cashCny = cashCny;
+  data.usdCnyRate = usdCnyRate;
+  data.cash = cashUsdEquivalent(cashUsd, cashCny, usdCnyRate);
   store.write(data);
   sendPortfolio(res, req);
 });
 
 app.put('/api/holdings-meta/:symbol', (req, res) => {
-  const symbol = String(req.params.symbol || '').trim().toUpperCase();
+  const symbol = normalizeSymbol(req.params.symbol);
   if (!symbol) return res.status(400).json({ error: '无效代码' });
   const data = store.read();
   if (!data.holdingsMeta) data.holdingsMeta = {};
@@ -108,7 +153,7 @@ app.put('/api/holdings-meta/:symbol', (req, res) => {
   if ('groupWith' in req.body) {
     const v = req.body.groupWith;
     if (v === '' || v == null) delete next.groupWith;
-    else next.groupWith = String(v).trim().toUpperCase();
+    else next.groupWith = normalizeSymbol(v);
   }
   data.holdingsMeta[symbol] = next;
   store.write(data);
@@ -120,7 +165,7 @@ app.post('/api/trades', (req, res) => {
     const trade = normalizeTrade(req.body || {});
     const data = store.read();
     data.trades.push(trade);
-    data.cash = roundMoney(data.cash + cashDelta(trade));
+    Object.assign(data, applyCashDelta(data, trade));
     store.write(data);
     sendPortfolio(res, req);
   } catch (e) {
@@ -136,7 +181,7 @@ app.put('/api/trades/:id', (req, res) => {
     if (i < 0) return res.status(404).json({ error: '未找到' });
     const old = data.trades[i];
     data.trades[i] = { ...trade, id: req.params.id, created_at: old.created_at || trade.created_at };
-    data.cash = roundMoney(data.cash - cashDelta(old) + cashDelta(trade));
+    Object.assign(data, applyCashDelta(undoCashDelta(data, old), trade));
     store.write(data);
     sendPortfolio(res, req);
   } catch (e) {
@@ -150,7 +195,7 @@ app.delete('/api/trades/:id', (req, res) => {
   if (i < 0) return res.status(404).json({ error: '未找到' });
   const old = data.trades[i];
   data.trades.splice(i, 1);
-  data.cash = roundMoney(data.cash - cashDelta(old));
+  Object.assign(data, undoCashDelta(data, old));
   store.write(data);
   sendPortfolio(res, req);
 });
@@ -183,7 +228,12 @@ app.post('/api/trades/import', express.raw({
     const mode = String(req.query.mode || 'merge');
     if (mode === 'replace') data.trades = imported;
     else data.trades = data.trades.concat(imported);
-    data.cash = recalcCashFromTrades(data.trades, 0);
+    const recalc = recalcCashFromTrades(data.trades, {
+      cashUsd: 0,
+      cashCny: 0,
+      usdCnyRate: data.usdCnyRate || DEFAULT_USD_CNY_RATE
+    });
+    Object.assign(data, recalc);
     store.write(data);
     sendPortfolio(res, req);
   } catch (e) {
@@ -195,7 +245,8 @@ app.get('/api/pnl', (req, res) => {
   const data = store.read();
   res.json(computePnl(data.trades, {
     startDate: req.query.start || undefined,
-    endDate: req.query.end || undefined
+    endDate: req.query.end || undefined,
+    usdCnyRate: data.usdCnyRate
   }));
 });
 
@@ -203,7 +254,8 @@ app.get('/api/trades/summary', (req, res) => {
   const data = store.read();
   res.json(computeSymbolSummaries(data.trades, {
     startDate: req.query.start || undefined,
-    endDate: req.query.end || undefined
+    endDate: req.query.end || undefined,
+    usdCnyRate: data.usdCnyRate
   }));
 });
 
@@ -225,6 +277,7 @@ app.get('/api/trades/export', (req, res) => {
     其它类别: t.other_category || '',
     代码: t.symbol,
     名称: t.name || '',
+    币种: t.currency || 'USD',
     股数: t.type === 'other' ? '' : t.shares,
     价格: t.type === 'other' ? '' : t.price,
     金额: t.total_amount,
@@ -266,7 +319,7 @@ app.post('/api/quotes/refresh', async (req, res) => {
   const data = store.read();
   const symbol = req.body?.symbol;
   const symbols = symbol
-    ? [String(symbol).toUpperCase()]
+    ? [normalizeSymbol(symbol)]
     : [...new Set(deriveHoldings(data.trades).map((h) => h.symbol))];
   if (!symbols.length) {
     return res.status(400).json({ error: '暂无持仓可刷新' });
@@ -283,7 +336,14 @@ app.post('/api/quotes/refresh', async (req, res) => {
       errors.push({ symbol: sym, error: e.message || '失败' });
     }
   }
+  try {
+    const fx = await quotes.getUsdCny();
+    if (fx?.rate > 0) data.usdCnyRate = fx.rate;
+  } catch (e) {
+    errors.push({ symbol: 'USDCNY', error: e.message || '汇率失败' });
+  }
   data.quotes = updated;
+  data.cash = cashUsdEquivalent(data.cashUsd, data.cashCny, data.usdCnyRate);
   store.write(data);
   const payload = buildPortfolio(data, pnlOptsFromReq(req));
   payload.refresh = { ok, failed: errors.length, errors };

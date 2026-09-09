@@ -1,3 +1,11 @@
+import {
+  normalizeSymbol,
+  inferCurrency,
+  holdingTypeForSymbol,
+  isAShareSymbol
+} from './markets.js';
+import { DEFAULT_USD_CNY_RATE } from '../../shared/db/portfolio-store.js';
+
 export function isOptionSymbol(symbol) {
   return /^[A-Z]+\d{6}[CP]\d+(?:\.\d+)?$/i.test(String(symbol || '').trim());
 }
@@ -10,11 +18,56 @@ export function roundMoney(n) {
   return Math.round(Number(n) * 100) / 100;
 }
 
+export function tradeCurrency(trade) {
+  return inferCurrency(trade?.symbol, trade?.currency);
+}
+
+/** Cash delta in the trade's native currency. */
 export function cashDelta(trade) {
   const fee = roundMoney(trade.commission || 0);
   const amt = roundMoney(trade.total_amount || 0);
   if (trade.type === 'buy') return roundMoney(-(amt + fee));
   return roundMoney(amt - fee);
+}
+
+export function toUsd(amount, currency, rate = DEFAULT_USD_CNY_RATE) {
+  const n = Number(amount) || 0;
+  const r = Number(rate) > 0 ? Number(rate) : DEFAULT_USD_CNY_RATE;
+  if (String(currency).toUpperCase() === 'CNY') return n / r;
+  return n;
+}
+
+export function cashUsdEquivalent(cashUsd, cashCny, rate = DEFAULT_USD_CNY_RATE) {
+  return roundMoney(toUsd(cashUsd, 'USD', rate) + toUsd(cashCny, 'CNY', rate));
+}
+
+export function applyCashDelta(cashState, trade) {
+  const delta = cashDelta(trade);
+  const cur = tradeCurrency(trade);
+  const next = {
+    cashUsd: Number(cashState.cashUsd) || 0,
+    cashCny: Number(cashState.cashCny) || 0,
+    usdCnyRate: Number(cashState.usdCnyRate) > 0 ? Number(cashState.usdCnyRate) : DEFAULT_USD_CNY_RATE
+  };
+  if (cur === 'CNY') next.cashCny = roundMoney(next.cashCny + delta);
+  else next.cashUsd = roundMoney(next.cashUsd + delta);
+  next.cash = cashUsdEquivalent(next.cashUsd, next.cashCny, next.usdCnyRate);
+  return next;
+}
+
+/** Reverse a previously applied trade cash effect. */
+export function undoCashDelta(cashState, trade) {
+  const delta = cashDelta(trade);
+  const cur = tradeCurrency(trade);
+  const next = {
+    cashUsd: Number(cashState.cashUsd) || 0,
+    cashCny: Number(cashState.cashCny) || 0,
+    usdCnyRate: Number(cashState.usdCnyRate) > 0 ? Number(cashState.usdCnyRate) : DEFAULT_USD_CNY_RATE
+  };
+  if (cur === 'CNY') next.cashCny = roundMoney(next.cashCny - delta);
+  else next.cashUsd = roundMoney(next.cashUsd - delta);
+  next.cash = cashUsdEquivalent(next.cashUsd, next.cashCny, next.usdCnyRate);
+  return next;
 }
 
 export const APP_TIME_ZONE = process.env.STOCK_TZ || 'Asia/Shanghai';
@@ -96,7 +149,7 @@ export function deriveHoldings(trades) {
   const bySym = new Map();
   for (const t of trades) {
     if (t.type !== 'buy' && t.type !== 'sell') continue;
-    const sym = String(t.symbol || '').trim().toUpperCase();
+    const sym = normalizeSymbol(t.symbol);
     if (!sym) continue;
     if (!bySym.has(sym)) bySym.set(sym, []);
     bySym.get(sym).push(t);
@@ -115,13 +168,15 @@ export function deriveHoldings(trades) {
     const shares = queue.reduce((s, x) => s + x.shares, 0);
     if (shares <= 0) continue;
     const cost = queue.reduce((s, x) => s + x.shares * x.price, 0);
+    const type = holdingTypeForSymbol(symbol);
     out.push({
       symbol,
       name,
       shares,
       avgCost: cost / shares,
       costLots: queue.map((x) => ({ shares: x.shares, costPerShare: x.price })),
-      type: isOptionSymbol(symbol) ? 'option' : 'stock'
+      type,
+      currency: type === 'ashare' ? 'CNY' : 'USD'
     });
   }
   out.sort((a, b) => a.symbol.localeCompare(b.symbol));
@@ -130,6 +185,7 @@ export function deriveHoldings(trades) {
 
 export function computePnl(trades, options = {}) {
   const { startDate, endDate } = options;
+  const rate = Number(options.usdCnyRate) > 0 ? Number(options.usdCnyRate) : DEFAULT_USD_CNY_RATE;
   const inWindow = (t) => {
     const d = dateKey(t);
     if (!d) return false;
@@ -144,27 +200,32 @@ export function computePnl(trades, options = {}) {
   let otherAmount = 0;
   for (const t of trades) {
     if (!inWindow(t)) continue;
-    commission += t.commission || 0;
-    if (t.type === 'buy') totalBuy += t.total_amount;
-    else if (t.type === 'sell') totalSell += t.total_amount;
-    else if (t.type === 'other') otherAmount += t.total_amount;
+    const cur = tradeCurrency(t);
+    commission += toUsd(t.commission || 0, cur, rate);
+    if (t.type === 'buy') totalBuy += toUsd(t.total_amount, cur, rate);
+    else if (t.type === 'sell') totalSell += toUsd(t.total_amount, cur, rate);
+    else if (t.type === 'other') otherAmount += toUsd(t.total_amount, cur, rate);
   }
 
   const fifoTrades = trades.filter((t) => t.type === 'buy' || t.type === 'sell');
   const bySym = new Map();
   for (const t of fifoTrades) {
-    const sym = t.symbol.toUpperCase();
+    const sym = normalizeSymbol(t.symbol);
     if (!bySym.has(sym)) bySym.set(sym, []);
     bySym.get(sym).push(t);
   }
 
   let realized = 0;
-  for (const [, list] of bySym) {
+  for (const [symbol, list] of bySym) {
     list.sort((a, b) => tradeTime(a.trade_date) - tradeTime(b.trade_date));
     const queue = [];
+    const cur = isAShareSymbol(symbol) ? 'CNY' : 'USD';
     for (const tr of list) {
       if (tr.type === 'buy') queue.push({ shares: tr.shares, price: tr.price });
-      else realized += applyFifoSellToQueue(queue, tr.shares, tr.price, tr.symbol);
+      else {
+        const gainNative = applyFifoSellToQueue(queue, tr.shares, tr.price, tr.symbol);
+        realized += toUsd(gainNative, tradeCurrency(tr) || cur, rate);
+      }
     }
   }
 
@@ -180,6 +241,7 @@ export function computePnl(trades, options = {}) {
 
 export function computeSymbolSummaries(trades, options = {}) {
   const { startDate, endDate } = options;
+  const rate = Number(options.usdCnyRate) > 0 ? Number(options.usdCnyRate) : DEFAULT_USD_CNY_RATE;
   const symbolsInWindow = new Set();
   for (const t of trades) {
     if (t.type !== 'buy' && t.type !== 'sell') continue;
@@ -187,14 +249,14 @@ export function computeSymbolSummaries(trades, options = {}) {
     if (!d) continue;
     if (startDate && d < startDate) continue;
     if (endDate && d > endDate) continue;
-    symbolsInWindow.add(t.symbol.toUpperCase());
+    symbolsInWindow.add(normalizeSymbol(t.symbol));
   }
   if (!symbolsInWindow.size) return [];
 
   const bySym = new Map();
   for (const t of trades) {
     if (t.type !== 'buy' && t.type !== 'sell') continue;
-    const sym = t.symbol.toUpperCase();
+    const sym = normalizeSymbol(t.symbol);
     if (!symbolsInWindow.has(sym)) continue;
     const d = dateKey(t);
     if (!d || (endDate && d > endDate)) continue;
@@ -225,13 +287,14 @@ export function computeSymbolSummaries(trades, options = {}) {
     let totalCommission = 0;
     let fifoGross = 0;
     for (const t of win) {
-      totalCommission += t.commission || 0;
+      const cur = tradeCurrency(t);
+      totalCommission += toUsd(t.commission || 0, cur, rate);
       if (t.type === 'buy') {
-        totalBuy += t.total_amount;
+        totalBuy += toUsd(t.total_amount, cur, rate);
         queue.push({ shares: t.shares, price: t.price });
       } else {
-        totalSell += t.total_amount;
-        fifoGross += applyFifoSellToQueue(queue, t.shares, t.price, symbol);
+        totalSell += toUsd(t.total_amount, cur, rate);
+        fifoGross += toUsd(applyFifoSellToQueue(queue, t.shares, t.price, symbol), cur, rate);
       }
     }
     const netPnl = fifoGross - totalCommission;
@@ -249,8 +312,9 @@ export function computeSymbolSummaries(trades, options = {}) {
   return out;
 }
 
-export function buildDailyCumulativeSeries(trades) {
+export function buildDailyCumulativeSeries(trades, options = {}) {
   if (!trades.length) return [];
+  const rate = Number(options.usdCnyRate) > 0 ? Number(options.usdCnyRate) : DEFAULT_USD_CNY_RATE;
   const sorted = [...trades].sort((a, b) => tradeTime(a.trade_date) - tradeTime(b.trade_date) || a.id.localeCompare(b.id));
   const byDay = new Map();
   for (const t of sorted) {
@@ -271,16 +335,17 @@ export function buildDailyCumulativeSeries(trades) {
 
   for (const day of days) {
     for (const tr of byDay.get(day)) {
-      cumCommission += tr.commission || 0;
+      const cur = tradeCurrency(tr);
+      cumCommission += toUsd(tr.commission || 0, cur, rate);
       if (tr.type === 'other') {
-        cumOther += tr.total_amount;
+        cumOther += toUsd(tr.total_amount, cur, rate);
         continue;
       }
-      const key = tr.symbol.toUpperCase();
+      const key = normalizeSymbol(tr.symbol);
       if (!queues.has(key)) queues.set(key, []);
       const q = queues.get(key);
       if (tr.type === 'buy') q.push({ shares: tr.shares, price: tr.price });
-      else cumRealized += applyFifoSellToQueue(q, tr.shares, tr.price, tr.symbol);
+      else cumRealized += toUsd(applyFifoSellToQueue(q, tr.shares, tr.price, tr.symbol), cur, rate);
     }
     const cumulativeNet = roundMoney(cumRealized - cumCommission + cumOther);
     out.push({ date: day, cumulativeNet, dayNet: roundMoney(cumulativeNet - prevNet) });
@@ -327,34 +392,52 @@ export function sliceSeries(series, startDate, endDate) {
   });
 }
 
-export function enrichHoldings(holdings, quotes, cash, meta = {}) {
+export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
+  const cashState = typeof cashOrState === 'number'
+    ? { cashUsd: cashOrState, cashCny: 0, usdCnyRate: DEFAULT_USD_CNY_RATE }
+    : {
+      cashUsd: Number(cashOrState?.cashUsd) || 0,
+      cashCny: Number(cashOrState?.cashCny) || 0,
+      usdCnyRate: Number(cashOrState?.usdCnyRate) > 0 ? Number(cashOrState.usdCnyRate) : DEFAULT_USD_CNY_RATE
+    };
+  const rate = cashState.usdCnyRate;
+
   let stockMv = 0;
   let optionMv = 0;
+  let ashareMv = 0;
   let unrealized = 0;
   const rows = holdings.map((h) => {
     const q = quotes[h.symbol] || {};
     const price = Number(q.price) || 0;
     const mult = optionMult(h.symbol);
-    const mv = price * h.shares * mult;
-    const cost = h.avgCost * h.shares * mult;
+    const currency = h.currency || (h.type === 'ashare' || isAShareSymbol(h.symbol) ? 'CNY' : 'USD');
+    const mvNative = price * h.shares * mult;
+    const costNative = h.avgCost * h.shares * mult;
+    const mv = toUsd(mvNative, currency, rate);
+    const cost = toUsd(costNative, currency, rate);
     const pnl = price > 0 ? mv - cost : null;
     const pnlPct = price > 0 && h.avgCost ? ((price - h.avgCost) / h.avgCost) * 100 : null;
     const change = q.change != null && q.change !== '' ? Number(q.change) : null;
     const changePct = q.changePercent != null && q.changePercent !== '' ? Number(q.changePercent) : null;
-    const dailyPnl = price > 0 && change != null && Number.isFinite(change)
+    const dailyPnlNative = price > 0 && change != null && Number.isFinite(change)
       ? roundMoney(change * h.shares * mult) : null;
+    const dailyPnl = dailyPnlNative != null ? roundMoney(toUsd(dailyPnlNative, currency, rate)) : null;
     const m = meta[h.symbol] || {};
     if (h.type === 'option') optionMv += mv;
+    else if (h.type === 'ashare' || currency === 'CNY') ashareMv += mv;
     else stockMv += mv;
     if (pnl != null) unrealized += pnl;
     const opt = parseOptionInfo(h.symbol);
     return {
       ...h,
+      currency,
       price,
-      marketValue: mv,
-      pnl,
+      marketValueNative: roundMoney(mvNative),
+      marketValue: roundMoney(mv),
+      pnl: pnl != null ? roundMoney(pnl) : null,
       pnlPct,
       dailyPnl,
+      dailyPnlNative,
       dailyPnlPct: price > 0 && changePct != null && Number.isFinite(changePct) ? changePct : null,
       change: change ?? 0,
       changePercent: changePct ?? 0,
@@ -366,8 +449,9 @@ export function enrichHoldings(holdings, quotes, cash, meta = {}) {
       optionInfo: opt
     };
   });
-  const totalMv = stockMv + optionMv;
-  const totalAssets = totalMv + cash;
+  const totalMv = stockMv + optionMv + ashareMv;
+  const cashEq = cashUsdEquivalent(cashState.cashUsd, cashState.cashCny, rate);
+  const totalAssets = totalMv + cashEq;
   rows.forEach((r) => {
     r.groupKey = (() => {
       const manual = String(meta[r.symbol]?.groupWith || '').trim().toUpperCase();
@@ -390,11 +474,20 @@ export function enrichHoldings(holdings, quotes, cash, meta = {}) {
     r.groupMarketValue = gs;
     r.weight = totalAssets > 0 ? (gs / totalAssets) * 100 : 0;
   });
-  return { rows, stockMv, optionMv, totalMv, totalAssets, unrealized };
+  return {
+    rows,
+    stockMv: roundMoney(stockMv),
+    optionMv: roundMoney(optionMv),
+    ashareMv: roundMoney(ashareMv),
+    totalMv: roundMoney(totalMv),
+    totalAssets: roundMoney(totalAssets),
+    cashUsdEq: cashEq,
+    unrealized: roundMoney(unrealized)
+  };
 }
 
-/** 当日总盈亏 = 持仓当日涨跌合计 + 今日交易净变动（已实现/费用/其它） */
-export function computeDailySummary(holdingRows, trades) {
+/** 当日总盈亏 = 持仓当日涨跌合计 + 今日交易净变动（已实现/费用/其它）；金额均为美元口径 */
+export function computeDailySummary(holdingRows, trades, options = {}) {
   let marketDaily = 0;
   let hasMarket = false;
   for (const h of holdingRows) {
@@ -404,7 +497,7 @@ export function computeDailySummary(holdingRows, trades) {
     }
   }
   const today = zonedDateKey();
-  const sparse = buildDailyCumulativeSeries(trades);
+  const sparse = buildDailyCumulativeSeries(trades, options);
   const todayPoint = sparse.find((p) => p.date === today);
   const tradeDaily = todayPoint?.dayNet ?? 0;
   const hasTradeToday = !!todayPoint;
@@ -421,7 +514,8 @@ export function computeDailySummary(holdingRows, trades) {
 
 export function normalizeTrade(input) {
   const type = input.type;
-  const symbol = String(input.symbol || '').trim().toUpperCase();
+  const symbol = normalizeSymbol(input.symbol);
+  const currency = inferCurrency(symbol, input.currency);
   if (type === 'other') {
     const cat = String(input.other_category || '').trim();
     const amt = Number(input.total_amount);
@@ -432,6 +526,7 @@ export function normalizeTrade(input) {
       name: String(input.name || cat),
       type: 'other',
       other_category: cat,
+      currency: currency === 'CNY' ? 'CNY' : 'USD',
       shares: 1,
       price: 0,
       total_amount: roundMoney(amt),
@@ -450,6 +545,7 @@ export function normalizeTrade(input) {
     symbol,
     name: String(input.name || symbol),
     type: type === 'sell' ? 'sell' : 'buy',
+    currency,
     shares,
     price: roundMoney(price),
     total_amount: total,
@@ -459,6 +555,18 @@ export function normalizeTrade(input) {
   };
 }
 
-export function recalcCashFromTrades(trades, baseCash = 0) {
-  return roundMoney(trades.reduce((c, t) => c + cashDelta(t), baseCash));
+export function recalcCashFromTrades(trades, base = {}) {
+  let state = {
+    cashUsd: Number(base.cashUsd) || (typeof base === 'number' ? base : 0),
+    cashCny: Number(base.cashCny) || 0,
+    usdCnyRate: Number(base.usdCnyRate) > 0 ? Number(base.usdCnyRate) : DEFAULT_USD_CNY_RATE
+  };
+  if (typeof base === 'number') {
+    state = { cashUsd: base, cashCny: 0, usdCnyRate: DEFAULT_USD_CNY_RATE };
+  }
+  for (const t of trades) {
+    state = applyCashDelta(state, t);
+  }
+  state.cash = cashUsdEquivalent(state.cashUsd, state.cashCny, state.usdCnyRate);
+  return state;
 }
