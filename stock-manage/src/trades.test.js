@@ -55,6 +55,10 @@ test('enrichHoldings converts CNY market value to USD', () => {
   assert.equal(ashare.currency, 'CNY');
   assert.equal(ashare.marketValueNative, 1500);
   assert.equal(ashare.marketValue, roundMoney(1500 / 7));
+  assert.equal(ashare.pnl, 100); // 本币盈亏
+  assert.equal(ashare.dailyPnl, 100); // 本币当日盈亏
+  assert.equal(enriched.unrealizedCny, 100);
+  assert.equal(enriched.ashareMvNative, 1500);
   assert.ok(enriched.ashareMv > 0);
   assert.equal(enriched.cashUsdEq, cashUsdEquivalent(100, 700, 7));
   assert.equal(enriched.totalAssets, roundMoney(enriched.totalMv + enriched.cashUsdEq));

@@ -230,15 +230,32 @@ function renderDashboard() {
   const s = state.summary || {};
   const cashEq = Number.isFinite(s.cashUsdEq) ? s.cashUsdEq : state.cash;
   const cashPct = s.totalAssets > 0 ? (cashEq / s.totalAssets * 100) : 0;
-  const dailyVal = s.dailyTotalPnl;
+  const usPnl = s.totalPnlUsd;
+  const cnPnl = s.totalPnlCny;
+  const dailyUs = s.dailyTotalPnlUsd != null ? s.dailyTotalPnlUsd : s.marketDailyPnlUsd;
+  const dailyCn = s.dailyTotalPnlCny != null ? s.dailyTotalPnlCny : s.marketDailyPnlCny;
+  const hasDaily = dailyUs != null || dailyCn != null || s.dailyTotalPnl != null;
   const dailyHint = !dashboardVisible || !pnlVisible
     ? '—'
-    : dailyVal == null
+    : !hasDaily
       ? '刷新行情后显示持仓涨跌'
       : (s.tradeDailyPnl != null && s.tradeDailyPnl !== 0
-        ? `持仓 ${fmtUsd(s.marketDailyPnl)} + 交易 ${fmtUsd(s.tradeDailyPnl)}`
-        : '持仓当日涨跌合计');
-  const dailyDisplay = dailyVal == null ? '—' : fmtUsdSigned(dailyVal);
+        ? `含今日交易净变动 ${fmtUsd(s.tradeDailyPnl)}`
+        : '持仓当日涨跌');
+  const usPnlDisplay = usPnl == null ? '—' : fmtUsdSigned(usPnl);
+  const dailyUsDisplay = dailyUs == null ? '—' : fmtUsdSigned(dailyUs);
+  const hasAshare = Number(s.ashareMvNative) > 0 || (Number.isFinite(cnPnl) && cnPnl !== 0);
+  const ashareMvHint = hasAshare || Number(s.ashareMvNative) > 0
+    ? `<div class="hint">A股/ETF ${fmtCny(s.ashareMvNative ?? 0)}</div>`
+    : '';
+  const totalPnlHint = hasAshare
+    ? `A股/ETF ${fmtMoneySigned(Number.isFinite(cnPnl) ? cnPnl : 0, 'CNY')}`
+    : '美股未实现盈亏';
+  const dailyPnlHintParts = [];
+  if (hasAshare || (Number.isFinite(dailyCn) && dailyCn !== 0)) {
+    dailyPnlHintParts.push(`A股/ETF ${dailyCn == null ? '—' : fmtMoneySigned(dailyCn, 'CNY')}`);
+  }
+  if (dailyHint && dailyHint !== '—') dailyPnlHintParts.push(dailyHint);
   const cashField = !dashboardVisible
     ? `<div class="value">${MASK}</div>`
     : can('cash', 'edit')
@@ -258,7 +275,7 @@ function renderDashboard() {
       <div class="sm-summary-card">
         <div class="label">股票市值</div>
         <div class="value">${maskDashboardValue(fmtUsd(s.stockMv))}</div>
-        ${s.ashareMv ? `<div class="hint">A股/ETF ${fmtUsd(s.ashareMv)}</div>` : ''}
+        ${ashareMvHint}
       </div>
       <div class="sm-summary-card">
         <div class="label">期权市值</div>
@@ -266,13 +283,13 @@ function renderDashboard() {
       </div>
       <div class="sm-summary-card sm-summary-card--green">
         <div class="label">总盈亏</div>
-        <div class="value ${dashboardVisible && pnlVisible ? cls(s.totalPnl) : ''}">${maskDashboardValue(maskPnlValue(fmtUsdSigned(s.totalPnl)))}</div>
-        <div class="hint">未实现盈亏合计（美元）</div>
+        <div class="value ${dashboardVisible && pnlVisible ? cls(usPnl) : ''}">${maskDashboardValue(maskPnlValue(usPnlDisplay))}</div>
+        <div class="hint">${maskDashboardValue(maskPnlValue(totalPnlHint))}</div>
       </div>
       <div class="sm-summary-card sm-summary-card--amber">
         <div class="label">当日总盈亏</div>
-        <div class="value ${dashboardVisible && pnlVisible && dailyVal != null ? cls(dailyVal) : ''}">${maskDashboardValue(maskPnlValue(dailyDisplay))}</div>
-        <div class="hint">${dailyHint}</div>
+        <div class="value ${dashboardVisible && pnlVisible && dailyUs != null ? cls(dailyUs) : ''}">${maskDashboardValue(maskPnlValue(dailyUsDisplay))}</div>
+        <div class="hint">${maskDashboardValue(maskPnlValue(dailyPnlHintParts.join(' · ') || '—'))}</div>
       </div>
       <div class="sm-summary-card sm-summary-card--cash">
         <div class="label">现金</div>
@@ -351,11 +368,11 @@ function holdingsCellContent(h, key, ctx) {
       return maskCol('price', `<span>${fmtMoney(h.price, cur)}</span>${delayHint}${can('refresh', 'edit') ? ` <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>` : ''}`);
     }
     case 'pnl':
-      return maskCol('pnl', h.pnl == null ? '—' : fmtUsdSigned(h.pnl));
+      return maskCol('pnl', h.pnl == null ? '—' : `<span class="${cls(h.pnl)}">${fmtMoneySigned(h.pnl, cur)}</span>`);
     case 'pnlPct':
       return maskCol('pnlPct', h.pnlPct == null ? '—' : fmtPct(h.pnlPct));
     case 'dailyPnl':
-      return maskCol('dailyPnl', h.dailyPnl == null ? '—' : fmtUsdSigned(h.dailyPnl));
+      return maskCol('dailyPnl', h.dailyPnl == null ? '—' : `<span class="${cls(h.dailyPnl)}">${fmtMoneySigned(h.dailyPnl, cur)}</span>`);
     case 'dailyPnlPct':
       return maskCol('dailyPnlPct', h.dailyPnlPct == null ? '—' : fmtPct(h.dailyPnlPct));
     case 'position': {
