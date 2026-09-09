@@ -405,28 +405,49 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
   let stockMv = 0;
   let optionMv = 0;
   let ashareMv = 0;
-  let unrealized = 0;
+  let ashareMvNative = 0;
+  let unrealizedUsd = 0;
+  let unrealizedCny = 0;
+  let marketDailyUsd = 0;
+  let marketDailyCny = 0;
+  let hasMarketDailyUsd = false;
+  let hasMarketDailyCny = false;
   const rows = holdings.map((h) => {
     const q = quotes[h.symbol] || {};
     const price = Number(q.price) || 0;
     const mult = optionMult(h.symbol);
     const currency = h.currency || (h.type === 'ashare' || isAShareSymbol(h.symbol) ? 'CNY' : 'USD');
+    const isCny = currency === 'CNY';
     const mvNative = price * h.shares * mult;
     const costNative = h.avgCost * h.shares * mult;
     const mv = toUsd(mvNative, currency, rate);
-    const cost = toUsd(costNative, currency, rate);
-    const pnl = price > 0 ? mv - cost : null;
+    const pnlNative = price > 0 ? roundMoney(mvNative - costNative) : null;
+    const pnlUsd = pnlNative != null ? roundMoney(toUsd(pnlNative, currency, rate)) : null;
     const pnlPct = price > 0 && h.avgCost ? ((price - h.avgCost) / h.avgCost) * 100 : null;
     const change = q.change != null && q.change !== '' ? Number(q.change) : null;
     const changePct = q.changePercent != null && q.changePercent !== '' ? Number(q.changePercent) : null;
     const dailyPnlNative = price > 0 && change != null && Number.isFinite(change)
       ? roundMoney(change * h.shares * mult) : null;
-    const dailyPnl = dailyPnlNative != null ? roundMoney(toUsd(dailyPnlNative, currency, rate)) : null;
+    const dailyPnlUsd = dailyPnlNative != null ? roundMoney(toUsd(dailyPnlNative, currency, rate)) : null;
     const m = meta[h.symbol] || {};
     if (h.type === 'option') optionMv += mv;
-    else if (h.type === 'ashare' || currency === 'CNY') ashareMv += mv;
-    else stockMv += mv;
-    if (pnl != null) unrealized += pnl;
+    else if (h.type === 'ashare' || isCny) {
+      ashareMv += mv;
+      ashareMvNative += mvNative;
+    } else stockMv += mv;
+    if (pnlNative != null) {
+      if (isCny) unrealizedCny += pnlNative;
+      else unrealizedUsd += pnlNative;
+    }
+    if (dailyPnlNative != null) {
+      if (isCny) {
+        marketDailyCny += dailyPnlNative;
+        hasMarketDailyCny = true;
+      } else {
+        marketDailyUsd += dailyPnlNative;
+        hasMarketDailyUsd = true;
+      }
+    }
     const opt = parseOptionInfo(h.symbol);
     const quoteName = String(q.name || '').trim();
     const displayName = (quoteName && quoteName !== h.symbol)
@@ -439,9 +460,12 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
       price,
       marketValueNative: roundMoney(mvNative),
       marketValue: roundMoney(mv),
-      pnl: pnl != null ? roundMoney(pnl) : null,
+      // 行内盈亏按本币；pnlUsd 供汇总折汇
+      pnl: pnlNative,
+      pnlUsd,
       pnlPct,
-      dailyPnl,
+      dailyPnl: dailyPnlNative,
+      dailyPnlUsd,
       dailyPnlNative,
       dailyPnlPct: price > 0 && changePct != null && Number.isFinite(changePct) ? changePct : null,
       change: change ?? 0,
@@ -457,6 +481,7 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
   const totalMv = stockMv + optionMv + ashareMv;
   const cashEq = cashUsdEquivalent(cashState.cashUsd, cashState.cashCny, rate);
   const totalAssets = totalMv + cashEq;
+  const unrealized = roundMoney(unrealizedUsd + toUsd(unrealizedCny, 'CNY', rate));
   rows.forEach((r) => {
     r.groupKey = (() => {
       const manual = String(meta[r.symbol]?.groupWith || '').trim().toUpperCase();
@@ -484,21 +509,35 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
     stockMv: roundMoney(stockMv),
     optionMv: roundMoney(optionMv),
     ashareMv: roundMoney(ashareMv),
+    ashareMvNative: roundMoney(ashareMvNative),
     totalMv: roundMoney(totalMv),
     totalAssets: roundMoney(totalAssets),
     cashUsdEq: cashEq,
-    unrealized: roundMoney(unrealized)
+    unrealized,
+    unrealizedUsd: roundMoney(unrealizedUsd),
+    unrealizedCny: roundMoney(unrealizedCny),
+    marketDailyUsd: hasMarketDailyUsd ? roundMoney(marketDailyUsd) : null,
+    marketDailyCny: hasMarketDailyCny ? roundMoney(marketDailyCny) : null
   };
 }
 
-/** 当日总盈亏 = 持仓当日涨跌合计 + 今日交易净变动（已实现/费用/其它）；金额均为美元口径 */
+/** 当日总盈亏：美股/期权按美元，A 股按人民币分开累计；交易净变动仍按当前汇率折美元（兼容旧字段） */
 export function computeDailySummary(holdingRows, trades, options = {}) {
-  let marketDaily = 0;
-  let hasMarket = false;
+  const rate = Number(options.usdCnyRate) > 0 ? Number(options.usdCnyRate) : DEFAULT_USD_CNY_RATE;
+  let marketDailyUsd = 0;
+  let marketDailyCny = 0;
+  let hasMarketUsd = false;
+  let hasMarketCny = false;
   for (const h of holdingRows) {
-    if (h.dailyPnl != null && Number.isFinite(h.dailyPnl)) {
-      marketDaily += h.dailyPnl;
-      hasMarket = true;
+    const isCny = h.currency === 'CNY' || h.type === 'ashare';
+    const native = h.dailyPnlNative != null ? h.dailyPnlNative : h.dailyPnl;
+    if (native == null || !Number.isFinite(native)) continue;
+    if (isCny) {
+      marketDailyCny += native;
+      hasMarketCny = true;
+    } else {
+      marketDailyUsd += native;
+      hasMarketUsd = true;
     }
   }
   const today = zonedDateKey();
@@ -506,14 +545,37 @@ export function computeDailySummary(holdingRows, trades, options = {}) {
   const todayPoint = sparse.find((p) => p.date === today);
   const tradeDaily = todayPoint?.dayNet ?? 0;
   const hasTradeToday = !!todayPoint;
+  const hasMarket = hasMarketUsd || hasMarketCny;
 
   if (!hasMarket && !hasTradeToday) {
-    return { dailyTotalPnl: null, marketDailyPnl: null, tradeDailyPnl: null };
+    return {
+      dailyTotalPnl: null,
+      marketDailyPnl: null,
+      tradeDailyPnl: null,
+      marketDailyPnlUsd: null,
+      marketDailyPnlCny: null,
+      dailyTotalPnlUsd: null,
+      dailyTotalPnlCny: null
+    };
   }
+
+  const marketUsd = hasMarketUsd ? roundMoney(marketDailyUsd) : null;
+  const marketCny = hasMarketCny ? roundMoney(marketDailyCny) : null;
+  const marketUsdEq = roundMoney(
+    (marketUsd || 0) + toUsd(marketCny || 0, 'CNY', rate)
+  );
+  const tradeUsd = hasTradeToday ? roundMoney(tradeDaily) : null;
+
   return {
-    dailyTotalPnl: roundMoney(marketDaily + tradeDaily),
-    marketDailyPnl: hasMarket ? roundMoney(marketDaily) : null,
-    tradeDailyPnl: hasTradeToday ? roundMoney(tradeDaily) : null
+    dailyTotalPnl: roundMoney(marketUsdEq + (tradeUsd || 0)),
+    marketDailyPnl: hasMarket ? marketUsdEq : null,
+    tradeDailyPnl: tradeUsd,
+    marketDailyPnlUsd: marketUsd,
+    marketDailyPnlCny: marketCny,
+    dailyTotalPnlUsd: hasMarketUsd || hasTradeToday
+      ? roundMoney((marketUsd || 0) + (tradeUsd || 0))
+      : null,
+    dailyTotalPnlCny: marketCny
   };
 }
 
