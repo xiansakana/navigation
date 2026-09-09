@@ -10,6 +10,7 @@ function configServicesKey(config) {
 }
 
 var STOCK_MANAGE_SERVICE_ID = 'stock-manage';
+var QQQ_DIP_SERVICE_ID = 'qqq-dip';
 
 var STOCK_MANAGE_HOLDINGS_COLUMNS = [
     { key: 'type', name: '类型' },
@@ -67,6 +68,43 @@ function buildStockManagePermissions() {
             action: item.action,
             featureGroup: item.featureGroup || null,
             columnKey: item.columnKey || null
+        };
+    });
+}
+
+var QQQ_DIP_FEATURES = [
+    { feature: 'tab-monitor', name: '抄底监控 Tab', action: 'view' },
+    { feature: 'tab-qq', name: 'QQ 提醒 Tab', action: 'view' },
+    { feature: 'docs', name: '手册预览', action: 'view' },
+    { feature: 'buy-preview', name: '预览买入', action: 'view' },
+    { feature: 'refresh', name: '刷新行情', action: 'edit' },
+    { feature: 'monitor-control', name: '开始/停止监听', action: 'edit' },
+    { feature: 'cash', name: '弹药现金录入', action: 'edit' },
+    { feature: 'settings', name: '规则开关', action: 'edit' },
+    { feature: 'tier-exec', name: '标记档位已执行', action: 'edit' },
+    { feature: 'lots', name: '抄底仓位金额', action: 'view' },
+    { feature: 'lots-edit', name: '登记/删除仓位', action: 'edit' },
+    { feature: 'actions', name: '操作记录', action: 'view' },
+    { feature: 'actions-note', name: '手动记一笔', action: 'edit' },
+    { feature: 'qq-config', name: 'QQ 配置', action: 'view' },
+    { feature: 'qq-save', name: '保存 QQ 配置', action: 'edit' },
+    { feature: 'qq-test', name: '测试 QQ 通知', action: 'edit' },
+    { feature: 'qq-monitor', name: 'QQ 页监听控制', action: 'edit' }
+];
+
+function qqqDipFeaturePermissionId(feature, action) {
+    return 'service:' + QQQ_DIP_SERVICE_ID + ':' + feature + ':' + action;
+}
+
+function buildQqqDipPermissions() {
+    return QQQ_DIP_FEATURES.map(function(item) {
+        return {
+            id: qqqDipFeaturePermissionId(item.feature, item.action),
+            name: item.name,
+            group: '抄底监控',
+            serviceId: QQQ_DIP_SERVICE_ID,
+            feature: item.feature,
+            action: item.action
         };
     });
 }
@@ -170,6 +208,9 @@ function buildDefaultGuestPermissions(services) {
     buildStockManagePermissions().forEach(function(item) {
         if (item.action === 'view') perms.add(item.id);
     });
+    buildQqqDipPermissions().forEach(function(item) {
+        if (item.action === 'view') perms.add(item.id);
+    });
     return Array.from(perms);
 }
 
@@ -181,10 +222,13 @@ function ensureGuestAccess(data, config) {
 
     var guestRole = data.roles.find(function(r) { return r.id === 'role_guest'; });
     if (guestRole) {
+        // 仅保证服务级入口；细粒度按钮/面板权限以管理员保存的勾选为准，
+        // 不要在每次 sync 时把 view 功能权限强行加回。
         var guestPerms = new Set(guestRole.permissions || []);
         if (guestPerms.has('service:stock-manage:view')) {
             guestPerms.add('service:qqq-dip:view');
         }
+        denyGuest.forEach(function(p) { guestPerms.delete(p); });
         guestRole.permissions = Array.from(guestPerms);
     }
     if (!guestRole) {
@@ -301,9 +345,10 @@ function buildMenusFromServices(services, overrides) {
 function createDefaultRbac(config) {
     var servicePerms = buildServicePermissions(config.services);
     var stockManagePerms = buildStockManagePermissions();
+    var qqqDipPerms = buildQqqDipPermissions();
     var adminUser = config.auth || {};
     var pwd = createPasswordRecord(adminUser.password || 'change-me');
-    return {
+    var created = {
         users: [{
             id: 'usr_admin',
             username: adminUser.username || 'admin',
@@ -315,7 +360,7 @@ function createDefaultRbac(config) {
         }],
         roles: [defaultAdminRole(servicePerms), defaultUserRole()],
         menus: buildMenusFromServices(config.services, []),
-        permissions: SYSTEM_PERMISSIONS.concat(servicePerms).concat(stockManagePerms),
+        permissions: SYSTEM_PERMISSIONS.concat(servicePerms).concat(stockManagePerms).concat(qqqDipPerms),
         userPrefs: {}
     };
     ensureGuestAccess(created, config);
@@ -372,8 +417,9 @@ export function syncRbacPermissions(data, config) {
     var before = JSON.stringify(data);
     var servicePerms = buildServicePermissions(config.services);
     var stockManagePerms = buildStockManagePermissions();
+    var qqqDipPerms = buildQqqDipPermissions();
     var known = {};
-    SYSTEM_PERMISSIONS.concat(servicePerms).concat(stockManagePerms).forEach(function(p) { known[p.id] = p; });
+    SYSTEM_PERMISSIONS.concat(servicePerms).concat(stockManagePerms).concat(qqqDipPerms).forEach(function(p) { known[p.id] = p; });
     (data.permissions || []).forEach(function(p) {
         if (!known[p.id]) known[p.id] = p;
     });
@@ -505,6 +551,24 @@ export function canEditService(userPerms, serviceId) {
     return hasPermission(userPerms, serviceEditPermissionId(serviceId));
 }
 
+export function canWriteService(userPerms, serviceId) {
+    if (canEditService(userPerms, serviceId)) return true;
+    if ((userPerms || []).includes('*')) return true;
+    if (serviceId === STOCK_MANAGE_SERVICE_ID) {
+        return STOCK_MANAGE_FEATURES.some(function(item) {
+            return item.action === 'edit'
+                && userPerms.includes(stockManageFeaturePermissionId(item.feature, item.action));
+        });
+    }
+    if (serviceId === QQQ_DIP_SERVICE_ID) {
+        return QQQ_DIP_FEATURES.some(function(item) {
+            return item.action === 'edit'
+                && userPerms.includes(qqqDipFeaturePermissionId(item.feature, item.action));
+        });
+    }
+    return false;
+}
+
 export function hasStockManageFeature(userPerms, feature, action) {
     if (!feature) return true;
     if ((userPerms || []).includes('*')) return true;
@@ -512,6 +576,17 @@ export function hasStockManageFeature(userPerms, feature, action) {
     if (userPerms.includes(fid)) return true;
     if (action === 'view') {
         if (userPerms.includes(stockManageFeaturePermissionId(feature, 'edit'))) return true;
+    }
+    return false;
+}
+
+export function hasQqqDipFeature(userPerms, feature, action) {
+    if (!feature) return true;
+    if ((userPerms || []).includes('*')) return true;
+    var fid = qqqDipFeaturePermissionId(feature, action);
+    if (userPerms.includes(fid)) return true;
+    if (action === 'view') {
+        if (userPerms.includes(qqqDipFeaturePermissionId(feature, 'edit'))) return true;
     }
     return false;
 }
@@ -712,8 +787,10 @@ export function updateMenus(data, menus) {
 export {
     SYSTEM_PERMISSIONS,
     STOCK_MANAGE_FEATURES,
+    QQQ_DIP_FEATURES,
     serviceViewPermissionId,
     serviceEditPermissionId,
     stockManageFeaturePermissionId,
+    qqqDipFeaturePermissionId,
     newId
 };
