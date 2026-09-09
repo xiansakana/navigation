@@ -446,20 +446,92 @@ export function createQuoteService(config) {
     }
   }
 
-  async function getCnyProxyQuote() {
-    const q = await getYahooQuote('159509.SZ');
+  async function getCnyProxyFromEastMoney() {
+    // Shenzhen ETF: secid=0.XXXXXX; fltt=2 returns yuan prices directly.
+    const url = 'https://push2.eastmoney.com/api/qt/stock/get?invt=2&fltt=2&fields=f43,f44,f45,f46,f57,f58,f60,f169,f170&secid=0.159509';
+    const data = await fetchJson(url, {
+      'User-Agent': 'Mozilla/5.0',
+      Referer: 'https://quote.eastmoney.com/'
+    });
+    const d = data?.data;
+    const price = Number(d?.f43);
+    if (!Number.isFinite(price) || price <= 0) throw new Error('东方财富无行情');
+    const prev = Number(d?.f60) || price;
+    const change = Number.isFinite(Number(d?.f169)) ? Number(d.f169) : price - prev;
+    const changePercent = Number.isFinite(Number(d?.f170))
+      ? Number(d.f170)
+      : (prev ? ((price - prev) / prev) * 100 : 0);
     return {
       symbol: CNY_EQUITY_PROXY_SYMBOL,
-      price: q.price,
-      close: q.close ?? q.price,
-      prevClose: q.prevClose,
-      change: q.change,
-      changePercent: q.changePercent,
-      high: q.high,
-      low: q.low,
-      source: 'yahoo',
+      name: d?.f58 || '纳指科技ETF景顺',
+      price,
+      close: price,
+      prevClose: prev,
+      change,
+      changePercent,
+      high: Number(d?.f44) || price,
+      low: Number(d?.f45) || price,
+      source: 'eastmoney',
       candles: []
     };
+  }
+
+  async function getCnyProxyFromTencent() {
+    const text = await fetchText('https://qt.gtimg.cn/q=sz159509', {
+      'User-Agent': 'Mozilla/5.0'
+    });
+    const m = text.match(/="([^"]*)"/);
+    if (!m) throw new Error('腾讯无行情');
+    const parts = m[1].split('~');
+    // 1 name, 2 code, 3 price, 4 prevClose, 5 open, 33 high, 34 low (approx common layout)
+    const price = Number(parts[3]);
+    const prev = Number(parts[4]) || price;
+    if (!Number.isFinite(price) || price <= 0) throw new Error('腾讯无有效价');
+    return {
+      symbol: CNY_EQUITY_PROXY_SYMBOL,
+      name: parts[1] || '纳指科技ETF景顺',
+      price,
+      close: price,
+      prevClose: prev,
+      change: price - prev,
+      changePercent: prev ? ((price - prev) / prev) * 100 : 0,
+      high: Number(parts[33]) || price,
+      low: Number(parts[34]) || price,
+      source: 'tencent',
+      candles: []
+    };
+  }
+
+  async function getCnyProxyQuote() {
+    const errors = [];
+    try {
+      return await getCnyProxyFromEastMoney();
+    } catch (e) {
+      errors.push(`东方财富: ${e.message}`);
+    }
+    try {
+      return await getCnyProxyFromTencent();
+    } catch (e) {
+      errors.push(`腾讯: ${e.message}`);
+    }
+    try {
+      const q = await getYahooQuote('159509.SZ');
+      return {
+        symbol: CNY_EQUITY_PROXY_SYMBOL,
+        price: q.price,
+        close: q.close ?? q.price,
+        prevClose: q.prevClose,
+        change: q.change,
+        changePercent: q.changePercent,
+        high: q.high,
+        low: q.low,
+        source: 'yahoo',
+        candles: []
+      };
+    } catch (e) {
+      errors.push(`Yahoo: ${e.message}`);
+      throw new Error(`159509 不可用（${errors.join('; ')}）`);
+    }
   }
 
   async function getMarketBundle(symbols) {
