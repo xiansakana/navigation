@@ -543,15 +543,55 @@ function openBuyPreview() {
   });
 }
 
+function sleeveBySymbol(symbol) {
+  return (state.evaluation?.sleeves || []).find((s) => s.symbol === symbol) || null;
+}
+
+function nextLevelHint(label, stats) {
+  if (!stats?.H) return '—';
+  const H = stats.H;
+  const hTxt = `H ${H.toFixed(2)}`;
+  if (label === 'QQQ') {
+    const next = stats.triggers?.T1;
+    return `${hTxt} · T1(−8%) ${next != null ? next : '—'}`;
+  }
+  if (label === 'SPY') {
+    return `${hTxt} · 非独立梯子（最多可作 QQQ T1 的 20% 降波）`;
+  }
+  if (label === 'TQQQ') {
+    const sleeve = sleeveBySymbol('TQQQ');
+    const t35 = sleeve?.trigger35 ?? roundMoneyClient(H * 0.65);
+    const t50 = sleeve?.trigger50 ?? roundMoneyClient(H * 0.5);
+    const dd = stats.drawdownLive;
+    if (dd != null && dd <= -50) return `${hTxt} · 袖仓已到 −50%（上限档 ${t50}）`;
+    if (dd != null && dd <= -35) return `${hTxt} · 下一袖仓 −50% ${t50}`;
+    return `${hTxt} · 下一袖仓 −35% ${t35}`;
+  }
+  if (label === 'SOXL') {
+    const sleeve = sleeveBySymbol('SOXL');
+    const t50 = sleeve?.trigger50 ?? roundMoneyClient(H * 0.5);
+    const t70 = sleeve?.trigger70 ?? roundMoneyClient(H * 0.3);
+    const dd = stats.drawdownLive;
+    if (!state.settings?.soxlEnabled) return `${hTxt} · 芯片观点未开`;
+    if (dd != null && dd <= -70) return `${hTxt} · 袖仓已近 −70% 上限（${t70}）`;
+    if (dd != null && dd <= -50) return `${hTxt} · 下一袖仓 −70% ${t70}`;
+    return `${hTxt} · 下一袖仓 −50% ${t50}`;
+  }
+  return hTxt;
+}
+
+function roundMoneyClient(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
 function symbolRow(label, stats) {
   if (!stats) return '';
-  const next = stats.triggers?.T1;
   return `<tr>
     <td>${label}</td>
     <td>${stats.price != null ? stats.price.toFixed(2) : '—'}</td>
     <td class="${pctClass(stats.changePercent)}">${fmtPct(stats.changePercent)}</td>
     <td class="${pctClass(stats.drawdownLive)}">${fmtPct(stats.drawdownLive)}</td>
-    <td>H ${stats.H != null ? stats.H.toFixed(2) : '—'} · T1 ${next != null ? next : '—'}</td>
+    <td>${nextLevelHint(label, stats)}</td>
   </tr>`;
 }
 
