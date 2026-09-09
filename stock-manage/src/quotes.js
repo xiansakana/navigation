@@ -98,6 +98,29 @@ export function createQuoteService(config) {
     return { symbol: sym, name: sym, price: q.c, change: q.d ?? 0, changePercent: q.dp ?? 0 };
   }
 
+  function pickOptionPrice(snap) {
+    const lastTrade = snap?.last_trade || {};
+    const lastQuote = snap?.last_quote || {};
+    const day = snap?.day || {};
+    if (Number.isFinite(lastTrade.price) && lastTrade.price > 0) return lastTrade.price;
+    if (Number.isFinite(lastQuote.midpoint) && lastQuote.midpoint > 0) return lastQuote.midpoint;
+    const bid = Number(lastQuote.bid);
+    const ask = Number(lastQuote.ask);
+    if (bid > 0 && ask > 0) return (bid + ask) / 2;
+    if (Number.isFinite(day.close) && day.close > 0) return day.close;
+    return 0;
+  }
+
+  async function getOptionPrevClose(polygonSymbol) {
+    const priceUrl = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(polygonSymbol)}/prev?adjusted=true&apiKey=${polygonKey}`;
+    const priceData = await fetchJson(priceUrl);
+    if (priceData.status === 'OK' && priceData.results?.length) {
+      const r = priceData.results[0];
+      return r.c || r.vw || 0;
+    }
+    return 0;
+  }
+
   async function getOption(symbol) {
     if (!polygonKey) throw new Error('未配置 Polygon API Key');
     const upper = String(symbol).toUpperCase();
@@ -105,42 +128,70 @@ export function createQuoteService(config) {
     if (!parsed) throw new Error('期权代码格式错误');
     const polygonSymbol = toPolygonOptionSymbol(upper);
 
-    const contractUrl = `https://api.polygon.io/v3/reference/options/contracts/${encodeURIComponent(polygonSymbol)}?apiKey=${polygonKey}`;
-    let contractData;
+    // Prefer live snapshot (last trade / quote); /prev is only previous session close.
+    const snapUrl = `https://api.polygon.io/v3/snapshot/options/${encodeURIComponent(parsed.underlying)}/${encodeURIComponent(polygonSymbol)}?apiKey=${polygonKey}`;
+    let snap = null;
+    let snapErr = null;
     try {
-      contractData = await fetchJson(contractUrl);
+      const data = await fetchJson(snapUrl);
+      snap = data?.results || null;
     } catch (e) {
-      throw new Error(`Polygon ${e.message}`);
-    }
-    if (contractData.status !== 'OK' || !contractData.results) {
-      throw new Error('期权不存在或已过期');
+      snapErr = e;
     }
 
-    const priceUrl = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(polygonSymbol)}/prev?adjusted=true&apiKey=${polygonKey}`;
-    let priceData;
-    try {
-      priceData = await fetchJson(priceUrl);
-    } catch (e) {
-      throw new Error(`Polygon 价格 ${e.message}`);
+    let price = pickOptionPrice(snap);
+    const day = snap?.day || {};
+    const details = snap?.details || {};
+    let change = Number(day.change);
+    let changePercent = Number(day.change_percent);
+    let prevClose = Number(day.previous_close) || Number(snap?.prev_day?.close) || 0;
+
+    if (!(price > 0) || !(prevClose > 0) || !Number.isFinite(change)) {
+      try {
+        const prev = await getOptionPrevClose(polygonSymbol);
+        if (!(prevClose > 0) && prev > 0) prevClose = prev;
+        if (!(price > 0) && prev > 0) price = prev;
+      } catch (e) {
+        if (!(price > 0)) {
+          throw new Error(`Polygon 期权价格不可用${snapErr ? `（snapshot: ${snapErr.message}）` : ''}`);
+        }
+      }
     }
 
-    let price = 0;
-    let change = 0;
-    let changePercent = 0;
-    if (priceData.status === 'OK' && priceData.results?.length) {
-      const r = priceData.results[0];
-      price = r.c || r.vw || 0;
-      change = r.c && r.o ? r.c - r.o : 0;
-      changePercent = r.c && r.o ? ((r.c - r.o) / r.o) * 100 : 0;
+    if (!Number.isFinite(change) && prevClose > 0 && price > 0) {
+      change = price - prevClose;
+      changePercent = (change / prevClose) * 100;
+    }
+    if (!Number.isFinite(changePercent) && prevClose > 0 && price > 0) {
+      changePercent = ((price - prevClose) / prevClose) * 100;
+    }
+    if (!Number.isFinite(change)) change = 0;
+    if (!Number.isFinite(changePercent)) changePercent = 0;
+
+    let name;
+    if (details.expiration_date || details.strike_price) {
+      name = `${parsed.underlying} ${details.expiration_date || parsed.expiration} ${details.contract_type || parsed.type} $${details.strike_price || parsed.strike}`;
+    } else {
+      try {
+        const contractUrl = `https://api.polygon.io/v3/reference/options/contracts/${encodeURIComponent(polygonSymbol)}?apiKey=${polygonKey}`;
+        const contractData = await fetchJson(contractUrl);
+        const c = contractData?.results;
+        if (!c) throw new Error('期权不存在或已过期');
+        name = `${parsed.underlying} ${c.expiration_date} ${c.contract_type} $${c.strike_price}`;
+      } catch (e) {
+        if (!(price > 0)) throw new Error(`Polygon ${e.message}`);
+        name = `${parsed.underlying} ${parsed.expiration} ${parsed.type} $${parsed.strike}`;
+      }
     }
 
-    const c = contractData.results;
     return {
       symbol: upper,
-      name: `${parsed.underlying} ${c.expiration_date} ${c.contract_type} $${c.strike_price}`,
+      name,
       price,
       change,
-      changePercent
+      changePercent,
+      prevClose: prevClose || undefined,
+      source: price > 0 && snap ? 'polygon-snapshot' : 'polygon-prev'
     };
   }
 
