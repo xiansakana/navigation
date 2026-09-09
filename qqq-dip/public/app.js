@@ -44,6 +44,11 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;');
 }
 
+function fmtCny(n) {
+  if (!Number.isFinite(Number(n))) return '—';
+  return `¥${Number(n).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`;
+}
+
 function fmtUsd(n) {
   if (!Number.isFinite(Number(n))) return '—';
   return Number(n).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -404,7 +409,7 @@ function renderPrimary() {
   }
   const prohib = (p.prohibitions || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const previewHint = preview?.available && canViewLotMoney()
-    ? `<p class="hint">本档预算 ${fmtUsd(preview.totalUsd)}，QQQ 现价 ${preview.spot?.toFixed(2) ?? '—'}。点「预览买入」查看拆单。</p>`
+    ? `<p class="hint">本档预算 ${fmtUsd(preview.totalUsd)}；拟用 ${fmtUsd(preview.cashPlan?.useUsd ?? preview.totalUsd)} + ${fmtCny(preview.cashPlan?.useCny || 0)}（正股优先 159509）。QQQ ${preview.spot?.toFixed(2) ?? '—'} · 159509 ${preview.proxyPrice != null ? preview.proxyPrice.toFixed(3) : '—'}。点「预览买入」查看拆单。</p>`
     : (preview?.reason ? `<p class="hint">${escapeHtml(preview.reason)}</p>` : '');
   $('#primary-rec').innerHTML = `
     <h3>${escapeHtml(p.title)}</h3>
@@ -416,19 +421,27 @@ function renderPrimary() {
 
 function legRow(leg) {
   if (leg.kind === 'equity') {
+    const isCny = leg.currency === 'CNY';
+    const budget = isCny
+      ? `${fmtCny(leg.cny)}（≈${fmtUsd(leg.usd)}）`
+      : fmtUsd(leg.usd);
+    const qty = `${leg.shares} 股 @ ${leg.price != null ? leg.price.toFixed(isCny ? 3 : 2) : '—'}`;
+    const ref = isCny
+      ? (leg.estCny != null ? `≈ ${fmtCny(leg.estCny)}` : '—')
+      : `≈ ${fmtUsd(leg.estUsd)}`;
     return `<tr>
-      <td>正股</td>
+      <td>正股${isCny ? '·CNY' : '·USD'}</td>
       <td>${escapeHtml(leg.symbol)}</td>
       <td>买入</td>
       <td>${leg.pct}%</td>
-      <td>${fmtUsd(leg.usd)}</td>
-      <td>${leg.shares} 股 @ ${leg.price?.toFixed(2) ?? '—'}</td>
-      <td>≈ ${fmtUsd(leg.estUsd)}</td>
+      <td>${budget}</td>
+      <td>${qty}</td>
+      <td>${ref}</td>
       <td>${escapeHtml(leg.note || '')}</td>
     </tr>`;
   }
   return `<tr>
-    <td>Call</td>
+    <td>Call·USD</td>
     <td>${escapeHtml(leg.occSymbol || leg.symbol)}</td>
     <td>买入</td>
     <td>${leg.pct}%</td>
@@ -457,6 +470,7 @@ function openBuyPreview() {
   const summary = [
     preview.title,
     `预算 ${fmtUsd(preview.totalUsd)}`,
+    `USD ${fmtUsd(preview.cashPlan?.useUsd ?? 0)} / CNY ${fmtCny(preview.cashPlan?.useCny || 0)}`,
     `QQQ ${preview.spot?.toFixed(2) ?? '—'}`,
     preview.pendingClose ? '待收盘确认' : null
   ].filter(Boolean).join(' · ');
@@ -478,7 +492,7 @@ function openBuyPreview() {
       </div>
       ${checklist ? `<h4>下单前核对</h4><ul class="sm-buy-checklist">${checklist}</ul>` : ''}
       ${prohib ? `<h4>禁令</h4><ul>${prohib}</ul>` : ''}
-      <p class="hint">期权张数需按实际买卖价重算；有 Polygon 链上合约时会填入 OCC 代码。</p>
+      <p class="hint">期权张数需按实际买卖价重算；有 Polygon 链上合约时会填入 OCC 代码。标记已执行会按填写金额扣减美元/人民币现金。</p>
       <div class="sm-modal-actions">
         <button type="button" class="btn ghost" id="btn-copy-buy">复制清单</button>
         ${preview.tier ? `<button type="button" class="btn ghost" data-exec-preview="${escapeHtml(preview.tier)}">标记已执行</button>` : ''}
@@ -493,9 +507,12 @@ function openBuyPreview() {
       '',
       ...(preview.legs || []).map((leg) => {
         if (leg.kind === 'equity') {
-          return `${leg.symbol} 正股 买入 ${leg.shares}股 预算${fmtUsd(leg.usd)} @${leg.price?.toFixed(2)}`;
+          if (leg.currency === 'CNY') {
+            return `${leg.symbol} 正股·CNY 买入 ${leg.shares}股 预算${fmtCny(leg.cny)}≈${fmtUsd(leg.usd)} @${leg.price?.toFixed(3)}`;
+          }
+          return `${leg.symbol} 正股·USD 买入 ${leg.shares}股 预算${fmtUsd(leg.usd)} @${leg.price?.toFixed(2)}`;
         }
-        return `${leg.occSymbol || leg.symbol} Call 买入 预算${fmtUsd(leg.usd)} K${leg.strike} 到期${leg.expiry}`;
+        return `${leg.occSymbol || leg.symbol} Call·USD 买入 预算${fmtUsd(leg.usd)} K${leg.strike} 到期${leg.expiry}`;
       }),
       '',
       '核对:',
@@ -513,33 +530,48 @@ function openBuyPreview() {
   execBtn?.addEventListener('click', () => {
     const tierId = execBtn.getAttribute('data-exec-preview');
     $('#modal-root').innerHTML = '';
-    const tier = (state.evaluation?.tiers || []).find((t) => t.id === tierId);
-    openModal(`
-      <h3>标记 ${tierId} 已执行</h3>
-      <label class="field">动用美元<input id="exec-usd" type="number" step="0.01" value="${tier?.usd ?? preview.totalUsd ?? 0}"></label>
+    openExecModal(tierId, preview);
+  });
+}
+
+function openExecModal(tierId, preview) {
+  const tier = (state.evaluation?.tiers || []).find((t) => t.id === tierId);
+  const plan = preview?.cashPlan || {};
+  const defaultUsd = plan.useUsd != null ? plan.useUsd : (tier?.usd ?? preview?.totalUsd ?? 0);
+  const defaultCny = plan.useCny != null ? plan.useCny : 0;
+  openModal(`
+      <h3>标记 ${escapeHtml(tierId)} 已执行</h3>
+      <p class="hint">确认后将从现金扣减下列金额（可改）。袋内占用按美元等价合计。</p>
+      <label class="field">动用美元<input id="exec-usd" type="number" step="0.01" value="${defaultUsd}"></label>
+      <label class="field">动用人民币<input id="exec-cny" type="number" step="0.01" value="${defaultCny}"></label>
       <label class="field">备注<input id="exec-note" type="text" placeholder="券商单号 / 合约"></label>
       <div class="sm-modal-actions">
         <button class="btn ghost" data-close>取消</button>
         <button class="btn primary" id="exec-ok">确认</button>
       </div>
     `);
-    $('#exec-ok').addEventListener('click', async () => {
-      try {
-        const data = await api('/actions', {
-          method: 'POST',
-          body: {
-            type: 'execute',
-            tier: tierId,
-            usd: Number($('#exec-usd').value),
-            note: $('#exec-note').value,
-            message: `已执行 ${tierId}，动用 $${Number($('#exec-usd').value).toFixed(2)}`
-          }
-        });
-        $('#modal-root').innerHTML = '';
-        applyState(data);
-        toast('success', '已记录');
-      } catch (err) { toast('error', err.message); }
-    });
+  $('#exec-ok').addEventListener('click', async () => {
+    try {
+      const cashUsd = Number($('#exec-usd').value) || 0;
+      const cashCny = Number($('#exec-cny').value) || 0;
+      const rate = Number(state.cash?.usdCnyRate) || 0;
+      const usdEq = cashUsd + (rate > 0 ? cashCny / rate : 0);
+      const data = await api('/actions', {
+        method: 'POST',
+        body: {
+          type: 'execute',
+          tier: tierId,
+          usd: Math.round(usdEq * 100) / 100,
+          cashUsd,
+          cashCny,
+          note: $('#exec-note').value,
+          message: `已执行 ${tierId}，扣 USD ${cashUsd.toFixed(2)} / CNY ${cashCny.toFixed(2)}（合计 ≈$${usdEq.toFixed(2)}）`
+        }
+      });
+      $('#modal-root').innerHTML = '';
+      applyState(data);
+      toast('success', '已记录并扣减现金');
+    } catch (err) { toast('error', err.message); }
   });
 }
 
@@ -548,6 +580,9 @@ function sleeveBySymbol(symbol) {
 }
 
 function nextLevelHint(label, stats) {
+  if (label === '159509') {
+    return '人民币 QQQ 代理，非独立梯子';
+  }
   if (!stats?.H) return '—';
   const H = stats.H;
   const hTxt = `H ${H.toFixed(2)}`;
@@ -599,6 +634,7 @@ function renderSymbols() {
   const ev = state.evaluation || {};
   const rows = [symbolRow('QQQ', ev.qqq)];
   if (state.settings?.showSpy !== false) rows.push(symbolRow('SPY', ev.spy));
+  if (ev.cnyProxy) rows.push(symbolRow('159509', ev.cnyProxy));
   rows.push(symbolRow('TQQQ', ev.tqqq));
   if (state.settings?.soxlEnabled) rows.push(symbolRow('SOXL', ev.soxl));
   $('#symbol-table tbody').innerHTML = rows.join('');
@@ -980,33 +1016,10 @@ function bind() {
     const id = e.target.dataset.exec;
     if (!id) return;
     if (!guardEdit('tier-exec')) return;
-    const tier = (state.evaluation?.tiers || []).find((t) => t.id === id);
-    openModal(`
-      <h3>标记 ${id} 已执行</h3>
-      <label class="field">动用美元<input id="exec-usd" type="number" step="0.01" value="${tier?.usd ?? 0}"></label>
-      <label class="field">备注<input id="exec-note" type="text" placeholder="券商单号 / 合约"></label>
-      <div class="sm-modal-actions">
-        <button class="btn ghost" data-close>取消</button>
-        <button class="btn primary" id="exec-ok">确认</button>
-      </div>
-    `);
-    $('#exec-ok').addEventListener('click', async () => {
-      try {
-        const data = await api('/actions', {
-          method: 'POST',
-          body: {
-            type: 'execute',
-            tier: id,
-            usd: Number($('#exec-usd').value),
-            note: $('#exec-note').value,
-            message: `已执行 ${id}，动用 $${Number($('#exec-usd').value).toFixed(2)}`
-          }
-        });
-        $('#modal-root').innerHTML = '';
-        applyState(data);
-        toast('success', '已记录');
-      } catch (err) { toast('error', err.message); }
-    });
+    const preview = state.evaluation?.buyPreview?.tier === id
+      ? state.evaluation.buyPreview
+      : null;
+    openExecModal(id, preview);
   });
   $('#btn-add-note').addEventListener('click', () => {
     if (!guardEdit('actions-note')) return;

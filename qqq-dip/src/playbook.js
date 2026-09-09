@@ -76,12 +76,55 @@ export function triggerPrices(H) {
   };
 }
 
+/** Onshore Nasdaq-tech ETF used as CNY proxy for QQQ equity. */
+export const CNY_EQUITY_PROXY = '159509';
+
 export function computeAmmoB(cashUsd, cashCny, usdCnyRate) {
   const usd = Number(cashUsd) || 0;
   const cny = Number(cashCny) || 0;
   const rate = Number(usdCnyRate) || 0;
   const fromCny = rate > 0 ? cny / rate : 0;
   return roundMoney(usd + fromCny);
+}
+
+/**
+ * Split an equity USD-equivalent budget: CNY (159509) first, remainder USD (QQQ).
+ * Remainder of the budget always lands on USD even if cash is short (preview guidance).
+ */
+export function planEquityCurrencySpend({ equityUsd, cashUsd, cashCny, rate }) {
+  const need = roundMoney(Math.max(0, Number(equityUsd) || 0));
+  const rateN = Number(rate) || 0;
+  const availCny = Math.max(0, Number(cashCny) || 0);
+  const availCnyUsd = rateN > 0 ? availCny / rateN : 0;
+  const cnyUsd = roundMoney(Math.min(need, availCnyUsd));
+  const cnyAmount = rateN > 0 ? roundMoney(cnyUsd * rateN) : 0;
+  const usdUsd = roundMoney(Math.max(0, need - cnyUsd));
+  return { cnyUsd, usdUsd, cnyAmount, rate: rateN };
+}
+
+/** Reserve option USD first, then CNY-first equity on the remainder. */
+export function planTierCurrencySpend({ equityUsd, optionUsd, cashUsd, cashCny, rate }) {
+  const opt = roundMoney(Math.max(0, Number(optionUsd) || 0));
+  const cashU = Math.max(0, Number(cashUsd) || 0);
+  const cashC = Math.max(0, Number(cashCny) || 0);
+  const rateN = Number(rate) || 0;
+  const usdAfterOpt = roundMoney(Math.max(0, cashU - opt));
+  const equity = planEquityCurrencySpend({
+    equityUsd,
+    cashUsd: usdAfterOpt,
+    cashCny: cashC,
+    rate: rateN
+  });
+  const useUsd = roundMoney(opt + equity.usdUsd);
+  const useCny = equity.cnyAmount;
+  return {
+    optionUsd: opt,
+    equity,
+    useUsd,
+    useCny,
+    remainUsd: roundMoney(Math.max(0, cashU - useUsd)),
+    remainCny: roundMoney(Math.max(0, cashC - useCny))
+  };
 }
 
 export function bagCaps(B, variant = 'default') {
@@ -285,22 +328,23 @@ function allocationText(tier, vxnGate, spot, B, usd, pctB, variant = 'default') 
     ? `VXN ${vxnGate.missing ? '未知' : vxnGate.value} 未达门槛 ${vxnGate.min}：本档全部改买正股，档位仍算触发。`
     : (vxnGate.value != null ? `VXN ${vxnGate.value}≥${vxnGate.min}，允许期权部分。` : '');
 
+  const cnyFirst = `正股优先人民币买 ${CNY_EQUITY_PROXY}，再用美元买 QQQ；期权仅美元。`;
   const map = {
-    T1: `只买 QQQ 正股（最多 20% 换成 SPY）。禁止任何期权、TQQQ、SOXL。`,
+    T1: `只买正股（${cnyFirst}最多 20% 可换成 SPY）。禁止任何期权、TQQQ、SOXL。`,
     T2: vxnGate.blocked
-      ? `全部改买 QQQ 正股。`
-      : `约 70–80% QQQ 正股 + 20–30% 中虚值 Call（12–21 个月、虚值 25–40%，行权价约 ${bandM.low}–${bandM.high}，到期 ${leapHint}）。禁止 50%+ 虚值、剩余不足 9 个月。`,
+      ? `全部改买正股（${cnyFirst}）。`
+      : `约 70–80% 正股 + 20–30% 中虚值 Call（12–21 个月、虚值 25–40%，行权价约 ${bandM.low}–${bandM.high}，到期 ${leapHint}）。${cnyFirst}禁止 50%+ 虚值、剩余不足 9 个月。`,
     T3: vxnGate.blocked
-      ? `全部改买 QQQ 正股。`
-      : `约 50–60% 正股 + 30–40% 中虚值（${bandM.low}–${bandM.high}）+ 约 10% 深虚值（${bandD.low}–${bandD.high}，累计深虚值 ≤8%B）。禁止 All-in SOXL。`,
-    T4: `补左侧：仍以正股和中虚值为主，停止再加同一张深虚值。深虚值累计不超过 8%B。不是打满全部 B。禁止 75%+ 虚值、TQQQ Call。`,
-    T5: `只加 QQQ 正股。禁止加旧的 65% 虚值。`,
-    T6: `约 70% 正股 + 30% 按新现货的浅/中虚值（约 ${bandS.low}–${bandM.high}）。禁止摊薄同一张已废彩票。`,
+      ? `全部改买正股（${cnyFirst}）。`
+      : `约 50–60% 正股 + 30–40% 中虚值（${bandM.low}–${bandM.high}）+ 约 10% 深虚值（${bandD.low}–${bandD.high}，累计深虚值 ≤8%B）。${cnyFirst}禁止 All-in SOXL。`,
+    T4: `补左侧：仍以正股和中虚值为主，停止再加同一张深虚值。深虚值累计不超过 8%B。不是打满全部 B。${cnyFirst}禁止 75%+ 虚值、TQQQ Call。`,
+    T5: `只加正股（${cnyFirst}）。禁止加旧的 65% 虚值。`,
+    T6: `约 70% 正股 + 30% 按新现货的浅/中虚值（约 ${bandS.low}–${bandM.high}）。${cnyFirst}禁止摊薄同一张已废彩票。`,
     T7: `同 T6。3x 正股仅当 TQQQ 自己也到 −50%。杠杆不超过 10%B。`,
     R1: vxnGate.blocked || !vxnGate.ok
-      ? `只用右侧袋的约 1/3：QQQ 正股。禁止一次性打完 ${rightPct}% 右侧。`
-      : `正股为主；VXN≥25 时可加不超过本档一半的中浅虚值 Call。禁止打完 ${rightPct}%B 右侧。`,
-    R2: `只加 QQQ 正股。禁止追已经大涨、IV 已塌的深虚值彩票。`
+      ? `只用右侧袋的约 1/3：正股（${cnyFirst}）。禁止一次性打完 ${rightPct}% 右侧。`
+      : `正股为主；VXN≥25 时可加不超过本档一半的中浅虚值 Call。${cnyFirst}禁止打完 ${rightPct}%B 右侧。`,
+    R2: `只加正股（${cnyFirst}）。禁止追已经大涨、IV 已塌的深虚值彩票。`
   };
   return [budgetPct, map[tier], vxnNote].filter(Boolean).join(' ');
 }
@@ -689,7 +733,17 @@ export function evaluate(input) {
     right: roundMoney(Math.max(0, bags.right - used.right))
   };
 
-  return {
+  const cashUsd = Number(input.cashUsd) || 0;
+  const cashCny = Number(input.cashCny) || 0;
+  const usdCnyRate = Number(input.usdCnyRate) || 0;
+  const cnyProxy = input.cnyProxy ? statsFromMarket(input.cnyProxy) : null;
+  const leapsMeta = {
+    expiries: januaryLeapExpiries(input.now || new Date()),
+    medium: mediumOtmBand(qqq.price),
+    deep: deepOtmBand(qqq.price),
+    shallow: shallowOtmBand(qqq.price)
+  };
+  const evalBase = {
     B,
     bags,
     remaining,
@@ -697,6 +751,10 @@ export function evaluate(input) {
     variant,
     rth,
     vxn,
+    cashUsd,
+    cashCny,
+    usdCnyRate,
+    cnyProxy,
     vxnGates: { t2: vxnPass(vxn, 25), t3: vxnPass(vxn, 32) },
     qqq,
     tqqq,
@@ -710,32 +768,12 @@ export function evaluate(input) {
     primary,
     sleeves,
     lots,
-    leaps: {
-      expiries: januaryLeapExpiries(input.now || new Date()),
-      medium: mediumOtmBand(qqq.price),
-      deep: deepOtmBand(qqq.price),
-      shallow: shallowOtmBand(qqq.price)
-    },
-    alerts,
-    buyPreview: buildBuyPreview({
-      B,
-      bags,
-      remaining,
-      variant,
-      qqq,
-      tiers,
-      primary,
-      leaps: {
-        expiries: januaryLeapExpiries(input.now || new Date()),
-        medium: mediumOtmBand(qqq.price),
-        deep: deepOtmBand(qqq.price),
-        shallow: shallowOtmBand(qqq.price)
-      },
-      sameDaySkip: Array.from(sameDaySkip),
-      reset,
-      fakeRight,
-      round
-    }, input.suggestedContracts || [])
+    leaps: leapsMeta,
+    alerts
+  };
+  return {
+    ...evalBase,
+    buyPreview: buildBuyPreview(evalBase, input.suggestedContracts || [])
   };
 }
 
@@ -760,19 +798,29 @@ function pickSuggestedContract(suggestedContracts, band) {
   }, null);
 }
 
-function equityLeg(symbol, usd, price, note, pct) {
+function equityLeg(symbol, usd, price, note, pct, extras = {}) {
   const px = Number(price);
   const budget = roundMoney(usd);
-  const shares = px > 0 ? Math.floor(budget / px) : 0;
+  const currency = extras.currency || 'USD';
+  const cny = extras.cny != null ? roundMoney(extras.cny) : null;
+  let shares = 0;
+  if (currency === 'CNY' && cny != null && px > 0) shares = Math.floor(cny / px);
+  else if (px > 0) shares = Math.floor(budget / px);
+  const estNotional = currency === 'CNY' && cny != null
+    ? roundMoney(shares * px)
+    : roundMoney(shares * px);
   return {
     kind: 'equity',
     symbol,
     side: 'buy',
+    currency,
     usd: budget,
+    cny,
     pct,
-    price: px,
+    price: Number.isFinite(px) ? px : null,
     shares,
-    estUsd: roundMoney(shares * px),
+    estUsd: currency === 'USD' ? estNotional : budget,
+    estCny: currency === 'CNY' ? estNotional : null,
     note
   };
 }
@@ -785,6 +833,7 @@ function callLeg({ underlying, expiry, strike, usd, spot, note, pct, otmClass, c
     kind: 'call',
     symbol: underlying,
     side: 'buy',
+    currency: 'USD',
     usd: roundMoney(usd),
     pct,
     expiry: expiryDate,
@@ -820,6 +869,75 @@ function strikeFromBand(band, spot) {
   return Math.round((band.low + band.high) / 2 / 5) * 5;
 }
 
+function makeCashWallet(ev) {
+  return {
+    usd: Math.max(0, Number(ev.cashUsd) || 0),
+    cny: Math.max(0, Number(ev.cashCny) || 0),
+    rate: Number(ev.usdCnyRate) || 0
+  };
+}
+
+/** Reserve option USD from wallet (planning only). */
+function reserveOptionUsd(wallet, optionUsd) {
+  const opt = roundMoney(Math.max(0, Number(optionUsd) || 0));
+  wallet.usd = roundMoney(Math.max(0, wallet.usd - opt));
+  return opt;
+}
+
+function appendEquityFromWallet(legs, wallet, { equityUsd, pct, note, spot, proxyPrice }) {
+  const need = roundMoney(Math.max(0, Number(equityUsd) || 0));
+  if (need <= 0) return { cnyUsd: 0, usdUsd: 0, cnyAmount: 0 };
+  const plan = planEquityCurrencySpend({
+    equityUsd: need,
+    cashUsd: wallet.usd,
+    cashCny: wallet.cny,
+    rate: wallet.rate
+  });
+  wallet.cny = roundMoney(Math.max(0, wallet.cny - plan.cnyAmount));
+  // Only deplete wallet USD by what we could cover from available cash after CNY;
+  // budget remainder still appears as QQQ leg.
+  const usdFromCash = roundMoney(Math.min(plan.usdUsd, wallet.usd));
+  wallet.usd = roundMoney(Math.max(0, wallet.usd - usdFromCash));
+
+  if (plan.cnyUsd > 0) {
+    const subPct = need > 0 ? Math.max(1, Math.round((plan.cnyUsd / need) * pct)) : pct;
+    legs.push(equityLeg(
+      CNY_EQUITY_PROXY,
+      plan.cnyUsd,
+      proxyPrice,
+      `${note}（人民币 ${CNY_EQUITY_PROXY}）`,
+      subPct,
+      { currency: 'CNY', cny: plan.cnyAmount }
+    ));
+  }
+  if (plan.usdUsd > 0) {
+    const subPct = need > 0 ? Math.max(1, Math.round((plan.usdUsd / need) * pct)) : pct;
+    legs.push(equityLeg('QQQ', plan.usdUsd, spot, `${note}（美元 QQQ）`, subPct, { currency: 'USD' }));
+  }
+  return plan;
+}
+
+function summarizeCashPlan(legs, startWallet) {
+  let useUsd = 0;
+  let useCny = 0;
+  for (const leg of legs) {
+    if (leg.kind === 'call' || (leg.kind === 'equity' && leg.currency !== 'CNY')) {
+      useUsd = roundMoney(useUsd + (Number(leg.usd) || 0));
+    }
+    if (leg.kind === 'equity' && leg.currency === 'CNY') {
+      useCny = roundMoney(useCny + (Number(leg.cny) || 0));
+      // CNY leg also counted in usd-eq for bag tracking via leg.usd
+    }
+  }
+  return {
+    useUsd,
+    useCny,
+    remainUsd: roundMoney(Math.max(0, startWallet.usd - useUsd)),
+    remainCny: roundMoney(Math.max(0, startWallet.cny - useCny)),
+    rate: startWallet.rate
+  };
+}
+
 export function buildBuyPreview(ev, suggestedContracts = []) {
   const primary = ev?.primary;
   if (ev?.reset || ev?.fakeRight) {
@@ -846,6 +964,7 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
   }
 
   const spot = Number(ev.qqq?.price);
+  const proxyPrice = Number(ev.cnyProxy?.price);
   const totalUsd = roundMoney(tier.usd);
   const leaps = ev.leaps || {};
   const medium = leaps.medium || mediumOtmBand(spot);
@@ -864,135 +983,178 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
   if ((ev.sameDaySkip || []).length) {
     notes.push(`同一天只执行最深档 ${primary.tier}，其余已触发档跳过。`);
   }
+  notes.push(`正股：人民币优先买 ${CNY_EQUITY_PROXY}，再用美元买 QQQ；期权只用美元。`);
 
   const blocked = tier.vxnGate?.blocked;
   const id = tier.id;
+  const startWallet = makeCashWallet(ev);
+  const wallet = { ...startWallet };
+
+  const pushCalls = (callSpecs) => {
+    const optionUsd = callSpecs.reduce((s, c) => s + (Number(c.usd) || 0), 0);
+    reserveOptionUsd(wallet, optionUsd);
+    return callSpecs;
+  };
+
+  const finishEquityThenCalls = (equityParts, callSpecs = []) => {
+    const deferredCalls = pushCalls(callSpecs);
+    for (const part of equityParts) {
+      appendEquityFromWallet(legs, wallet, {
+        equityUsd: part.usd,
+        pct: part.pct,
+        note: part.note,
+        spot,
+        proxyPrice
+      });
+    }
+    for (const c of deferredCalls) {
+      legs.push(callLeg(c));
+    }
+  };
 
   if (id === 'T1') {
-    legs.push(equityLeg('QQQ', totalUsd, spot, 'T1 只买 QQQ 正股', 100));
+    finishEquityThenCalls([{ usd: totalUsd, pct: 100, note: 'T1 只买正股' }]);
     notes.push('最多 20% 可换成 SPY 降波（需自行调整比例）。');
   } else if (id === 'T2') {
     if (blocked) {
-      legs.push(equityLeg('QQQ', totalUsd, spot, 'VXN 未达标，全部改买正股', 100));
+      finishEquityThenCalls([{ usd: totalUsd, pct: 100, note: 'VXN 未达标，全部改买正股' }]);
     } else {
       const parts = splitBudget(totalUsd, [
-        { pct: 75, tag: 'equity', note: '约 75% QQQ 正股' },
+        { pct: 75, tag: 'equity', note: '约 75% 正股' },
         { pct: 25, tag: 'call-medium', note: '约 25% 中虚值 LEAP Call' }
       ]);
-      legs.push(equityLeg('QQQ', parts[0].usd, spot, parts[0].note, 75));
-      const strike = mediumContract?.strike || strikeFromBand(medium, spot);
-      const expiry = mediumContract?.expiry || leapExpiry;
-      legs.push(callLeg({
-        underlying: 'QQQ',
-        expiry,
-        strike,
-        usd: parts[1].usd,
-        spot,
-        note: parts[1].note,
-        pct: 25,
-        otmClass: 'medium',
-        contract: mediumContract
-      }));
+      finishEquityThenCalls(
+        [{ usd: parts[0].usd, pct: 75, note: parts[0].note }],
+        [{
+          underlying: 'QQQ',
+          expiry: mediumContract?.expiry || leapExpiry,
+          strike: mediumContract?.strike || strikeFromBand(medium, spot),
+          usd: parts[1].usd,
+          spot,
+          note: parts[1].note,
+          pct: 25,
+          otmClass: 'medium',
+          contract: mediumContract
+        }]
+      );
     }
   } else if (id === 'T3') {
     if (blocked) {
-      legs.push(equityLeg('QQQ', totalUsd, spot, 'VXN 未达标，全部改买正股', 100));
+      finishEquityThenCalls([{ usd: totalUsd, pct: 100, note: 'VXN 未达标，全部改买正股' }]);
     } else {
       const parts = splitBudget(totalUsd, [
         { pct: 55, tag: 'equity' },
         { pct: 35, tag: 'call-medium' },
         { pct: 10, tag: 'call-deep' }
       ]);
-      legs.push(equityLeg('QQQ', parts[0].usd, spot, '约 55% QQQ 正股', 55));
-      legs.push(callLeg({
-        underlying: 'QQQ',
-        expiry: mediumContract?.expiry || leapExpiry,
-        strike: mediumContract?.strike || strikeFromBand(medium, spot),
-        usd: parts[1].usd,
-        spot,
-        note: '约 35% 中虚值 Call',
-        pct: 35,
-        otmClass: 'medium',
-        contract: mediumContract
-      }));
-      legs.push(callLeg({
-        underlying: 'QQQ',
-        expiry: deepContract?.expiry || leapExpiry,
-        strike: deepContract?.strike || strikeFromBand(deep, spot),
-        usd: parts[2].usd,
-        spot,
-        note: '约 10% 深虚值（累计深虚值 ≤8%B）',
-        pct: 10,
-        otmClass: 'deep',
-        contract: deepContract
-      }));
+      finishEquityThenCalls(
+        [{ usd: parts[0].usd, pct: 55, note: '约 55% 正股' }],
+        [
+          {
+            underlying: 'QQQ',
+            expiry: mediumContract?.expiry || leapExpiry,
+            strike: mediumContract?.strike || strikeFromBand(medium, spot),
+            usd: parts[1].usd,
+            spot,
+            note: '约 35% 中虚值 Call',
+            pct: 35,
+            otmClass: 'medium',
+            contract: mediumContract
+          },
+          {
+            underlying: 'QQQ',
+            expiry: deepContract?.expiry || leapExpiry,
+            strike: deepContract?.strike || strikeFromBand(deep, spot),
+            usd: parts[2].usd,
+            spot,
+            note: '约 10% 深虚值（累计深虚值 ≤8%B）',
+            pct: 10,
+            otmClass: 'deep',
+            contract: deepContract
+          }
+        ]
+      );
     }
   } else if (id === 'T4') {
     const parts = splitBudget(totalUsd, [{ pct: 80 }, { pct: 20 }]);
-    legs.push(equityLeg('QQQ', parts[0].usd, spot, '补左侧：正股为主', 80));
     if (!blocked && leapExpiry) {
-      legs.push(callLeg({
-        underlying: 'QQQ',
-        expiry: mediumContract?.expiry || leapExpiry,
-        strike: mediumContract?.strike || strikeFromBand(medium, spot),
-        usd: parts[1].usd,
-        spot,
-        note: '停止再加同一张深虚值；可加中虚值',
-        pct: 20,
-        otmClass: 'medium',
-        contract: mediumContract
-      }));
+      finishEquityThenCalls(
+        [{ usd: parts[0].usd, pct: 80, note: '补左侧：正股为主' }],
+        [{
+          underlying: 'QQQ',
+          expiry: mediumContract?.expiry || leapExpiry,
+          strike: mediumContract?.strike || strikeFromBand(medium, spot),
+          usd: parts[1].usd,
+          spot,
+          note: '停止再加同一张深虚值；可加中虚值',
+          pct: 20,
+          otmClass: 'medium',
+          contract: mediumContract
+        }]
+      );
     } else {
-      legs.push(equityLeg('QQQ', parts[1].usd, spot, '余下预算继续正股', 20));
+      finishEquityThenCalls([
+        { usd: parts[0].usd, pct: 80, note: '补左侧：正股为主' },
+        { usd: parts[1].usd, pct: 20, note: '余下预算继续正股' }
+      ]);
     }
     if (tier.intradayPrice) {
       notes.push(`盘中限价参考 0.75H ≈ ${tier.intradayPrice}。T4 不是打满全部 B。`);
     }
   } else if (id === 'T5' || id === 'R2') {
-    legs.push(equityLeg('QQQ', totalUsd, spot, '只加 QQQ 正股', 100));
+    finishEquityThenCalls([{ usd: totalUsd, pct: 100, note: '只加正股' }]);
   } else if (id === 'T6' || id === 'T7') {
     const parts = splitBudget(totalUsd, [{ pct: 70 }, { pct: 30 }]);
-    legs.push(equityLeg('QQQ', parts[0].usd, spot, '约 70% 正股', 70));
     if (!blocked && leapExpiry) {
-      legs.push(callLeg({
-        underlying: 'QQQ',
-        expiry: mediumContract?.expiry || leapExpiry,
-        strike: mediumContract?.strike || strikeFromBand(shallow, spot),
-        usd: parts[1].usd,
-        spot,
-        note: '约 30% 按新现货的浅/中虚值 Call',
-        pct: 30,
-        otmClass: 'shallow-medium',
-        contract: mediumContract
-      }));
+      finishEquityThenCalls(
+        [{ usd: parts[0].usd, pct: 70, note: '约 70% 正股' }],
+        [{
+          underlying: 'QQQ',
+          expiry: mediumContract?.expiry || leapExpiry,
+          strike: mediumContract?.strike || strikeFromBand(shallow, spot),
+          usd: parts[1].usd,
+          spot,
+          note: '约 30% 按新现货的浅/中虚值 Call',
+          pct: 30,
+          otmClass: 'shallow-medium',
+          contract: mediumContract
+        }]
+      );
     } else {
-      legs.push(equityLeg('QQQ', parts[1].usd, spot, '余下预算继续正股', 30));
+      finishEquityThenCalls([
+        { usd: parts[0].usd, pct: 70, note: '约 70% 正股' },
+        { usd: parts[1].usd, pct: 30, note: '余下预算继续正股' }
+      ]);
     }
     if (id === 'T7') notes.push('3x 正股仅当 TQQQ 自己也到 −50%，且 ≤10%B。');
   } else if (id === 'R1') {
     if (blocked || !tier.vxnGate?.ok) {
-      legs.push(equityLeg('QQQ', totalUsd, spot, '右侧袋 1/3：只买正股', 100));
+      finishEquityThenCalls([{ usd: totalUsd, pct: 100, note: '右侧袋 1/3：只买正股' }]);
     } else {
       const parts = splitBudget(totalUsd, [{ pct: 80 }, { pct: 20 }]);
-      legs.push(equityLeg('QQQ', parts[0].usd, spot, '正股为主', 80));
-      legs.push(callLeg({
-        underlying: 'QQQ',
-        expiry: mediumContract?.expiry || leapExpiry,
-        strike: mediumContract?.strike || strikeFromBand(shallow, spot),
-        usd: parts[1].usd,
-        spot,
-        note: '不超过本档一半的中浅虚值 Call',
-        pct: 20,
-        otmClass: 'shallow',
-        contract: mediumContract
-      }));
+      finishEquityThenCalls(
+        [{ usd: parts[0].usd, pct: 80, note: '正股为主' }],
+        [{
+          underlying: 'QQQ',
+          expiry: mediumContract?.expiry || leapExpiry,
+          strike: mediumContract?.strike || strikeFromBand(shallow, spot),
+          usd: parts[1].usd,
+          spot,
+          note: '不超过本档一半的中浅虚值 Call',
+          pct: 20,
+          otmClass: 'shallow',
+          contract: mediumContract
+        }]
+      );
     }
     notes.push('禁止一次性打完 30% 右侧袋。');
   }
 
+  const cashPlan = summarizeCashPlan(legs, startWallet);
   const checklist = [
     `H = ${ev.qqq?.H != null ? ev.qqq.H.toFixed(2) : '—'}，${id} 触发价 ${tier.triggerPrice ?? '—'}${tier.intradayPrice ? ` / 盘中 ${tier.intradayPrice}` : ''}`,
     `弹药 B = $${Number(ev.B || 0).toFixed(2)}，本档预算 $${totalUsd.toFixed(2)}（${formatPctB(tier.pctB)}%B）`,
+    `币种：拟用 USD $${cashPlan.useUsd.toFixed(2)} / CNY ¥${cashPlan.useCny.toFixed(2)}（汇率 ${cashPlan.rate || '—'}）`,
     `袋内剩余：左 $${ev.remaining?.left ?? 0} / 危机 $${ev.remaining?.crisis ?? 0} / 右 $${ev.remaining?.right ?? 0}`,
     medium ? `T2 行权价区间参考：$${medium.low}–$${medium.high}` : null,
     ...legs.filter((l) => l.kind === 'call').map((l) => (
@@ -1007,8 +1169,11 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
     status: tier.status,
     totalUsd,
     spot,
+    proxyPrice: Number.isFinite(proxyPrice) ? proxyPrice : null,
+    proxySymbol: CNY_EQUITY_PROXY,
     pendingClose: !!tier.pendingClose,
     legs,
+    cashPlan,
     checklist,
     notes,
     prohibitions: primary.prohibitions || globalProhibitions(id, ev.round),

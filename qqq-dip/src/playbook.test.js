@@ -10,7 +10,10 @@ import {
   evaluateLot,
   mediumOtmBand,
   buildBuyPreview,
-  tierTriggerText
+  tierTriggerText,
+  planEquityCurrencySpend,
+  planTierCurrencySpend,
+  CNY_EQUITY_PROXY
 } from './playbook.js';
 
 const H = 540.81;
@@ -47,6 +50,37 @@ test('drawdown from H', () => {
 test('ammo B = USD + CNY/rate', () => {
   assert.equal(computeAmmoB(70000, 140000, 7), 90000);
   assert.equal(computeAmmoB(100000, 0, 7.2), 100000);
+});
+
+test('planEquityCurrencySpend uses CNY first', () => {
+  const full = planEquityCurrencySpend({ equityUsd: 6000, cashUsd: 1000, cashCny: 70000, rate: 7 });
+  assert.equal(full.cnyUsd, 6000);
+  assert.equal(full.usdUsd, 0);
+  assert.equal(full.cnyAmount, 42000);
+
+  const split = planEquityCurrencySpend({ equityUsd: 6000, cashUsd: 8000, cashCny: 7000, rate: 7 });
+  assert.equal(split.cnyUsd, 1000);
+  assert.equal(split.usdUsd, 5000);
+  assert.equal(split.cnyAmount, 7000);
+
+  const usdOnly = planEquityCurrencySpend({ equityUsd: 6000, cashUsd: 8000, cashCny: 0, rate: 7 });
+  assert.equal(usdOnly.cnyUsd, 0);
+  assert.equal(usdOnly.usdUsd, 6000);
+});
+
+test('planTierCurrencySpend reserves option USD before equity', () => {
+  const plan = planTierCurrencySpend({
+    equityUsd: 7500,
+    optionUsd: 2500,
+    cashUsd: 3000,
+    cashCny: 70000,
+    rate: 7
+  });
+  assert.equal(plan.optionUsd, 2500);
+  assert.equal(plan.equity.cnyUsd, 7500);
+  assert.equal(plan.equity.usdUsd, 0);
+  assert.equal(plan.useUsd, 2500);
+  assert.equal(plan.useCny, 52500);
 });
 
 test('default bags 40/30/30', () => {
@@ -118,7 +152,7 @@ test('T1 confirmed on close −8%', () => {
   });
   const t1 = ev.tiers.find((t) => t.id === 'T1');
   assert.equal(t1.status, 'confirmed');
-  assert.match(t1.recommendation, /只买 QQQ 正股/);
+  assert.match(t1.recommendation, /只买正股/);
   const t2 = ev.tiers.find((t) => t.id === 'T2');
   assert.equal(t2.status, 'idle');
   const r1 = ev.tiers.find((t) => t.id === 'R1');
@@ -230,7 +264,7 @@ test('medium OTM strike band is 1.25S–1.40S', () => {
   assert.equal(band.high, 660);
 });
 
-test('buy preview T1 is all QQQ equity', () => {
+test('buy preview T1 is all QQQ equity when no CNY', () => {
   const ev = evaluate({
     cashUsd: 100000,
     cashCny: 0,
@@ -244,6 +278,42 @@ test('buy preview T1 is all QQQ equity', () => {
   assert.equal(preview.legs.length, 1);
   assert.equal(preview.legs[0].kind, 'equity');
   assert.equal(preview.legs[0].symbol, 'QQQ');
+  assert.equal(preview.legs[0].currency, 'USD');
+});
+
+test('buy preview T1 prefers 159509 when CNY covers', () => {
+  const ev = evaluate({
+    cashUsd: 1000,
+    cashCny: 700000,
+    usdCnyRate: 7,
+    qqq: { candles: candlesFromHighClose(H, 497), price: 497, close: 497, low: 496 },
+    cnyProxy: { price: 1.25 },
+    vxn: { price: 20 }
+  });
+  const preview = ev.buyPreview;
+  assert.equal(preview.tier, 'T1');
+  assert.equal(preview.legs.length, 1);
+  assert.equal(preview.legs[0].symbol, CNY_EQUITY_PROXY);
+  assert.equal(preview.legs[0].currency, 'CNY');
+  assert.ok(preview.cashPlan.useCny > 0);
+  assert.equal(preview.cashPlan.useUsd, 0);
+});
+
+test('buy preview T1 splits CNY then USD when CNY short', () => {
+  const ev = evaluate({
+    cashUsd: 50000,
+    cashCny: 7000,
+    usdCnyRate: 7,
+    qqq: { candles: candlesFromHighClose(H, 497), price: 497, close: 497, low: 496 },
+    cnyProxy: { price: 1.25 },
+    vxn: { price: 20 }
+  });
+  const preview = ev.buyPreview;
+  assert.equal(preview.tier, 'T1');
+  assert.equal(preview.legs.length, 2);
+  assert.equal(preview.legs[0].symbol, CNY_EQUITY_PROXY);
+  assert.equal(preview.legs[1].symbol, 'QQQ');
+  assert.equal(preview.legs[0].usd, 1000);
 });
 
 test('buy preview T2 blocked is equity only', () => {
@@ -273,4 +343,20 @@ test('buy preview T2 with VXN splits equity and call', () => {
   assert.equal(preview.legs[0].kind, 'equity');
   assert.equal(preview.legs[1].kind, 'call');
   assert.ok(preview.legs[1].strike >= 585);
+});
+
+test('buy preview T2 with VXN keeps calls USD and equity CNY-first', () => {
+  const ev = evaluate({
+    cashUsd: 3000,
+    cashCny: 700000,
+    usdCnyRate: 7,
+    qqq: { candles: candlesFromHighClose(H, 470), price: 470, close: 470, low: 468 },
+    cnyProxy: { price: 1.25 },
+    vxn: { price: 28 }
+  });
+  const preview = ev.buyPreview;
+  assert.equal(preview.tier, 'T2');
+  assert.ok(preview.legs.some((l) => l.kind === 'call' && l.currency === 'USD'));
+  assert.ok(preview.legs.some((l) => l.kind === 'equity' && l.symbol === CNY_EQUITY_PROXY));
+  assert.ok(!preview.legs.some((l) => l.kind === 'equity' && l.symbol === 'QQQ'));
 });

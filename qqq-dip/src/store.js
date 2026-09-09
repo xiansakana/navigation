@@ -28,7 +28,7 @@ export function defaultNotify(seed = {}) {
 }
 
 export function defaultCash() {
-  return { cashUsd: 0, cashCny: 0, usdCnyRate: 7.2 };
+  return { cashUsd: 0, cashCny: 0, usdCnyRate: 7.2, fxSource: null, fxUpdatedAt: null };
 }
 
 export function defaultSettings() {
@@ -70,6 +70,27 @@ export function createStore(config) {
     data.actions = Array.isArray(data.actions) ? data.actions : [];
   }
 
+  const canonicalQqToken = String(config?.notify?.qq?.token || '').trim();
+
+  function resolveNotifyToken(stored) {
+    const saved = String(stored || '').trim();
+    if (canonicalQqToken) return canonicalQqToken;
+    return saved;
+  }
+
+  function syncNotifyToken() {
+    if (!canonicalQqToken) return;
+    const stored = String(data.notify?.qq?.token || '').trim();
+    if (stored !== canonicalQqToken) {
+      data.notify = defaultNotify({
+        ...data.notify,
+        qq: { ...data.notify?.qq, token: canonicalQqToken }
+      });
+    }
+  }
+
+  syncNotifyToken();
+
   function persist() {
     const tmp = jsonPath + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
@@ -81,10 +102,13 @@ export function createStore(config) {
   }
 
   function setCash(cash) {
+    const prev = getCash();
     data.cash = {
-      cashUsd: Number(cash.cashUsd) || 0,
-      cashCny: Number(cash.cashCny) || 0,
-      usdCnyRate: Number(cash.usdCnyRate) > 0 ? Number(cash.usdCnyRate) : getCash().usdCnyRate
+      cashUsd: cash.cashUsd != null ? Number(cash.cashUsd) || 0 : prev.cashUsd,
+      cashCny: cash.cashCny != null ? Number(cash.cashCny) || 0 : prev.cashCny,
+      usdCnyRate: Number(cash.usdCnyRate) > 0 ? Number(cash.usdCnyRate) : prev.usdCnyRate,
+      fxSource: cash.fxSource != null ? cash.fxSource : prev.fxSource,
+      fxUpdatedAt: cash.fxUpdatedAt != null ? cash.fxUpdatedAt : prev.fxUpdatedAt
     };
     persist();
     return data.cash;
@@ -111,7 +135,9 @@ export function createStore(config) {
   }
 
   function getNotify() {
-    return defaultNotify(data.notify);
+    const n = defaultNotify(data.notify);
+    n.qq.token = resolveNotifyToken(n.qq.token);
+    return n;
   }
 
   function setNotify(patch, previous = getNotify()) {
@@ -119,7 +145,7 @@ export function createStore(config) {
     const incoming = patch || {};
     const qq = { ...prev.qq, ...(incoming.qq || {}) };
     if (!incoming.qq?.token || !String(incoming.qq.token).trim() || String(incoming.qq.token).includes('*')) {
-      qq.token = prev.qq.token;
+      qq.token = resolveNotifyToken(prev.qq.token);
     }
     const targets = Array.isArray(incoming.targets) ? incoming.targets : prev.targets;
     data.notify = {
@@ -211,13 +237,35 @@ export function createStore(config) {
   }
 
   function markExecuted(tier, payload) {
+    const cashUsd = Math.max(0, Number(payload.cashUsd) || 0);
+    const cashCny = Math.max(0, Number(payload.cashCny) || 0);
+    const usd = payload.usd != null
+      ? Number(payload.usd) || 0
+      : roundMoneyLocal(cashUsd + (getCash().usdCnyRate > 0 ? cashCny / getCash().usdCnyRate : 0));
     const round = getRound();
     round.executed = {
       ...(round.executed || {}),
-      [tier]: { usd: Number(payload.usd) || 0, at: new Date().toISOString(), note: payload.note || '' }
+      [tier]: {
+        usd,
+        cashUsd,
+        cashCny,
+        at: new Date().toISOString(),
+        note: payload.note || ''
+      }
     };
     setRound(round);
+    if (cashUsd > 0 || cashCny > 0) {
+      const cash = getCash();
+      setCash({
+        cashUsd: Math.max(0, roundMoneyLocal((Number(cash.cashUsd) || 0) - cashUsd)),
+        cashCny: Math.max(0, roundMoneyLocal((Number(cash.cashCny) || 0) - cashCny))
+      });
+    }
     return round;
+  }
+
+  function roundMoneyLocal(n) {
+    return Math.round((Number(n) || 0) * 100) / 100;
   }
 
   persist();

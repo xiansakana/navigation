@@ -3,6 +3,9 @@ const FETCH_RETRIES = 2;
 const RETRY_BASE_MS = 500;
 const POLYGON_429_BASE_MS = 2000;
 const CANDLE_CACHE = new Map();
+const QUOTE_CACHE = new Map();
+const QUOTE_CACHE_MS = 30000;
+const CNY_EQUITY_PROXY_SYMBOL = '159509';
 
 function parseOptionSymbol(symbol) {
   const m = String(symbol).toUpperCase().match(/^([A-Z]+)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
@@ -129,20 +132,71 @@ export function createQuoteService(config) {
   const finnhubKey = config.finnhubApiKey;
   const polygonKey = config.polygonApiKey;
 
-  async function getStock(symbol) {
+  async function getStockFromFinnhub(sym) {
     if (!finnhubKey) throw new Error('未配置 Finnhub API Key');
-    const sym = String(symbol).toUpperCase();
     const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${finnhubKey}`;
     let q;
     try {
       q = await fetchJson(url);
     } catch (e) {
-      throw new Error(`Finnhub ${e.message}`);
+      throw new Error(e.message);
     }
     if (q.error) throw new Error(String(q.error));
     if (!q.c && q.c !== 0) throw new Error('无效代码或无行情');
     if (q.c === 0 && q.pc === 0) throw new Error('无效代码或无行情');
     return mapQuote(sym, q);
+  }
+
+  async function getStockFromPolygon(sym) {
+    if (!polygonKey) throw new Error('未配置 Polygon API Key');
+    const url = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(sym)}/prev?adjusted=true&apiKey=${polygonKey}`;
+    let data;
+    try {
+      data = await fetchJson(url);
+    } catch (e) {
+      throw new Error(`Polygon ${e.message}`);
+    }
+    const r = data?.results?.[0];
+    if (!r?.c) throw new Error(`无行情 ${sym}`);
+    const price = r.c;
+    const prev = r.o ?? price;
+    return {
+      symbol: sym,
+      price,
+      close: price,
+      change: price - prev,
+      changePercent: prev ? ((price - prev) / prev) * 100 : 0,
+      high: r.h ?? price,
+      low: r.l ?? price,
+      open: r.o ?? price,
+      prevClose: prev
+    };
+  }
+
+  async function getStock(symbol) {
+    const sym = String(symbol).toUpperCase();
+    const cached = QUOTE_CACHE.get(sym);
+    if (cached && Date.now() - cached.at < QUOTE_CACHE_MS) return cached.quote;
+
+    let quote;
+    if (finnhubKey) {
+      try {
+        quote = await getStockFromFinnhub(sym);
+      } catch (e) {
+        if (!polygonKey) throw new Error(`Finnhub ${e.message}`);
+        try {
+          quote = await getStockFromPolygon(sym);
+        } catch (e2) {
+          throw new Error(`Finnhub ${e.message}; ${e2.message}`);
+        }
+      }
+    } else if (polygonKey) {
+      quote = await getStockFromPolygon(sym);
+    } else {
+      throw new Error('未配置行情 API Key');
+    }
+    QUOTE_CACHE.set(sym, { at: Date.now(), quote });
+    return quote;
   }
 
   async function getCandlesFromPolygon(symbol, days = 90) {
@@ -276,19 +330,57 @@ export function createQuoteService(config) {
     }
   }
 
+  async function getUsdCnyFromFred() {
+    const text = await fetchText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DEXCHUS');
+    const lines = text.trim().split(/\r?\n/);
+    for (let i = lines.length - 1; i >= 1; i--) {
+      const [date, raw] = lines[i].split(',');
+      const rate = Number(raw);
+      if (date && Number.isFinite(rate) && rate > 0) {
+        return { rate, source: 'fred', asOf: date };
+      }
+    }
+    throw new Error('无有效收盘数据');
+  }
+
+  let usdCnyCache = { rate: null, source: null, at: 0 };
+  const USD_CNY_CACHE_MS = 60 * 1000;
+
   async function getUsdCny() {
+    if (usdCnyCache.rate && Date.now() - usdCnyCache.at < USD_CNY_CACHE_MS) {
+      return { rate: usdCnyCache.rate, source: usdCnyCache.source };
+    }
+    const errors = [];
     if (finnhubKey) {
       try {
         const url = `https://finnhub.io/api/v1/forex/rates?base=USD&token=${finnhubKey}`;
         const data = await fetchJson(url);
         const rate = data?.quote?.CNY || data?.quote?.CNH;
-        if (rate) return { rate: Number(rate), source: 'finnhub' };
-      } catch {
-        /* fall through */
+        if (rate) {
+          const out = { rate: Number(rate), source: 'finnhub' };
+          usdCnyCache = { rate: out.rate, source: out.source, at: Date.now() };
+          return out;
+        }
+      } catch (e) {
+        errors.push(`Finnhub: ${e.message}`);
       }
     }
-    const q = await getYahooQuote('USDCNY=X');
-    return { rate: q.price, source: 'yahoo' };
+    try {
+      const fx = await getUsdCnyFromFred();
+      usdCnyCache = { rate: fx.rate, source: fx.source, at: Date.now() };
+      return fx;
+    } catch (e) {
+      errors.push(`FRED: ${e.message}`);
+    }
+    try {
+      const q = await getYahooQuote('USDCNY=X');
+      const out = { rate: q.price, source: 'yahoo' };
+      usdCnyCache = { rate: out.rate, source: out.source, at: Date.now() };
+      return out;
+    } catch (e) {
+      errors.push(`Yahoo: ${e.message}`);
+      throw new Error(`USD/CNY 不可用（${errors.join('; ')}）`);
+    }
   }
 
   async function getOptionSnapshot(symbol) {
@@ -354,6 +446,22 @@ export function createQuoteService(config) {
     }
   }
 
+  async function getCnyProxyQuote() {
+    const q = await getYahooQuote('159509.SZ');
+    return {
+      symbol: CNY_EQUITY_PROXY_SYMBOL,
+      price: q.price,
+      close: q.close ?? q.price,
+      prevClose: q.prevClose,
+      change: q.change,
+      changePercent: q.changePercent,
+      high: q.high,
+      low: q.low,
+      source: 'yahoo',
+      candles: []
+    };
+  }
+
   async function getMarketBundle(symbols) {
     const out = {};
     const errors = {};
@@ -372,6 +480,11 @@ export function createQuoteService(config) {
     } catch (e) {
       errors.VXN = e.message;
     }
+    try {
+      out[CNY_EQUITY_PROXY_SYMBOL] = await getCnyProxyQuote();
+    } catch (e) {
+      errors[CNY_EQUITY_PROXY_SYMBOL] = e.message;
+    }
     return { markets: out, errors };
   }
 
@@ -380,6 +493,7 @@ export function createQuoteService(config) {
     getCandles,
     getVxn,
     getUsdCny,
+    getCnyProxyQuote,
     getOptionSnapshot,
     searchLeapCalls,
     getMarketBundle,
