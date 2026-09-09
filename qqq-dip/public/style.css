@@ -203,10 +203,11 @@ body.has-navbar { padding-top: var(--navbar-height); }
     white-space: nowrap;
 }
 .sm-table th { color: var(--muted); font-weight: 600; }
-#tier-table td.tier-action {
+#tier-table td.tier-action,
+#tier-table td.tier-cond {
     white-space: normal;
-    min-width: 220px;
-    max-width: 420px;
+    min-width: 200px;
+    max-width: 360px;
     color: var(--muted);
     font-size: 12px;
     line-height: 1.45;

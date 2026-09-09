@@ -8,10 +8,21 @@ import {
   evaluate,
   shouldReset,
   evaluateLot,
-  mediumOtmBand
+  mediumOtmBand,
+  buildBuyPreview,
+  tierTriggerText
 } from './playbook.js';
 
 const H = 540.81;
+
+test('tier trigger text covers left / crisis / right', () => {
+  assert.match(tierTriggerText('T1'), /−8%/);
+  assert.match(tierTriggerText('T2'), /VXN≥25/);
+  assert.match(tierTriggerText('T4'), /盘中/);
+  assert.match(tierTriggerText('T5'), /危机袋/);
+  assert.match(tierTriggerText('R1'), /20 日线/);
+  assert.match(tierTriggerText('R2'), /假右侧/);
+});
 
 test('T1–T4 trigger prices from 2025-02-19 high', () => {
   const t = triggerPrices(H);
@@ -47,6 +58,35 @@ test('V-boost bags 55/20/25', () => {
   assert.equal(b.left, 55000);
   assert.equal(b.crisis, 20000);
   assert.equal(b.right, 25000);
+});
+
+test('V-boost scales tier pctB and usd', () => {
+  const base = evaluate({
+    cashUsd: 100000,
+    cashCny: 0,
+    usdCnyRate: 7,
+    variant: 'default',
+    qqq: { candles: candlesFromHighClose(H, 530), price: 530, close: 530, low: 529 }
+  });
+  const boost = evaluate({
+    cashUsd: 100000,
+    cashCny: 0,
+    usdCnyRate: 7,
+    variant: 'vBoost',
+    qqq: { candles: candlesFromHighClose(H, 530), price: 530, close: 530, low: 529 }
+  });
+  const t1 = boost.tiers.find((t) => t.id === 'T1');
+  const t1Base = base.tiers.find((t) => t.id === 'T1');
+  assert.equal(t1Base.pctB, 0.06);
+  assert.equal(t1Base.usd, 6000);
+  assert.equal(t1.pctB, 0.06 * (0.55 / 0.4));
+  assert.equal(t1.usd, 8250);
+  const leftSum = boost.tiers.filter((t) => t.bag === 'left').reduce((s, t) => s + t.pctB, 0);
+  const crisisSum = boost.tiers.filter((t) => t.bag === 'crisis').reduce((s, t) => s + t.pctB, 0);
+  const rightSum = boost.tiers.filter((t) => t.bag === 'right').reduce((s, t) => s + t.pctB, 0);
+  assert.ok(Math.abs(leftSum - 0.55) < 1e-9);
+  assert.ok(Math.abs(crisisSum - 0.2) < 1e-9);
+  assert.ok(Math.abs(rightSum - 0.25) < 1e-9);
 });
 
 test('0.98H reset', () => {
@@ -185,4 +225,49 @@ test('medium OTM strike band is 1.25S–1.40S', () => {
   const band = mediumOtmBand(470);
   assert.equal(band.low, 590);
   assert.equal(band.high, 660);
+});
+
+test('buy preview T1 is all QQQ equity', () => {
+  const ev = evaluate({
+    cashUsd: 100000,
+    cashCny: 0,
+    usdCnyRate: 7,
+    qqq: { candles: candlesFromHighClose(H, 497), price: 497, close: 497, low: 496 },
+    vxn: { price: 20 }
+  });
+  const preview = ev.buyPreview;
+  assert.equal(preview.available, true);
+  assert.equal(preview.tier, 'T1');
+  assert.equal(preview.legs.length, 1);
+  assert.equal(preview.legs[0].kind, 'equity');
+  assert.equal(preview.legs[0].symbol, 'QQQ');
+});
+
+test('buy preview T2 blocked is equity only', () => {
+  const ev = evaluate({
+    cashUsd: 100000,
+    cashCny: 0,
+    usdCnyRate: 7,
+    qqq: { candles: candlesFromHighClose(H, 470), price: 470, close: 470, low: 468 },
+    vxn: { price: 20 }
+  });
+  const preview = ev.buyPreview;
+  assert.equal(preview.tier, 'T2');
+  assert.equal(preview.legs.length, 1);
+  assert.equal(preview.legs[0].kind, 'equity');
+});
+
+test('buy preview T2 with VXN splits equity and call', () => {
+  const ev = evaluate({
+    cashUsd: 100000,
+    cashCny: 0,
+    usdCnyRate: 7,
+    qqq: { candles: candlesFromHighClose(H, 470), price: 470, close: 470, low: 468 },
+    vxn: { price: 28 }
+  });
+  const preview = ev.buyPreview;
+  assert.equal(preview.legs.length, 2);
+  assert.equal(preview.legs[0].kind, 'equity');
+  assert.equal(preview.legs[1].kind, 'call');
+  assert.ok(preview.legs[1].strike >= 585);
 });
