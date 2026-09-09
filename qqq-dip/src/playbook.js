@@ -115,6 +115,28 @@ export function formatPctB(pctB) {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
+/** Human-readable trigger rule for the tier ladder UI (no dollar amounts). */
+export function tierTriggerText(tierId) {
+  const def = TIER_DEFS[tierId];
+  if (!def) return '';
+  if (tierId === 'R1') {
+    return '已见 −22%；收盘站上 20 日线且创 5 日新高（VXN≥25 才允许本档期权）';
+  }
+  if (tierId === 'R2') {
+    return 'R1 已触发且未假右侧冻结；其后约 15–40 个交易日未破前低，或已见 −30% 后再上 20 日线';
+  }
+  const dd = def.closeMult != null ? Math.round((1 - def.closeMult) * 100) : null;
+  const parts = [];
+  if (dd != null) parts.push(`相对 H 收盘 ≤ −${dd}%（≤ ${def.closeMult}H）`);
+  if (def.intradayMult != null) {
+    const idd = Math.round((1 - def.intradayMult) * 100);
+    parts.push(`或盘中触及 −${idd}%（${def.intradayMult}H 限价）`);
+  }
+  if (def.vxnMin != null) parts.push(`且 VXN≥${def.vxnMin} 才允许期权（否则改正股，档仍触发）`);
+  if (['T5', 'T6', 'T7'].includes(tierId)) parts.push('须先见过 −22% 才解锁危机袋');
+  return parts.join('；');
+}
+
 export function thirdFriday(year, monthIndex) {
   const first = new Date(Date.UTC(year, monthIndex, 1));
   const day = first.getUTCDay();
@@ -569,6 +591,7 @@ export function evaluate(input) {
       usd,
       triggerPrice: def.closeMult ? qqq.triggers?.[id] : null,
       intradayPrice: def.intradayMult ? qqq.triggers?.T4_intraday : null,
+      triggerCondition: tierTriggerText(id),
       status,
       pendingClose,
       vxnGate,

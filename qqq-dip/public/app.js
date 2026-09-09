@@ -578,10 +578,12 @@ function renderTiers() {
   const tiers = state.evaluation?.tiers || [];
   $('#tier-table tbody').innerHTML = tiers.map((t) => {
     const action = t.recommendation || '—';
+    const cond = t.triggerCondition || '—';
     return `
     <tr class="tier-row st-row-${escapeHtml(t.status || '')}">
       <td><strong>${escapeHtml(t.id)}</strong></td>
       <td>${escapeHtml(bagLabel(t.bag))}</td>
+      <td class="tier-cond" title="${escapeHtml(cond)}">${escapeHtml(cond)}</td>
       <td>${t.triggerPrice ?? '—'}${t.intradayPrice ? ` / 盘中 ${t.intradayPrice}` : ''}</td>
       <td>${fmtPctB(t.pctB)}%</td>
       <td>${maskMoney(fmtUsd(t.usd))}</td>
