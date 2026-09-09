@@ -358,6 +358,9 @@ export function enrichHoldings(holdings, quotes, cash, meta = {}) {
       dailyPnlPct: price > 0 && changePct != null && Number.isFinite(changePct) ? changePct : null,
       change: change ?? 0,
       changePercent: changePct ?? 0,
+      delayed: !!q.delayed,
+      quoteAsOf: q.asOf || null,
+      quoteSource: q.source || null,
       targetPrice: m.targetPrice ?? '',
       signal: m.signal ?? '',
       optionInfo: opt

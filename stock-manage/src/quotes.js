@@ -71,6 +71,14 @@ async function fetchJson(url) {
   throw new Error(formatFetchError(lastErr));
 }
 
+function ymdUTC(ms) {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+function ymdDaysAgo(days) {
+  return ymdUTC(Date.now() - days * 86400000);
+}
+
 export function createQuoteService(config) {
   const finnhubKey = config.finnhubApiKey;
   const polygonKey = config.polygonApiKey;
@@ -102,23 +110,88 @@ export function createQuoteService(config) {
     const lastTrade = snap?.last_trade || {};
     const lastQuote = snap?.last_quote || {};
     const day = snap?.day || {};
-    if (Number.isFinite(lastTrade.price) && lastTrade.price > 0) return lastTrade.price;
-    if (Number.isFinite(lastQuote.midpoint) && lastQuote.midpoint > 0) return lastQuote.midpoint;
+    if (Number.isFinite(lastTrade.price) && lastTrade.price > 0) return Number(lastTrade.price);
+    if (Number.isFinite(lastQuote.midpoint) && lastQuote.midpoint > 0) return Number(lastQuote.midpoint);
     const bid = Number(lastQuote.bid);
     const ask = Number(lastQuote.ask);
     if (bid > 0 && ask > 0) return (bid + ask) / 2;
-    if (Number.isFinite(day.close) && day.close > 0) return day.close;
+    if (Number.isFinite(day.close) && day.close > 0) return Number(day.close);
     return 0;
   }
 
-  async function getOptionPrevClose(polygonSymbol) {
-    const priceUrl = `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(polygonSymbol)}/prev?adjusted=true&apiKey=${polygonKey}`;
-    const priceData = await fetchJson(priceUrl);
-    if (priceData.status === 'OK' && priceData.results?.length) {
-      const r = priceData.results[0];
-      return r.c || r.vw || 0;
+  async function getOptionDailyBars(polygonSymbol) {
+    const url =
+      `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(polygonSymbol)}` +
+      `/range/1/day/${ymdDaysAgo(25)}/${ymdUTC(Date.now())}` +
+      `?adjusted=true&sort=asc&limit=30&apiKey=${polygonKey}`;
+    const data = await fetchJson(url);
+    return Array.isArray(data.results) ? data.results : [];
+  }
+
+  async function getOptionFromSnapshot(polygonSymbol, underlying) {
+    const snapUrl =
+      `https://api.polygon.io/v3/snapshot/options/${encodeURIComponent(underlying)}/` +
+      `${encodeURIComponent(polygonSymbol)}?apiKey=${polygonKey}`;
+    const data = await fetchJson(snapUrl);
+    const snap = data?.results;
+    if (!snap) throw new Error(data?.error || data?.message || '无快照');
+    const price = pickOptionPrice(snap);
+    if (!(price > 0)) throw new Error('快照无有效价格');
+    const day = snap.day || {};
+    let prevClose = Number(day.previous_close) || Number(snap.prev_day?.close) || 0;
+    let change = Number(day.change);
+    let changePercent = Number(day.change_percent);
+    if (!(prevClose > 0)) {
+      try {
+        const bars = await getOptionDailyBars(polygonSymbol);
+        if (bars.length >= 2) prevClose = Number(bars[bars.length - 2].c) || 0;
+        else if (bars.length === 1) prevClose = Number(bars[0].o) || 0;
+      } catch {
+        /* ignore */
+      }
     }
-    return 0;
+    if (prevClose > 0 && (!Number.isFinite(change) || (Math.abs(change) < 1e-12 && Math.abs(price - prevClose) > 1e-9))) {
+      change = price - prevClose;
+      changePercent = (change / prevClose) * 100;
+    }
+    if (!Number.isFinite(change)) change = 0;
+    if (!Number.isFinite(changePercent)) changePercent = 0;
+    const details = snap.details || {};
+    return {
+      price,
+      change,
+      changePercent,
+      prevClose: prevClose || undefined,
+      delayed: false,
+      source: 'polygon-snapshot',
+      asOf: null,
+      details
+    };
+  }
+
+  /** Delayed daily bars — available on basic Polygon plans when snapshot is 403. */
+  async function getOptionFromDailyBars(polygonSymbol) {
+    const bars = await getOptionDailyBars(polygonSymbol);
+    if (!bars.length) throw new Error('无日线数据');
+    const last = bars[bars.length - 1];
+    const prev = bars.length >= 2 ? bars[bars.length - 2] : null;
+    const price = Number(last.c) || Number(last.vw) || 0;
+    if (!(price > 0)) throw new Error('日线无有效收盘价');
+    let prevClose = prev ? Number(prev.c) || 0 : 0;
+    // If only one bar, fall back to that session open so change is not always 0.
+    if (!(prevClose > 0)) prevClose = Number(last.o) || 0;
+    const change = prevClose > 0 ? price - prevClose : 0;
+    const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
+    return {
+      price,
+      change,
+      changePercent,
+      prevClose: prevClose || undefined,
+      delayed: true,
+      source: 'polygon-daily-delayed',
+      asOf: last.t ? ymdUTC(last.t) : null,
+      details: null
+    };
   }
 
   async function getOption(symbol) {
@@ -128,58 +201,35 @@ export function createQuoteService(config) {
     if (!parsed) throw new Error('期权代码格式错误');
     const polygonSymbol = toPolygonOptionSymbol(upper);
 
-    // Prefer live snapshot (last trade / quote); /prev is only previous session close.
-    const snapUrl = `https://api.polygon.io/v3/snapshot/options/${encodeURIComponent(parsed.underlying)}/${encodeURIComponent(polygonSymbol)}?apiKey=${polygonKey}`;
-    let snap = null;
+    let quote = null;
     let snapErr = null;
     try {
-      const data = await fetchJson(snapUrl);
-      snap = data?.results || null;
+      quote = await getOptionFromSnapshot(polygonSymbol, parsed.underlying);
     } catch (e) {
       snapErr = e;
-    }
-
-    let price = pickOptionPrice(snap);
-    const day = snap?.day || {};
-    const details = snap?.details || {};
-    let change = Number(day.change);
-    let changePercent = Number(day.change_percent);
-    let prevClose = Number(day.previous_close) || Number(snap?.prev_day?.close) || 0;
-
-    if (!(price > 0) || !(prevClose > 0) || !Number.isFinite(change)) {
       try {
-        const prev = await getOptionPrevClose(polygonSymbol);
-        if (!(prevClose > 0) && prev > 0) prevClose = prev;
-        if (!(price > 0) && prev > 0) price = prev;
-      } catch (e) {
-        if (!(price > 0)) {
-          throw new Error(`Polygon 期权价格不可用${snapErr ? `（snapshot: ${snapErr.message}）` : ''}`);
-        }
+        quote = await getOptionFromDailyBars(polygonSymbol);
+      } catch (e2) {
+        throw new Error(
+          `Polygon 期权价格不可用（snapshot: ${snapErr.message}; daily: ${e2.message}）`
+        );
       }
     }
 
-    if (!Number.isFinite(change) && prevClose > 0 && price > 0) {
-      change = price - prevClose;
-      changePercent = (change / prevClose) * 100;
-    }
-    if (!Number.isFinite(changePercent) && prevClose > 0 && price > 0) {
-      changePercent = ((price - prevClose) / prevClose) * 100;
-    }
-    if (!Number.isFinite(change)) change = 0;
-    if (!Number.isFinite(changePercent)) changePercent = 0;
-
     let name;
+    const details = quote.details || {};
     if (details.expiration_date || details.strike_price) {
       name = `${parsed.underlying} ${details.expiration_date || parsed.expiration} ${details.contract_type || parsed.type} $${details.strike_price || parsed.strike}`;
     } else {
       try {
-        const contractUrl = `https://api.polygon.io/v3/reference/options/contracts/${encodeURIComponent(polygonSymbol)}?apiKey=${polygonKey}`;
+        const contractUrl =
+          `https://api.polygon.io/v3/reference/options/contracts/${encodeURIComponent(polygonSymbol)}` +
+          `?apiKey=${polygonKey}`;
         const contractData = await fetchJson(contractUrl);
         const c = contractData?.results;
         if (!c) throw new Error('期权不存在或已过期');
         name = `${parsed.underlying} ${c.expiration_date} ${c.contract_type} $${c.strike_price}`;
-      } catch (e) {
-        if (!(price > 0)) throw new Error(`Polygon ${e.message}`);
+      } catch {
         name = `${parsed.underlying} ${parsed.expiration} ${parsed.type} $${parsed.strike}`;
       }
     }
@@ -187,11 +237,13 @@ export function createQuoteService(config) {
     return {
       symbol: upper,
       name,
-      price,
-      change,
-      changePercent,
-      prevClose: prevClose || undefined,
-      source: price > 0 && snap ? 'polygon-snapshot' : 'polygon-prev'
+      price: quote.price,
+      change: quote.change,
+      changePercent: quote.changePercent,
+      prevClose: quote.prevClose,
+      delayed: !!quote.delayed,
+      asOf: quote.asOf || undefined,
+      source: quote.source
     };
   }
 
