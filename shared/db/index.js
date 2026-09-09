@@ -2,5 +2,5 @@ export { resolveRepoRoot, resolveDbPath, defaultRbacJsonPath, defaultPortfolioJs
 export { getDatabase, getDbPath, closeDatabase } from './connection.js';
 export { initSchema } from './schema.js';
 export { runMigrations, importPortfolioJson } from './migrate.js';
-export { createPortfolioStore, EMPTY, normalizePortfolio } from './portfolio-store.js';
+export { createPortfolioStore, EMPTY, normalizePortfolio, DEFAULT_USD_CNY_RATE } from './portfolio-store.js';
 export { loadRbacBlob, saveRbacBlob, hasRbacData } from './rbac-store.js';

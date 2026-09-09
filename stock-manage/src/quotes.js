@@ -1,3 +1,10 @@
+import {
+  isAShareSymbol,
+  ashareCode,
+  ashareExchange,
+  normalizeSymbol
+} from './markets.js';
+
 const FETCH_TIMEOUT_MS = 12000;
 const FETCH_RETRIES = 2;
 const RETRY_BASE_MS = 500;
@@ -39,13 +46,13 @@ function isRetryable(err, status) {
   return /fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|UND_ERR_|socket|network|timeout|aborted/i.test(blob);
 }
 
-async function fetchJson(url) {
+async function fetchJson(url, headers = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= FETCH_RETRIES; attempt++) {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
     try {
-      const res = await fetch(url, { signal: ac.signal });
+      const res = await fetch(url, { signal: ac.signal, headers });
       if (!res.ok) {
         const err = new Error(`HTTP ${res.status}`);
         err.status = res.status;
@@ -57,6 +64,38 @@ async function fetchJson(url) {
         throw err;
       }
       return await res.json();
+    } catch (e) {
+      lastErr = e;
+      if (attempt < FETCH_RETRIES && isRetryable(e, e.status)) {
+        await new Promise((r) => setTimeout(r, RETRY_BASE_MS * (attempt + 1)));
+        continue;
+      }
+      throw new Error(formatFetchError(e));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error(formatFetchError(lastErr));
+}
+
+async function fetchText(url, headers = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= FETCH_RETRIES; attempt++) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: ac.signal, headers });
+      if (!res.ok) {
+        const err = new Error(`HTTP ${res.status}`);
+        err.status = res.status;
+        lastErr = err;
+        if (attempt < FETCH_RETRIES && isRetryable(err, res.status)) {
+          await new Promise((r) => setTimeout(r, RETRY_BASE_MS * (attempt + 1)));
+          continue;
+        }
+        throw err;
+      }
+      return await res.text();
     } catch (e) {
       lastErr = e;
       if (attempt < FETCH_RETRIES && isRetryable(e, e.status)) {
@@ -84,13 +123,13 @@ export function createQuoteService(config) {
   const polygonKey = config.polygonApiKey;
 
   if (!finnhubKey) {
-    console.warn('stock-manage: finnhubApiKey 未配置，股票行情不可用');
+    console.warn('stock-manage: finnhubApiKey 未配置，美股行情不可用');
   }
   if (!polygonKey) {
     console.warn('stock-manage: polygonApiKey 未配置，期权行情不可用');
   }
 
-  async function getStock(symbol) {
+  async function getStockFromFinnhub(symbol) {
     if (!finnhubKey) throw new Error('未配置 Finnhub API Key');
     const sym = String(symbol).toUpperCase();
     const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${finnhubKey}`;
@@ -103,7 +142,201 @@ export function createQuoteService(config) {
     if (q.error) throw new Error(String(q.error));
     if (!q.c && q.c !== 0) throw new Error('无效代码或无行情');
     if (q.c === 0 && q.pc === 0) throw new Error('无效代码或无行情');
-    return { symbol: sym, name: sym, price: q.c, change: q.d ?? 0, changePercent: q.dp ?? 0 };
+    return {
+      symbol: sym,
+      name: sym,
+      price: q.c,
+      change: q.d ?? 0,
+      changePercent: q.dp ?? 0,
+      currency: 'USD',
+      source: 'finnhub'
+    };
+  }
+
+  async function getYahooQuote(symbol) {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
+    const data = await fetchJson(url, { 'User-Agent': 'Mozilla/5.0' });
+    const result = data?.chart?.result?.[0];
+    const meta = result?.meta;
+    const price = Number(meta?.regularMarketPrice);
+    if (!Number.isFinite(price) || price <= 0) throw new Error('Yahoo 无有效价');
+    const prev = Number(meta?.chartPreviousClose || meta?.previousClose) || price;
+    return {
+      symbol,
+      price,
+      change: price - prev,
+      changePercent: prev ? ((price - prev) / prev) * 100 : 0,
+      prevClose: prev,
+      source: 'yahoo'
+    };
+  }
+
+  async function getAShareFromTencent(code) {
+    const ex = ashareExchange(code);
+    const text = await fetchText(`https://qt.gtimg.cn/q=${ex}${code}`, {
+      'User-Agent': 'Mozilla/5.0'
+    });
+    const m = text.match(/="([^"]*)"/);
+    if (!m) throw new Error('腾讯无行情');
+    const parts = m[1].split('~');
+    const price = Number(parts[3]);
+    const prev = Number(parts[4]) || price;
+    if (!Number.isFinite(price) || price <= 0) throw new Error('腾讯无有效价');
+    return {
+      symbol: code,
+      name: parts[1] || code,
+      price,
+      change: price - prev,
+      changePercent: prev ? ((price - prev) / prev) * 100 : 0,
+      prevClose: prev,
+      currency: 'CNY',
+      source: 'tencent'
+    };
+  }
+
+  async function getAShareFromSina(code) {
+    const ex = ashareExchange(code);
+    const text = await fetchText(`https://hq.sinajs.cn/list=${ex}${code}`, {
+      'User-Agent': 'Mozilla/5.0',
+      Referer: 'https://finance.sina.com.cn'
+    });
+    const m = text.match(/="([^"]*)"/);
+    if (!m || !m[1]) throw new Error('新浪无行情');
+    const parts = m[1].split(',');
+    const price = Number(parts[3]);
+    const prev = Number(parts[2]) || price;
+    if (!Number.isFinite(price) || price <= 0) throw new Error('新浪无有效价');
+    return {
+      symbol: code,
+      name: parts[0] || code,
+      price,
+      change: price - prev,
+      changePercent: prev ? ((price - prev) / prev) * 100 : 0,
+      prevClose: prev,
+      currency: 'CNY',
+      source: 'sina'
+    };
+  }
+
+  async function getAShareFromEastMoney(code) {
+    const ex = ashareExchange(code);
+    const secid = `${ex === 'sh' ? 1 : 0}.${code}`;
+    const url = `https://push2.eastmoney.com/api/qt/stock/get?invt=2&fltt=2&fields=f43,f44,f45,f46,f57,f58,f60,f169,f170&secid=${secid}`;
+    const data = await fetchJson(url, {
+      'User-Agent': 'Mozilla/5.0',
+      Referer: 'https://quote.eastmoney.com/'
+    });
+    const d = data?.data;
+    const price = Number(d?.f43);
+    if (!Number.isFinite(price) || price <= 0) throw new Error('东方财富无行情');
+    const prev = Number(d?.f60) || price;
+    const change = Number.isFinite(Number(d?.f169)) ? Number(d.f169) : price - prev;
+    const changePercent = Number.isFinite(Number(d?.f170))
+      ? Number(d.f170)
+      : (prev ? ((price - prev) / prev) * 100 : 0);
+    return {
+      symbol: code,
+      name: d?.f58 || code,
+      price,
+      change,
+      changePercent,
+      prevClose: prev,
+      currency: 'CNY',
+      source: 'eastmoney'
+    };
+  }
+
+  async function getAShareQuote(symbol) {
+    const code = ashareCode(symbol);
+    if (!code) throw new Error('无效 A 股代码');
+    const errors = [];
+    for (const [label, fn] of [
+      ['腾讯', getAShareFromTencent],
+      ['新浪', getAShareFromSina],
+      ['东方财富', getAShareFromEastMoney]
+    ]) {
+      try {
+        return await fn(code);
+      } catch (e) {
+        errors.push(`${label}: ${e.message}`);
+      }
+    }
+    try {
+      const ex = ashareExchange(code);
+      const yahooSym = `${code}.${ex === 'sh' ? 'SS' : 'SZ'}`;
+      const q = await getYahooQuote(yahooSym);
+      return {
+        symbol: code,
+        name: code,
+        price: q.price,
+        change: q.change,
+        changePercent: q.changePercent,
+        prevClose: q.prevClose,
+        currency: 'CNY',
+        source: 'yahoo'
+      };
+    } catch (e) {
+      errors.push(`Yahoo: ${e.message}`);
+      throw new Error(`${code} 不可用（${errors.join('; ')}）`);
+    }
+  }
+
+  async function getUsdCnyFromFred() {
+    const text = await fetchText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DEXCHUS');
+    const lines = text.trim().split(/\r?\n/);
+    for (let i = lines.length - 1; i >= 1; i--) {
+      const [date, raw] = lines[i].split(',');
+      const rate = Number(raw);
+      if (date && Number.isFinite(rate) && rate > 0) {
+        return { rate, source: 'fred', asOf: date };
+      }
+    }
+    throw new Error('无有效收盘数据');
+  }
+
+  let usdCnyCache = { rate: null, source: null, at: 0 };
+  const USD_CNY_CACHE_MS = 60 * 1000;
+
+  async function getUsdCny() {
+    if (usdCnyCache.rate && Date.now() - usdCnyCache.at < USD_CNY_CACHE_MS) {
+      return { rate: usdCnyCache.rate, source: usdCnyCache.source };
+    }
+    const errors = [];
+    if (finnhubKey) {
+      try {
+        const url = `https://finnhub.io/api/v1/forex/rates?base=USD&token=${finnhubKey}`;
+        const data = await fetchJson(url);
+        const rate = data?.quote?.CNY || data?.quote?.CNH;
+        if (rate) {
+          const out = { rate: Number(rate), source: 'finnhub' };
+          usdCnyCache = { rate: out.rate, source: out.source, at: Date.now() };
+          return out;
+        }
+      } catch (e) {
+        errors.push(`Finnhub: ${e.message}`);
+      }
+    }
+    try {
+      const fx = await getUsdCnyFromFred();
+      usdCnyCache = { rate: fx.rate, source: fx.source, at: Date.now() };
+      return fx;
+    } catch (e) {
+      errors.push(`FRED: ${e.message}`);
+    }
+    try {
+      const q = await getYahooQuote('USDCNY=X');
+      const out = { rate: q.price, source: 'yahoo' };
+      usdCnyCache = { rate: out.rate, source: out.source, at: Date.now() };
+      return out;
+    } catch (e) {
+      errors.push(`Yahoo: ${e.message}`);
+      throw new Error(`USD/CNY 不可用（${errors.join('; ')}）`);
+    }
+  }
+
+  async function getStock(symbol) {
+    if (isAShareSymbol(symbol)) return getAShareQuote(symbol);
+    return getStockFromFinnhub(symbol);
   }
 
   function pickOptionPrice(snap) {
@@ -169,7 +402,6 @@ export function createQuoteService(config) {
     };
   }
 
-  /** Delayed daily bars — available on basic Polygon plans when snapshot is 403. */
   async function getOptionFromDailyBars(polygonSymbol) {
     const bars = await getOptionDailyBars(polygonSymbol);
     if (!bars.length) throw new Error('无日线数据');
@@ -178,7 +410,6 @@ export function createQuoteService(config) {
     const price = Number(last.c) || Number(last.vw) || 0;
     if (!(price > 0)) throw new Error('日线无有效收盘价');
     let prevClose = prev ? Number(prev.c) || 0 : 0;
-    // If only one bar, fall back to that session open so change is not always 0.
     if (!(prevClose > 0)) prevClose = Number(last.o) || 0;
     const change = prevClose > 0 ? price - prevClose : 0;
     const changePercent = prevClose > 0 ? (change / prevClose) * 100 : 0;
@@ -243,14 +474,24 @@ export function createQuoteService(config) {
       prevClose: quote.prevClose,
       delayed: !!quote.delayed,
       asOf: quote.asOf || undefined,
-      source: quote.source
+      source: quote.source,
+      currency: 'USD'
     };
   }
 
   async function search(q) {
-    if (!finnhubKey) return [];
     const query = String(q || '').trim();
     if (query.length < 1) return [];
+    if (isAShareSymbol(query)) {
+      const code = ashareCode(query);
+      try {
+        const quote = await getAShareQuote(code);
+        return [{ symbol: code, name: quote.name || code }];
+      } catch {
+        return [{ symbol: code, name: code }];
+      }
+    }
+    if (!finnhubKey) return [];
     const url = `https://finnhub.io/api/v1/search?q=${encodeURIComponent(query)}&token=${finnhubKey}`;
     let data;
     try {
@@ -265,9 +506,11 @@ export function createQuoteService(config) {
   }
 
   async function getQuote(symbol) {
-    if (/^[A-Z]+\d{6}[CP]\d/i.test(symbol)) return getOption(symbol);
-    return getStock(symbol);
+    const sym = normalizeSymbol(symbol);
+    if (/^[A-Z]+\d{6}[CP]\d/i.test(sym)) return getOption(sym);
+    if (isAShareSymbol(sym)) return getAShareQuote(sym);
+    return getStockFromFinnhub(sym);
   }
 
-  return { getStock, getOption, getQuote, search };
+  return { getStock, getOption, getQuote, getAShareQuote, getUsdCny, search };
 }

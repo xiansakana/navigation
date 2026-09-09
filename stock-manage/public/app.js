@@ -6,12 +6,32 @@ import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, get
 const $ = (sel, root = document) => root.querySelector(sel);
 const fmt = (n) => Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 const fmtUsd = (n) => Number.isFinite(n) ? '$' + fmt(n) : '—';
+const fmtCny = (n) => Number.isFinite(n) ? '¥' + fmt(n) : '—';
+const fmtMoney = (n, currency = 'USD') => (String(currency).toUpperCase() === 'CNY' ? fmtCny(n) : fmtUsd(n));
 const fmtUsdSigned = (n) => !Number.isFinite(n) ? '—' : `${n >= 0 ? '+' : ''}$${fmt(n)}`;
-const fmtCommission = (n) => Number.isFinite(n) && n > 0 ? '-$' + fmt(n) : '—';
+const fmtMoneySigned = (n, currency = 'USD') => {
+  if (!Number.isFinite(n)) return '—';
+  return (n >= 0 ? '+' : '-') + fmtMoney(Math.abs(n), currency);
+};
+const fmtCommission = (n, currency = 'USD') => {
+  if (!Number.isFinite(n) || !(n > 0)) return '—';
+  return '-' + fmtMoney(n, currency);
+};
 const fmtPct = (n) => Number.isFinite(n) ? n.toFixed(2) + '%' : '—';
 const cls = (n) => n > 0 ? 'pos' : n < 0 ? 'neg' : '';
 const MASK = '<span class="sm-mask">—</span>';
 const pad2 = (n) => String(n).padStart(2, '0');
+
+function looksLikeAShare(symbol) {
+  const s = String(symbol || '').trim().replace(/^(sh|sz|ss)\.?/i, '').replace(/\.(SH|SZ|SS)$/i, '');
+  return /^\d{6}$/.test(s);
+}
+
+function holdingTypeLabel(h) {
+  if (h.type === 'option') return '期权';
+  if (h.type === 'ashare' || h.currency === 'CNY' || looksLikeAShare(h.symbol)) return 'A股/ETF';
+  return '股票';
+}
 
 function localDateParts(iso) {
   const d = iso ? new Date(iso) : new Date();
@@ -61,7 +81,19 @@ const toastRefresh = (type, msg) => {
   else toastOk(msg);
 };
 
-let state = { cash: 0, trades: [], holdings: [], summary: {}, chartSeries: [], chartSparse: [], chartExpandedFull: [], holdingsMeta: {} };
+let state = {
+  cash: 0,
+  cashUsd: 0,
+  cashCny: 0,
+  usdCnyRate: 7.2,
+  trades: [],
+  holdings: [],
+  summary: {},
+  chartSeries: [],
+  chartSparse: [],
+  chartExpandedFull: [],
+  holdingsMeta: {}
+};
 let colVis = defaultColVis();
 let dashboardVisible = true;
 let pnlVisible = true;
@@ -196,7 +228,8 @@ function renderDashboard() {
   $('#toggle-pnl-visible').checked = pnlVisible;
   el.classList.remove('hidden');
   const s = state.summary || {};
-  const cashPct = s.totalAssets > 0 ? (state.cash / s.totalAssets * 100) : 0;
+  const cashEq = Number.isFinite(s.cashUsdEq) ? s.cashUsdEq : state.cash;
+  const cashPct = s.totalAssets > 0 ? (cashEq / s.totalAssets * 100) : 0;
   const dailyVal = s.dailyTotalPnl;
   const dailyHint = !dashboardVisible || !pnlVisible
     ? '—'
@@ -209,17 +242,23 @@ function renderDashboard() {
   const cashField = !dashboardVisible
     ? `<div class="value">${MASK}</div>`
     : can('cash', 'edit')
-      ? `<div class="sm-cash-input-wrap"><span>$</span><input type="number" step="0.01" id="cash-input" value="${state.cash}"></div>`
-      : `<div class="value">${fmtUsd(state.cash)}</div>`;
+      ? `<div class="sm-cash-dual">
+          <div class="sm-cash-input-wrap"><span>$</span><input type="number" step="0.01" id="cash-usd-input" value="${state.cashUsd ?? 0}"></div>
+          <div class="sm-cash-input-wrap"><span>¥</span><input type="number" step="0.01" id="cash-cny-input" value="${state.cashCny ?? 0}"></div>
+        </div>`
+      : `<div class="value">${fmtUsd(state.cashUsd)} · ${fmtCny(state.cashCny)}</div>`;
+  const rateHint = `汇率 ${Number(state.usdCnyRate || 0).toFixed(4)} · 折合 ${maskDashboardValue(fmtUsd(cashEq))} · 占组合 ${maskDashboardValue(fmtPct(cashPct))}`;
   el.innerHTML = `
     <div class="sm-summary-grid">
       <div class="sm-summary-card sm-summary-card--accent">
         <div class="label">总资产</div>
         <div class="value">${maskDashboardValue(fmtUsd(s.totalAssets))}</div>
+        <div class="hint">美元口径（含 A 股折汇）</div>
       </div>
       <div class="sm-summary-card">
         <div class="label">股票市值</div>
         <div class="value">${maskDashboardValue(fmtUsd(s.stockMv))}</div>
+        ${s.ashareMv ? `<div class="hint">A股/ETF ${fmtUsd(s.ashareMv)}</div>` : ''}
       </div>
       <div class="sm-summary-card">
         <div class="label">期权市值</div>
@@ -228,7 +267,7 @@ function renderDashboard() {
       <div class="sm-summary-card sm-summary-card--green">
         <div class="label">总盈亏</div>
         <div class="value ${dashboardVisible && pnlVisible ? cls(s.totalPnl) : ''}">${maskDashboardValue(maskPnlValue(fmtUsdSigned(s.totalPnl)))}</div>
-        <div class="hint">未实现盈亏合计</div>
+        <div class="hint">未实现盈亏合计（美元）</div>
       </div>
       <div class="sm-summary-card sm-summary-card--amber">
         <div class="label">当日总盈亏</div>
@@ -238,22 +277,33 @@ function renderDashboard() {
       <div class="sm-summary-card sm-summary-card--cash">
         <div class="label">现金</div>
         ${cashField}
-        <div class="hint">占组合 ${maskDashboardValue(fmtPct(cashPct))}</div>
+        <div class="hint">${rateHint}</div>
       </div>
     </div>`;
   bindCashInput();
 }
 
 function bindCashInput() {
-  const el = $('#cash-input');
-  if (!el || el.dataset.cashBound === '1' || !can('cash', 'edit')) return;
-  el.dataset.cashBound = '1';
-  el.addEventListener('change', async (e) => {
-    try {
-      applyPortfolio(await api('/cash' + pnlQuery(), { method: 'PUT', body: { cash: Number(e.target.value) } }));
-      toastOk('现金已更新');
-    } catch (err) { toastErr(err.message); }
-  });
+  if (!can('cash', 'edit')) return;
+  const usdEl = $('#cash-usd-input');
+  const cnyEl = $('#cash-cny-input');
+  const bind = (el, key) => {
+    if (!el || el.dataset.cashBound === '1') return;
+    el.dataset.cashBound = '1';
+    el.addEventListener('change', async (e) => {
+      try {
+        const body = {
+          cashUsd: key === 'cashUsd' ? Number(e.target.value) : Number(state.cashUsd) || 0,
+          cashCny: key === 'cashCny' ? Number(e.target.value) : Number(state.cashCny) || 0,
+          usdCnyRate: state.usdCnyRate
+        };
+        applyPortfolio(await api('/cash' + pnlQuery(), { method: 'PUT', body }));
+        toastOk('现金已更新');
+      } catch (err) { toastErr(err.message); }
+    });
+  };
+  bind(usdEl, 'cashUsd');
+  bind(cnyEl, 'cashCny');
 }
 
 function renderColToggle() {
@@ -279,20 +329,21 @@ function renderHoldingsHead() {
 
 function holdingsCellContent(h, key, ctx) {
   const { optStr, lots, symInner } = ctx;
+  const cur = h.currency || (looksLikeAShare(h.symbol) ? 'CNY' : 'USD');
   switch (key) {
     case 'type':
-      return maskCol('type', h.type === 'option' ? '期权' : '股票');
+      return maskCol('type', holdingTypeLabel(h));
     case 'symbol':
       return maskCol('symbol', symInner);
     case 'shares':
       return maskCol('shares', h.shares);
     case 'cost':
-      return maskCol('cost', fmtUsd(h.avgCost) + lots);
+      return maskCol('cost', fmtMoney(h.avgCost, cur) + lots);
     case 'price': {
       const delayHint = h.delayed
         ? ` <span class="hint" title="期权实时快照未授权，当前为 Polygon 延时日线${h.quoteAsOf ? `（截至 ${h.quoteAsOf}）` : ''}">延时</span>`
         : '';
-      return maskCol('price', `<span>${fmtUsd(h.price)}</span>${delayHint}${can('refresh', 'edit') ? ` <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>` : ''}`);
+      return maskCol('price', `<span>${fmtMoney(h.price, cur)}</span>${delayHint}${can('refresh', 'edit') ? ` <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>` : ''}`);
     }
     case 'pnl':
       return maskCol('pnl', h.pnl == null ? '—' : fmtUsdSigned(h.pnl));
@@ -302,8 +353,11 @@ function holdingsCellContent(h, key, ctx) {
       return maskCol('dailyPnl', h.dailyPnl == null ? '—' : fmtUsdSigned(h.dailyPnl));
     case 'dailyPnlPct':
       return maskCol('dailyPnlPct', h.dailyPnlPct == null ? '—' : fmtPct(h.dailyPnlPct));
-    case 'position':
-      return maskCol('position', fmtUsd(h.marketValue));
+    case 'position': {
+      const native = h.marketValueNative != null ? h.marketValueNative : h.marketValue;
+      const tip = cur === 'CNY' ? ` title="折合 ${fmtUsd(h.marketValue)}"` : '';
+      return maskCol('position', `<span${tip}>${fmtMoney(native, cur)}</span>`);
+    }
     case 'weight':
       return maskCol('weight', fmtPct(h.weight));
     case 'target':
@@ -350,10 +404,14 @@ function renderHoldingsRowCells(h, group, i) {
 }
 
 function renderCashRowCells(cashPct) {
+  const cashEq = Number.isFinite(state.summary?.cashUsdEq) ? state.summary.cashUsdEq : state.cash;
   return visibleHoldingsColumns().map((c) => {
     if (c.key === 'type') return `<td>${maskCol('type', '现金')}</td>`;
     if (c.key === 'symbol') return `<td>${maskCol('symbol', 'CASH')}</td>`;
-    if (c.key === 'position') return `<td>${maskCol('position', fmtUsd(state.cash))}</td>`;
+    if (c.key === 'position') {
+      return `<td>${maskCol('position', `${fmtUsd(state.cashUsd)} · ${fmtCny(state.cashCny)}`)}</td>`;
+    }
+    if (c.key === 'cost') return `<td>${maskCol('cost', `折合 ${fmtUsd(cashEq)}`)}</td>`;
     if (c.key === 'weight') return `<td>${maskCol('weight', fmtPct(cashPct))}</td>`;
     return `<td>${maskCol(c.key, '—')}</td>`;
   }).join('');
@@ -368,13 +426,15 @@ function renderHoldings() {
     group.items.forEach((h, i) => {
       const rowCls = [
         gi > 0 && i === 0 ? 'sm-holding-group-start' : '',
-        h.type === 'option' ? 'sm-holding-option' : ''
+        h.type === 'option' ? 'sm-holding-option' : '',
+        (h.type === 'ashare' || h.currency === 'CNY') ? 'sm-holding-ashare' : ''
       ].filter(Boolean).join(' ');
       html += `<tr data-symbol="${h.symbol}" class="${rowCls}">${renderHoldingsRowCells(h, group, i)}</tr>`;
     });
   });
 
-  const cashPct = state.summary?.totalAssets > 0 ? (state.cash / state.summary.totalAssets * 100) : 0;
+  const cashEq = Number.isFinite(state.summary?.cashUsdEq) ? state.summary.cashUsdEq : state.cash;
+  const cashPct = state.summary?.totalAssets > 0 ? (cashEq / state.summary.totalAssets * 100) : 0;
   html += `<tr class="sm-cash-row">${renderCashRowCells(cashPct)}</tr>`;
 
   const colCount = cols.length || 1;
@@ -531,6 +591,8 @@ function openModal(title, bodyHtml, footHtml, onSubmit, opts = {}) {
 function tradeFormFields(trade = {}) {
   const type = trade.type || trade.prefillType || 'buy';
   const dt = toDatetimeLocalValue(trade.trade_date || Date.now());
+  const currency = trade.currency
+    || (looksLikeAShare(trade.symbol) ? 'CNY' : 'USD');
   return `
     <form id="trade-form" class="sm-form-grid">
       <label>类型<select name="type" id="trade-type">
@@ -539,8 +601,12 @@ function tradeFormFields(trade = {}) {
         <option value="other" ${type === 'other' ? 'selected' : ''}>其它收支</option>
       </select></label>
       <label class="field-other ${type !== 'other' ? 'hidden' : ''}">其它类别<input name="other_category" value="${trade.other_category || ''}"></label>
-      <label>代码<input name="symbol" required value="${trade.symbol || ''}"></label>
+      <label>代码<input name="symbol" id="trade-symbol" required value="${trade.symbol || ''}"></label>
       <label>名称<input name="name" value="${trade.name || ''}"></label>
+      <label>币种<select name="currency" id="trade-currency">
+        <option value="USD" ${currency === 'USD' ? 'selected' : ''}>USD 美元</option>
+        <option value="CNY" ${currency === 'CNY' ? 'selected' : ''}>CNY 人民币</option>
+      </select></label>
       <label class="field-trade ${type === 'other' ? 'hidden' : ''}">数量<input name="shares" type="number" step="any" value="${trade.shares ?? ''}"></label>
       <label class="field-trade ${type === 'other' ? 'hidden' : ''}">价格<input name="price" type="number" step="any" value="${trade.price ?? ''}"></label>
       <label class="field-other-amt ${type !== 'other' ? 'hidden' : ''}">金额<input name="total_amount" type="number" step="any" value="${trade.total_amount ?? ''}"></label>
@@ -551,20 +617,34 @@ function tradeFormFields(trade = {}) {
 
 function bindTradeForm(root) {
   const typeEl = root.querySelector('#trade-type');
-  if (!typeEl) return;
-  typeEl.addEventListener('change', () => {
-    const other = typeEl.value === 'other';
-    root.querySelectorAll('.field-other,.field-other-amt').forEach((el) => el.classList.toggle('hidden', !other));
-    root.querySelectorAll('.field-trade').forEach((el) => el.classList.toggle('hidden', other));
-  });
+  const symbolEl = root.querySelector('#trade-symbol');
+  const currencyEl = root.querySelector('#trade-currency');
+  if (typeEl) {
+    typeEl.addEventListener('change', () => {
+      const other = typeEl.value === 'other';
+      root.querySelectorAll('.field-other,.field-other-amt').forEach((el) => el.classList.toggle('hidden', !other));
+      root.querySelectorAll('.field-trade').forEach((el) => el.classList.toggle('hidden', other));
+    });
+  }
+  if (symbolEl && currencyEl) {
+    const syncCurrency = () => {
+      if (looksLikeAShare(symbolEl.value)) currencyEl.value = 'CNY';
+    };
+    symbolEl.addEventListener('input', syncCurrency);
+    symbolEl.addEventListener('change', syncCurrency);
+  }
 }
 
 function formToTrade(fd, existing = {}) {
   const type = fd.get('type');
   return {
-    type, symbol: String(fd.get('symbol') || '').trim(), name: String(fd.get('name') || '').trim(),
+    type,
+    symbol: String(fd.get('symbol') || '').trim(),
+    name: String(fd.get('name') || '').trim(),
+    currency: String(fd.get('currency') || 'USD').toUpperCase(),
     commission: Number(fd.get('commission')) || 0,
-    trade_date: datetimeLocalToIso(fd.get('trade_date')), id: existing.id,
+    trade_date: datetimeLocalToIso(fd.get('trade_date')),
+    id: existing.id,
     ...(type === 'other'
       ? { other_category: String(fd.get('other_category') || '').trim(), total_amount: Number(fd.get('total_amount')) }
       : { shares: Number(fd.get('shares')), price: Number(fd.get('price')) })
@@ -738,7 +818,7 @@ function renderTradeListTab() {
       <div class="sm-table-wrap sm-table-wrap--modal">
         <table class="sm-table">
           <thead><tr>
-            <th>时间</th><th>类型</th><th>代码</th><th>名称</th><th>股数</th><th>价格</th><th>金额</th><th>手续费</th><th>操作</th>
+            <th>时间</th><th>类型</th><th>代码</th><th>名称</th><th>币种</th><th>股数</th><th>价格</th><th>金额</th><th>手续费</th><th>操作</th>
           </tr></thead>
           <tbody>${pageRows.length ? pageRows.map((t) => `
             <tr>
@@ -746,15 +826,16 @@ function renderTradeListTab() {
               <td>${typeLabel(t)}</td>
               <td>${t.symbol}</td>
               <td>${t.name || ''}</td>
+              <td>${t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')}</td>
               <td>${t.type === 'other' ? '—' : t.shares}</td>
-              <td>${t.type === 'other' ? '—' : fmtUsd(t.price)}</td>
-              <td>${fmtUsd(t.total_amount)}</td>
-              <td>${fmtCommission(t.commission)}</td>
+              <td>${t.type === 'other' ? '—' : fmtMoney(t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
+              <td>${fmtMoney(t.total_amount, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
+              <td>${fmtCommission(t.commission, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
               <td>${can('trade', 'edit') ? `
                 <button type="button" class="btn link" data-edit="${t.id}">编辑</button>
                 <button type="button" class="btn link" data-del="${t.id}">删除</button>` : '—'}
               </td>
-            </tr>`).join('') : `<tr><td colspan="9" class="empty">暂无记录</td></tr>`}
+            </tr>`).join('') : `<tr><td colspan="10" class="empty">暂无记录</td></tr>`}
           </tbody>
         </table>
       </div>

@@ -1,10 +1,11 @@
 {
   "name": "stock-manage",
   "version": "2.0.0",
-  "description": "美股持仓管理（navigation 子服务，纯 JS）",
+  "description": "美股/A股持仓管理（navigation 子服务，纯 JS）",
   "type": "module",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node --test src/markets.test.js src/trades.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

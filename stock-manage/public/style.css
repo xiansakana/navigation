@@ -158,6 +158,21 @@ body.has-navbar {
     padding: 0;
 }
 
+.sm-cash-dual {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.sm-cash-dual .sm-cash-input-wrap {
+    font-size: 18px;
+}
+
+.sm-cash-dual .sm-cash-input-wrap input {
+    font-size: 18px;
+    min-width: 6.5rem;
+}
+
 .sm-col-panel {
     display: flex;
     flex-wrap: wrap;
