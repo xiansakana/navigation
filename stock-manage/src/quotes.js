@@ -78,7 +78,7 @@ async function fetchJson(url, headers = {}) {
   throw new Error(formatFetchError(lastErr));
 }
 
-async function fetchText(url, headers = {}) {
+async function fetchText(url, headers = {}, encoding = 'utf-8') {
   let lastErr;
   for (let attempt = 0; attempt <= FETCH_RETRIES; attempt++) {
     const ac = new AbortController();
@@ -95,7 +95,16 @@ async function fetchText(url, headers = {}) {
         }
         throw err;
       }
-      return await res.text();
+      const buf = Buffer.from(await res.arrayBuffer());
+      const enc = String(encoding || 'utf-8').toLowerCase();
+      if (enc !== 'utf-8' && enc !== 'utf8') {
+        try {
+          return new TextDecoder(enc).decode(buf);
+        } catch {
+          // fall through to utf-8
+        }
+      }
+      return buf.toString('utf8');
     } catch (e) {
       lastErr = e;
       if (attempt < FETCH_RETRIES && isRetryable(e, e.status)) {
@@ -173,9 +182,10 @@ export function createQuoteService(config) {
 
   async function getAShareFromTencent(code) {
     const ex = ashareExchange(code);
+    // 腾讯行情正文为 GBK
     const text = await fetchText(`https://qt.gtimg.cn/q=${ex}${code}`, {
       'User-Agent': 'Mozilla/5.0'
-    });
+    }, 'gbk');
     const m = text.match(/="([^"]*)"/);
     if (!m) throw new Error('腾讯无行情');
     const parts = m[1].split('~');
@@ -196,10 +206,11 @@ export function createQuoteService(config) {
 
   async function getAShareFromSina(code) {
     const ex = ashareExchange(code);
+    // 新浪 hq.sinajs.cn 正文为 GBK
     const text = await fetchText(`https://hq.sinajs.cn/list=${ex}${code}`, {
       'User-Agent': 'Mozilla/5.0',
       Referer: 'https://finance.sina.com.cn'
-    });
+    }, 'gbk');
     const m = text.match(/="([^"]*)"/);
     if (!m || !m[1]) throw new Error('新浪无行情');
     const parts = m[1].split(',');
