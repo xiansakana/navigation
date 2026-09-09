@@ -14,18 +14,23 @@
       <div class="sm-panel-head">
         <h2>抄底监控</h2>
         <div class="sm-panel-head-actions">
+          <button type="button" class="btn ghost sm-btn-sm" data-doc="cheatsheet">手册速查</button>
+          <button type="button" class="btn ghost sm-btn-sm" data-doc="manual">操作手册</button>
           <span class="sm-market-pill" id="market-pill">—</span>
           <button type="button" class="btn ghost sm-btn-sm" id="btn-refresh">刷新行情</button>
           <button type="button" class="btn primary sm-btn-sm" id="btn-monitor-toggle">开始监听</button>
         </div>
       </div>
-      <p class="hint" id="monitor-hint">规则来自 QQQ 抄底手册。不是投资建议。弹药 B 与持仓现金互不影响。</p>
+      <p class="hint" id="monitor-hint">规则来自 QQQ 抄底手册。不是投资建议。弹药 B 与持仓现金互不影响。可点「手册速查」或「操作手册」预览完整文档。</p>
       <p class="hint sm-error" id="error-line" hidden></p>
 
       <div class="sm-dashboard" id="ammo-cards"></div>
 
       <section class="sm-panel">
-        <div class="sm-panel-head"><h2>当前推荐</h2></div>
+        <div class="sm-panel-head">
+          <h2>当前推荐</h2>
+          <div class="sm-panel-head-actions" id="primary-actions"></div>
+        </div>
         <div id="primary-rec" class="sm-rec"></div>
       </section>
 
@@ -45,7 +50,7 @@
           <table class="sm-table" id="tier-table">
             <thead>
               <tr>
-                <th>档</th><th>袋</th><th>触发价</th><th>占 B</th><th>金额</th><th>状态</th><th></th>
+                <th>档</th><th>袋</th><th>触发价</th><th>占 B</th><th>金额</th><th>状态</th><th>操作说明</th><th></th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -54,7 +59,7 @@
         <p class="hint" id="leap-hint"></p>
       </section>
 
-      <section class="sm-panel">
+      <section class="sm-panel" data-perm-panel="lots">
         <div class="sm-panel-head">
           <h2>抄底仓位（止盈）</h2>
           <button type="button" class="btn ghost sm-btn-sm" id="btn-add-lot">登记仓位</button>
@@ -71,7 +76,7 @@
         </div>
       </section>
 
-      <section class="sm-panel">
+      <section class="sm-panel" data-perm-panel="actions">
         <div class="sm-panel-head">
           <h2>操作记录</h2>
           <div class="sm-panel-head-actions">

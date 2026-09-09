@@ -97,6 +97,24 @@ export function bagCaps(B, variant = 'default') {
   };
 }
 
+/** Scale each tier's share of B with the active bag split (40/30/30 → 55/20/25). */
+export function tierPctOfB(tierId, variant = 'default') {
+  const def = TIER_DEFS[tierId];
+  if (!def) return 0;
+  const base = BAG_RATIOS.default;
+  const ratios = BAG_RATIOS[variant] || base;
+  const bagBase = base[def.bag];
+  const bagTarget = ratios[def.bag];
+  if (!bagBase || !Number.isFinite(bagTarget)) return def.pctB;
+  return def.pctB * (bagTarget / bagBase);
+}
+
+export function formatPctB(pctB) {
+  const pct = (Number(pctB) || 0) * 100;
+  const rounded = Math.round(pct * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
 export function thirdFriday(year, monthIndex) {
   const first = new Date(Date.UTC(year, monthIndex, 1));
   const day = first.getUTCDay();
@@ -235,13 +253,14 @@ export function emptyRound() {
   };
 }
 
-function allocationText(tier, vxnGate, spot, B, usd) {
+function allocationText(tier, vxnGate, spot, B, usd, pctB, variant = 'default') {
   const bandM = mediumOtmBand(spot);
   const bandD = deepOtmBand(spot);
   const bandS = shallowOtmBand(spot);
   const leaps = januaryLeapExpiries();
   const leapHint = leaps.length ? leaps.map((x) => x.expiry).join(' / ') : '下一期有量 1 月 LEAP';
-  const money = `$${usd.toFixed(2)}（${(TIER_DEFS[tier].pctB * 100).toFixed(0)}%B）`;
+  const money = `$${usd.toFixed(2)}（${formatPctB(pctB)}%B）`;
+  const rightPct = formatPctB((BAG_RATIOS[variant] || BAG_RATIOS.default).right);
   const vxnNote = vxnGate.blocked
     ? `VXN ${vxnGate.missing ? '未知' : vxnGate.value} 未达门槛 ${vxnGate.min}：本档全部改买正股，档位仍算触发。`
     : (vxnGate.value != null ? `VXN ${vxnGate.value}≥${vxnGate.min}，允许期权部分。` : '');
@@ -259,8 +278,8 @@ function allocationText(tier, vxnGate, spot, B, usd) {
     T6: `约 70% 正股 + 30% 按新现货的浅/中虚值（约 ${bandS.low}–${bandM.high}）。禁止摊薄同一张已废彩票。`,
     T7: `同 T6。3x 正股仅当 TQQQ 自己也到 −50%。杠杆不超过 10%B。`,
     R1: vxnGate.blocked || !vxnGate.ok
-      ? `只用右侧袋的 1/3：QQQ 正股。禁止一次性打完 30% 右侧。`
-      : `正股为主；VXN≥25 时可加不超过本档一半的中浅虚值 Call。禁止打完 0.30B 右侧。`,
+      ? `只用右侧袋的约 1/3：QQQ 正股。禁止一次性打完 ${rightPct}% 右侧。`
+      : `正股为主；VXN≥25 时可加不超过本档一半的中浅虚值 Call。禁止打完 ${rightPct}%B 右侧。`,
     R2: `只加 QQQ 正股。禁止追已经大涨、IV 已塌的深虚值彩票。`
   };
   return [`动用 ${money}。`, map[tier], vxnNote].filter(Boolean).join(' ');
@@ -486,7 +505,8 @@ export function evaluate(input) {
   const tiers = [];
   TIER_ORDER.forEach((id) => {
     const def = TIER_DEFS[id];
-    const usd = roundMoney(B * def.pctB);
+    const pctB = tierPctOfB(id, variant);
+    const usd = roundMoney(B * pctB);
     const vxnGate = vxnPass(vxn, def.vxnMin);
     let status = 'idle';
     let pendingClose = false;
@@ -531,9 +551,7 @@ export function evaluate(input) {
       if (status === 'idle' || status === 'intraday') status = status === 'intraday' ? 'intraday' : 'locked';
     }
 
-    const rec = (status === 'confirmed' || status === 'intraday')
-      ? allocationText(id, vxnGate, qqq.price, B, usd)
-      : '';
+    const rec = allocationText(id, vxnGate, qqq.price, B, usd, pctB, variant);
 
     if (status === 'confirmed') {
       alerts.push({
@@ -546,7 +564,7 @@ export function evaluate(input) {
     tiers.push({
       id,
       bag: def.bag,
-      pctB: def.pctB,
+      pctB,
       usd,
       triggerPrice: def.closeMult ? qqq.triggers?.[id] : null,
       intradayPrice: def.intradayMult ? qqq.triggers?.T4_intraday : null,
@@ -677,7 +695,303 @@ export function evaluate(input) {
       deep: deepOtmBand(qqq.price),
       shallow: shallowOtmBand(qqq.price)
     },
-    alerts
+    alerts,
+    buyPreview: buildBuyPreview({
+      B,
+      bags,
+      remaining,
+      variant,
+      qqq,
+      tiers,
+      primary,
+      leaps: {
+        expiries: januaryLeapExpiries(input.now || new Date()),
+        medium: mediumOtmBand(qqq.price),
+        deep: deepOtmBand(qqq.price),
+        shallow: shallowOtmBand(qqq.price)
+      },
+      sameDaySkip: Array.from(sameDaySkip),
+      reset,
+      fakeRight,
+      round
+    }, input.suggestedContracts || [])
+  };
+}
+
+export function formatOccSymbol(underlying, expiry, strike, type = 'C') {
+  const d = new Date(expiry);
+  if (Number.isNaN(d.getTime())) return '';
+  const yy = String(d.getUTCFullYear()).slice(-2);
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const strikeInt = Math.round(Number(strike) * 1000);
+  return `${String(underlying).toUpperCase()}${yy}${mm}${dd}${type}${String(strikeInt).padStart(8, '0')}`;
+}
+
+function pickSuggestedContract(suggestedContracts, band) {
+  if (!Array.isArray(suggestedContracts) || !suggestedContracts.length || !band) return null;
+  const inBand = suggestedContracts.filter((c) => c.strike >= band.low && c.strike <= band.high);
+  const list = inBand.length ? inBand : suggestedContracts;
+  const mid = (band.low + band.high) / 2;
+  return list.reduce((best, c) => {
+    if (!best) return c;
+    return Math.abs(c.strike - mid) < Math.abs(best.strike - mid) ? c : best;
+  }, null);
+}
+
+function equityLeg(symbol, usd, price, note, pct) {
+  const px = Number(price);
+  const budget = roundMoney(usd);
+  const shares = px > 0 ? Math.floor(budget / px) : 0;
+  return {
+    kind: 'equity',
+    symbol,
+    side: 'buy',
+    usd: budget,
+    pct,
+    price: px,
+    shares,
+    estUsd: roundMoney(shares * px),
+    note
+  };
+}
+
+function callLeg({ underlying, expiry, strike, usd, spot, note, pct, otmClass, contract }) {
+  const strikeNum = Number(strike);
+  const expiryDate = contract?.expiry || expiry;
+  const occ = contract?.ticker || formatOccSymbol(underlying, expiryDate, strikeNum, 'C');
+  return {
+    kind: 'call',
+    symbol: underlying,
+    side: 'buy',
+    usd: roundMoney(usd),
+    pct,
+    expiry: expiryDate,
+    strike: strikeNum,
+    otmPct: otmPct(strikeNum, spot),
+    contractsHint: '按期权报价重算张数',
+    note,
+    otmClass,
+    occSymbol: occ
+  };
+}
+
+function splitBudget(totalUsd, parts) {
+  const total = roundMoney(totalUsd);
+  const weights = parts.map((p) => p.pct);
+  const sum = weights.reduce((a, b) => a + b, 0) || 1;
+  let allocated = 0;
+  return parts.map((part, i) => {
+    const isLast = i === parts.length - 1;
+    const usd = isLast ? roundMoney(total - allocated) : roundMoney(total * (part.pct / sum));
+    allocated += usd;
+    return { ...part, usd };
+  });
+}
+
+function defaultLeapExpiry(ev) {
+  const expiries = ev.leaps?.expiries || [];
+  return expiries[0]?.expiry || null;
+}
+
+function strikeFromBand(band, spot) {
+  if (!band) return roundStrike(spot, 1.32);
+  return Math.round((band.low + band.high) / 2 / 5) * 5;
+}
+
+export function buildBuyPreview(ev, suggestedContracts = []) {
+  const primary = ev?.primary;
+  if (ev?.reset || ev?.fakeRight) {
+    return {
+      available: false,
+      title: primary?.title || '不可买入',
+      reason: primary?.body || '当前为风控/重置状态，不加仓。'
+    };
+  }
+  if (!primary?.tier) {
+    return {
+      available: false,
+      title: primary?.title || '观察区',
+      reason: primary?.body || '尚未到可操作档位。'
+    };
+  }
+  const tier = (ev.tiers || []).find((t) => t.id === primary.tier);
+  if (!tier || (tier.status !== 'confirmed' && tier.status !== 'intraday')) {
+    return {
+      available: false,
+      title: primary.title,
+      reason: '当前推荐不可生成买入清单。'
+    };
+  }
+
+  const spot = Number(ev.qqq?.price);
+  const totalUsd = roundMoney(tier.usd);
+  const leaps = ev.leaps || {};
+  const medium = leaps.medium || mediumOtmBand(spot);
+  const deep = leaps.deep || deepOtmBand(spot);
+  const shallow = leaps.shallow || shallowOtmBand(spot);
+  const leapExpiry = defaultLeapExpiry(ev);
+  const mediumContract = pickSuggestedContract(suggestedContracts, medium);
+  const deepContract = pickSuggestedContract(
+    suggestedContracts.filter((c) => c.strike >= deep.low && c.strike <= deep.high),
+    deep
+  ) || pickSuggestedContract(suggestedContracts, deep);
+
+  const legs = [];
+  const notes = [];
+  if (tier.pendingClose) notes.push('盘中触及，待收盘确认后再下单。');
+  if ((ev.sameDaySkip || []).length) {
+    notes.push(`同一天只执行最深档 ${primary.tier}，其余已触发档跳过。`);
+  }
+
+  const blocked = tier.vxnGate?.blocked;
+  const id = tier.id;
+
+  if (id === 'T1') {
+    legs.push(equityLeg('QQQ', totalUsd, spot, 'T1 只买 QQQ 正股', 100));
+    notes.push('最多 20% 可换成 SPY 降波（需自行调整比例）。');
+  } else if (id === 'T2') {
+    if (blocked) {
+      legs.push(equityLeg('QQQ', totalUsd, spot, 'VXN 未达标，全部改买正股', 100));
+    } else {
+      const parts = splitBudget(totalUsd, [
+        { pct: 75, tag: 'equity', note: '约 75% QQQ 正股' },
+        { pct: 25, tag: 'call-medium', note: '约 25% 中虚值 LEAP Call' }
+      ]);
+      legs.push(equityLeg('QQQ', parts[0].usd, spot, parts[0].note, 75));
+      const strike = mediumContract?.strike || strikeFromBand(medium, spot);
+      const expiry = mediumContract?.expiry || leapExpiry;
+      legs.push(callLeg({
+        underlying: 'QQQ',
+        expiry,
+        strike,
+        usd: parts[1].usd,
+        spot,
+        note: parts[1].note,
+        pct: 25,
+        otmClass: 'medium',
+        contract: mediumContract
+      }));
+    }
+  } else if (id === 'T3') {
+    if (blocked) {
+      legs.push(equityLeg('QQQ', totalUsd, spot, 'VXN 未达标，全部改买正股', 100));
+    } else {
+      const parts = splitBudget(totalUsd, [
+        { pct: 55, tag: 'equity' },
+        { pct: 35, tag: 'call-medium' },
+        { pct: 10, tag: 'call-deep' }
+      ]);
+      legs.push(equityLeg('QQQ', parts[0].usd, spot, '约 55% QQQ 正股', 55));
+      legs.push(callLeg({
+        underlying: 'QQQ',
+        expiry: mediumContract?.expiry || leapExpiry,
+        strike: mediumContract?.strike || strikeFromBand(medium, spot),
+        usd: parts[1].usd,
+        spot,
+        note: '约 35% 中虚值 Call',
+        pct: 35,
+        otmClass: 'medium',
+        contract: mediumContract
+      }));
+      legs.push(callLeg({
+        underlying: 'QQQ',
+        expiry: deepContract?.expiry || leapExpiry,
+        strike: deepContract?.strike || strikeFromBand(deep, spot),
+        usd: parts[2].usd,
+        spot,
+        note: '约 10% 深虚值（累计深虚值 ≤8%B）',
+        pct: 10,
+        otmClass: 'deep',
+        contract: deepContract
+      }));
+    }
+  } else if (id === 'T4') {
+    const parts = splitBudget(totalUsd, [{ pct: 80 }, { pct: 20 }]);
+    legs.push(equityLeg('QQQ', parts[0].usd, spot, '补左侧：正股为主', 80));
+    if (!blocked && leapExpiry) {
+      legs.push(callLeg({
+        underlying: 'QQQ',
+        expiry: mediumContract?.expiry || leapExpiry,
+        strike: mediumContract?.strike || strikeFromBand(medium, spot),
+        usd: parts[1].usd,
+        spot,
+        note: '停止再加同一张深虚值；可加中虚值',
+        pct: 20,
+        otmClass: 'medium',
+        contract: mediumContract
+      }));
+    } else {
+      legs.push(equityLeg('QQQ', parts[1].usd, spot, '余下预算继续正股', 20));
+    }
+    if (tier.intradayPrice) {
+      notes.push(`盘中限价参考 0.75H ≈ ${tier.intradayPrice}。T4 不是打满全部 B。`);
+    }
+  } else if (id === 'T5' || id === 'R2') {
+    legs.push(equityLeg('QQQ', totalUsd, spot, '只加 QQQ 正股', 100));
+  } else if (id === 'T6' || id === 'T7') {
+    const parts = splitBudget(totalUsd, [{ pct: 70 }, { pct: 30 }]);
+    legs.push(equityLeg('QQQ', parts[0].usd, spot, '约 70% 正股', 70));
+    if (!blocked && leapExpiry) {
+      legs.push(callLeg({
+        underlying: 'QQQ',
+        expiry: mediumContract?.expiry || leapExpiry,
+        strike: mediumContract?.strike || strikeFromBand(shallow, spot),
+        usd: parts[1].usd,
+        spot,
+        note: '约 30% 按新现货的浅/中虚值 Call',
+        pct: 30,
+        otmClass: 'shallow-medium',
+        contract: mediumContract
+      }));
+    } else {
+      legs.push(equityLeg('QQQ', parts[1].usd, spot, '余下预算继续正股', 30));
+    }
+    if (id === 'T7') notes.push('3x 正股仅当 TQQQ 自己也到 −50%，且 ≤10%B。');
+  } else if (id === 'R1') {
+    if (blocked || !tier.vxnGate?.ok) {
+      legs.push(equityLeg('QQQ', totalUsd, spot, '右侧袋 1/3：只买正股', 100));
+    } else {
+      const parts = splitBudget(totalUsd, [{ pct: 80 }, { pct: 20 }]);
+      legs.push(equityLeg('QQQ', parts[0].usd, spot, '正股为主', 80));
+      legs.push(callLeg({
+        underlying: 'QQQ',
+        expiry: mediumContract?.expiry || leapExpiry,
+        strike: mediumContract?.strike || strikeFromBand(shallow, spot),
+        usd: parts[1].usd,
+        spot,
+        note: '不超过本档一半的中浅虚值 Call',
+        pct: 20,
+        otmClass: 'shallow',
+        contract: mediumContract
+      }));
+    }
+    notes.push('禁止一次性打完 30% 右侧袋。');
+  }
+
+  const checklist = [
+    `H = ${ev.qqq?.H != null ? ev.qqq.H.toFixed(2) : '—'}，${id} 触发价 ${tier.triggerPrice ?? '—'}${tier.intradayPrice ? ` / 盘中 ${tier.intradayPrice}` : ''}`,
+    `弹药 B = $${Number(ev.B || 0).toFixed(2)}，本档预算 $${totalUsd.toFixed(2)}（${formatPctB(tier.pctB)}%B）`,
+    `袋内剩余：左 $${ev.remaining?.left ?? 0} / 危机 $${ev.remaining?.crisis ?? 0} / 右 $${ev.remaining?.right ?? 0}`,
+    medium ? `T2 行权价区间参考：$${medium.low}–$${medium.high}` : null,
+    ...legs.filter((l) => l.kind === 'call').map((l) => (
+      `${l.occSymbol || 'Call'}：下单前记下成本、3×/5×目标价、6 个月清仓日、到期 ${l.expiry || '—'}`
+    ))
+  ].filter(Boolean);
+
+  return {
+    available: true,
+    title: `${id} 买入预览`,
+    tier: id,
+    status: tier.status,
+    totalUsd,
+    spot,
+    pendingClose: !!tier.pendingClose,
+    legs,
+    checklist,
+    notes,
+    prohibitions: primary.prohibitions || globalProhibitions(id, ev.round),
+    recommendation: tier.recommendation || primary.body
   };
 }
 
