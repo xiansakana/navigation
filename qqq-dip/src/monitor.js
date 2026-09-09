@@ -81,6 +81,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
         soxl: markets.SOXL,
         spy: markets.SPY,
         vxn: markets.VXN,
+        cnyProxy: markets['159509'],
         lots
       });
       ev.quoteErrors = bundle.errors;
