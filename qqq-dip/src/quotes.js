@@ -502,17 +502,46 @@ export function createQuoteService(config) {
     };
   }
 
+  async function getCnyProxyFromSina() {
+    const text = await fetchText('https://hq.sinajs.cn/list=sz159509', {
+      'User-Agent': 'Mozilla/5.0',
+      Referer: 'https://finance.sina.com.cn'
+    });
+    const m = text.match(/="([^"]*)"/);
+    if (!m || !m[1]) throw new Error('新浪无行情');
+    const parts = m[1].split(',');
+    // 1 open, 2 prevClose, 3 price, 4 high, 5 low
+    const price = Number(parts[3]);
+    const prev = Number(parts[2]) || price;
+    if (!Number.isFinite(price) || price <= 0) throw new Error('新浪无有效价');
+    return {
+      symbol: CNY_EQUITY_PROXY_SYMBOL,
+      name: parts[0] || '纳指科技ETF景顺',
+      price,
+      close: price,
+      prevClose: prev,
+      change: price - prev,
+      changePercent: prev ? ((price - prev) / prev) * 100 : 0,
+      high: Number(parts[4]) || price,
+      low: Number(parts[5]) || price,
+      source: 'sina',
+      candles: []
+    };
+  }
+
   async function getCnyProxyQuote() {
+    // Prefer Tencent/Sina on CN cloud hosts; East Money push2 often empty there.
     const errors = [];
-    try {
-      return await getCnyProxyFromEastMoney();
-    } catch (e) {
-      errors.push(`东方财富: ${e.message}`);
-    }
-    try {
-      return await getCnyProxyFromTencent();
-    } catch (e) {
-      errors.push(`腾讯: ${e.message}`);
+    for (const [label, fn] of [
+      ['腾讯', getCnyProxyFromTencent],
+      ['新浪', getCnyProxyFromSina],
+      ['东方财富', getCnyProxyFromEastMoney]
+    ]) {
+      try {
+        return await fn();
+      } catch (e) {
+        errors.push(`${label}: ${e.message}`);
+      }
     }
     try {
       const q = await getYahooQuote('159509.SZ');
