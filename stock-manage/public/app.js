@@ -317,11 +317,14 @@ function renderColToggle() {
 function renderHoldingsHead() {
   const cols = visibleHoldingsColumns();
   $('#holdings-head').innerHTML = `<tr>${cols.map((c) => {
+    if (c.key === 'type') {
+      return `<th class="sm-sort-th" data-sort="type" title="按类型排序（同类型内按仓位）">类型${sortMark(tableSort, 'type')}</th>`;
+    }
     if (c.key === 'symbol') {
       return `<th class="sm-sort-th" data-sort="symbol" title="按标的代码排序">代码${sortMark(tableSort, 'symbol')}</th>`;
     }
     if (c.key === 'weight') {
-      return `<th class="sm-sort-th" data-sort="weight" title="按同标的合计占总资产比例排序">仓位 / 占比${sortMark(tableSort, 'weight')}</th>`;
+      return `<th class="sm-sort-th" data-sort="weight" title="按同标的合计占总资产比例排序（同仓位按类型）">仓位 / 占比${sortMark(tableSort, 'weight')}</th>`;
     }
     return `<th>${c.label}</th>`;
   }).join('')}</tr>`;
