@@ -1033,12 +1033,15 @@ export function globalProhibitions(tier, round) {
 export function applyRoundFromEval(prev, ev, { sessionDate } = {}) {
   const next = { ...emptyRound(), ...(prev || {}) };
   if (ev.reset) {
+    const keepOpen = Object.fromEntries(
+      Object.entries(next.firedAlerts || {}).filter(([k]) => k.startsWith('openSummary:'))
+    );
     return {
       ...emptyRound(),
       variant: ev.variant,
       lastResetAt: new Date().toISOString(),
       executed: next.executed,
-      firedAlerts: {}
+      firedAlerts: keepOpen
     };
   }
   next.variant = ev.variant;

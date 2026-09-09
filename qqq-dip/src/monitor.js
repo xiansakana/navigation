@@ -1,10 +1,10 @@
-import { evaluate, applyRoundFromEval, newAlertKeys } from './playbook.js';
+import { evaluate, applyRoundFromEval, newAlertKeys, buildBuyPreview } from './playbook.js';
 import { marketStatus, isRth } from './market-hours.js';
-import { notifyDipEvent } from './notify.js';
+import { eventAllowed, notifyDipEvent } from './notify.js';
 
 const SYMBOLS = ['QQQ', 'TQQQ', 'SOXL', 'SPY'];
 
-export function createMonitor({ store, quotes, onSnapshot }) {
+export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
   let timer = null;
   let running = false;
   let busy = false;
@@ -58,6 +58,7 @@ export function createMonitor({ store, quotes, onSnapshot }) {
     lastMarketStatus = marketStatus();
     const rth = isRth();
     try {
+      if (refreshFx) await refreshFx();
       const settings = store.getSettings();
       const cash = store.getCash();
       const round = store.getRound();
@@ -88,6 +89,7 @@ export function createMonitor({ store, quotes, onSnapshot }) {
       } catch {
         ev.suggestedContracts = [];
       }
+      ev.buyPreview = buildBuyPreview(ev, ev.suggestedContracts);
 
       const nextRound = applyRoundFromEval(round, ev, { sessionDate: lastMarketStatus.ymd });
       const fresh = newAlertKeys(ev, nextRound.firedAlerts || round.firedAlerts);
@@ -120,9 +122,23 @@ export function createMonitor({ store, quotes, onSnapshot }) {
         void action;
       }
 
-      if (opts.openSummary && rth && checks === 0) {
+      // Once per NY trading day on first RTH poll (not once per process start).
+      const openKey = `openSummary:${lastMarketStatus.ymd}`;
+      const openAlready = !!(nextRound.firedAlerts || {})[openKey];
+      if (!opts.silent && rth && !openAlready && eventAllowed(notify, 'openSummary')) {
         const text = ev.primary ? `${ev.primary.title}：${ev.primary.body}` : '抄底监控已开盘';
-        await notifyDipEvent(notify, 'openSummary', text);
+        const qq = await notifyDipEvent(notify, 'openSummary', text);
+        nextRound.firedAlerts = { ...(nextRound.firedAlerts || {}), [openKey]: new Date().toISOString() };
+        store.addAction({
+          type: 'notify',
+          source: 'auto',
+          tier: 'openSummary',
+          message: qq.skipped
+            ? `QQ 跳过开盘摘要：${qq.reason || 'openSummary'}`
+            : `QQ 已发送开盘摘要：${(qq.sent || []).join('，') || '无目标'}${(qq.errors || []).length ? `；失败 ${(qq.errors || []).join('；')}` : ''}`,
+          payload: { key: openKey, ...qq }
+        });
+        pushResults.push({ key: openKey, qq });
       }
 
       store.setRound(nextRound);
@@ -191,5 +207,15 @@ export function createMonitor({ store, quotes, onSnapshot }) {
     };
   }
 
-  return { start, stop, tick, status, buildSnapshot };
+  function getEvaluation() {
+    return lastEval;
+  }
+
+  function setEvaluation(ev) {
+    lastEval = ev || null;
+    if (onSnapshot) onSnapshot(buildSnapshot());
+    return lastEval;
+  }
+
+  return { start, stop, tick, status, buildSnapshot, getEvaluation, setEvaluation };
 }
