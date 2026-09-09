@@ -3,4 +3,14 @@ export { getDatabase, getDbPath, closeDatabase } from './connection.js';
 export { initSchema } from './schema.js';
 export { runMigrations, importPortfolioJson } from './migrate.js';
 export { createPortfolioStore, EMPTY, normalizePortfolio, DEFAULT_USD_CNY_RATE } from './portfolio-store.js';
+export {
+  getPortfolioStore,
+  resetPortfolioBridge,
+  getPortfolioCash,
+  setPortfolioCash,
+  migrateDipCashOnce,
+  legsToTradeInputs,
+  appendTradesDeductFormCash,
+  appendTradesApplyCash
+} from './portfolio-bridge.js';
 export { loadRbacBlob, saveRbacBlob, hasRbacData } from './rbac-store.js';
