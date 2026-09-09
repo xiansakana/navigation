@@ -15,6 +15,7 @@ var QQQ_DIP_SERVICE_ID = 'qqq-dip';
 var STOCK_MANAGE_HOLDINGS_COLUMNS = [
     { key: 'type', name: '类型' },
     { key: 'symbol', name: '代码' },
+    { key: 'name', name: '名称' },
     { key: 'shares', name: '股数' },
     { key: 'cost', name: '成本' },
     { key: 'price', name: '现价' },

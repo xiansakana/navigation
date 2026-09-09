@@ -428,8 +428,13 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
     else stockMv += mv;
     if (pnl != null) unrealized += pnl;
     const opt = parseOptionInfo(h.symbol);
+    const quoteName = String(q.name || '').trim();
+    const displayName = (quoteName && quoteName !== h.symbol)
+      ? quoteName
+      : (h.name || h.symbol);
     return {
       ...h,
+      name: displayName,
       currency,
       price,
       marketValueNative: roundMoney(mvNative),

@@ -335,6 +335,8 @@ function holdingsCellContent(h, key, ctx) {
       return maskCol('type', holdingTypeLabel(h));
     case 'symbol':
       return maskCol('symbol', symInner);
+    case 'name':
+      return maskCol('name', h.name && h.name !== h.symbol ? h.name : (h.name || '—'));
     case 'shares':
       return maskCol('shares', h.shares);
     case 'cost':
@@ -408,6 +410,7 @@ function renderCashRowCells(cashPct) {
   return visibleHoldingsColumns().map((c) => {
     if (c.key === 'type') return `<td>${maskCol('type', '现金')}</td>`;
     if (c.key === 'symbol') return `<td>${maskCol('symbol', 'CASH')}</td>`;
+    if (c.key === 'name') return `<td>${maskCol('name', '现金')}</td>`;
     if (c.key === 'position') {
       return `<td>${maskCol('position', `${fmtUsd(state.cashUsd)} · ${fmtCny(state.cashCny)}`)}</td>`;
     }
