@@ -3,6 +3,11 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { resolveRoot } from './config.js';
 import { DEFAULT_EVENTS, emptyRound } from './playbook.js';
+import {
+  getPortfolioCash,
+  setPortfolioCash,
+  migrateDipCashOnce
+} from '../../shared/db/portfolio-bridge.js';
 
 function parseJson(text, fallback) {
   try {
@@ -91,6 +96,10 @@ export function createStore(config) {
 
   syncNotifyToken();
 
+  // One-time: import dip JSON cash into portfolio only when holdings pocket is 0.
+  migrateDipCashOnce({ ...defaultCash(), ...(data.cash || {}) });
+  data.cash = { ...defaultCash(), ...getPortfolioCash() };
+
   function persist() {
     const tmp = jsonPath + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
@@ -98,18 +107,21 @@ export function createStore(config) {
   }
 
   function getCash() {
-    return { ...defaultCash(), ...data.cash };
+    const cash = { ...defaultCash(), ...getPortfolioCash() };
+    data.cash = cash;
+    return { ...cash };
   }
 
   function setCash(cash) {
     const prev = getCash();
-    data.cash = {
+    const next = setPortfolioCash({
       cashUsd: cash.cashUsd != null ? Number(cash.cashUsd) || 0 : prev.cashUsd,
       cashCny: cash.cashCny != null ? Number(cash.cashCny) || 0 : prev.cashCny,
       usdCnyRate: Number(cash.usdCnyRate) > 0 ? Number(cash.usdCnyRate) : prev.usdCnyRate,
       fxSource: cash.fxSource != null ? cash.fxSource : prev.fxSource,
       fxUpdatedAt: cash.fxUpdatedAt != null ? cash.fxUpdatedAt : prev.fxUpdatedAt
-    };
+    });
+    data.cash = { ...defaultCash(), ...next };
     persist();
     return data.cash;
   }
@@ -253,14 +265,8 @@ export function createStore(config) {
         note: payload.note || ''
       }
     };
+    // Cash deduct is applied once via portfolio-bridge when syncing trades.
     setRound(round);
-    if (cashUsd > 0 || cashCny > 0) {
-      const cash = getCash();
-      setCash({
-        cashUsd: Math.max(0, roundMoneyLocal((Number(cash.cashUsd) || 0) - cashUsd)),
-        cashCny: Math.max(0, roundMoneyLocal((Number(cash.cashCny) || 0) - cashCny))
-      });
-    }
     return round;
   }
 

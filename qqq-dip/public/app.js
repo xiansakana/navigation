@@ -565,6 +565,7 @@ function openExecModal(tierId, preview) {
           cashUsd,
           cashCny,
           note: $('#exec-note').value,
+          legs: Array.isArray(preview?.legs) ? preview.legs : [],
           message: `已执行 ${tierId}，扣 USD ${cashUsd.toFixed(2)} / CNY ${cashCny.toFixed(2)}（合计 ≈$${usdEq.toFixed(2)}）`
         }
       });
@@ -1025,17 +1026,48 @@ function bind() {
     if (!guardEdit('actions-note')) return;
     openModal(`
       <h3>手动记录</h3>
+      <label class="field">类型
+        <select id="note-type">
+          <option value="note">备注</option>
+          <option value="sell">卖出（同步持仓）</option>
+        </select>
+      </label>
       <label class="field">内容<textarea id="note-text" rows="3"></textarea></label>
+      <div id="sell-fields" class="sm-grid" hidden>
+        <label class="field">代码<input id="sell-sym" placeholder="QQQ / 159509 / OCC"></label>
+        <label class="field">数量<input id="sell-shares" type="number" step="1"></label>
+        <label class="field">价格<input id="sell-price" type="number" step="0.01"></label>
+        <label class="field">币种<select id="sell-cur"><option value="USD">USD</option><option value="CNY">CNY</option></select></label>
+      </div>
       <div class="sm-modal-actions">
         <button class="btn ghost" data-close>取消</button>
         <button class="btn primary" id="note-ok">保存</button>
       </div>
     `);
+    const typeEl = $('#note-type');
+    const sellFields = $('#sell-fields');
+    typeEl.addEventListener('change', () => {
+      sellFields.hidden = typeEl.value !== 'sell';
+    });
     $('#note-ok').addEventListener('click', async () => {
       try {
-        const data = await api('/actions', { method: 'POST', body: { type: 'note', message: $('#note-text').value } });
+        const type = typeEl.value;
+        const body = { type, message: $('#note-text').value };
+        if (type === 'sell') {
+          body.symbol = $('#sell-sym').value;
+          body.shares = Number($('#sell-shares').value) || 0;
+          body.price = Number($('#sell-price').value) || 0;
+          body.currency = $('#sell-cur').value;
+          body.note = body.message;
+          if (!body.symbol || !(body.shares > 0) || !(body.price > 0)) {
+            throw new Error('卖出需填写代码、数量与价格');
+          }
+          body.message = body.message || `卖出 ${body.symbol} × ${body.shares} @ ${body.price}`;
+        }
+        const data = await api('/actions', { method: 'POST', body });
         $('#modal-root').innerHTML = '';
         applyState(data);
+        toast('success', type === 'sell' ? '已同步卖出到持仓' : '已保存');
       } catch (err) { toast('error', err.message); }
     });
   });

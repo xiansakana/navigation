@@ -9,6 +9,11 @@ import { maskNotifyForClient, testDipNotify } from './notify.js';
 import { marketStatus } from './market-hours.js';
 import { evaluate } from './playbook.js';
 import { createDocService } from './docs.js';
+import {
+  legsToTradeInputs,
+  appendTradesDeductFormCash,
+  appendTradesApplyCash
+} from '../../shared/db/portfolio-bridge.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -228,16 +233,71 @@ app.get('/api/actions', (req, res) => {
 
 app.post('/api/actions', (req, res) => {
   const body = req.body || {};
+  let syncedTrades = [];
+
   if (body.type === 'execute' && body.tier) {
     const cashUsd = body.cashUsd != null ? Number(body.cashUsd) || 0 : Number(body.usd) || 0;
     const cashCny = body.cashCny != null ? Number(body.cashCny) || 0 : 0;
+    const legs = Array.isArray(body.legs) ? body.legs : [];
+    const tradeInputs = legsToTradeInputs(legs, {
+      tier: body.tier,
+      note: body.note || '',
+      trade_date: new Date().toISOString()
+    });
+    const buyInputs = tradeInputs.filter((t) => t.type !== 'sell');
+    const sellInputs = tradeInputs.filter((t) => t.type === 'sell');
+
+    // Form amounts are cash truth for buys; legs become trade rows without double-deduct.
+    if (buyInputs.length || cashUsd > 0 || cashCny > 0) {
+      const result = appendTradesDeductFormCash({
+        trades: buyInputs,
+        deductCashUsd: cashUsd,
+        deductCashCny: cashCny
+      });
+      syncedTrades = syncedTrades.concat(result.trades);
+    }
+    if (sellInputs.length) {
+      const result = appendTradesApplyCash(sellInputs);
+      syncedTrades = syncedTrades.concat(result.trades);
+    }
+
     store.markExecuted(body.tier, {
       usd: body.usd,
       cashUsd,
       cashCny,
       note: body.note
     });
+  } else if (body.type === 'sell') {
+    const symbol = String(body.symbol || '').trim();
+    const shares = Number(body.shares);
+    const price = Number(body.price);
+    if (symbol && shares > 0 && price > 0) {
+      const result = appendTradesApplyCash([{
+        type: 'sell',
+        symbol,
+        name: body.name || symbol,
+        currency: body.currency,
+        shares,
+        price,
+        commission: Number(body.commission) || 0,
+        trade_date: body.trade_date || new Date().toISOString(),
+        source: 'qqq-dip',
+        note: body.note || body.message || ''
+      }]);
+      syncedTrades = result.trades;
+    }
+  } else if (Array.isArray(body.legs) && body.legs.some((l) => String(l?.side || '').toLowerCase() === 'sell')) {
+    const tradeInputs = legsToTradeInputs(body.legs, {
+      note: body.note || body.message || '',
+      trade_date: new Date().toISOString()
+    });
+    const sellInputs = tradeInputs.filter((t) => t.type === 'sell');
+    if (sellInputs.length) {
+      const result = appendTradesApplyCash(sellInputs);
+      syncedTrades = result.trades;
+    }
   }
+
   const cash = store.getCash();
   const row = store.addAction({
     type: body.type || 'note',
@@ -251,7 +311,11 @@ app.post('/api/actions', (req, res) => {
       cashCny: body.cashCny,
       qty: body.qty,
       price: body.price,
-      note: body.note
+      shares: body.shares,
+      currency: body.currency,
+      note: body.note,
+      legs: body.legs,
+      syncedTradeIds: syncedTrades.map((t) => t.id)
     }
   });
   res.json({
@@ -260,7 +324,8 @@ app.post('/api/actions', (req, res) => {
     cash,
     round: store.getRound(),
     evaluation: refreshEvaluation(),
-    actions: store.listActionRows({ limit: 80 })
+    actions: store.listActionRows({ limit: 80 }),
+    syncedTrades
   });
 });
 

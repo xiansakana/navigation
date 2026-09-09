@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test src/markets.test.js src/trades.test.js"
+    "test": "node --test src/markets.test.js src/trades.test.js ../shared/db/portfolio-bridge.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
