@@ -15,6 +15,7 @@ import {
     getVisibleMenus,
     canViewService,
     canEditService,
+    canWriteService,
     canViewAdmin,
     hasPermission,
     loadRbac,
@@ -309,7 +310,7 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
             });
             return true;
         }
-        if (isWriteMethod(req.method) && !canEditService(proxySession.permissions, ctx.service.id)) {
+        if (isWriteMethod(req.method) && !canWriteService(proxySession.permissions, ctx.service.id)) {
             sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '该服务为只读权限，无法修改');
             return true;
         }

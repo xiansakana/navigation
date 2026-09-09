@@ -1,4 +1,5 @@
 const STOCK_MANAGE_SERVICE = 'stock-manage';
+const QQQ_DIP_SERVICE = 'qqq-dip';
 
 let ctx = {
   portal: false,
@@ -6,8 +7,18 @@ let ctx = {
   prefs: { stockManage: {} }
 };
 
-function featurePermId(feature, action) {
-  return `service:${STOCK_MANAGE_SERVICE}:${feature}:${action}`;
+function featurePermId(service, feature, action) {
+  return `service:${service}:${feature}:${action}`;
+}
+
+function checkPerm(service, feature, action) {
+  const perms = ctx.permissions;
+  if (perms.includes('*')) return true;
+  if (action === 'edit' && perms.includes(`service:${service}:edit`)) return true;
+  const fid = featurePermId(service, feature, action);
+  if (perms.includes(fid)) return true;
+  if (action === 'view' && perms.includes(featurePermId(service, feature, 'edit'))) return true;
+  return false;
 }
 
 export function isPortalMode() {
@@ -24,12 +35,12 @@ export function getStockManagePrefs() {
 
 export function can(feature, action = 'view') {
   if (!ctx.portal) return true;
-  const perms = ctx.permissions;
-  if (perms.includes('*')) return true;
-  const fid = featurePermId(feature, action);
-  if (perms.includes(fid)) return true;
-  if (action === 'view' && perms.includes(featurePermId(feature, 'edit'))) return true;
-  return false;
+  return checkPerm(STOCK_MANAGE_SERVICE, feature, action);
+}
+
+export function canDip(feature, action = 'view') {
+  if (!ctx.portal) return true;
+  return checkPerm(QQQ_DIP_SERVICE, feature, action);
 }
 
 export async function loadPortalContext() {

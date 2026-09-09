@@ -13,6 +13,17 @@ function keysFromStockManage() {
   return { finnhub: fh?.[1] || '', polygon: pg?.[1] || '' };
 }
 
+function tokenFromQqBot() {
+  const botPath = path.resolve(ROOT, '..', 'qq-bot', 'config.json');
+  if (!fs.existsSync(botPath)) return '';
+  try {
+    const raw = JSON.parse(fs.readFileSync(botPath, 'utf8'));
+    return String(raw.server?.notifyToken || '').trim();
+  } catch {
+    return '';
+  }
+}
+
 export function resolveRoot() {
   return ROOT;
 }
@@ -36,7 +47,7 @@ export function loadConfig() {
       qq: {
         enabled: raw.notify?.qq?.enabled !== false,
         url: raw.notify?.qq?.url || 'http://127.0.0.1:8787/notify',
-        token: raw.notify?.qq?.token || process.env.QQ_NOTIFY_TOKEN || ''
+        token: raw.notify?.qq?.token || process.env.QQ_NOTIFY_TOKEN || tokenFromQqBot()
       }
     }
   };
