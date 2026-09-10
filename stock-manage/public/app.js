@@ -19,6 +19,7 @@ const fmtCommission = (n, currency = 'USD') => {
 };
 const fmtPct = (n) => Number.isFinite(n) ? n.toFixed(2) + '%' : '—';
 const cls = (n) => n > 0 ? 'pos' : n < 0 ? 'neg' : '';
+const roundMoneyClient = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const MASK = '<span class="sm-mask">—</span>';
 const pad2 = (n) => String(n).padStart(2, '0');
 
@@ -265,12 +266,33 @@ function renderDashboard() {
         </div>`
       : `<div class="value">${fmtUsd(state.cashUsd)} · ${fmtCny(state.cashCny)}</div>`;
   const rateHint = `汇率 ${Number(state.usdCnyRate || 0).toFixed(4)} · 折合 ${maskDashboardValue(fmtUsd(cashEq))} · 占组合 ${maskDashboardValue(fmtPct(cashPct))}`;
+  const rate = Number(state.usdCnyRate) > 0 ? Number(state.usdCnyRate) : 7.2;
+  const assetsUsd = Number.isFinite(s.assetsUsd)
+    ? s.assetsUsd
+    : roundMoneyClient((Number(s.stockMv) || 0) + (Number(s.optionMv) || 0) + (Number(state.cashUsd) || 0));
+  const assetsCny = Number.isFinite(s.assetsCny)
+    ? s.assetsCny
+    : roundMoneyClient((Number(s.ashareMvNative) || 0) + (Number(state.cashCny) || 0));
+  const totalAssetsCny = Number.isFinite(s.totalAssetsCny)
+    ? s.totalAssetsCny
+    : roundMoneyClient((Number(s.totalAssets) || 0) * rate);
+  const totalAssetsLine = `${fmtUsd(s.totalAssets)}（${fmtCny(totalAssetsCny)}）`;
   el.innerHTML = `
     <div class="sm-summary-grid">
-      <div class="sm-summary-card sm-summary-card--accent">
+      <div class="sm-summary-card sm-summary-card--accent sm-summary-card--assets">
         <div class="label">总资产</div>
-        <div class="value">${maskDashboardValue(fmtUsd(s.totalAssets))}</div>
-        <div class="hint">美元口径（含 A 股折汇）</div>
+        <div class="value">${maskDashboardValue(totalAssetsLine)}</div>
+        <div class="sm-asset-split">
+          <div class="sm-asset-split-item">
+            <span class="sm-asset-split-label">美元资产</span>
+            <span class="sm-asset-split-value">${maskDashboardValue(fmtUsd(assetsUsd))}</span>
+          </div>
+          <div class="sm-asset-split-item">
+            <span class="sm-asset-split-label">人民币资产</span>
+            <span class="sm-asset-split-value">${maskDashboardValue(fmtCny(assetsCny))}</span>
+          </div>
+        </div>
+        <div class="hint">美元口径含 A 股折汇；分币种为持仓+现金本币合计</div>
       </div>
       <div class="sm-summary-card">
         <div class="label">股票市值</div>

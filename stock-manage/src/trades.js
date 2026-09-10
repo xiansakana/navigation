@@ -481,6 +481,10 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
   const totalMv = stockMv + optionMv + ashareMv;
   const cashEq = cashUsdEquivalent(cashState.cashUsd, cashState.cashCny, rate);
   const totalAssets = totalMv + cashEq;
+  // Native-currency asset pockets (holdings + cash in that currency).
+  const assetsUsd = roundMoney(stockMv + optionMv + (Number(cashState.cashUsd) || 0));
+  const assetsCny = roundMoney(ashareMvNative + (Number(cashState.cashCny) || 0));
+  const totalAssetsCny = roundMoney(assetsUsd * rate + assetsCny);
   const unrealized = roundMoney(unrealizedUsd + toUsd(unrealizedCny, 'CNY', rate));
   rows.forEach((r) => {
     r.groupKey = (() => {
@@ -512,6 +516,9 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
     ashareMvNative: roundMoney(ashareMvNative),
     totalMv: roundMoney(totalMv),
     totalAssets: roundMoney(totalAssets),
+    totalAssetsCny,
+    assetsUsd,
+    assetsCny,
     cashUsdEq: cashEq,
     unrealized,
     unrealizedUsd: roundMoney(unrealizedUsd),
