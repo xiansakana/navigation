@@ -132,6 +132,15 @@ body.has-navbar {
     margin-top: 6px;
 }
 
+.sm-summary-card .sm-sub-value {
+    margin-top: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+    color: var(--text);
+}
+
 .sm-summary-card--assets .value {
     font-size: 22px;
     line-height: 1.25;
