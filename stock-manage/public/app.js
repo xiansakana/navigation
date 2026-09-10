@@ -246,17 +246,17 @@ function renderDashboard() {
   const usPnlDisplay = usPnl == null ? '—' : fmtUsdSigned(usPnl);
   const dailyUsDisplay = dailyUs == null ? '—' : fmtUsdSigned(dailyUs);
   const hasAshare = Number(s.ashareMvNative) > 0 || (Number.isFinite(cnPnl) && cnPnl !== 0);
-  const ashareMvHint = hasAshare || Number(s.ashareMvNative) > 0
-    ? `<div class="hint">A股/ETF ${fmtCny(s.ashareMvNative ?? 0)}</div>`
+  const ashareMvLine = hasAshare || Number(s.ashareMvNative) > 0
+    ? `<div class="sm-sub-value">A股/ETF ${maskDashboardValue(fmtCny(s.ashareMvNative ?? 0))}</div>`
     : '';
-  const totalPnlHint = hasAshare
-    ? `A股/ETF ${fmtMoneySigned(Number.isFinite(cnPnl) ? cnPnl : 0, 'CNY')}`
-    : '美股未实现盈亏';
-  const dailyPnlHintParts = [];
-  if (hasAshare || (Number.isFinite(dailyCn) && dailyCn !== 0)) {
-    dailyPnlHintParts.push(`A股/ETF ${dailyCn == null ? '—' : fmtMoneySigned(dailyCn, 'CNY')}`);
-  }
-  if (dailyHint && dailyHint !== '—') dailyPnlHintParts.push(dailyHint);
+  const totalPnlAshare = hasAshare
+    ? `<div class="sm-sub-value ${dashboardVisible && pnlVisible ? cls(cnPnl) : ''}">A股/ETF ${maskDashboardValue(maskPnlValue(fmtMoneySigned(Number.isFinite(cnPnl) ? cnPnl : 0, 'CNY')))}</div>`
+    : '';
+  const totalPnlHint = hasAshare ? '' : '美股未实现盈亏';
+  const dailyPnlAshare = (hasAshare || (Number.isFinite(dailyCn) && dailyCn !== 0))
+    ? `<div class="sm-sub-value ${dashboardVisible && pnlVisible && dailyCn != null ? cls(dailyCn) : ''}">A股/ETF ${maskDashboardValue(maskPnlValue(dailyCn == null ? '—' : fmtMoneySigned(dailyCn, 'CNY')))}</div>`
+    : '';
+  const dailyMetaHint = (dailyHint && dailyHint !== '—') ? dailyHint : '';
   const cashField = !dashboardVisible
     ? `<div class="value">${MASK}</div>`
     : can('cash', 'edit')
@@ -297,7 +297,7 @@ function renderDashboard() {
       <div class="sm-summary-card">
         <div class="label">股票市值</div>
         <div class="value">${maskDashboardValue(fmtUsd(s.stockMv))}</div>
-        ${ashareMvHint}
+        ${ashareMvLine}
       </div>
       <div class="sm-summary-card">
         <div class="label">期权市值</div>
@@ -306,12 +306,14 @@ function renderDashboard() {
       <div class="sm-summary-card sm-summary-card--green">
         <div class="label">总盈亏</div>
         <div class="value ${dashboardVisible && pnlVisible ? cls(usPnl) : ''}">${maskDashboardValue(maskPnlValue(usPnlDisplay))}</div>
-        <div class="hint">${maskDashboardValue(maskPnlValue(totalPnlHint))}</div>
+        ${totalPnlAshare}
+        ${totalPnlHint ? `<div class="hint">${maskDashboardValue(maskPnlValue(totalPnlHint))}</div>` : ''}
       </div>
       <div class="sm-summary-card sm-summary-card--amber">
         <div class="label">当日总盈亏</div>
         <div class="value ${dashboardVisible && pnlVisible && dailyUs != null ? cls(dailyUs) : ''}">${maskDashboardValue(maskPnlValue(dailyUsDisplay))}</div>
-        <div class="hint">${maskDashboardValue(maskPnlValue(dailyPnlHintParts.join(' · ') || '—'))}</div>
+        ${dailyPnlAshare}
+        ${dailyMetaHint ? `<div class="hint">${maskDashboardValue(maskPnlValue(dailyMetaHint))}</div>` : ''}
       </div>
       <div class="sm-summary-card sm-summary-card--cash">
         <div class="label">现金</div>
