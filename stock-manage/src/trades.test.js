@@ -62,4 +62,8 @@ test('enrichHoldings converts CNY market value to USD', () => {
   assert.ok(enriched.ashareMv > 0);
   assert.equal(enriched.cashUsdEq, cashUsdEquivalent(100, 700, 7));
   assert.equal(enriched.totalAssets, roundMoney(enriched.totalMv + enriched.cashUsdEq));
+  // QQQ 10*420=4200 + cash 100 = 4300 USD assets; 159509 1500 + cash 700 = 2200 CNY
+  assert.equal(enriched.assetsUsd, 4300);
+  assert.equal(enriched.assetsCny, 2200);
+  assert.equal(enriched.totalAssetsCny, roundMoney(4300 * 7 + 2200));
 });

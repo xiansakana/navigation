@@ -132,6 +132,39 @@ body.has-navbar {
     margin-top: 6px;
 }
 
+.sm-summary-card--assets .value {
+    font-size: 22px;
+    line-height: 1.25;
+    word-break: break-word;
+}
+
+.sm-asset-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.sm-asset-split-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.sm-asset-split-label {
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.sm-asset-split-value {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
 .sm-summary-card--accent { border-left: 3px solid var(--accent); }
 .sm-summary-card--green { border-left: 3px solid rgba(61, 220, 132, 0.55); }
 .sm-summary-card--amber { border-left: 3px solid rgba(245, 158, 11, 0.55); }
@@ -1022,6 +1055,7 @@ select:focus {
     .sm-col-panel { padding: 12px; }
     .sm-holdings-hint { padding-left: 12px; padding-right: 12px; }
     .sm-summary-grid { grid-template-columns: 1fr; }
+    .sm-asset-split { grid-template-columns: 1fr; }
     .sm-cal-gran { flex-direction: column; align-items: stretch; }
     .sm-cal-gran-net { margin-left: 0; white-space: normal; }
     .sm-cal-cell { min-height: 52px; }
