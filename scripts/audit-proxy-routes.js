@@ -115,6 +115,7 @@ SIYUAN_API_NAMESPACES.forEach(function(ns) {
     ['/publish/', 'GET', { kind: 'proxy', id: 'siyuan-publish' }],
     ['/alist/', 'GET', { kind: 'proxy', id: 'alist' }],
     ['/alist/api/me', 'GET', { kind: 'proxy', id: 'alist' }],
+    ['/piclist/upload', 'POST', { kind: 'proxy', id: 'piclist' }],
     ['/notes/stage/build/desktop/', 'GET', { kind: 'proxy', id: 'notes' }],
     ['/napcat/webui/', 'GET', { kind: 'proxy', id: 'napcat' }],
 ].forEach(function(c) { expectRoute(c[0], c[1], c[2]); });
@@ -137,6 +138,7 @@ SIYUAN_API_NAMESPACES.forEach(function(ns) {
     { path: '/torn-toolbox/undercut/api/state', want: { id: 'torn-undercut' } },
     { path: '/publish/', want: { id: 'siyuan-publish' } },
     { path: '/alist/', want: { id: 'alist', proxyPath: '/alist/' } },
+    { path: '/piclist/upload', want: { id: 'piclist', proxyPath: '/piclist/upload' } },
     { path: '/notes/stage/build/desktop/', want: { id: 'notes' } },
     { path: '/api/me', want: { id: null } },
     { path: '/api/state', want: { id: null } },

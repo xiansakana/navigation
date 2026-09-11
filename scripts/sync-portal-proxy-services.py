@@ -39,6 +39,20 @@ NAPCAT_PROXY = {
     "icon": "💬",
 }
 
+PICLIST_PROXY = {
+    "id": "piclist",
+    "title": "PicList 图床",
+    "description": "思源粘贴图片使用的同域上传通道",
+    "hidden": True,
+    "type": "proxy",
+    "path": "/piclist",
+    "entryPath": "/",
+    "internalUrl": "http://127.0.0.1:36677",
+    "injectBar": False,
+    "injectBase": False,
+    "icon": "🖼️",
+}
+
 
 def read_auth_code(path):
     if not path.exists():
@@ -104,6 +118,7 @@ def main():
     changed = False
     changed |= sync_service(services, "notes", NOTES_PROXY, notes_extras)
     changed |= sync_service(services, "napcat", NAPCAT_PROXY, napcat_extras)
+    changed |= sync_service(services, "piclist", PICLIST_PROXY)
 
     if changed:
         PORTAL_CFG.write_text(json.dumps(portal, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

@@ -119,10 +119,14 @@
     {
       "id": "piclist",
       "title": "PicList 图床",
-      "description": "HTTP 上传服务（Typora / Obsidian / PicHoro）",
-      "type": "external",
-      "url": "http://123.56.235.12:36677/upload",
-      "newTab": true,
+      "description": "思源粘贴图片使用的同域上传通道",
+      "hidden": true,
+      "type": "proxy",
+      "path": "/piclist",
+      "entryPath": "/",
+      "internalUrl": "http://127.0.0.1:36677",
+      "injectBar": false,
+      "injectBase": false,
       "icon": "🖼️"
     },
     {
