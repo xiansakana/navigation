@@ -7,7 +7,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CFG_PATH = ROOT / "siyuan" / "data" / "siyuan" / "data" / "storage" / "syp" / "picgo" / "external-picgo-cfg.json"
 
-PICLIST_URL = os.environ.get("PICLIST_PUBLIC_URL", "http://123.56.235.12:36677").rstrip("/")
+# 浏览器中的思源通过 Portal 同域转发到 PicList，避免 HTTPS 页面请求
+# http://IP:36677 时被浏览器按 Mixed Content 拦截。保留环境变量以便特殊部署覆盖。
+PICLIST_URL = os.environ.get("PICLIST_BROWSER_URL", "/piclist").rstrip("/")
 PICLIST_KEY = os.environ.get("PICLIST_SERVER_KEY", "siyuan-web")
 
 

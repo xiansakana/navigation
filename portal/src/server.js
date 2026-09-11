@@ -267,8 +267,11 @@ function proxyRouteOpts(req) {
     return { referer: req.headers.referer || req.headers.referrer || '' };
 }
 
-/** NapCat / 思源笔记需编辑权限才能进入；其余服务按查看权限 */
+/** NapCat / 思源笔记需编辑权限才能进入；PicList 复用笔记编辑权限。 */
 function canAccessProxiedService(permissions, service) {
+    if (service.id === 'piclist') {
+        return canEditService(permissions, 'notes');
+    }
     if (service.id === 'napcat' || service.id === 'notes') {
         return canEditService(permissions, service.id);
     }
@@ -310,7 +313,10 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
             });
             return true;
         }
-        if (isWriteMethod(req.method) && !canWriteService(proxySession.permissions, ctx.service.id)) {
+        var canWriteProxy = ctx.service.id === 'piclist'
+            ? canEditService(proxySession.permissions, 'notes')
+            : canWriteService(proxySession.permissions, ctx.service.id);
+        if (isWriteMethod(req.method) && !canWriteProxy) {
             sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '该服务为只读权限，无法修改');
             return true;
         }
