@@ -1,8 +1,14 @@
 import { evaluate, applyRoundFromEval, newAlertKeys, buildBuyPreview } from './playbook.js';
 import { marketStatus, isRth } from './market-hours.js';
-import { eventAllowed, notifyDipEvent } from './notify.js';
+import { appendMarketSnapshot, eventAllowed, notifyDipEvent } from './notify.js';
 
 const SYMBOLS = ['QQQ', 'TQQQ', 'SOXL', 'SPY'];
+
+function alertMarket(ev, alert) {
+  const symbol = alert?.symbol || 'QQQ';
+  const key = symbol.toLowerCase();
+  return { symbol, stats: ev?.[key] || ev?.qqq };
+}
 
 export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
   let timer = null;
@@ -107,7 +113,9 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
         });
         const quietOffHours = !rth && !['reset', 'takeProfit', 'openSummary'].includes(alert.event);
         if (!opts.silent && !quietOffHours) {
-          const qq = await notifyDipEvent(notify, alert.event, alert.message);
+          const market = alertMarket(ev, alert);
+          const qqText = appendMarketSnapshot(alert.message, market.stats, market.symbol);
+          const qq = await notifyDipEvent(notify, alert.event, qqText);
           pushResults.push({ key: alert.key, qq });
           store.addAction({
             type: 'notify',
@@ -128,7 +136,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
       const openAlready = !!(nextRound.firedAlerts || {})[openKey];
       if (!opts.silent && rth && !openAlready && eventAllowed(notify, 'openSummary')) {
         const text = ev.primary ? `${ev.primary.title}：${ev.primary.body}` : '抄底监控已开盘';
-        const qq = await notifyDipEvent(notify, 'openSummary', text);
+        const qq = await notifyDipEvent(notify, 'openSummary', appendMarketSnapshot(text, ev.qqq, 'QQQ'));
         nextRound.firedAlerts = { ...(nextRound.firedAlerts || {}), [openKey]: new Date().toISOString() };
         store.addAction({
           type: 'notify',

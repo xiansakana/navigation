@@ -4,6 +4,18 @@ export function sanitizeQqText(text) {
   return String(text).replace(/\$/g, '\uFF04');
 }
 
+function formatPct(value) {
+  if (!Number.isFinite(value)) return '—';
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(2)}%`;
+}
+
+export function appendMarketSnapshot(text, stats, symbol = 'QQQ') {
+  const price = Number.isFinite(stats?.price) ? stats.price.toFixed(2) : '—';
+  const h = Number.isFinite(stats?.H) ? stats.H.toFixed(2) : '—';
+  return `${text}\n行情：${symbol} 现价 ${price}｜当日涨跌幅 ${formatPct(stats?.changePercent)}｜相对 H 回撤 ${formatPct(stats?.drawdownLive)}（H ${h}）`;
+}
+
 export function normalizeQqTargets(qqOrNotify) {
   const qq = qqOrNotify?.qq || qqOrNotify || {};
   const fromNotify = Array.isArray(qqOrNotify?.targets) ? qqOrNotify.targets : null;

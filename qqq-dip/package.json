@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test src/playbook.test.js src/market-hours.test.js"
+    "test": "node --test src/playbook.test.js src/market-hours.test.js src/notify.test.js"
   },
   "dependencies": {
     "express": "^4.21.2",

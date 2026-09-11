@@ -537,6 +537,7 @@ export function evaluate(input) {
     alerts.push({
       key: 'reset',
       event: 'reset',
+      symbol: 'QQQ',
       message: `QQQ 收盘/现价回到 0.98H 或创新高（H=${qqq.H?.toFixed(2)}）。未触发档作废，已买仓位留下。停止加仓。`
     });
   }
@@ -554,6 +555,7 @@ export function evaluate(input) {
     alerts.push({
       key: 'fakeRight',
       event: 'fakeRight',
+      symbol: 'QQQ',
       message: `假右侧：跌破 R1 前低 ${Number(round.r1SwingLow).toFixed(2)}（1% 容差）。清 R1 期权，正股留，R2 冻结，转等 T5 或新低后的新 R1。`
     });
   }
@@ -586,6 +588,7 @@ export function evaluate(input) {
         alerts.push({
           key: 'T4_intraday',
           event: 'T4_intraday',
+          symbol: 'QQQ',
           message: `T4 盘中触及 0.75H 限价 ${qqq.triggers?.T4_intraday}（现价/低点 ${qqq.price}/${qqq.low}）。`
         });
       } else if (rth && hitLive(qqq.price, qqq.H, 0.78)) {
@@ -621,6 +624,7 @@ export function evaluate(input) {
       alerts.push({
         key: id,
         event: id,
+        symbol: 'QQQ',
         message: `${id} 触发。${rec}`
       });
     }
@@ -711,10 +715,12 @@ export function evaluate(input) {
     });
   });
   lots.forEach((lot) => {
+    const under = (lot.symbol || 'QQQ').replace(/\d.*/, '') || 'QQQ';
     lot.alerts.forEach((a) => {
       alerts.push({
         key: `${lot.id}:${a.code}`,
         event: a.event,
+        symbol: under,
         message: `${lot.symbol || lot.id} ${a.action}`
       });
     });
@@ -723,7 +729,7 @@ export function evaluate(input) {
   const sleeves = evaluateSleeves(tqqq, soxl, B, !!input.soxlEnabled);
   sleeves.forEach((s) => {
     if (s.status === 'confirmed') {
-      alerts.push({ key: s.symbol, event: s.event, message: s.recommendation });
+      alerts.push({ key: s.symbol, event: s.event, symbol: s.symbol, message: s.recommendation });
     }
   });
 
