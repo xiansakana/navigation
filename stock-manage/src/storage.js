@@ -19,8 +19,6 @@ export function loadConfig() {
     }
   }
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const defaultFinnhub = 'REMOVED_SECRET';
-  const defaultPolygon = 'REMOVED_SECRET';
   return {
     server: {
       host: raw.server?.host || '127.0.0.1',
@@ -28,8 +26,8 @@ export function loadConfig() {
     },
     dbPath: raw.dbPath || 'data/navigation.db',
     dataFile: raw.dataFile || 'data/portfolio.json',
-    finnhubApiKey: raw.finnhubApiKey || process.env.FINNHUB_API_KEY || defaultFinnhub,
-    polygonApiKey: raw.polygonApiKey || process.env.POLYGON_API_KEY || defaultPolygon
+    finnhubApiKey: raw.finnhubApiKey || process.env.FINNHUB_API_KEY || '',
+    polygonApiKey: raw.polygonApiKey || process.env.POLYGON_API_KEY || ''
   };
 }
 
