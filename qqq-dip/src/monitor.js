@@ -1,5 +1,5 @@
 import { evaluate, applyRoundFromEval, newAlertKeys, buildBuyPreview } from './playbook.js';
-import { marketStatus, isRth } from './market-hours.js';
+import { marketStatus, isOpenSummaryTime, isRth } from './market-hours.js';
 import { appendMarketSnapshot, eventAllowed, notifyDipEvent } from './notify.js';
 
 const SYMBOLS = ['QQQ', 'TQQQ', 'SOXL', 'SPY'];
@@ -131,10 +131,11 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
         void action;
       }
 
-      // Once per NY trading day on first RTH poll (not once per process start).
+      // Once per NY trading day, five minutes after the opening bell. The delay
+      // gives live quote providers time to roll over from the previous session.
       const openKey = `openSummary:${lastMarketStatus.ymd}`;
       const openAlready = !!(nextRound.firedAlerts || {})[openKey];
-      if (!opts.silent && rth && !openAlready && eventAllowed(notify, 'openSummary')) {
+      if (!opts.silent && isOpenSummaryTime() && !openAlready && eventAllowed(notify, 'openSummary')) {
         const text = ev.primary ? `${ev.primary.title}：${ev.primary.body}` : '抄底监控已开盘';
         const qq = await notifyDipEvent(notify, 'openSummary', appendMarketSnapshot(text, ev.qqq, 'QQQ'));
         nextRound.firedAlerts = { ...(nextRound.firedAlerts || {}), [openKey]: new Date().toISOString() };

@@ -61,6 +61,14 @@ export function isRth(date = new Date()) {
   return parts.minutes >= open && parts.minutes < close;
 }
 
+export function isOpenSummaryTime(date = new Date(), delayMinutes = 5) {
+  const parts = nyParts(date);
+  if (!isSessionDay(parts)) return false;
+  const sendFrom = 9 * 60 + 30 + Math.max(0, Number(delayMinutes) || 0);
+  const close = 16 * 60;
+  return parts.minutes >= sendFrom && parts.minutes < close;
+}
+
 function addNyDays(ymd, delta) {
   const [y, m, d] = ymd.split('-').map(Number);
   const utc = Date.UTC(y, m - 1, d + delta, 16, 0, 0);
