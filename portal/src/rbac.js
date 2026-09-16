@@ -219,7 +219,12 @@ function ensureGuestAccess(data, config) {
     if (!data.roles) data.roles = [];
     if (!data.users) data.users = [];
     var guestUsername = config?.auth?.guestUsername || 'guest';
-    var denyGuest = ['service:napcat:view', 'service:napcat:edit'];
+    var denyGuest = [
+        'service:napcat:view',
+        'service:napcat:edit',
+        'service:notifications:view',
+        'service:notifications:edit'
+    ];
 
     var guestRole = data.roles.find(function(r) { return r.id === 'role_guest'; });
     if (guestRole) {

@@ -110,6 +110,7 @@ SIYUAN_API_NAMESPACES.forEach(function(ns) {
 // prefixed services
 [
     ['/stock-manage/api/health', 'GET', { kind: 'proxy', id: 'stock-manage' }],
+    ['/notifications/api/config', 'GET', { kind: 'proxy', id: 'notifications' }],
     ['/stock-manage/dip/api/health', 'GET', { kind: 'proxy', id: 'qqq-dip' }],
     ['/torn-toolbox/undercut/api/state', 'GET', { kind: 'proxy', id: 'torn-undercut' }],
     ['/publish/', 'GET', { kind: 'proxy', id: 'siyuan-publish' }],
@@ -134,6 +135,7 @@ SIYUAN_API_NAMESPACES.forEach(function(ns) {
     { path: '/plugin/x', want: { id: 'napcat', proxyPath: '/napcat/plugin/x' } },
     { path: '/files/theme.css', want: { id: 'napcat', proxyPath: '/napcat/files/theme.css' } },
     { path: '/stock-manage/api/health', want: { id: 'stock-manage', proxyPath: '/stock-manage/api/health' } },
+    { path: '/notifications/api/config', want: { id: 'notifications', proxyPath: '/notifications/api/config' } },
     { path: '/stock-manage/dip/api/health', want: { id: 'qqq-dip', proxyPath: '/stock-manage/dip/api/health' } },
     { path: '/torn-toolbox/undercut/api/state', want: { id: 'torn-undercut' } },
     { path: '/publish/', want: { id: 'siyuan-publish' } },

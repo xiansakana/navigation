@@ -22,15 +22,9 @@ if [ ! -f config.json ]; then
     echo "已创建 config.json，请编辑后重新运行本脚本"
     echo "  nano config.json"
     echo "必改项:"
-    echo "  - server.host = 0.0.0.0"
+    echo "  - server.host = 127.0.0.1（仅由 Portal 反代访问）"
     echo "  - server.notifyToken = 强随机字符串"
     echo "  - napcat.accessToken = ECS 上 NapCat 的 HTTP Token"
-    exit 1
-fi
-
-if grep -q '"host": "127.0.0.1"' config.json; then
-    echo "警告: config.json 中 server.host 仍为 127.0.0.1，外网无法访问"
-    echo "请改为 0.0.0.0 后重试"
     exit 1
 fi
 
@@ -44,5 +38,4 @@ echo "==> 本机健康检查..."
 sleep 1
 curl -s http://127.0.0.1:8787/health
 echo ""
-echo "部署完成。外网测试:"
-echo "  curl http://$(curl -s ifconfig.me 2>/dev/null || echo '你的公网IP'):8787/health"
+echo "部署完成。请通过 Portal 的 /notifications/ 访问管理页面。"

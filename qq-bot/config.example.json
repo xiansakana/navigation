@@ -15,6 +15,23 @@
     "groupId": "123456789",
     "atUserId": "987654321"
   },
+  "channels": {
+    "qq": {
+      "enabled": true
+    },
+    "email": {
+      "enabled": false,
+      "from": "通知中心 <name@example.com>",
+      "to": "you@example.com",
+      "smtp": {
+        "host": "smtp.example.com",
+        "port": 465,
+        "secure": true,
+        "user": "name@example.com",
+        "pass": "填写 SMTP 密码或授权码"
+      }
+    }
+  },
   "server": {
     "host": "127.0.0.1",
     "port": 8787,

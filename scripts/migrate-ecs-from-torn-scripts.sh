@@ -30,9 +30,9 @@ for f in config.undercut.json config.company.json config.json; do
     fi
 done
 
-if [ -f "$NEW/qq-bot/config.json" ] && grep -q '"host": "127.0.0.1"' "$NEW/qq-bot/config.json"; then
-    sed -i 's/"host": "127.0.0.1"/"host": "0.0.0.0"/' "$NEW/qq-bot/config.json"
-    echo "  qq-bot server.host -> 0.0.0.0"
+if [ -f "$NEW/qq-bot/config.json" ] && grep -q '"host": "0.0.0.0"' "$NEW/qq-bot/config.json"; then
+    sed -i 's/"host": "0.0.0.0"/"host": "127.0.0.1"/' "$NEW/qq-bot/config.json"
+    echo "  qq-bot server.host -> 127.0.0.1"
 fi
 
 echo "==> 重新部署 pm2（指向新路径）..."

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""同步思源、NapCat 为 Portal 反代（仅登录且有权限的用户可访问，端口不对外暴露）。"""
+"""同步内置服务为 Portal 反代（仅登录且有权限的用户可访问，端口不对外暴露）。"""
 import json
 import os
 import re
@@ -51,6 +51,19 @@ PICLIST_PROXY = {
     "injectBar": False,
     "injectBase": False,
     "icon": "🖼️",
+}
+
+NOTIFICATIONS_PROXY = {
+    "id": "notifications",
+    "title": "通知管理",
+    "description": "集中配置与测试 QQ、邮件等通知渠道",
+    "type": "proxy",
+    "path": "/notifications",
+    "entryPath": "/",
+    "internalUrl": "http://127.0.0.1:8787",
+    "injectBar": True,
+    "injectBase": True,
+    "icon": "🔔",
 }
 
 
@@ -116,6 +129,7 @@ def main():
     portal = json.loads(PORTAL_CFG.read_text(encoding="utf-8"))
     services = portal.setdefault("services", [])
     changed = False
+    changed |= sync_service(services, "notifications", NOTIFICATIONS_PROXY)
     changed |= sync_service(services, "notes", NOTES_PROXY, notes_extras)
     changed |= sync_service(services, "napcat", NAPCAT_PROXY, napcat_extras)
     changed |= sync_service(services, "piclist", PICLIST_PROXY)

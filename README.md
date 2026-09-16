@@ -7,7 +7,7 @@ ECS 服务导航与自托管应用（portal 统一入口 :80）。
 | 目录 | 说明 |
 |------|------|
 | `portal/` | 服务导航、登录、反代 |
-| `qq-bot/` | QQ 通知桥接 → NapCat |
+| `qq-bot/` | 通知管理服务（QQ / 邮件，QQ 通过 NapCat） |
 | `torn-toolbox-desktop/` | Torn 压价助手 + 公司监听（独立进程） |
 | `stock-manage/` | 美股持仓管理（:5000，服务端持久化） |
 | `qqq-dip/` | QQQ 抄底监控与 QQ 提醒（:5001，独立库） |

@@ -1,6 +1,8 @@
-# Torn QQ Bot（NapCat）
+# 通知管理服务
 
-通过 [NapCat](https://napneko.github.io/) 发送 QQ 私聊/群消息。本地跑通后，可将同一套代码部署到云服务器，供 Torn 工具箱等脚本远程调用。
+集中管理 QQ、邮件等通知渠道。QQ 通过 [NapCat](https://napneko.github.io/) 发送私聊/群消息，邮件通过 SMTP 发送。Portal 首页的“通知管理”卡片可进入配置页面。
+
+> Torn 工具箱和股票管理当前仍使用各自的提醒配置，暂未迁移到本服务。
 
 ## 目录结构
 
@@ -10,8 +12,10 @@ qq-bot/
   config.json           # 本地配置（勿提交）
   src/
     napcat.js           # NapCat HTTP 客户端
+    email.js            # SMTP 邮件客户端
     send-test.js        # 命令行测试发送
-    server.js           # HTTP 推送服务（日后对接工具箱）
+    server.js           # 管理页面、配置 API 与统一通知 API
+  public/               # 通知管理页面
 ```
 
 ## 1. 安装 NapCat
@@ -36,6 +40,8 @@ copy config.example.json config.json
 | `napcat.baseUrl` | NapCat HTTP 地址，本机一般为 `http://127.0.0.1:3000` |
 | `napcat.accessToken` | NapCat 鉴权 token（未设置则留空） |
 | `defaultTarget.userId` | 默认接收私聊的 QQ 号（可先填自己的） |
+| `channels.qq.enabled` | 是否启用 QQ 渠道 |
+| `channels.email` | 邮件启停、默认收发件人与 SMTP 配置 |
 | `server.port` | 本地推送服务端口，默认 `8787` |
 | `server.notifyToken` | 调用 `/notify` 时的 Bearer Token |
 
@@ -54,9 +60,9 @@ node src/send-test.js --user 123456789 "Poison Mistletoe 被压价了"
 node src/send-test.js --group 987654321 "群通知测试"
 ```
 
-## 4. 启动 HTTP 推送服务（可选）
+## 4. 启动通知管理服务
 
-供浏览器脚本或其他程序 POST 消息，**尚未接入 Torn 工具箱**：
+启动后可直接打开 `http://127.0.0.1:8787/`，或通过 Portal 的 `/notifications/` 访问：
 
 ```bash
 npm start
@@ -69,17 +75,24 @@ curl -X POST http://127.0.0.1:8787/notify ^
   -d "{\"message\":\"测试推送\"}"
 ```
 
+指定邮件渠道或同时发送多个渠道：
+
+```json
+{ "channel": "email", "subject": "测试", "message": "邮件正文" }
+{ "channels": ["qq", "email"], "message": "同时发送" }
+```
+
 ## 5. 迁移到云服务器
 
 1. 在云服务器安装 NapCat 并保持 QQ 在线
-2. 将 `qq-bot` 目录上传，`npm` 无需额外依赖（Node 18+）
+2. 将 `qq-bot` 目录上传并执行 `npm install`（Node 18+）
 3. `config.json` 中：
    - `napcat.baseUrl` 改为 `http://127.0.0.1:3000`（Bot 与 NapCat 同机）
-   - `server.host` 改为 `0.0.0.0` 以便外网访问
-   - 设置强随机 `notifyToken`，云防火墙仅开放必要端口
+   - `server.host` 保持 `127.0.0.1`，由 Portal 统一反向代理
+   - 设置强随机 `notifyToken`，不对公网开放 8787 端口
 4. 使用 `pm2` / `systemd` 保持 `node src/server.js` 运行
 
-日后 Torn 工具箱只需向 `https://你的域名/notify` 发 POST，无需直连 NapCat。
+后续业务迁移时可在服务器内网调用 `http://127.0.0.1:8787/notify`，无需直连 NapCat。
 
 ## 掉线与自动登录
 

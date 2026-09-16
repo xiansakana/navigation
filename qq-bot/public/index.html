@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>通知管理</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <main class="notify-app">
+        <section class="hero">
+            <div>
+                <span class="eyebrow">NOTIFICATION HUB</span>
+                <h1>通知管理</h1>
+                <p>集中配置消息渠道、检查可用状态，并在接入业务前完成发送测试。</p>
+            </div>
+            <div class="summary" id="summary" aria-live="polite"></div>
+        </section>
+
+        <div class="notice">
+            <span>i</span>
+            <p>Torn 工具箱和股票管理仍使用原有提醒配置，本页暂不影响它们。</p>
+        </div>
+
+        <section class="channel-grid">
+            <article class="channel-card" data-channel="qq">
+                <div class="channel-head">
+                    <div class="channel-identity"><span class="channel-icon qq">Q</span><div><h2>QQ 通知</h2><p>通过 NapCat 发送私聊或群消息</p></div></div>
+                    <label class="switch"><input id="qq-enabled" type="checkbox"><span></span></label>
+                </div>
+                <div class="status-row"><span class="status-dot"></span><span class="status-text">检查中</span></div>
+                <div class="form-grid">
+                    <label class="wide">NapCat 地址<input id="qq-base-url" placeholder="http://127.0.0.1:3000"></label>
+                    <label class="wide">Access Token<input id="qq-token" type="password" autocomplete="new-password" placeholder="留空则保持原值"></label>
+                    <label>消息类型<select id="qq-type"><option value="private">私聊</option><option value="group">群聊</option></select></label>
+                    <label id="qq-user-wrap">QQ 号<input id="qq-user-id" inputmode="numeric" placeholder="123456789"></label>
+                    <label id="qq-group-wrap" class="hidden">群号<input id="qq-group-id" inputmode="numeric" placeholder="123456789"></label>
+                    <label id="qq-at-wrap" class="hidden">@ QQ 号（可选）<input id="qq-at-user-id" inputmode="numeric"></label>
+                </div>
+                <button class="test-btn" data-test="qq" type="button">发送 QQ 测试</button>
+            </article>
+
+            <article class="channel-card" data-channel="email">
+                <div class="channel-head">
+                    <div class="channel-identity"><span class="channel-icon email">@</span><div><h2>邮件通知</h2><p>通过标准 SMTP 服务器发送邮件</p></div></div>
+                    <label class="switch"><input id="email-enabled" type="checkbox"><span></span></label>
+                </div>
+                <div class="status-row"><span class="status-dot"></span><span class="status-text">检查中</span></div>
+                <div class="form-grid">
+                    <label class="wide">SMTP 主机<input id="smtp-host" placeholder="smtp.example.com"></label>
+                    <label>端口<input id="smtp-port" type="number" min="1" max="65535" value="465"></label>
+                    <label class="check-label"><input id="smtp-secure" type="checkbox" checked> 使用 SSL/TLS</label>
+                    <label class="wide">用户名<input id="smtp-user" autocomplete="username" placeholder="name@example.com"></label>
+                    <label class="wide">密码或授权码<input id="smtp-pass" type="password" autocomplete="new-password" placeholder="留空则保持原值"></label>
+                    <label>发件人<input id="email-from" placeholder="通知中心 <name@example.com>"></label>
+                    <label>默认收件人<input id="email-to" placeholder="you@example.com"></label>
+                </div>
+                <button class="test-btn" data-test="email" type="button">发送邮件测试</button>
+            </article>
+        </section>
+
+        <section class="send-test">
+            <div><h2>测试内容</h2><p>测试按钮会使用当前已保存的渠道配置。</p></div>
+            <textarea id="test-message" rows="3" placeholder="留空时发送默认测试消息"></textarea>
+        </section>
+
+        <div class="action-bar">
+            <span id="save-state">修改配置后请保存</span>
+            <button id="save" type="button">保存配置</button>
+        </div>
+    </main>
+    <div class="toast" id="toast" hidden></div>
+    <script src="app.js"></script>
+</body>
+</html>

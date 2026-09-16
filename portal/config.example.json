@@ -49,6 +49,18 @@
       "icon": "📈"
     },
     {
+      "id": "notifications",
+      "title": "通知管理",
+      "description": "集中配置与测试 QQ、邮件等通知渠道",
+      "type": "proxy",
+      "path": "/notifications",
+      "entryPath": "/",
+      "internalUrl": "http://127.0.0.1:8787",
+      "injectBar": true,
+      "injectBase": true,
+      "icon": "🔔"
+    },
+    {
       "id": "qqq-dip",
       "title": "抄底监控",
       "hidden": true,
