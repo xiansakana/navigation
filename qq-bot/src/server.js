@@ -163,7 +163,10 @@ async function main() {
     });
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// PM2 fork mode can replace process.argv[1] with its ProcessContainer wrapper.
+// Node's test runner exposes NODE_TEST_CONTEXT, so imports stay side-effect free in tests
+// while direct Node, npm and PM2 execution all start the HTTP service.
+if (!process.env.NODE_TEST_CONTEXT) {
     main().catch(function(err) {
         console.error(err.message);
         process.exit(1);
