@@ -18,6 +18,10 @@ let state = {
   tab: 'monitor'
 };
 
+const ACTION_PAGE_SIZE = 20;
+let actionPage = 1;
+let actionRequestId = 0;
+
 function $(sel) { return document.querySelector(sel); }
 function toast(type, msg) {
   const t = window.portalToast;
@@ -242,7 +246,10 @@ function applyState(data) {
   if (data.notify) state.notify = data.notify;
   if (data.evaluation) state.evaluation = data.evaluation;
   if (data.monitor) state.monitor = data.monitor;
-  if (data.actions) state.actions = data.actions;
+  if (data.actions) {
+    const filter = $('#action-filter')?.value || 'all';
+    if (actionPage === 1 && filter === 'all') state.actions = data.actions;
+  }
   if (data.lots) state.lots = data.lots;
   if (data.market && state.monitor) state.monitor.market = data.market;
   render();
@@ -571,6 +578,7 @@ function openExecModal(tierId, preview) {
       });
       $('#modal-root').innerHTML = '';
       applyState(data);
+      await loadActions(1);
       toast('success', '已记录并扣减现金');
     } catch (err) { toast('error', err.message); }
   });
@@ -688,18 +696,37 @@ function renderLots() {
 }
 
 function renderActions() {
-  const filter = $('#action-filter')?.value || 'all';
-  const items = (state.actions?.items || []).filter((a) => {
-    if (filter === 'auto') return a.source === 'auto';
-    if (filter === 'user') return a.source === 'user';
-    return true;
-  });
+  const items = state.actions?.items || [];
+  const total = Number(state.actions?.total) || 0;
+  const pageCount = Math.max(1, Math.ceil(total / ACTION_PAGE_SIZE));
+  if (actionPage > pageCount) actionPage = pageCount;
   $('#action-list').innerHTML = items.length ? items.map((a) => `
     <div class="sm-action">
       <div class="meta">${escapeHtml(a.ts)} · ${escapeHtml(a.source)} · ${escapeHtml(a.type)}${a.tier ? ' · ' + escapeHtml(a.tier) : ''}</div>
       <div>${escapeHtml(a.message)}</div>
     </div>
   `).join('') : '<p class="hint">暂无操作记录</p>';
+  $('#action-page-info').textContent = `第 ${actionPage} / ${pageCount} 页 · 共 ${total} 条`;
+  $('#action-prev').disabled = actionPage <= 1;
+  $('#action-next').disabled = actionPage >= pageCount;
+}
+
+async function loadActions(page = 1) {
+  const filter = $('#action-filter')?.value || 'all';
+  const targetPage = Math.max(1, Number(page) || 1);
+  const requestId = ++actionRequestId;
+  const params = new URLSearchParams({
+    limit: String(ACTION_PAGE_SIZE),
+    offset: String((targetPage - 1) * ACTION_PAGE_SIZE),
+    source: filter
+  });
+  const data = await api(`/actions?${params}`);
+  if (requestId !== actionRequestId) return;
+  const pageCount = Math.max(1, Math.ceil((Number(data.total) || 0) / ACTION_PAGE_SIZE));
+  if (targetPage > pageCount) return loadActions(pageCount);
+  actionPage = targetPage;
+  state.actions = data;
+  renderActions();
 }
 
 function defaultTarget() {
@@ -1012,7 +1039,15 @@ function bind() {
       render();
     } catch (e) { toast('error', e.message); }
   });
-  $('#action-filter').addEventListener('change', renderActions);
+  $('#action-filter').addEventListener('change', () => {
+    loadActions(1).catch((e) => toast('error', e.message));
+  });
+  $('#action-prev').addEventListener('click', () => {
+    loadActions(actionPage - 1).catch((e) => toast('error', e.message));
+  });
+  $('#action-next').addEventListener('click', () => {
+    loadActions(actionPage + 1).catch((e) => toast('error', e.message));
+  });
   $('#tier-table').addEventListener('click', async (e) => {
     const id = e.target.dataset.exec;
     if (!id) return;
@@ -1067,6 +1102,7 @@ function bind() {
         const data = await api('/actions', { method: 'POST', body });
         $('#modal-root').innerHTML = '';
         applyState(data);
+        await loadActions(1);
         toast('success', type === 'sell' ? '已同步卖出到持仓' : '已保存');
       } catch (err) { toast('error', err.message); }
     });

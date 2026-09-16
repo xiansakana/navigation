@@ -105,7 +105,7 @@ function snapshot() {
   if (!snap.evaluation) snap.evaluation = liveEval();
   snap.market = marketStatus();
   snap.notify = maskNotifyForClient(store.getNotify());
-  snap.actions = store.listActionRows({ limit: 80 });
+  snap.actions = store.listActionRows({ limit: 20 });
   return snap;
 }
 
@@ -154,7 +154,7 @@ app.put('/api/cash', (req, res) => {
     ok: true,
     cash,
     evaluation: refreshEvaluation(),
-    actions: store.listActionRows({ limit: 80 }),
+    actions: store.listActionRows({ limit: 20 }),
     monitor: monitor.status()
   });
 });
@@ -226,8 +226,9 @@ app.get('/api/docs/:id', (req, res) => {
 
 app.get('/api/actions', (req, res) => {
   res.json(store.listActionRows({
-    limit: Number(req.query.limit) || 80,
-    offset: Number(req.query.offset) || 0
+    limit: Number(req.query.limit) || 20,
+    offset: Number(req.query.offset) || 0,
+    source: String(req.query.source || 'all')
   }));
 });
 
@@ -324,7 +325,7 @@ app.post('/api/actions', (req, res) => {
     cash,
     round: store.getRound(),
     evaluation: refreshEvaluation(),
-    actions: store.listActionRows({ limit: 80 }),
+    actions: store.listActionRows({ limit: 20 }),
     syncedTrades
   });
 });

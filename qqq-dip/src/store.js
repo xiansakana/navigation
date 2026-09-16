@@ -17,6 +17,22 @@ function parseJson(text, fallback) {
   }
 }
 
+export function paginateActions(actions, { limit = 100, offset = 0, source = 'all' } = {}) {
+  const all = Array.isArray(actions) ? actions : [];
+  const rows = source === 'auto' || source === 'user'
+    ? all.filter((action) => action.source === source)
+    : all;
+  const start = Math.max(0, Number(offset) || 0);
+  const lim = Math.max(1, Math.min(Number(limit) || 100, 500));
+  return {
+    total: rows.length,
+    limit: lim,
+    offset: start,
+    source,
+    items: rows.slice(start, start + lim)
+  };
+}
+
 export function defaultNotify(seed = {}) {
   return {
     desktop: seed.desktop === true,
@@ -203,13 +219,8 @@ export function createStore(config) {
     return row;
   }
 
-  function listActionRows({ limit = 100, offset = 0 } = {}) {
-    const start = Number(offset) || 0;
-    const lim = Math.min(Number(limit) || 100, 500);
-    return {
-      total: data.actions.length,
-      items: data.actions.slice(start, start + lim)
-    };
+  function listActionRows({ limit = 100, offset = 0, source = 'all' } = {}) {
+    return paginateActions(data.actions, { limit, offset, source });
   }
 
   function patchAction(id, patch) {

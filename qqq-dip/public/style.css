@@ -269,6 +269,28 @@ body.has-navbar { padding-top: var(--navbar-height); }
     font-size: 13px;
 }
 
+.sm-pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.sm-pagination-actions {
+    display: flex;
+    gap: 8px;
+}
+
+@media (max-width: 560px) {
+    .sm-pagination {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
 .sm-modal-backdrop {
     position: fixed;
     inset: 0;
