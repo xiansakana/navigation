@@ -2,6 +2,8 @@
 
 集中管理 QQ、邮件等通知渠道。QQ 通过 [NapCat](https://napneko.github.io/) 发送私聊/群消息，邮件通过 SMTP 发送。Portal 首页的“通知管理”卡片可进入配置页面。
 
+内置 Tibo 重置机会监听：合并公开 feed 与 RSS，逐条检查 `@thsottiaux` 的新推文，对“可能重置、已预告、已确认”的 Codex 额度信号自动发送 QQ 通知。首次启用只建立当前推文基线，不补发历史消息。
+
 > Torn 工具箱和股票管理当前仍使用各自的提醒配置，暂未迁移到本服务。
 
 ## 目录结构
@@ -42,6 +44,8 @@ copy config.example.json config.json
 | `defaultTarget.userId` | 默认接收私聊的 QQ 号（可先填自己的） |
 | `channels.qq.enabled` | 是否启用 QQ 渠道 |
 | `channels.email` | 邮件启停、默认收发件人与 SMTP 配置 |
+| `monitors.tiboReset.enabled` | 是否启用 Tibo 重置机会监听 |
+| `monitors.tiboReset.intervalMinutes` | 拉取间隔；数据源自身可能约 15 分钟更新 |
 | `server.port` | 本地推送服务端口，默认 `8787` |
 | `server.notifyToken` | 调用 `/notify` 时的 Bearer Token |
 

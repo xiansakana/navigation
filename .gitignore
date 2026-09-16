@@ -5,6 +5,7 @@
 **/config.company.json
 .DS_Store
 **/data/uploads/
+qq-bot/data/
 portal/data/
 data/navigation.db
 data/navigation.db-wal

@@ -11,6 +11,19 @@ button,input,select,textarea { font:inherit; }
 .notice { display:flex; align-items:center; gap:11px; margin-bottom:18px; padding:12px 15px; border:1px solid rgba(101,167,255,.25); border-radius:12px; background:rgba(101,167,255,.08); color:#bad7ff; }
 .notice span { display:grid; place-items:center; width:21px; height:21px; flex:0 0 21px; border-radius:50%; background:var(--accent); color:#081321; font-weight:800; }
 .notice p { margin:0; }
+.monitor-card { display:flex; align-items:center; justify-content:space-between; gap:24px; margin-bottom:18px; padding:20px 22px; border:1px solid var(--line); border-radius:18px; background:linear-gradient(145deg,rgba(23,34,49,.96),rgba(15,23,34,.98)); }
+.monitor-main { display:flex; align-items:flex-start; gap:14px; min-width:0; }
+.x-icon { flex:0 0 44px; background:#f4f4f5; color:#09090b; }
+.monitor-title { display:flex; align-items:center; flex-wrap:wrap; gap:9px; }
+.monitor-title h2 { margin:0; font-size:19px; }
+.monitor-main p { margin:3px 0 8px; color:var(--muted); }
+.monitor-badge { padding:2px 8px; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:12px; }
+.monitor-badge.on { color:var(--green); border-color:rgba(75,208,139,.35); }
+.monitor-badge.error { color:var(--red); border-color:rgba(255,117,130,.35); }
+.monitor-detail { color:#b8c7da; font-size:12px; overflow-wrap:anywhere; }
+.monitor-controls { display:flex; align-items:center; justify-content:flex-end; gap:12px; flex:0 0 auto; }
+.interval-label { display:grid; gap:4px; color:var(--muted); font-size:12px; }
+.interval-label select { min-width:108px; padding:7px 9px; }
 .channel-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
 .channel-card,.send-test { border:1px solid var(--line); border-radius:18px; background:linear-gradient(145deg,rgba(23,34,49,.96),rgba(15,23,34,.98)); box-shadow:0 16px 40px rgba(0,0,0,.18); }
 .channel-card { padding:22px; }
@@ -41,6 +54,7 @@ input:focus,select:focus,textarea:focus { border-color:var(--accent); box-shadow
 .test-btn { width:100%; margin-top:18px; padding:10px 14px; border:1px solid var(--line); border-radius:10px; background:transparent; color:var(--text); cursor:pointer; }
 .test-btn:hover { border-color:var(--accent); background:rgba(101,167,255,.08); }
 .test-btn:disabled,button:disabled { opacity:.55; cursor:wait; }
+.test-btn.compact { width:auto; min-width:92px; margin:0; padding:9px 12px; }
 .send-test { display:grid; grid-template-columns:220px 1fr; gap:20px; align-items:center; margin-top:18px; padding:20px 22px; }
 textarea { resize:vertical; }
 .action-bar { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); width:min(760px,calc(100% - 32px)); display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 14px 12px 18px; border:1px solid var(--line); border-radius:14px; background:rgba(15,23,34,.92); box-shadow:0 14px 44px rgba(0,0,0,.42); backdrop-filter:blur(14px); }
@@ -49,4 +63,4 @@ textarea { resize:vertical; }
 .toast { position:fixed; z-index:10; top:18px; left:50%; transform:translateX(-50%); max-width:min(420px,calc(100% - 32px)); padding:11px 16px; border-radius:10px; background:#f4f8ff; color:#101722; box-shadow:0 12px 34px rgba(0,0,0,.3); }
 .toast.error { background:#ffe9eb; color:#901d2b; }
 .hidden { display:none!important; }
-@media (max-width:780px) { .notify-app{padding-top:24px}.hero{align-items:flex-start;flex-direction:column}.summary{text-align:left}.channel-grid{grid-template-columns:1fr}.send-test{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.action-bar{bottom:10px}.action-bar span{font-size:12px} }
+@media (max-width:780px) { .notify-app{padding-top:24px}.hero{align-items:flex-start;flex-direction:column}.summary{text-align:left}.monitor-card{align-items:stretch;flex-direction:column}.monitor-controls{justify-content:flex-start;flex-wrap:wrap}.channel-grid{grid-template-columns:1fr}.send-test{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.action-bar{bottom:10px}.action-bar span{font-size:12px} }

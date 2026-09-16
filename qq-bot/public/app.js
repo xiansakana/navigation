@@ -42,8 +42,28 @@ function fill(data) {
     byId('smtp-pass').placeholder = config.channels.email.smtp.hasPassword ? '已设置，留空则保持原值' : '尚未设置';
     byId('email-from').value = config.channels.email.from || '';
     byId('email-to').value = config.channels.email.to || '';
+    byId('monitor-enabled').checked = !!config.monitors.tiboReset.enabled;
+    byId('monitor-interval').value = String(config.monitors.tiboReset.intervalMinutes || 5);
     updateTargetFields();
     renderStatus(data.channels || []);
+}
+
+function renderMonitor(status) {
+    var enabled = byId('monitor-enabled').checked;
+    var badge = byId('monitor-badge');
+    badge.className = 'monitor-badge' + (status?.lastError ? ' error' : enabled ? ' on' : '');
+    badge.textContent = status?.lastError ? '异常' : enabled ? '监听中' : '已停用';
+    if (!status) return byId('monitor-detail').textContent = enabled ? '监听器尚未启动' : '启用后将从最新推文开始监听';
+    var parts = [];
+    if (status.lastCheckedAt) parts.push('上次检查：' + new Date(status.lastCheckedAt).toLocaleString('zh-CN'));
+    if (status.lastSignal?.decision?.label) parts.push('最近信号：' + status.lastSignal.decision.label);
+    if (status.lastError) parts.push('错误：' + status.lastError);
+    byId('monitor-detail').textContent = parts.join(' · ') || '首次检查会建立基线，不补发历史推文';
+}
+
+async function loadMonitor() {
+    try { renderMonitor((await api('api/monitors/tibo-reset')).status); }
+    catch (err) { byId('monitor-detail').textContent = '状态读取失败：' + err.message; }
 }
 
 function renderStatus(channels) {
@@ -81,7 +101,8 @@ function payload() {
                     pass: byId('smtp-pass').value
                 }
             }
-        }
+        },
+        monitors: { tiboReset: { enabled: byId('monitor-enabled').checked, intervalMinutes: Number(byId('monitor-interval').value) } }
     };
 }
 
@@ -98,8 +119,20 @@ byId('save').addEventListener('click', async function() {
         byId('qq-token').value = '';
         byId('smtp-pass').value = '';
         fill(data);
+        await loadMonitor();
         byId('save-state').textContent = '配置已保存';
         toast('通知渠道配置已保存');
+    } catch (err) { toast(err.message, true); }
+    finally { button.disabled = false; }
+});
+
+byId('monitor-check').addEventListener('click', async function() {
+    var button = byId('monitor-check');
+    button.disabled = true;
+    try {
+        var data = await api('api/monitors/tibo-reset/check', { method: 'POST' });
+        renderMonitor(data.status);
+        toast('Tibo 推文检查完成');
     } catch (err) { toast(err.message, true); }
     finally { button.disabled = false; }
 });
@@ -116,4 +149,4 @@ document.querySelectorAll('[data-test]').forEach(function(button) {
     });
 });
 
-api('api/config').then(fill).catch(function(err) { toast('加载失败：' + err.message, true); });
+api('api/config').then(function(data) { fill(data); return loadMonitor(); }).catch(function(err) { toast('加载失败：' + err.message, true); });

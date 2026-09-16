@@ -22,6 +22,24 @@
             <p>Torn 工具箱和股票管理仍使用原有提醒配置，本页暂不影响它们。</p>
         </div>
 
+        <section class="monitor-card">
+            <div class="monitor-main">
+                <span class="channel-icon x-icon">𝕏</span>
+                <div>
+                    <div class="monitor-title"><h2>Tibo 重置机会监听</h2><span id="monitor-badge" class="monitor-badge">加载中</span></div>
+                    <p>持续检查 @thsottiaux 的每条新推文，判断 Codex 是否可能即将重置额度；命中后通过 QQ 通知。</p>
+                    <div id="monitor-detail" class="monitor-detail">正在读取监听状态…</div>
+                </div>
+            </div>
+            <div class="monitor-controls">
+                <label class="switch"><input id="monitor-enabled" type="checkbox"><span></span></label>
+                <label class="interval-label">检查间隔
+                    <select id="monitor-interval"><option value="3">3 分钟</option><option value="5">5 分钟</option><option value="10">10 分钟</option><option value="15">15 分钟</option></select>
+                </label>
+                <button id="monitor-check" class="test-btn compact" type="button">立即检查</button>
+            </div>
+        </section>
+
         <section class="channel-grid">
             <article class="channel-card" data-channel="qq">
                 <div class="channel-head">

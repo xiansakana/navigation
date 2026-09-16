@@ -15,6 +15,7 @@ import { loadConfig, saveConfig, publicConfig, applyPublicConfig } from './confi
 import { sendMessage } from './napcat.js';
 import { sendEmail } from './email.js';
 import { startLoginWatchdog } from './watchdog.js';
+import { startTiboResetMonitor } from './tibo-reset-monitor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -102,9 +103,10 @@ function channelStatus(config) {
     ];
 }
 
-export function createNotificationServer(initialConfig) {
+export function createNotificationServer(initialConfig, options) {
     var config = initialConfig || loadConfig();
-    return http.createServer(async function(req, res) {
+    var monitor = options?.startMonitors ? startTiboResetMonitor(function() { return config; }) : null;
+    var server = http.createServer(async function(req, res) {
         var url = new URL(req.url, 'http://127.0.0.1');
         try {
             if (req.method === 'GET' && url.pathname === '/health') {
@@ -115,7 +117,15 @@ export function createNotificationServer(initialConfig) {
             }
             if (req.method === 'PUT' && url.pathname === '/api/config') {
                 config = saveConfig(applyPublicConfig(config, await readJson(req)));
+                monitor?.reschedule();
                 return json(res, 200, { ok: true, config: publicConfig(config), channels: channelStatus(config) });
+            }
+            if (req.method === 'GET' && url.pathname === '/api/monitors/tibo-reset') {
+                return json(res, 200, { ok: true, status: monitor?.status() || null });
+            }
+            if (req.method === 'POST' && url.pathname === '/api/monitors/tibo-reset/check') {
+                if (!monitor) return json(res, 503, { ok: false, error: '监听器未启动' });
+                return json(res, 200, { ok: true, status: await monitor.checkNow() });
             }
             if (req.method === 'POST' && url.pathname === '/api/test') {
                 var testBody = await readJson(req);
@@ -148,13 +158,15 @@ export function createNotificationServer(initialConfig) {
             return json(res, 400, { ok: false, error: err.message });
         }
     });
+    server.tiboResetMonitor = monitor;
+    return server;
 }
 
 async function main() {
     var config = loadConfig();
     var host = config.server.host || '127.0.0.1';
     var port = config.server.port || 8787;
-    var server = createNotificationServer(config);
+    var server = createNotificationServer(config, { startMonitors: true });
     startLoginWatchdog(config);
     server.listen(port, host, function() {
         console.log('通知管理服务已启动: http://' + host + ':' + port);

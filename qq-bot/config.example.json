@@ -32,6 +32,14 @@
       }
     }
   },
+  "monitors": {
+    "tiboReset": {
+      "enabled": false,
+      "intervalMinutes": 5,
+      "feedUrl": "https://codex-reset.com/api/feed",
+      "rssUrl": "https://x.noodl3.net/thsottiaux/rss"
+    }
+  },
   "server": {
     "host": "127.0.0.1",
     "port": 8787,

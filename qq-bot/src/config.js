@@ -26,6 +26,13 @@ export function normalizeConfig(raw) {
         { host: '', port: 465, secure: true, user: '', pass: '' },
         config.channels.email.smtp || {}
     );
+    config.monitors = config.monitors || {};
+    config.monitors.tiboReset = Object.assign({
+        enabled: false,
+        intervalMinutes: 5,
+        feedUrl: 'https://codex-reset.com/api/feed',
+        rssUrl: 'https://x.noodl3.net/thsottiaux/rss'
+    }, config.monitors.tiboReset || {});
     return config;
 }
 
@@ -86,5 +93,10 @@ export function applyPublicConfig(current, input) {
     if (typeof smtp.user === 'string') next.channels.email.smtp.user = smtp.user.trim();
     if (typeof smtp.pass === 'string' && smtp.pass) next.channels.email.smtp.pass = smtp.pass;
     if (smtp.clearPassword === true) next.channels.email.smtp.pass = '';
+    var monitor = body.monitors?.tiboReset || {};
+    if (typeof monitor.enabled === 'boolean') next.monitors.tiboReset.enabled = monitor.enabled;
+    if (monitor.intervalMinutes != null) {
+        next.monitors.tiboReset.intervalMinutes = Math.max(1, Math.min(60, Number(monitor.intervalMinutes) || 5));
+    }
     return next;
 }

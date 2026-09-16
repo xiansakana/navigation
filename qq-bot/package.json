@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test:send": "node src/send-test.js",
-    "test": "node --test src/config.test.js src/server.test.js",
+    "test": "node --test src/config.test.js src/server.test.js src/tibo-reset-monitor.test.js",
     "start": "node src/server.js"
   },
   "dependencies": {
