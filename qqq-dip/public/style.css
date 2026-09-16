@@ -282,7 +282,11 @@ body.has-navbar { padding-top: var(--navbar-height); }
 .sm-pagination-actions {
     display: flex;
     gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
 }
+
+.sm-pagination-actions select { width: auto; }
 
 @media (max-width: 560px) {
     .sm-pagination {

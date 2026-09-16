@@ -18,8 +18,8 @@ let state = {
   tab: 'monitor'
 };
 
-const ACTION_PAGE_SIZE = 20;
 let actionPage = 1;
+let actionPageSize = 20;
 let actionRequestId = 0;
 
 function $(sel) { return document.querySelector(sel); }
@@ -248,7 +248,10 @@ function applyState(data) {
   if (data.monitor) state.monitor = data.monitor;
   if (data.actions) {
     const filter = $('#action-filter')?.value || 'all';
-    if (actionPage === 1 && filter === 'all') state.actions = data.actions;
+    const incomingLimit = Number(data.actions.limit) || 20;
+    if (actionPage === 1 && filter === 'all' && incomingLimit === actionPageSize) {
+      state.actions = data.actions;
+    }
   }
   if (data.lots) state.lots = data.lots;
   if (data.market && state.monitor) state.monitor.market = data.market;
@@ -698,7 +701,7 @@ function renderLots() {
 function renderActions() {
   const items = state.actions?.items || [];
   const total = Number(state.actions?.total) || 0;
-  const pageCount = Math.max(1, Math.ceil(total / ACTION_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(total / actionPageSize));
   if (actionPage > pageCount) actionPage = pageCount;
   $('#action-list').innerHTML = items.length ? items.map((a) => `
     <div class="sm-action">
@@ -716,13 +719,13 @@ async function loadActions(page = 1) {
   const targetPage = Math.max(1, Number(page) || 1);
   const requestId = ++actionRequestId;
   const params = new URLSearchParams({
-    limit: String(ACTION_PAGE_SIZE),
-    offset: String((targetPage - 1) * ACTION_PAGE_SIZE),
+    limit: String(actionPageSize),
+    offset: String((targetPage - 1) * actionPageSize),
     source: filter
   });
   const data = await api(`/actions?${params}`);
   if (requestId !== actionRequestId) return;
-  const pageCount = Math.max(1, Math.ceil((Number(data.total) || 0) / ACTION_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil((Number(data.total) || 0) / actionPageSize));
   if (targetPage > pageCount) return loadActions(pageCount);
   actionPage = targetPage;
   state.actions = data;
@@ -1047,6 +1050,10 @@ function bind() {
   });
   $('#action-next').addEventListener('click', () => {
     loadActions(actionPage + 1).catch((e) => toast('error', e.message));
+  });
+  $('#action-page-size').addEventListener('change', (e) => {
+    actionPageSize = Number(e.target.value) || 20;
+    loadActions(1).catch((err) => toast('error', err.message));
   });
   $('#tier-table').addEventListener('click', async (e) => {
     const id = e.target.dataset.exec;
