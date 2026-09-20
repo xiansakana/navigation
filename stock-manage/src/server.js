@@ -449,6 +449,26 @@ app.get('/api/quant/settings', (_req, res) => {
   res.json(quantStore.read().settings);
 });
 
+app.get('/api/quant/history/:symbol', async (req, res) => {
+  const symbol = quantSymbols(req.params.symbol)[0];
+  if (!symbol || inferMarket(symbol) !== 'US') {
+    return res.status(400).json({ error: 'K 线当前仅支持美股正股' });
+  }
+  try {
+    const period = quantPeriod(req.query.period);
+    const history = await quotes.getStockHistory(symbol, { days: period.days });
+    res.json({
+      symbol,
+      period: period.key,
+      source: history.source,
+      candles: history.candles,
+      timestamp: Date.now()
+    });
+  } catch (error) {
+    res.status(502).json({ error: error.message || '获取 K 线失败' });
+  }
+});
+
 app.put('/api/quant/settings', (req, res) => {
   const current = quantStore.read();
   const body = req.body || {};

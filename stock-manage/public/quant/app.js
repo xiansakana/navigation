@@ -3,7 +3,7 @@ import { loadPortalContext, canDip } from '../js/portal-auth.js';
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const DEFAULT_CONFIG = Object.freeze({ rsiPeriod: 14, rsiOverbought: 58, rsiOversold: 42, macdFast: 12, macdSlow: 26, macdSignal: 9, bollingerPeriod: 20, bollingerStdDev: 2, buyThreshold: 0.25, sellThreshold: -0.3 });
-const state = { settings: null, signals: [], loading: false, updatedAt: null };
+const state = { settings: null, signals: [], loading: false, updatedAt: null, klineChart: null, klineSymbol: '' };
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
@@ -53,7 +53,7 @@ function signalRow(item) {
   const score = Number(item.combinedScore);
   const status = item.status === 'ok' ? '' : `<span class="quant-row-message">${escapeHtml(item.message || '暂无可用数据')}</span>`;
   const dataInfo = item.status === 'ok' ? `${Number(item.dataPoints) || 0} 根 · ${formatDate(item.asOf)} · ${sourceLabel(item.historySource)}` : '未生成指标';
-  return `<tr><td><strong class="quant-symbol">${escapeHtml(item.symbol)}</strong>${item.name && item.name !== item.symbol ? `<span class="quant-name">${escapeHtml(item.name)}</span>` : ''}${status}</td><td class="align-right"><strong>${formatMoney(item.price)}</strong><span class="quant-sub ${changeClass}">${formatPercent(item.changePercent)}</span></td><td class="align-center">${badge(item.signal)}</td><td class="align-center">${strengthBar(item)}</td><td class="align-center"><strong>${formatNumber(item.rsi, 1)}</strong><span class="quant-sub">${miniSignal(item.rsiSignal)}</span></td><td class="align-center"><strong>${formatNumber(item.macd, 4)}</strong><span class="quant-sub">${miniSignal(item.macdSignal)}</span></td><td class="align-center"><strong>${hasNumber(item.bollingerPosition) ? `${formatNumber(item.bollingerPosition, 1)}%` : '—'}</strong><span class="quant-sub">${miniSignal(item.bollingerSignal)}</span></td><td class="align-center">${trendLabel(item.trend)}</td><td class="align-right"><strong class="${score > 0 ? 'pos' : score < 0 ? 'neg' : ''}">${Number.isFinite(score) ? `${score > 0 ? '+' : ''}${score.toFixed(2)}` : '—'}</strong><span class="quant-sub">${dataInfo}</span></td></tr>`;
+  return `<tr><td><button class="quant-symbol-link" type="button" data-kline-symbol="${escapeHtml(item.symbol)}" data-kline-period="${escapeHtml($('#period-select').value)}">${escapeHtml(item.symbol)}</button>${item.name && item.name !== item.symbol ? `<span class="quant-name">${escapeHtml(item.name)}</span>` : ''}${status}</td><td class="align-right"><strong>${formatMoney(item.price)}</strong><span class="quant-sub ${changeClass}">${formatPercent(item.changePercent)}</span></td><td class="align-center">${badge(item.signal)}</td><td class="align-center">${strengthBar(item)}</td><td class="align-center"><strong>${formatNumber(item.rsi, 1)}</strong><span class="quant-sub">${miniSignal(item.rsiSignal)}</span></td><td class="align-center"><strong>${formatNumber(item.macd, 4)}</strong><span class="quant-sub">${miniSignal(item.macdSignal)}</span></td><td class="align-center"><strong>${hasNumber(item.bollingerPosition) ? `${formatNumber(item.bollingerPosition, 1)}%` : '—'}</strong><span class="quant-sub">${miniSignal(item.bollingerSignal)}</span></td><td class="align-center">${trendLabel(item.trend)}</td><td class="align-right"><strong class="${score > 0 ? 'pos' : score < 0 ? 'neg' : ''}">${Number.isFinite(score) ? `${score > 0 ? '+' : ''}${score.toFixed(2)}` : '—'}</strong><span class="quant-sub">${dataInfo}</span></td></tr>`;
 }
 
 function renderSignals(message = '') {
@@ -128,10 +128,79 @@ function showView(view) {
   history.replaceState(null, '', url);
 }
 
+function backtestTradeRows(item) {
+  if (!item.trades?.length) return '<p class="quant-trades-empty">该标的在回测区间内没有触发买卖操作。</p>';
+  const rows = item.trades.map((trade, index) => `<tr><td>${index + 1}</td><td>${formatDate(trade.timestamp)}</td><td class="${trade.side === 'BUY' ? 'pos' : 'neg'}">${trade.side === 'BUY' ? '买入' : '卖出'}</td><td class="align-right">${formatMoney(trade.price)}</td><td class="align-right">${formatNumber(trade.shares, 4)}</td><td class="align-right ${hasNumber(trade.pnl) ? (trade.pnl >= 0 ? 'pos' : 'neg') : ''}">${hasNumber(trade.pnl) ? formatMoney(trade.pnl) : '—'}</td></tr>`).join('');
+  return `<div class="quant-trades-title"><strong>${escapeHtml(item.symbol)} 买卖操作记录</strong><span>${item.trades.length} 次操作${item.openPosition ? ' · 期末仍持仓' : ''}</span></div><div class="quant-trades-scroll"><table class="quant-trades-table"><thead><tr><th>#</th><th>日期</th><th>方向</th><th class="align-right">成交价</th><th class="align-right">数量</th><th class="align-right">已实现盈亏</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function backtestResultRows(results, period) {
+  return results.map((item) => {
+    if (item.status !== 'ok') return `<tr><td><strong>${escapeHtml(item.symbol)}</strong></td><td colspan="7" class="quant-error">${escapeHtml(item.message)}</td></tr>`;
+    const symbol = escapeHtml(item.symbol);
+    return `<tr class="quant-backtest-result"><td><button class="quant-symbol-link" type="button" data-kline-symbol="${symbol}" data-kline-period="${escapeHtml(period)}">${symbol}</button></td><td class="align-right">${formatMoney(item.finalEquity)}</td><td class="align-right ${item.totalReturn >= 0 ? 'pos' : 'neg'}">${formatPercent(item.totalReturn, true)}</td><td class="align-right ${item.buyHoldReturn >= 0 ? 'pos' : 'neg'}">${formatPercent(item.buyHoldReturn, true)}</td><td class="align-right neg">${formatPercent(-item.maxDrawdown, true)}</td><td class="align-right">${item.completedTrades}</td><td>${sourceLabel(item.historySource)}</td><td class="align-center"><button type="button" class="quant-expand-button" data-toggle-trades="${symbol}" aria-expanded="false">展开 <span>⌄</span></button></td></tr><tr class="quant-trade-detail hidden" data-trades-for="${symbol}"><td colspan="8">${backtestTradeRows(item)}</td></tr>`;
+  }).join('');
+}
+
+function closeKline() {
+  state.klineChart?.dispose();
+  state.klineChart = null;
+  state.klineSymbol = '';
+  $('#modal-root').innerHTML = '';
+}
+
+function klineOption(candles) {
+  const dates = candles.map((item) => new Date(Number(item.timestamp)).toISOString().slice(0, 10));
+  const values = candles.map((item) => [Number(item.open), Number(item.close), Number(item.low), Number(item.high)]);
+  const volumes = candles.map((item, index) => [index, Number(item.volume) || 0, Number(item.close) >= Number(item.open) ? 1 : -1]);
+  return {
+    animation: false,
+    backgroundColor: 'transparent',
+    legend: { show: false },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, backgroundColor: '#171c25', borderColor: '#30394a', textStyle: { color: '#e6edf7' } },
+    axisPointer: { link: [{ xAxisIndex: 'all' }], label: { backgroundColor: '#465267' } },
+    grid: [{ left: 62, right: 24, top: 18, height: '62%' }, { left: 62, right: 24, top: '75%', height: '14%' }],
+    xAxis: [{ type: 'category', data: dates, boundaryGap: true, axisLine: { lineStyle: { color: '#465267' } }, axisLabel: { color: '#8f9bad' }, min: 'dataMin', max: 'dataMax' }, { type: 'category', gridIndex: 1, data: dates, boundaryGap: true, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#465267' } }, axisTick: { show: false }, min: 'dataMin', max: 'dataMax' }],
+    yAxis: [{ scale: true, splitLine: { lineStyle: { color: 'rgba(148,163,184,.12)' } }, axisLabel: { color: '#8f9bad' } }, { scale: true, gridIndex: 1, splitNumber: 2, axisLabel: { color: '#8f9bad', formatter: (value) => value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : `${(value / 1000).toFixed(0)}K` }, splitLine: { show: false } }],
+    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: Math.max(0, 100 - Math.min(100, 90 / candles.length * 100)), end: 100 }, { show: true, xAxisIndex: [0, 1], type: 'slider', bottom: 4, height: 20, borderColor: '#30394a', fillerColor: 'rgba(91,156,255,.16)', textStyle: { color: '#8f9bad' } }],
+    visualMap: { show: false, seriesIndex: 1, dimension: 2, pieces: [{ value: 1, color: '#3ddc84' }, { value: -1, color: '#ff7b7b' }] },
+    series: [{ name: 'K 线', type: 'candlestick', data: values, itemStyle: { color: '#3ddc84', color0: '#ff7b7b', borderColor: '#3ddc84', borderColor0: '#ff7b7b' } }, { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: volumes }]
+  };
+}
+
+async function loadKline(symbol, period) {
+  const status = $('#kline-status');
+  const host = $('#kline-chart');
+  status.textContent = '正在加载真实历史行情…';
+  state.klineChart?.dispose();
+  state.klineChart = null;
+  try {
+    const result = await api(`/quant/history/${encodeURIComponent(symbol)}?period=${encodeURIComponent(period)}`);
+    status.textContent = `${result.candles.length} 根日 K · ${sourceLabel(result.source)}`;
+    if (!globalThis.echarts) throw new Error('图表组件加载失败');
+    state.klineChart = globalThis.echarts.init(host, null, { renderer: 'canvas' });
+    state.klineChart.setOption(klineOption(result.candles));
+  } catch (error) {
+    status.textContent = error.message || 'K 线加载失败';
+    host.innerHTML = `<div class="quant-kline-error">${escapeHtml(error.message || 'K 线加载失败')}</div>`;
+  }
+}
+
+function showKline(symbol, period = '1y') {
+  state.klineSymbol = symbol;
+  const root = $('#modal-root');
+  root.innerHTML = `<div class="sm-modal-backdrop quant-kline-backdrop"><div class="sm-modal sm-modal--xl quant-kline-modal" role="dialog" aria-modal="true" aria-labelledby="kline-title"><div class="sm-modal-head"><div><h3 id="kline-title">${escapeHtml(symbol)} · 日 K 线</h3><p id="kline-status">准备加载行情…</p></div><button type="button" class="btn link" data-kline-close>关闭</button></div><div class="quant-kline-toolbar"><label>历史范围 <select id="kline-period"><option value="3m">近 3 个月</option><option value="6m">近 6 个月</option><option value="1y">近 1 年</option><option value="2y">近 2 年</option><option value="5y">近 5 年</option></select></label><span>拖动底部缩放条可查看区间行情</span></div><div class="sm-modal-body quant-kline-body"><div id="kline-chart"></div></div></div></div>`;
+  $('#kline-period').value = period;
+  root.querySelector('[data-kline-close]').addEventListener('click', closeKline);
+  root.querySelector('.quant-kline-backdrop').addEventListener('click', (event) => { if (event.target.classList.contains('quant-kline-backdrop')) closeKline(); });
+  $('#kline-period').addEventListener('change', (event) => loadKline(symbol, event.target.value));
+  loadKline(symbol, period);
+}
+
 async function runBacktest() {
   const button = $('#backtest-button');
   button.disabled = true; button.textContent = '回测中…';
-  $('#backtest-body').innerHTML = '<tr><td colspan="7"><span class="quant-skeleton"></span></td></tr>';
+  $('#backtest-body').innerHTML = '<tr><td colspan="8"><span class="quant-skeleton"></span></td></tr>';
   try {
     const result = await api('/quant/backtest', { method: 'POST', body: JSON.stringify({ symbols: state.settings.symbols, period: $('#backtest-period').value, initialCapital: Number($('#backtest-capital').value), config: state.settings.config }) });
     $('#bt-equity').textContent = formatMoney(result.finalEquity);
@@ -140,8 +209,8 @@ async function runBacktest() {
     $('#bt-drawdown').textContent = formatPercent(-result.maxDrawdown, true);
     $('#bt-winrate').textContent = `${formatPercent(result.winRate, true)} / ${result.completedTrades}`;
     $('#backtest-note').textContent = `${result.results.filter((item) => item.status === 'ok').length}/${result.results.length} 个标的完成，买入持有同期平均 ${formatPercent(result.buyHoldReturn, true)}`;
-    $('#backtest-body').innerHTML = result.results.map((item) => item.status === 'ok' ? `<tr><td><strong class="quant-symbol">${escapeHtml(item.symbol)}</strong></td><td class="align-right">${formatMoney(item.finalEquity)}</td><td class="align-right ${item.totalReturn >= 0 ? 'pos' : 'neg'}">${formatPercent(item.totalReturn, true)}</td><td class="align-right ${item.buyHoldReturn >= 0 ? 'pos' : 'neg'}">${formatPercent(item.buyHoldReturn, true)}</td><td class="align-right neg">${formatPercent(-item.maxDrawdown, true)}</td><td class="align-right">${item.completedTrades}</td><td>${sourceLabel(item.historySource)}</td></tr>` : `<tr><td><strong>${escapeHtml(item.symbol)}</strong></td><td colspan="6" class="quant-error">${escapeHtml(item.message)}</td></tr>`).join('');
-  } catch (error) { $('#backtest-body').innerHTML = `<tr><td colspan="7" class="quant-empty quant-error">${escapeHtml(error.message)}</td></tr>`; }
+    $('#backtest-body').innerHTML = backtestResultRows(result.results, result.period);
+  } catch (error) { $('#backtest-body').innerHTML = `<tr><td colspan="8" class="quant-empty quant-error">${escapeHtml(error.message)}</td></tr>`; }
   finally { button.disabled = false; button.textContent = '运行回测'; }
 }
 
@@ -174,6 +243,22 @@ function bindEvents() {
   $('#paper-settings-save').addEventListener('click', () => saveSettings({ includeWatchlist: false, message: '模拟盘设置已保存；重置后初始资金生效' }));
   $('#paper-sync').addEventListener('click', async () => { const button = $('#paper-sync'); button.disabled = true; button.textContent = '同步中…'; try { const result = await api('/quant/paper/sync', { method: 'POST', body: '{}' }); renderPaper(result); } catch (error) { $('#paper-note').textContent = error.message; } finally { button.disabled = false; button.textContent = '同步信号并交易'; } });
   $('#paper-reset').addEventListener('click', async () => { if (!confirm('确定清空全部模拟持仓和交易记录？')) return; const result = await api('/quant/paper/reset', { method: 'POST', body: JSON.stringify({ initialCapital: Number($('#paper-capital').value) }) }); renderPaper(result); });
+  document.addEventListener('click', (event) => {
+    const symbolButton = event.target.closest('[data-kline-symbol]');
+    if (symbolButton) {
+      showKline(symbolButton.dataset.klineSymbol, symbolButton.dataset.klinePeriod || '1y');
+      return;
+    }
+    const toggle = event.target.closest('[data-toggle-trades]');
+    if (!toggle) return;
+    const detail = $$('[data-trades-for]', $('#backtest-body')).find((row) => row.dataset.tradesFor === toggle.dataset.toggleTrades);
+    if (!detail) return;
+    const expanded = !detail.classList.toggle('hidden');
+    toggle.setAttribute('aria-expanded', String(expanded));
+    toggle.innerHTML = `${expanded ? '收起' : '展开'} <span>${expanded ? '⌃' : '⌄'}</span>`;
+  });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && state.klineSymbol) closeKline(); });
+  window.addEventListener('resize', () => state.klineChart?.resize());
 }
 
 async function init() {

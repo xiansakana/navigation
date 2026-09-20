@@ -52,7 +52,8 @@ portal 中访问路径：`/stock-manage/`（需在 `portal/config.json` 注册�
 | GET | `/api/option/:symbol` | Polygon 期权报价 |
 | GET | `/api/analysis` | 美股量化信号；支持 `symbols`、`period`、`config` 查询参数 |
 | GET/PUT | `/api/quant/settings` | 读取或保存量化自选池、策略和模拟盘设置 |
-| POST | `/api/quant/backtest` | 使用真实历史日线运行组合回测 |
+| GET | `/api/quant/history/:symbol` | 获取标的真实历史 K 线；支持 `period` 查询参数 |
+| POST | `/api/quant/backtest` | 使用真实历史日线运行组合回测，返回逐笔买卖记录 |
 | GET | `/api/quant/paper` | 读取独立模拟盘 |
 | POST | `/api/quant/paper/sync` | 根据最新策略信号执行模拟交易 |
 | POST | `/api/quant/paper/reset` | 清空并重置模拟盘 |

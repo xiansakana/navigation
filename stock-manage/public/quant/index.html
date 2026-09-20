@@ -69,7 +69,7 @@
           <header class="quant-header"><div><div class="quant-eyebrow">HISTORICAL SIMULATION</div><h1>策略回测</h1><p>对已保存的自选池进行等权回测，并与买入持有比较。</p></div></header>
           <form class="quant-toolbar" id="backtest-form"><label><span>初始资金（USD）</span><input id="backtest-capital" type="number" min="1000" step="1000" value="100000"></label><label><span>回测范围</span><select id="backtest-period"><option value="6m">近 6 个月</option><option value="1y" selected>近 1 年</option><option value="2y">近 2 年</option><option value="5y">近 5 年</option></select></label><button class="btn primary" id="backtest-button" type="submit">运行回测</button></form>
           <section class="quant-summary"><article class="quant-stat"><span>$</span><div><small>期末权益</small><strong id="bt-equity">—</strong></div></article><article class="quant-stat"><span>↗</span><div><small>策略收益</small><strong id="bt-return">—</strong></div></article><article class="quant-stat"><span>≋</span><div><small>最大回撤</small><strong id="bt-drawdown">—</strong></div></article><article class="quant-stat"><span>✓</span><div><small>胜率 / 平仓</small><strong id="bt-winrate">—</strong></div></article></section>
-          <section class="quant-card"><div class="quant-card-head"><div><h2>分标的结果</h2><p id="backtest-note">设置资金和范围后运行回测。</p></div></div><div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>标的</th><th class="align-right">期末权益</th><th class="align-right">策略收益</th><th class="align-right">买入持有</th><th class="align-right">最大回撤</th><th class="align-right">平仓次数</th><th>行情源</th></tr></thead><tbody id="backtest-body"><tr><td colspan="7" class="quant-empty">尚未运行回测</td></tr></tbody></table></div></section>
+          <section class="quant-card"><div class="quant-card-head"><div><h2>分标的结果</h2><p id="backtest-note">设置资金和范围后运行回测。</p></div></div><div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>标的</th><th class="align-right">期末权益</th><th class="align-right">策略收益</th><th class="align-right">买入持有</th><th class="align-right">最大回撤</th><th class="align-right">平仓次数</th><th>行情源</th><th class="align-center">交易记录</th></tr></thead><tbody id="backtest-body"><tr><td colspan="8" class="quant-empty">尚未运行回测</td></tr></tbody></table></div></section>
         </section>
 
         <section class="quant-view" data-view-panel="paper">
@@ -81,7 +81,9 @@
         </section>
       </div>
     </div>
+    <div id="modal-root"></div>
   </main>
+  <script src="../vendor/echarts.min.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
