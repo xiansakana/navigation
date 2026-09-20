@@ -21,8 +21,9 @@ import {
   tradeCalendarDate,
   formatZonedDateTime
 } from './trades.js';
-import { normalizeSymbol } from './markets.js';
+import { inferMarket, normalizeSymbol } from './markets.js';
 import { DEFAULT_USD_CNY_RATE } from '../../shared/db/portfolio-store.js';
+import { analyzeCandles, DEFAULT_QUANT_CONFIG, normalizeQuantConfig } from './quant-analysis.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -312,6 +313,131 @@ app.get('/api/stock/:symbol', async (req, res) => {
     res.json(await quotes.getStock(req.params.symbol));
   } catch (e) {
     res.status(502).json({ error: e.message });
+  }
+});
+
+function quantSymbols(raw, fallback = []) {
+  const source = typeof raw === 'string' && raw.trim() ? raw.split(',') : fallback;
+  return [...new Set(source
+    .map((symbol) => normalizeSymbol(symbol))
+    .filter((symbol) => /^[A-Z0-9][A-Z0-9.-]{0,23}$/.test(symbol)))]
+    .slice(0, 30);
+}
+
+function quantPeriod(raw) {
+  const periods = {
+    '3m': 120,
+    '6m': 220,
+    '1y': 370,
+    '2y': 740,
+    '5y': 1825
+  };
+  const key = Object.hasOwn(periods, raw) ? raw : '1y';
+  return { key, days: periods[key] };
+}
+
+function quantConfig(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return { ...DEFAULT_QUANT_CONFIG };
+  try {
+    return normalizeQuantConfig(JSON.parse(raw));
+  } catch {
+    return { ...DEFAULT_QUANT_CONFIG };
+  }
+}
+
+function unavailableQuantSignal({ symbol, name, price, changePercent, status, message, config }) {
+  return {
+    ...analyzeCandles({ symbol, name, price, changePercent, candles: [], config }),
+    status,
+    message
+  };
+}
+
+async function mapWithConcurrency(items, limit, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function run() {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  return results;
+}
+
+app.get('/api/analysis', async (req, res) => {
+  try {
+    const data = store.read();
+    const holdings = deriveHoldings(data.trades);
+    const holdingMap = new Map(holdings.map((holding) => [normalizeSymbol(holding.symbol), holding]));
+    const defaultSymbols = holdings
+      .filter((holding) => inferMarket(holding.symbol) === 'US')
+      .map((holding) => holding.symbol);
+    const symbols = quantSymbols(req.query.symbols, defaultSymbols);
+    const config = quantConfig(req.query.config);
+    const period = quantPeriod(req.query.period);
+
+    const signals = await mapWithConcurrency(symbols, 4, async (symbol) => {
+      const holding = holdingMap.get(symbol);
+      const storedQuote = data.quotes?.[symbol] || {};
+      const name = holding?.name || storedQuote.name || symbol;
+      if (inferMarket(symbol) !== 'US') {
+        return unavailableQuantSignal({
+          symbol,
+          name,
+          price: Number(storedQuote.price),
+          changePercent: Number(storedQuote.changePercent),
+          status: 'unsupported',
+          message: '当前仅支持美股正股，A 股与期权暂不参与量化分析',
+          config
+        });
+      }
+
+      const [quoteResult, historyResult] = await Promise.allSettled([
+        quotes.getStock(symbol),
+        quotes.getStockHistory(symbol, { days: period.days })
+      ]);
+      const quote = quoteResult.status === 'fulfilled' ? quoteResult.value : storedQuote;
+      if (historyResult.status === 'rejected') {
+        return unavailableQuantSignal({
+          symbol,
+          name: quote.name || name,
+          price: Number(quote.price),
+          changePercent: Number(quote.changePercent),
+          status: 'error',
+          message: historyResult.reason?.message || '获取历史行情失败',
+          config
+        });
+      }
+      return analyzeCandles({
+        symbol,
+        name: quote.name && quote.name !== symbol ? quote.name : name,
+        price: Number(quote.price),
+        changePercent: Number(quote.changePercent),
+        candles: historyResult.value.candles,
+        config,
+        historySource: historyResult.value.source,
+        quoteSource: quote.source || null
+      });
+    });
+
+    signals.sort((a, b) => {
+      const rank = (signal) => signal.signal === 'BUY'
+        ? signal.strength + 100
+        : signal.signal === 'HOLD' ? 0 : -signal.strength - 100;
+      return rank(b) - rank(a);
+    });
+    res.json({
+      signals,
+      config,
+      period: period.key,
+      days: period.days,
+      timestamp: Date.now()
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message || '量化分析失败' });
   }
 });
 

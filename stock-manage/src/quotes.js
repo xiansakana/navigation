@@ -130,6 +130,8 @@ function ymdDaysAgo(days) {
 export function createQuoteService(config) {
   const finnhubKey = config.finnhubApiKey;
   const polygonKey = config.polygonApiKey;
+  const stockHistoryCache = new Map();
+  const stockHistoryCacheMs = 5 * 60 * 1000;
 
   if (!finnhubKey) {
     console.warn('stock-manage: finnhubApiKey 未配置，美股行情不可用');
@@ -160,6 +162,90 @@ export function createQuoteService(config) {
       currency: 'USD',
       source: 'finnhub'
     };
+  }
+
+  async function getStockHistoryFromPolygon(symbol, days) {
+    if (!polygonKey) throw new Error('未配置 Polygon API Key');
+    const url =
+      `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(symbol)}` +
+      `/range/1/day/${ymdDaysAgo(days)}/${ymdUTC(Date.now())}` +
+      `?adjusted=true&sort=asc&limit=50000&apiKey=${polygonKey}`;
+    let data;
+    try {
+      data = await fetchJson(url);
+    } catch (e) {
+      throw new Error(`Polygon ${e.message}`);
+    }
+    if (!Array.isArray(data.results)) {
+      throw new Error(data.error || data.message || 'Polygon 无历史行情');
+    }
+    const candles = data.results
+      .map((bar) => ({
+        timestamp: Number(bar.t),
+        open: Number(bar.o),
+        high: Number(bar.h),
+        low: Number(bar.l),
+        close: Number(bar.c),
+        volume: Number(bar.v) || 0
+      }))
+      .filter((bar) => [bar.timestamp, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite))
+      .sort((a, b) => a.timestamp - b.timestamp);
+    if (!candles.length) throw new Error('Polygon 无历史行情');
+    return { candles, source: 'polygon' };
+  }
+
+  async function getStockHistoryFromFinnhub(symbol, days) {
+    if (!finnhubKey) throw new Error('未配置 Finnhub API Key');
+    const to = Math.floor(Date.now() / 1000);
+    const from = to - Math.round(days * 86400);
+    const url = `https://finnhub.io/api/v1/stock/candle?symbol=${encodeURIComponent(symbol)}&resolution=D&from=${from}&to=${to}&token=${finnhubKey}`;
+    let data;
+    try {
+      data = await fetchJson(url);
+    } catch (e) {
+      throw new Error(`Finnhub ${e.message}`);
+    }
+    if (data.error) throw new Error(String(data.error));
+    if (data.s !== 'ok' || !Array.isArray(data.t)) throw new Error('Finnhub 无历史行情');
+    const candles = data.t.map((timestamp, index) => ({
+      timestamp: Number(timestamp) * 1000,
+      open: Number(data.o?.[index]),
+      high: Number(data.h?.[index]),
+      low: Number(data.l?.[index]),
+      close: Number(data.c?.[index]),
+      volume: Number(data.v?.[index]) || 0
+    })).filter((bar) => [bar.timestamp, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite));
+    if (!candles.length) throw new Error('Finnhub 无历史行情');
+    return { candles: candles.sort((a, b) => a.timestamp - b.timestamp), source: 'finnhub' };
+  }
+
+  async function getStockHistory(symbol, options = {}) {
+    const sym = normalizeSymbol(symbol);
+    if (!sym || isAShareSymbol(sym) || parseOptionSymbol(sym)) {
+      throw new Error('历史量化行情当前仅支持美股正股');
+    }
+    const days = Math.min(1825, Math.max(90, Number(options.days) || 365));
+    const cacheKey = `${sym}:${days}`;
+    const cached = stockHistoryCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < stockHistoryCacheMs) return cached.value;
+    const errors = [];
+    for (const [provider, loader, enabled] of [
+      ['Polygon', getStockHistoryFromPolygon, polygonKey],
+      ['Finnhub', getStockHistoryFromFinnhub, finnhubKey]
+    ]) {
+      if (!enabled) {
+        errors.push(`${provider}: 未配置 API Key`);
+        continue;
+      }
+      try {
+        const value = await loader(sym, days);
+        stockHistoryCache.set(cacheKey, { value, at: Date.now() });
+        return value;
+      } catch (e) {
+        errors.push(`${provider}: ${e.message}`);
+      }
+    }
+    throw new Error(`历史行情不可用（${errors.join('; ')}）`);
   }
 
   async function getYahooQuote(symbol) {
@@ -523,5 +609,5 @@ export function createQuoteService(config) {
     return getStockFromFinnhub(sym);
   }
 
-  return { getStock, getOption, getQuote, getAShareQuote, getUsdCny, search };
+  return { getStock, getOption, getQuote, getStockHistory, getAShareQuote, getUsdCny, search };
 }
