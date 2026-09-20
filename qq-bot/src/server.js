@@ -58,7 +58,7 @@ function serve(file, res) {
     var type = file.endsWith('.css') ? 'text/css; charset=utf-8'
         : file.endsWith('.js') ? 'application/javascript; charset=utf-8'
         : 'text/html; charset=utf-8';
-    res.writeHead(200, { 'Content-Type': type });
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
     fs.createReadStream(full).pipe(res);
     return true;
 }
