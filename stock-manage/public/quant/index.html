@@ -16,108 +16,71 @@
       <a class="sm-feature-tab" href="/stock-manage/dip/?tab=qq">QQ 提醒</a>
     </nav>
 
-    <header class="quant-header">
-      <div>
-        <div class="quant-eyebrow">REAL MARKET · DAILY SIGNALS</div>
-        <h1>量化分析</h1>
-        <p>基于真实美股日线，组合 RSI、MACD、布林带与 SMA50 趋势生成研究信号。</p>
-      </div>
-      <div class="quant-header-actions">
-        <button class="btn ghost" id="config-toggle" type="button">参数配置</button>
-        <button class="btn ghost" id="refresh-button" type="button">刷新分析</button>
-      </div>
-    </header>
+    <div class="quant-shell">
+      <aside class="quant-sidebar">
+        <div class="quant-brand"><span>↗</span><div><strong>QUANT</strong><small>REAL MARKET</small></div></div>
+        <nav aria-label="量化分析功能">
+          <button class="quant-nav active" data-view="dashboard" type="button"><span>▦</span><b>Dashboard</b><small>信号总览</small></button>
+          <button class="quant-nav" data-view="strategy" type="button"><span>⌁</span><b>Strategy</b><small>策略参数</small></button>
+          <button class="quant-nav" data-view="backtest" type="button"><span>◫</span><b>Backtest</b><small>历史回测</small></button>
+          <button class="quant-nav" data-view="paper" type="button"><span>◎</span><b>模拟盘</b><small>虚拟交易</small></button>
+        </nav>
+        <p>真实证券行情<br>研究用途，不构成投资建议</p>
+      </aside>
 
-    <section class="quant-card quant-config hidden" id="config-panel">
-      <div class="quant-card-head">
-        <div>
-          <h2>策略参数</h2>
-          <p>参数会保存在当前浏览器中，应用后立即重新计算。</p>
-        </div>
-      </div>
-      <div class="quant-config-grid">
-        <label><span>RSI 周期</span><input type="number" data-config="rsiPeriod" min="2" max="50" step="1"></label>
-        <label><span>RSI 超买</span><input type="number" data-config="rsiOverbought" min="51" max="95" step="1"></label>
-        <label><span>RSI 超卖</span><input type="number" data-config="rsiOversold" min="5" max="49" step="1"></label>
-        <label><span>MACD 快线</span><input type="number" data-config="macdFast" min="2" max="50" step="1"></label>
-        <label><span>MACD 慢线</span><input type="number" data-config="macdSlow" min="3" max="100" step="1"></label>
-        <label><span>MACD 信号线</span><input type="number" data-config="macdSignal" min="2" max="50" step="1"></label>
-        <label><span>布林带周期</span><input type="number" data-config="bollingerPeriod" min="5" max="100" step="1"></label>
-        <label><span>布林标准差</span><input type="number" data-config="bollingerStdDev" min="0.5" max="5" step="0.1"></label>
-        <label><span>买入阈值</span><input type="number" data-config="buyThreshold" min="0" max="1" step="0.05"></label>
-        <label><span>卖出阈值</span><input type="number" data-config="sellThreshold" min="-1" max="0" step="0.05"></label>
-      </div>
-      <div class="quant-config-actions">
-        <button class="btn ghost" id="config-reset" type="button">恢复默认</button>
-        <button class="btn primary" id="config-apply" type="button">应用参数</button>
-      </div>
-    </section>
+      <div class="quant-content">
+        <section class="quant-view active" data-view-panel="dashboard">
+          <header class="quant-header">
+            <div><div class="quant-eyebrow">REAL MARKET · DAILY SIGNALS</div><h1>量化仪表盘</h1><p>自选标的独立于真实持仓，可随时修改并保存到服务器。</p></div>
+            <button class="btn ghost" id="refresh-button" type="button">刷新分析</button>
+          </header>
+          <form class="quant-toolbar" id="analysis-form">
+            <label class="quant-symbol-field"><span>分析标的</span><input id="symbol-input" autocomplete="off" placeholder="AAPL, MSFT, NVDA"></label>
+            <label><span>历史范围</span><select id="period-select"><option value="3m">近 3 个月</option><option value="6m">近 6 个月</option><option value="1y">近 1 年</option><option value="2y">近 2 年</option><option value="5y">近 5 年</option></select></label>
+            <button class="btn ghost" id="save-watchlist" type="button">保存自选池</button>
+            <button class="btn primary" id="analyze-button" type="submit">开始分析</button>
+          </form>
+          <p class="quant-save-status" id="save-status"></p>
+          <section class="quant-summary" aria-label="信号概览">
+            <article class="quant-stat quant-stat-buy"><span>↗</span><div><small>买入信号</small><strong id="buy-count">0</strong></div></article>
+            <article class="quant-stat quant-stat-sell"><span>↘</span><div><small>卖出信号</small><strong id="sell-count">0</strong></div></article>
+            <article class="quant-stat quant-stat-hold"><span>—</span><div><small>观望</small><strong id="hold-count">0</strong></div></article>
+            <article class="quant-stat"><span>◷</span><div><small>更新时间</small><strong class="quant-time" id="updated-at">尚未分析</strong></div></article>
+          </section>
+          <section class="quant-card">
+            <div class="quant-card-head"><div><h2>策略信号</h2><p id="result-note">正在读取已保存的自选标的…</p></div><span class="quant-live-dot"><i></i>真实行情</span></div>
+            <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>标的</th><th class="align-right">价格 / 日涨跌</th><th class="align-center">综合信号</th><th class="align-center">强度</th><th class="align-center">RSI</th><th class="align-center">MACD</th><th class="align-center">布林位置</th><th class="align-center">趋势</th><th class="align-right">评分 / 数据</th></tr></thead><tbody id="signal-body"><tr><td colspan="9" class="quant-empty">加载中…</td></tr></tbody></table></div>
+          </section>
+        </section>
 
-    <form class="quant-toolbar" id="analysis-form">
-      <label class="quant-symbol-field">
-        <span>分析标的</span>
-        <input id="symbol-input" autocomplete="off" placeholder="例如 AAPL, MSFT, NVDA（留空则使用当前美股持仓）">
-      </label>
-      <label>
-        <span>历史范围</span>
-        <select id="period-select">
-          <option value="3m">近 3 个月</option>
-          <option value="6m">近 6 个月</option>
-          <option value="1y" selected>近 1 年</option>
-          <option value="2y">近 2 年</option>
-          <option value="5y">近 5 年</option>
-        </select>
-      </label>
-      <button class="btn primary" id="analyze-button" type="submit">开始分析</button>
-    </form>
+        <section class="quant-view" data-view-panel="strategy">
+          <header class="quant-header"><div><div class="quant-eyebrow">STRATEGY CONFIGURATION</div><h1>策略参数</h1><p>Dashboard、Backtest 与模拟盘共用并持久化这一组参数。</p></div></header>
+          <section class="quant-card quant-config">
+            <div class="quant-card-head"><div><h2>技术指标</h2><p>修改后保存策略，下一次分析立即生效。</p></div></div>
+            <div class="quant-config-grid">
+              <label><span>RSI 周期</span><input type="number" data-config="rsiPeriod" min="2" max="50" step="1"></label><label><span>RSI 超买</span><input type="number" data-config="rsiOverbought" min="51" max="95" step="1"></label><label><span>RSI 超卖</span><input type="number" data-config="rsiOversold" min="5" max="49" step="1"></label><label><span>MACD 快线</span><input type="number" data-config="macdFast" min="2" max="50" step="1"></label><label><span>MACD 慢线</span><input type="number" data-config="macdSlow" min="3" max="100" step="1"></label><label><span>MACD 信号线</span><input type="number" data-config="macdSignal" min="2" max="50" step="1"></label><label><span>布林带周期</span><input type="number" data-config="bollingerPeriod" min="5" max="100" step="1"></label><label><span>布林标准差</span><input type="number" data-config="bollingerStdDev" min="0.5" max="5" step="0.1"></label><label><span>买入阈值</span><input type="number" data-config="buyThreshold" min="0" max="1" step="0.05"></label><label><span>卖出阈值</span><input type="number" data-config="sellThreshold" min="-1" max="0" step="0.05"></label>
+            </div>
+            <div class="quant-config-actions"><button class="btn ghost" id="config-reset" type="button">恢复默认</button><button class="btn primary" id="config-save" type="button">保存策略</button></div>
+          </section>
+          <section class="quant-card quant-explain"><div class="quant-card-head"><div><h2>策略说明</h2><p>与参考项目保持同一信号组合，行情替换为真实股票接口。</p></div></div><div class="quant-explain-grid"><article><span class="quant-index">01</span><h3>RSI 相对强弱</h3><p id="rsi-description"></p></article><article><span class="quant-index">02</span><h3>MACD 动能交叉</h3><p id="macd-description"></p></article><article><span class="quant-index">03</span><h3>布林带位置</h3><p id="bollinger-description"></p></article></div><p class="quant-formula" id="formula-description"></p></section>
+        </section>
 
-    <section class="quant-summary" aria-label="信号概览">
-      <article class="quant-stat quant-stat-buy"><span>↗</span><div><small>买入信号</small><strong id="buy-count">0</strong></div></article>
-      <article class="quant-stat quant-stat-sell"><span>↘</span><div><small>卖出信号</small><strong id="sell-count">0</strong></div></article>
-      <article class="quant-stat quant-stat-hold"><span>—</span><div><small>观望</small><strong id="hold-count">0</strong></div></article>
-      <article class="quant-stat"><span>◷</span><div><small>更新时间</small><strong class="quant-time" id="updated-at">尚未分析</strong></div></article>
-    </section>
+        <section class="quant-view" data-view-panel="backtest">
+          <header class="quant-header"><div><div class="quant-eyebrow">HISTORICAL SIMULATION</div><h1>策略回测</h1><p>对已保存的自选池进行等权回测，并与买入持有比较。</p></div></header>
+          <form class="quant-toolbar" id="backtest-form"><label><span>初始资金（USD）</span><input id="backtest-capital" type="number" min="1000" step="1000" value="100000"></label><label><span>回测范围</span><select id="backtest-period"><option value="6m">近 6 个月</option><option value="1y" selected>近 1 年</option><option value="2y">近 2 年</option><option value="5y">近 5 年</option></select></label><button class="btn primary" id="backtest-button" type="submit">运行回测</button></form>
+          <section class="quant-summary"><article class="quant-stat"><span>$</span><div><small>期末权益</small><strong id="bt-equity">—</strong></div></article><article class="quant-stat"><span>↗</span><div><small>策略收益</small><strong id="bt-return">—</strong></div></article><article class="quant-stat"><span>≋</span><div><small>最大回撤</small><strong id="bt-drawdown">—</strong></div></article><article class="quant-stat"><span>✓</span><div><small>胜率 / 平仓</small><strong id="bt-winrate">—</strong></div></article></section>
+          <section class="quant-card"><div class="quant-card-head"><div><h2>分标的结果</h2><p id="backtest-note">设置资金和范围后运行回测。</p></div></div><div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>标的</th><th class="align-right">期末权益</th><th class="align-right">策略收益</th><th class="align-right">买入持有</th><th class="align-right">最大回撤</th><th class="align-right">平仓次数</th><th>行情源</th></tr></thead><tbody id="backtest-body"><tr><td colspan="7" class="quant-empty">尚未运行回测</td></tr></tbody></table></div></section>
+        </section>
 
-    <section class="quant-card">
-      <div class="quant-card-head">
-        <div>
-          <h2>策略信号</h2>
-          <p id="result-note">读取当前美股持仓后自动分析，也可输入自选代码。</p>
-        </div>
-        <span class="quant-live-dot"><i></i>真实行情</span>
+        <section class="quant-view" data-view-panel="paper">
+          <header class="quant-header"><div><div class="quant-eyebrow">PAPER TRADING</div><h1>模拟盘</h1><p>根据保存的策略与自选池执行虚拟交易，与真实持仓完全隔离。</p></div><div class="quant-header-actions"><button class="btn ghost" id="paper-reset" type="button">重置模拟盘</button><button class="btn primary" id="paper-sync" type="button">同步信号并交易</button></div></header>
+          <div class="quant-paper-settings"><label><span>初始资金（USD）</span><input id="paper-capital" type="number" min="1000" step="1000"></label><label><span>单次仓位</span><input id="paper-position-pct" type="number" min="1" max="100" step="1"><em>%</em></label><button class="btn ghost" id="paper-settings-save" type="button">保存设置</button></div>
+          <section class="quant-summary"><article class="quant-stat"><span>$</span><div><small>总权益</small><strong id="paper-equity">—</strong></div></article><article class="quant-stat"><span>◈</span><div><small>可用现金</small><strong id="paper-cash">—</strong></div></article><article class="quant-stat"><span>▤</span><div><small>持仓市值</small><strong id="paper-market-value">—</strong></div></article><article class="quant-stat"><span>%</span><div><small>累计收益</small><strong id="paper-return">—</strong></div></article></section>
+          <section class="quant-card"><div class="quant-card-head"><div><h2>模拟持仓</h2><p id="paper-note">尚未同步策略信号。</p></div></div><div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>标的</th><th class="align-right">数量</th><th class="align-right">成本</th><th class="align-right">现价</th><th class="align-right">市值</th><th class="align-right">浮动盈亏</th><th class="align-center">当前信号</th></tr></thead><tbody id="paper-holdings-body"></tbody></table></div></section>
+          <section class="quant-card"><div class="quant-card-head"><div><h2>模拟交易记录</h2><p>最多保留最近 500 笔。</p></div></div><div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>时间</th><th>标的</th><th>方向</th><th class="align-right">数量</th><th class="align-right">价格</th><th class="align-right">金额 / 盈亏</th></tr></thead><tbody id="paper-trades-body"></tbody></table></div></section>
+        </section>
       </div>
-      <div class="quant-table-wrap">
-        <table class="quant-table">
-          <thead>
-            <tr>
-              <th>标的</th>
-              <th class="align-right">价格 / 日涨跌</th>
-              <th class="align-center">综合信号</th>
-              <th class="align-center">强度</th>
-              <th class="align-center">RSI</th>
-              <th class="align-center">MACD</th>
-              <th class="align-center">布林位置</th>
-              <th class="align-center">趋势</th>
-              <th class="align-right">评分 / 数据</th>
-            </tr>
-          </thead>
-          <tbody id="signal-body">
-            <tr><td colspan="9" class="quant-empty">正在读取持仓…</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="quant-card quant-explain">
-      <div class="quant-card-head"><div><h2>策略说明</h2><p>沿用参考项目的信号计算方式，数据源替换为真实证券行情。</p></div></div>
-      <div class="quant-explain-grid">
-        <article><span class="quant-index">01</span><h3>RSI 相对强弱</h3><p id="rsi-description"></p></article>
-        <article><span class="quant-index">02</span><h3>MACD 动能交叉</h3><p id="macd-description"></p></article>
-        <article><span class="quant-index">03</span><h3>布林带位置</h3><p id="bollinger-description"></p></article>
-      </div>
-      <p class="quant-formula" id="formula-description"></p>
-      <p class="quant-disclaimer">量化信号仅用于研究与辅助判断，不构成投资建议。日线可能受交易所延迟、复权方式及行情供应商权限影响。</p>
-    </section>
+    </div>
   </main>
   <script type="module" src="./app.js"></script>
 </body>

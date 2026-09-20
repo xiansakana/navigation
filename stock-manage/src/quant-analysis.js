@@ -307,3 +307,90 @@ export function analyzeCandles({
     message: ''
   };
 }
+
+export function backtestCandles({
+  symbol,
+  candles,
+  config: rawConfig = DEFAULT_QUANT_CONFIG,
+  initialCapital = 10000
+}) {
+  const config = normalizeQuantConfig(rawConfig);
+  const capital = Math.max(100, Number(initialCapital) || 10000);
+  const cleanCandles = (Array.isArray(candles) ? candles : [])
+    .map((candle) => ({ ...candle, timestamp: Number(candle?.timestamp), close: Number(candle?.close) }))
+    .filter((candle) => finite(candle.timestamp) && finite(candle.close) && candle.close > 0)
+    .sort((a, b) => a.timestamp - b.timestamp);
+  const minimumPoints = Math.max(50, config.rsiPeriod + 1, config.macdSlow + config.macdSignal, config.bollingerPeriod);
+  if (cleanCandles.length < minimumPoints + 1) {
+    return {
+      symbol,
+      status: 'insufficient',
+      message: `历史数据不足（${cleanCandles.length} 条）`,
+      initialCapital: round(capital),
+      finalEquity: round(capital),
+      totalReturn: 0,
+      buyHoldReturn: 0,
+      maxDrawdown: 0,
+      winRate: 0,
+      trades: [],
+      equityCurve: []
+    };
+  }
+
+  let cash = capital;
+  let shares = 0;
+  let entryPrice = 0;
+  let peak = capital;
+  let maxDrawdown = 0;
+  const trades = [];
+  const equityCurve = [];
+  const startIndex = minimumPoints - 1;
+
+  for (let index = startIndex; index < cleanCandles.length; index += 1) {
+    const candle = cleanCandles[index];
+    const history = cleanCandles.slice(Math.max(0, index - 249), index + 1);
+    const analysis = analyzeCandles({ symbol, price: candle.close, candles: history, config });
+    if (analysis.status === 'ok' && analysis.signal === 'BUY' && shares === 0 && cash > 0) {
+      shares = cash / candle.close;
+      entryPrice = candle.close;
+      trades.push({ timestamp: candle.timestamp, side: 'BUY', price: round(candle.close, 4), shares: round(shares, 4) });
+      cash = 0;
+    } else if (analysis.status === 'ok' && analysis.signal === 'SELL' && shares > 0) {
+      cash = shares * candle.close;
+      const pnl = (candle.close - entryPrice) * shares;
+      trades.push({
+        timestamp: candle.timestamp,
+        side: 'SELL',
+        price: round(candle.close, 4),
+        shares: round(shares, 4),
+        pnl: round(pnl)
+      });
+      shares = 0;
+      entryPrice = 0;
+    }
+    const equity = cash + shares * candle.close;
+    peak = Math.max(peak, equity);
+    maxDrawdown = Math.max(maxDrawdown, peak > 0 ? (peak - equity) / peak : 0);
+    equityCurve.push({ timestamp: candle.timestamp, equity: round(equity) });
+  }
+
+  const finalPrice = cleanCandles.at(-1).close;
+  const finalEquity = cash + shares * finalPrice;
+  const completed = trades.filter((trade) => trade.side === 'SELL');
+  const winners = completed.filter((trade) => trade.pnl > 0).length;
+  const firstPrice = cleanCandles[startIndex].close;
+  return {
+    symbol,
+    status: 'ok',
+    initialCapital: round(capital),
+    finalEquity: round(finalEquity),
+    totalReturn: round((finalEquity - capital) / capital, 4),
+    buyHoldReturn: round((finalPrice - firstPrice) / firstPrice, 4),
+    maxDrawdown: round(maxDrawdown, 4),
+    winRate: completed.length ? round(winners / completed.length, 4) : 0,
+    completedTrades: completed.length,
+    openPosition: shares > 0,
+    trades,
+    equityCurve
+  };
+}

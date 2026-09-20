@@ -6,7 +6,7 @@
 
 抄底监控与 QQ 提醒是独立服务 `qqq-dip`（:5001），从页面顶部 Tab 进入 `/stock-manage/dip/`，不读写本服务的持仓与现金。
 
-量化分析页面位于 `/stock-manage/quant/`，默认分析当前美股正股持仓，也可输入自选代码。策略沿用 `torn-stocks-quant` 的 RSI、MACD、布林带与 SMA50 组合评分，但行情来自 Polygon、Sina Finance、Finnhub 的真实美股日线并自动回退；A 股和期权暂不参与该策略。
+量化分析页面位于 `/stock-manage/quant/`，使用独立于真实持仓的服务器端自选池，可随时修改保存。页面包含 Dashboard、Strategy、Backtest 和模拟盘：四者共用 RSI、MACD、布林带与 SMA50 组合策略；模拟盘资金、持仓与交易记录和真实持仓完全隔离。行情来自 Polygon、Sina Finance、Finnhub 的真实美股日线并自动回退；A 股和期权暂不参与该策略。
 
 ## 本地开发
 
@@ -51,4 +51,9 @@ portal 中访问路径：`/stock-manage/`（需在 `portal/config.json` 注册�
 | GET | `/api/stock/:symbol` | 股票/A股报价 |
 | GET | `/api/option/:symbol` | Polygon 期权报价 |
 | GET | `/api/analysis` | 美股量化信号；支持 `symbols`、`period`、`config` 查询参数 |
+| GET/PUT | `/api/quant/settings` | 读取或保存量化自选池、策略和模拟盘设置 |
+| POST | `/api/quant/backtest` | 使用真实历史日线运行组合回测 |
+| GET | `/api/quant/paper` | 读取独立模拟盘 |
+| POST | `/api/quant/paper/sync` | 根据最新策略信号执行模拟交易 |
+| POST | `/api/quant/paper/reset` | 清空并重置模拟盘 |
 | GET | `/api/search` | 代码搜索 |

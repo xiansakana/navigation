@@ -109,6 +109,11 @@ function holdingsHref() {
   return 'http://127.0.0.1:5000/';
 }
 
+function quantHref() {
+  if (location.pathname.includes('/stock-manage')) return '/stock-manage/quant/';
+  return 'http://127.0.0.1:5000/quant/';
+}
+
 function dipHref(tab) {
   const underPortal = location.pathname.includes('/stock-manage/dip');
   const base = underPortal ? '/stock-manage/dip/' : './';
@@ -128,6 +133,7 @@ function renderTabs() {
   if (showMonitor) {
     tabsHtml += `<a class="sm-feature-tab ${tab === 'monitor' ? 'active' : ''}" href="${dipHref('monitor')}">抄底监控</a>`;
   }
+  tabsHtml += `<a class="sm-feature-tab" href="${quantHref()}">量化分析</a>`;
   if (showQq) {
     tabsHtml += `<a class="sm-feature-tab ${tab === 'qq' ? 'active' : ''}" href="${dipHref('qq')}">QQ 提醒</a>`;
   }

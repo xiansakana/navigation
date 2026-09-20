@@ -1,5 +1,90 @@
 .quant-app {
-  max-width: 1500px;
+  max-width: 1680px;
+}
+
+.quant-shell {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.quant-sidebar {
+  position: sticky;
+  top: 18px;
+  min-height: calc(100vh - 100px);
+  padding: 17px 12px;
+  background: color-mix(in srgb, var(--card) 98%, #080b11);
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, .12);
+}
+
+.quant-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 7px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.quant-brand > span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 9px;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.quant-brand strong,
+.quant-brand small { display: block; }
+.quant-brand strong { font: 800 14px ui-monospace, monospace; letter-spacing: .08em; }
+.quant-brand small { margin-top: 2px; color: var(--muted); font: 700 8px ui-monospace, monospace; letter-spacing: .13em; }
+.quant-sidebar nav { display: grid; gap: 6px; margin-top: 16px; }
+
+.quant-nav {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 0 7px;
+  width: 100%;
+  padding: 10px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quant-nav > span { grid-row: 1 / 3; align-self: center; font: 700 19px ui-monospace, monospace; }
+.quant-nav b { color: inherit; font-size: 12px; }
+.quant-nav small { margin-top: 2px; font-size: 9px; opacity: .72; }
+.quant-nav:hover { color: var(--text); background: var(--row-hover); }
+.quant-nav.active { color: var(--accent); background: rgba(91, 156, 255, .1); border-color: rgba(91, 156, 255, .2); }
+.quant-sidebar > p { position: absolute; bottom: 14px; margin: 0 7px; color: var(--muted); font-size: 9px; line-height: 1.6; }
+.quant-content { min-width: 0; }
+.quant-view { display: none; }
+.quant-view.active { display: block; }
+.quant-save-status { min-height: 18px; margin: -7px 2px 7px; color: var(--green); font-size: 11px; }
+
+.quant-paper-settings {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 15px 18px;
+  background: color-mix(in srgb, var(--card) 96%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.quant-paper-settings label { position: relative; display: flex; flex-direction: column; gap: 6px; width: 190px; }
+.quant-paper-settings label > span { color: var(--muted); font-size: 12px; }
+.quant-paper-settings label em { position: absolute; right: 12px; bottom: 11px; color: var(--muted); font-style: normal; font-size: 12px; }
 }
 
 .quant-header {
@@ -387,6 +472,7 @@
 }
 
 @media (max-width: 1000px) {
+  .quant-shell { grid-template-columns: 150px minmax(0, 1fr); gap: 14px; }
   .quant-config-grid { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
   .quant-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -394,11 +480,21 @@
 @media (max-width: 700px) {
   .quant-app { padding: 22px 14px 48px; }
   .quant-header { flex-direction: column; }
+  .quant-shell { display: block; }
+  .quant-sidebar { position: static; min-height: 0; margin-bottom: 18px; padding: 10px; }
+  .quant-brand, .quant-sidebar > p { display: none; }
+  .quant-sidebar nav { grid-template-columns: repeat(4, 1fr); margin: 0; gap: 4px; }
+  .quant-nav { display: flex; flex-direction: column; align-items: center; padding: 8px 3px; text-align: center; }
+  .quant-nav > span { font-size: 16px; }
+  .quant-nav b { font-size: 10px; }
+  .quant-nav small { display: none; }
   .quant-header-actions { width: 100%; }
   .quant-header-actions .btn { flex: 1; }
   .quant-toolbar { align-items: stretch; flex-direction: column; }
   .quant-toolbar label:not(.quant-symbol-field),
   .quant-symbol-field { width: 100%; min-width: 0; }
+  .quant-paper-settings { align-items: stretch; flex-direction: column; }
+  .quant-paper-settings label { width: 100%; }
   .quant-config-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .quant-explain-grid { grid-template-columns: 1fr; }
   .quant-explain-grid article { border-right: 0; border-bottom: 1px solid var(--border); }

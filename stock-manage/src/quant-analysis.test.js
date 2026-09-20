@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   analyzeCandles,
+  backtestCandles,
   bollingerBands,
   DEFAULT_QUANT_CONFIG,
   normalizeQuantConfig,
@@ -77,4 +78,17 @@ test('returns an explanatory hold result for insufficient history', () => {
   assert.equal(result.signal, 'HOLD');
   assert.equal(result.dataPoints, 20);
   assert.match(result.message, /历史数据不足/);
+});
+
+test('backtests candles and returns an equity curve', () => {
+  const result = backtestCandles({
+    symbol: 'AAPL',
+    candles: candles(180, (index) => 100 + Math.sin(index / 8) * 12 + index * 0.08),
+    initialCapital: 10000
+  });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.initialCapital, 10000);
+  assert.ok(result.equityCurve.length > 100);
+  assert.ok(Number.isFinite(result.finalEquity));
+  assert.ok(Number.isFinite(result.maxDrawdown));
 });
