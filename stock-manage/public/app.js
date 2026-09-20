@@ -1045,6 +1045,187 @@ async function saveMeta(symbol, patch) {
   applyPortfolio(await api('/holdings-meta/' + encodeURIComponent(symbol) + pnlQuery(), { method: 'PUT', body: patch }));
 }
 
+const quantPageState = {
+  symbols: [],
+  period: '1y',
+  signals: [],
+  loading: false,
+  error: '',
+  updatedAt: null
+};
+
+function quantEscape(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char]));
+}
+
+function quantApiBase() {
+  return location.pathname.includes('/stock-manage') ? '/stock-manage/api' : './api';
+}
+
+async function quantApi(path) {
+  const res = await fetch(quantApiBase() + path);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function quantSignalLabel(signal) {
+  return signal === 'BUY' ? '买入' : signal === 'SELL' ? '卖出' : '观望';
+}
+
+function quantSignalClass(signal) {
+  return signal === 'BUY' ? 'buy' : signal === 'SELL' ? 'sell' : 'hold';
+}
+
+function quantTrendLabel(trend) {
+  return trend === 'ABOVE_SMA50' ? '高于 SMA50' : trend === 'BELOW_SMA50' ? '低于 SMA50' : '—';
+}
+
+function quantDate(timestamp) {
+  if (!Number.isFinite(Number(timestamp))) return '—';
+  return new Date(Number(timestamp)).toLocaleDateString('zh-CN');
+}
+
+function quantNav() {
+  return `<nav class="sm-feature-tabs" aria-label="股票功能">
+    <a class="sm-feature-tab" href="/stock-manage/">持仓</a>
+    <a class="sm-feature-tab" href="/stock-manage/dip/">抄底监控</a>
+    <a class="sm-feature-tab active" href="/stock-manage/quant/">量化分析</a>
+    <a class="sm-feature-tab" href="/stock-manage/dip/?tab=qq">QQ 提醒</a>
+  </nav>`;
+}
+
+function quantSignalRow(signal) {
+  const statusMessage = signal.status === 'ok' ? ''
+    : `<div class="hint">${quantEscape(signal.message || '暂无足够数据')}</div>`;
+  const signalClass = quantSignalClass(signal.signal);
+  const price = Number.isFinite(Number(signal.price)) && Number(signal.price) > 0
+    ? fmtUsd(Number(signal.price)) : '—';
+  const numericChange = Number(signal.changePercent);
+  const hasChange = Number.isFinite(numericChange);
+  const change = hasChange
+    ? `${numericChange >= 0 ? '+' : ''}${numericChange.toFixed(2)}%` : '—';
+  const changeClass = hasChange ? (numericChange >= 0 ? 'pos' : 'neg') : '';
+  const score = Number.isFinite(Number(signal.combinedScore))
+    ? `${Number(signal.combinedScore) >= 0 ? '+' : ''}${Number(signal.combinedScore).toFixed(2)}` : '—';
+  const rsi = Number.isFinite(Number(signal.rsi)) ? Number(signal.rsi).toFixed(1) : '—';
+  const macd = Number.isFinite(Number(signal.macd)) ? Number(signal.macd).toFixed(4) : '—';
+  const bb = Number.isFinite(Number(signal.bollingerPosition)) ? `${Number(signal.bollingerPosition).toFixed(1)}%` : '—';
+  const strength = Math.min(100, Math.max(0, Number(signal.strength) || 0));
+  return `<tr>
+    <td><strong>${quantEscape(signal.symbol)}</strong>${signal.name && signal.name !== signal.symbol ? `<span class="hint" style="margin-left: 6px;">${quantEscape(signal.name)}</span>` : ''}${statusMessage}</td>
+    <td class="num"><strong>${price}</strong><div class="${changeClass}">${change}</div></td>
+    <td class="center"><span class="sm-quant-badge sm-quant-badge--${signalClass}">${quantSignalLabel(signal.signal)}</span></td>
+    <td><div class="sm-quant-strength"><span class="sm-quant-strength-bar"><span style="width: ${strength}%"></span></span><span>${strength ? `${strength}%` : '—'}</span></div></td>
+    <td class="center">${rsi}<div class="hint">${quantSignalLabel(signal.rsiSignal)}</div></td>
+    <td class="center">${macd}<div class="hint">${quantSignalLabel(signal.macdSignal)}</div></td>
+    <td class="center">${bb}<div class="hint">${quantSignalLabel(signal.bollingerSignal)}</div></td>
+    <td class="center">${quantTrendLabel(signal.trend)}</td>
+    <td class="num"><strong>${score}</strong><div class="hint">${Number(signal.dataPoints) || 0} 根 · ${quantDate(signal.asOf)}</div></td>
+  </tr>`;
+}
+
+function renderQuantPage() {
+  const app = $('#app');
+  if (!app) return;
+  const signals = Array.isArray(quantPageState.signals) ? quantPageState.signals : [];
+  const buyCount = signals.filter((signal) => signal.signal === 'BUY').length;
+  const sellCount = signals.filter((signal) => signal.signal === 'SELL').length;
+  const holdCount = signals.filter((signal) => signal.signal === 'HOLD').length;
+  const tableBody = quantPageState.loading && !signals.length
+    ? '<tr><td colspan="9" class="sm-quant-empty">正在拉取真实日线数据并计算指标…</td></tr>'
+    : quantPageState.error
+      ? `<tr><td colspan="9" class="sm-quant-error">${quantEscape(quantPageState.error)}</td></tr>`
+      : signals.length
+        ? signals.map(quantSignalRow).join('')
+        : '<tr><td colspan="9" class="sm-quant-empty">暂无分析结果。请输入股票代码，或先在持仓页添加正股。</td></tr>';
+
+  app.innerHTML = `<div class="sm-app sm-quant-page">
+    ${quantNav()}
+    <section class="sm-quant-hero">
+      <div><h1>量化分析</h1><p>真实美股日线数据 · RSI + MACD + 布林带 · SMA50 趋势过滤</p></div>
+      <button type="button" id="quant-refresh" class="btn ghost sm-btn-sm" ${quantPageState.loading ? 'disabled' : ''}>${quantPageState.loading ? '分析中…' : '刷新分析'}</button>
+    </section>
+    <form id="quant-analysis-form" class="sm-quant-controls">
+      <label class="sm-quant-field sm-quant-field--symbols"><span>分析标的（逗号分隔）</span><input id="quant-symbols" value="${quantEscape(quantPageState.symbols.join(', '))}" placeholder="例如：AAPL, MSFT, NVDA"></label>
+      <label class="sm-quant-field"><span>历史范围</span><select id="quant-period"><option value="3m" ${quantPageState.period === '3m' ? 'selected' : ''}>近 3 个月</option><option value="6m" ${quantPageState.period === '6m' ? 'selected' : ''}>近 6 个月</option><option value="1y" ${quantPageState.period === '1y' ? 'selected' : ''}>近 1 年</option><option value="2y" ${quantPageState.period === '2y' ? 'selected' : ''}>近 2 年</option><option value="5y" ${quantPageState.period === '5y' ? 'selected' : ''}>近 5 年</option></select></label>
+      <button type="submit" class="btn primary sm-btn-sm" ${quantPageState.loading ? 'disabled' : ''}>开始分析</button>
+    </form>
+    <div class="sm-quant-summary">
+      <div class="sm-quant-stat sm-quant-stat--buy"><div class="label">买入信号</div><div class="value">${buyCount}</div></div>
+      <div class="sm-quant-stat sm-quant-stat--sell"><div class="label">卖出信号</div><div class="value">${sellCount}</div></div>
+      <div class="sm-quant-stat"><div class="label">观望</div><div class="value">${holdCount}</div></div>
+      <div class="sm-quant-stat"><div class="label">更新时间</div><div class="value" style="font-size: 16px; margin-top: 9px;">${quantDate(quantPageState.updatedAt)}</div></div>
+    </div>
+    <section class="sm-quant-card">
+      <div class="sm-quant-card-head"><h2>策略信号</h2><span class="hint">${signals.length ? `共 ${signals.length} 个标的` : '按持仓或自选代码分析'}</span></div>
+      <div class="sm-quant-table-wrap"><table class="sm-quant-table"><thead><tr><th>标的</th><th class="num">现价 / 日涨跌</th><th class="center">综合信号</th><th>强度</th><th class="center">RSI</th><th class="center">MACD</th><th class="center">布林位置</th><th class="center">趋势</th><th class="num">评分 / 数据</th></tr></thead><tbody>${tableBody}</tbody></table></div>
+      <p class="sm-quant-hint">综合评分 = RSI 35% + MACD 35% + 布林带 20% + 趋势/动能修正；评分 &gt; 0.25 为买入，评分 &lt; -0.30 为卖出。历史数据来自真实股票行情接口，分析结果仅供研究参考，不构成投资建议。</p>
+    </section>
+  </div>`;
+
+  $('#quant-analysis-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const raw = $('#quant-symbols')?.value || '';
+    const symbols = [...new Set(raw.split(',').map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))];
+    const period = $('#quant-period')?.value || '1y';
+    runQuantAnalysis(symbols, period);
+  });
+  $('#quant-refresh')?.addEventListener('click', () => runQuantAnalysis(quantPageState.symbols, quantPageState.period));
+}
+
+async function runQuantAnalysis(symbols, period = '1y') {
+  const cleanSymbols = [...new Set((symbols || []).map((symbol) => String(symbol).trim().toUpperCase()).filter(Boolean))];
+  quantPageState.symbols = cleanSymbols;
+  quantPageState.period = period;
+  quantPageState.loading = true;
+  quantPageState.error = '';
+  quantPageState.signals = [];
+  renderQuantPage();
+  if (!cleanSymbols.length) {
+    quantPageState.loading = false;
+    renderQuantPage();
+    return;
+  }
+
+  try {
+    const q = new URLSearchParams({ symbols: cleanSymbols.join(','), period });
+    const data = await quantApi('/analysis?' + q.toString());
+    quantPageState.signals = Array.isArray(data.signals) ? data.signals : [];
+    quantPageState.updatedAt = Number(data.timestamp) || Date.now();
+  } catch (error) {
+    quantPageState.error = error.message || '量化分析失败';
+  } finally {
+    quantPageState.loading = false;
+    renderQuantPage();
+  }
+}
+
+async function initQuantPage() {
+  await loadPortalContext();
+  quantPageState.loading = true;
+  renderQuantPage();
+  try {
+    const portfolio = await quantApi('/portfolio');
+    const symbols = [...new Set((portfolio.holdings || [])
+      .filter((holding) => holding.type !== 'option' && !looksLikeAShare(holding.symbol))
+      .map((holding) => holding.symbol))];
+    quantPageState.loading = false;
+    renderQuantPage();
+    await runQuantAnalysis(symbols, quantPageState.period);
+  } catch (error) {
+    quantPageState.loading = false;
+    quantPageState.error = error.message || '加载持仓失败';
+    renderQuantPage();
+  }
+}
+
 function applyLayoutPrefs() {
   fullWidth = loadJson(LS_FULL_WIDTH, false);
   $('#app').classList.toggle('sm-app--full', fullWidth);
@@ -1233,4 +1414,5 @@ async function init() {
   }
 }
 
-init();
+if (location.pathname.includes('/quant')) initQuantPage();
+else init();

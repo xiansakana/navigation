@@ -23,6 +23,7 @@ import {
 } from './trades.js';
 import { normalizeSymbol } from './markets.js';
 import { DEFAULT_USD_CNY_RATE } from '../../shared/db/portfolio-store.js';
+import { analyzeCandles, DEFAULT_QUANT_CONFIG } from './quant-analysis.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -313,6 +314,99 @@ app.get('/api/stock/:symbol', async (req, res) => {
   } catch (e) {
     res.status(502).json({ error: e.message });
   }
+});
+
+function quantSymbols(raw, fallback) {
+  const source = String(raw || '').trim()
+    ? String(raw).split(',')
+    : fallback;
+  return [...new Set(source
+    .map((symbol) => normalizeSymbol(symbol))
+    .filter((symbol) => /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)))]
+    .slice(0, 30);
+}
+
+function quantPeriodDays(raw) {
+  const periods = { '3m': 120, '6m': 220, '1y': 365, '2y': 730, '5y': 1825 };
+  return periods[String(raw || '')] || 365;
+}
+
+function quantConfigFromQuery(raw) {
+  const config = { ...DEFAULT_QUANT_CONFIG };
+  if (typeof raw !== 'string' || !raw) return config;
+  try {
+    const parsed = JSON.parse(raw);
+    for (const key of Object.keys(config)) {
+      const value = Number(parsed?.[key]);
+      if (Number.isFinite(value) && value > 0) config[key] = value;
+    }
+  } catch {
+    // Invalid custom parameters fall back to the documented defaults.
+  }
+  return config;
+}
+
+function quantUnsupported(symbol, name, message) {
+  const result = analyzeCandles({ symbol, name, candles: [] });
+  return { ...result, status: 'unsupported', message };
+}
+
+app.get('/api/analysis', async (req, res) => {
+  const data = store.read();
+  const holdings = deriveHoldings(data.trades);
+  const holdingMap = new Map(holdings.map((holding) => [normalizeSymbol(holding.symbol), holding]));
+  const fallbackSymbols = holdings
+    .filter((holding) => holding.type !== 'option' && !/^[A-Z]+\d{6}[CP]/i.test(holding.symbol))
+    .map((holding) => holding.symbol);
+  const symbols = quantSymbols(req.query.symbols, fallbackSymbols);
+  const config = quantConfigFromQuery(req.query.config);
+  if (!symbols.length) {
+    return res.json({ signals: [], config, timestamp: Date.now() });
+  }
+
+  const days = quantPeriodDays(req.query.period);
+  const signals = await Promise.all(symbols.map(async (symbol) => {
+    const holding = holdingMap.get(symbol);
+    const name = holding?.name || symbol;
+    if (/^\d{6}$/.test(symbol) || /^[A-Z]+\d{6}[CP]/i.test(symbol)) {
+      return quantUnsupported(symbol, name, '量化分析当前仅支持美股正股，A 股/期权暂不支持');
+    }
+
+    const storedQuote = data.quotes?.[symbol] || {};
+    const [quoteResult, historyResult] = await Promise.allSettled([
+      quotes.getStock(symbol),
+      quotes.getStockHistory(symbol, { days })
+    ]);
+    const quote = quoteResult.status === 'fulfilled' ? quoteResult.value : storedQuote;
+    const price = Number(quote?.price);
+    const changePercent = Number(quote?.changePercent);
+    if (historyResult.status === 'rejected') {
+      const result = analyzeCandles({
+        symbol,
+        name,
+        price,
+        changePercent,
+        candles: [],
+        config
+      });
+      return {
+        ...result,
+        status: 'error',
+        message: historyResult.reason?.message || '获取历史行情失败'
+      };
+    }
+    return analyzeCandles({
+      symbol,
+      name,
+      price,
+      changePercent,
+      candles: historyResult.value,
+      config
+    });
+  }));
+
+  signals.sort((a, b) => b.combinedScore - a.combinedScore);
+  return res.json({ signals, config, period: `${days}d`, timestamp: Date.now() });
 });
 
 app.get('/api/option/:symbol', async (req, res) => {
