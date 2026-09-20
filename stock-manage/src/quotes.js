@@ -162,10 +162,7 @@ export function createQuoteService(config) {
     };
   }
 
-  async function getStockHistory(symbol, options = {}) {
-    if (!finnhubKey) throw new Error('未配置 Finnhub API Key');
-    const sym = String(symbol).toUpperCase();
-    const days = Math.min(1825, Math.max(90, Number(options.days) || 365));
+  async function getStockHistoryFromFinnhub(sym, days) {
     const to = Math.floor(Date.now() / 1000);
     const from = to - Math.round(days * 86400);
     const url = `https://finnhub.io/api/v1/stock/candle?symbol=${encodeURIComponent(sym)}&resolution=D&from=${from}&to=${to}&token=${finnhubKey}`;
@@ -196,6 +193,61 @@ export function createQuoteService(config) {
     candles.sort((a, b) => a.timestamp - b.timestamp);
     if (!candles.length) throw new Error('无有效历史行情');
     return candles;
+  }
+
+  async function getStockHistoryFromPolygon(sym, days) {
+    if (!polygonKey) throw new Error('未配置 Polygon API Key');
+    const url =
+      `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(sym)}` +
+      `/range/1/day/${ymdDaysAgo(days)}/${ymdUTC(Date.now())}` +
+      `?adjusted=true&sort=asc&limit=50000&apiKey=${polygonKey}`;
+    let data;
+    try {
+      data = await fetchJson(url);
+    } catch (e) {
+      throw new Error(`Polygon 历史行情 ${e.message}`);
+    }
+    if (!Array.isArray(data.results)) {
+      throw new Error(data.error || data.message || '无有效历史行情');
+    }
+    const candles = data.results
+      .map((bar) => ({
+        timestamp: Number(bar.t),
+        open: Number(bar.o),
+        high: Number(bar.h),
+        low: Number(bar.l),
+        close: Number(bar.c),
+        volume: Number(bar.v) || 0
+      }))
+      .filter((bar) => [bar.timestamp, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite))
+      .sort((a, b) => a.timestamp - b.timestamp);
+    if (!candles.length) throw new Error('无有效历史行情');
+    return candles;
+  }
+
+  async function getStockHistory(symbol, options = {}) {
+    const sym = String(symbol).toUpperCase();
+    const days = Math.min(1825, Math.max(90, Number(options.days) || 365));
+    const errors = [];
+    if (finnhubKey) {
+      try {
+        return await getStockHistoryFromFinnhub(sym, days);
+      } catch (e) {
+        errors.push(`Finnhub: ${e.message}`);
+      }
+    } else {
+      errors.push('Finnhub: 未配置 API Key');
+    }
+    if (polygonKey) {
+      try {
+        return await getStockHistoryFromPolygon(sym, days);
+      } catch (e) {
+        errors.push(`Polygon: ${e.message}`);
+      }
+    } else {
+      errors.push('Polygon: 未配置 API Key');
+    }
+    throw new Error(`历史行情不可用（${errors.join('; ')}）`);
   }
 
   async function getYahooQuote(symbol) {
