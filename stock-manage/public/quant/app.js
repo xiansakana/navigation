@@ -105,7 +105,10 @@ function badge(signal) {
 }
 
 function sourceLabel(source) {
-  return source === 'polygon' ? 'Polygon' : source === 'finnhub' ? 'Finnhub' : '行情接口';
+  if (source === 'polygon') return 'Polygon';
+  if (source === 'sina') return '新浪财经';
+  if (source === 'finnhub') return 'Finnhub';
+  return '行情接口';
 }
 
 function strengthBar(signal) {

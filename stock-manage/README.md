@@ -6,7 +6,7 @@
 
 抄底监控与 QQ 提醒是独立服务 `qqq-dip`（:5001），从页面顶部 Tab 进入 `/stock-manage/dip/`，不读写本服务的持仓与现金。
 
-量化分析页面位于 `/stock-manage/quant/`，默认分析当前美股正股持仓，也可输入自选代码。策略沿用 `torn-stocks-quant` 的 RSI、MACD、布林带与 SMA50 组合评分，但行情来自 Polygon/Finnhub 的真实美股日线；A 股和期权暂不参与该策略。
+量化分析页面位于 `/stock-manage/quant/`，默认分析当前美股正股持仓，也可输入自选代码。策略沿用 `torn-stocks-quant` 的 RSI、MACD、布林带与 SMA50 组合评分，但行情来自 Polygon、Sina Finance、Finnhub 的真实美股日线并自动回退；A 股和期权暂不参与该策略。
 
 ## 本地开发
 

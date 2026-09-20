@@ -46,9 +46,12 @@ function isRetryable(err, status) {
   return /fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|UND_ERR_|socket|network|timeout|aborted/i.test(blob);
 }
 
-async function fetchJson(url, headers = {}) {
+async function fetchJson(url, headers = {}, options = {}) {
+  const maxRetries = Number.isInteger(options.retries)
+    ? Math.max(0, options.retries)
+    : FETCH_RETRIES;
   let lastErr;
-  for (let attempt = 0; attempt <= FETCH_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
     try {
@@ -57,7 +60,7 @@ async function fetchJson(url, headers = {}) {
         const err = new Error(`HTTP ${res.status}`);
         err.status = res.status;
         lastErr = err;
-        if (attempt < FETCH_RETRIES && isRetryable(err, res.status)) {
+        if (attempt < maxRetries && isRetryable(err, res.status)) {
           await new Promise((r) => setTimeout(r, RETRY_BASE_MS * (attempt + 1)));
           continue;
         }
@@ -66,7 +69,7 @@ async function fetchJson(url, headers = {}) {
       return await res.json();
     } catch (e) {
       lastErr = e;
-      if (attempt < FETCH_RETRIES && isRetryable(e, e.status)) {
+      if (attempt < maxRetries && isRetryable(e, e.status)) {
         await new Promise((r) => setTimeout(r, RETRY_BASE_MS * (attempt + 1)));
         continue;
       }
@@ -172,7 +175,7 @@ export function createQuoteService(config) {
       `?adjusted=true&sort=asc&limit=50000&apiKey=${polygonKey}`;
     let data;
     try {
-      data = await fetchJson(url);
+      data = await fetchJson(url, {}, { retries: 0 });
     } catch (e) {
       throw new Error(`Polygon ${e.message}`);
     }
@@ -192,6 +195,40 @@ export function createQuoteService(config) {
       .sort((a, b) => a.timestamp - b.timestamp);
     if (!candles.length) throw new Error('Polygon 无历史行情');
     return { candles, source: 'polygon' };
+  }
+
+  async function getStockHistoryFromSina(symbol, days) {
+    const url =
+      'https://stock.finance.sina.com.cn/usstock/api/json.php/' +
+      `US_MinKService.getDailyK?symbol=${encodeURIComponent(symbol)}&___qn=3`;
+    let data;
+    try {
+      data = await fetchJson(url, {
+        'User-Agent': 'Mozilla/5.0',
+        Referer: 'https://finance.sina.com.cn/'
+      });
+    } catch (e) {
+      throw new Error(`新浪财经 ${e.message}`);
+    }
+    const rows = Array.isArray(data) ? data : data?.result?.data;
+    if (!Array.isArray(rows)) throw new Error('新浪财经无历史行情');
+    const from = Date.now() - days * 86400000;
+    const candles = rows
+      .map((row) => ({
+        timestamp: Date.parse(`${row.d}T00:00:00Z`),
+        open: Number(row.o),
+        high: Number(row.h),
+        low: Number(row.l),
+        close: Number(row.c),
+        volume: Number(row.v) || 0
+      }))
+      .filter((bar) => (
+        [bar.timestamp, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite)
+          && bar.timestamp >= from
+      ))
+      .sort((a, b) => a.timestamp - b.timestamp);
+    if (!candles.length) throw new Error('新浪财经无历史行情');
+    return { candles, source: 'sina' };
   }
 
   async function getStockHistoryFromFinnhub(symbol, days) {
@@ -231,6 +268,7 @@ export function createQuoteService(config) {
     const errors = [];
     for (const [provider, loader, enabled] of [
       ['Polygon', getStockHistoryFromPolygon, polygonKey],
+      ['新浪财经', getStockHistoryFromSina, true],
       ['Finnhub', getStockHistoryFromFinnhub, finnhubKey]
     ]) {
       if (!enabled) {
