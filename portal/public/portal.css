@@ -1291,6 +1291,21 @@ body.portal-dialog-open {
     border-left: 1px solid var(--border);
 }
 .admin-perm-tree-children.collapsed { display: none; }
+.admin-perm-branch { margin: 2px 0; }
+.admin-perm-branch-node {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 4px 0;
+}
+.admin-perm-branch-children {
+    margin-left: 11px;
+    padding-left: 16px;
+    border-left: 1px solid var(--border);
+}
+.admin-perm-branch-children.collapsed { display: none; }
+.admin-perm-branch .admin-perm-tree-row--feature .admin-perm-tree-label { padding-left: 8px; }
 .admin-perm-tree-section-label {
     margin: 10px 0 4px;
     font-size: 12px;

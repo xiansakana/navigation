@@ -95,7 +95,7 @@ function buildPermissionTree() {
             enabled: menu.enabled !== false,
             view: s.view,
             edit: s.edit,
-            features: sortFeaturePerms(s.features || [])
+            features: s.features || []
         });
     });
 
@@ -112,7 +112,7 @@ function buildPermissionTree() {
             enabled: true,
             view: s.view,
             edit: s.edit,
-            features: sortFeaturePerms(s.features || [])
+            features: s.features || []
         });
     });
 
@@ -151,7 +151,43 @@ function splitServiceFeatures(features) {
         var bk = b.columnKey || String(b.feature || '').replace(/^col-/, '');
         return HOLDINGS_FIELD_ORDER.indexOf(ak) - HOLDINGS_FIELD_ORDER.indexOf(bk);
     });
-    return { buttons: sortFeaturePerms(buttons), fields: fields };
+    return { buttons: buttons, fields: fields };
+}
+
+function buildFeatureHierarchy(features) {
+    var root = [];
+    (features || []).forEach(function(perm) {
+        var path = Array.isArray(perm.permissionPath) && perm.permissionPath.length
+            ? perm.permissionPath
+            : ['其他页面功能'];
+        var level = root;
+        var node = null;
+        path.forEach(function(title) {
+            node = level.find(function(item) { return item.title === title; });
+            if (!node) {
+                node = { title: title, permissions: [], children: [] };
+                level.push(node);
+            }
+            level = node.children;
+        });
+        node.permissions.push(perm);
+    });
+    return root;
+}
+
+function renderFeatureBranch(node, mode, rolePerms, isAdminRole) {
+    var html = '<div class="admin-perm-branch">'
+        + '<div class="admin-perm-branch-node">'
+        + '<button type="button" class="admin-perm-tree-toggle" aria-expanded="true" aria-label="展开/收起">▾</button>'
+        + '<span class="admin-perm-tree-label admin-perm-tree-label--strong">' + esc(node.title) + '</span>'
+        + '</div><div class="admin-perm-branch-children">';
+    node.permissions.forEach(function(perm) {
+        html += renderFeatureRow(perm, mode, rolePerms, isAdminRole);
+    });
+    node.children.forEach(function(child) {
+        html += renderFeatureBranch(child, mode, rolePerms, isAdminRole);
+    });
+    return html + '</div></div>';
 }
 
 function renderPermActionCell(perm, mode, rolePerms, isAdminRole) {
@@ -221,9 +257,9 @@ function renderServiceNode(node, mode, rolePerms, isAdminRole) {
     }
     var split = splitServiceFeatures(node.features || []);
     if (split.buttons.length) {
-        html += '<div class="admin-perm-tree-section-label">页面按钮与功能</div>';
-        split.buttons.forEach(function(perm) {
-            html += renderFeatureRow(perm, mode, rolePerms, isAdminRole);
+        html += '<div class="admin-perm-tree-section-label">页面菜单、按钮与功能</div>';
+        buildFeatureHierarchy(split.buttons).forEach(function(branch) {
+            html += renderFeatureBranch(branch, mode, rolePerms, isAdminRole);
         });
     }
     if (split.fields.length) {
@@ -278,8 +314,11 @@ function bindPermissionTree(root) {
     root.querySelectorAll('.admin-perm-tree-toggle').forEach(function(btn) {
         if (btn.classList.contains('admin-perm-tree-toggle--spacer')) return;
         btn.addEventListener('click', function() {
-            var item = btn.closest('.admin-perm-tree-item--service');
-            var children = item && item.querySelector('.admin-perm-tree-children');
+            var item = btn.closest('.admin-perm-branch, .admin-perm-tree-item--service');
+            var children = item && Array.from(item.children).find(function(child) {
+                return child.classList.contains('admin-perm-tree-children')
+                    || child.classList.contains('admin-perm-branch-children');
+            });
             if (!children) return;
             var open = children.classList.toggle('collapsed');
             btn.setAttribute('aria-expanded', open ? 'false' : 'true');

@@ -32,38 +32,39 @@ var STOCK_MANAGE_HOLDINGS_COLUMNS = [
 ];
 
 var STOCK_MANAGE_FEATURES = [
-    { feature: 'tab-quant', name: '量化分析 Tab', action: 'view' },
-    { feature: 'quant-settings', name: '读取量化用户设置', action: 'view' },
-    { feature: 'quant-dashboard', name: '量化仪表盘', action: 'view' },
-    { feature: 'quant-strategy', name: '量化策略页', action: 'view' },
-    { feature: 'quant-backtest', name: '历史回测页', action: 'view' },
-    { feature: 'quant-paper', name: '模拟盘页', action: 'view' },
-    { feature: 'quant-history', name: '查看 K 线', action: 'view' },
-    { feature: 'quant-watchlist', name: '保存分析标的', action: 'edit' },
-    { feature: 'quant-analysis-run', name: '运行量化分析', action: 'edit' },
-    { feature: 'quant-config', name: '保存策略参数', action: 'edit' },
-    { feature: 'quant-backtest-run', name: '运行历史回测', action: 'edit' },
-    { feature: 'quant-paper-settings', name: '保存模拟盘设置', action: 'edit' },
-    { feature: 'quant-paper-sync', name: '执行模拟盘同步', action: 'edit' },
-    { feature: 'quant-paper-reset', name: '重置模拟盘', action: 'edit' },
-    { feature: 'dashboard', name: '显示看板', action: 'view' },
-    { feature: 'pnl', name: '查询盈亏', action: 'view' },
-    { feature: 'pnl-toggle', name: '盈亏显隐', action: 'view' },
-    { feature: 'trades', name: '交易记录', action: 'view' },
-    { feature: 'columns', name: '列数据显隐控制', action: 'view' },
-    { feature: 'export', name: '导出交易', action: 'view' },
-    { feature: 'import', name: '导入交易', action: 'edit' },
-    { feature: 'trade', name: '记一笔', action: 'edit' },
-    { feature: 'refresh', name: '刷新价格', action: 'edit' },
-    { feature: 'cash', name: '编辑现金', action: 'edit' },
-    { feature: 'meta', name: '编辑目标价/打分', action: 'edit' },
-    { feature: 'row-trade', name: '行内买卖/记录', action: 'edit' }
+    { feature: 'tab-quant', name: '进入量化分析', action: 'view', permissionPath: ['量化分析'] },
+    { feature: 'quant-settings', name: '读取用户量化设置', action: 'view', permissionPath: ['量化分析', '通用数据'] },
+    { feature: 'quant-history', name: '查看 K 线', action: 'view', permissionPath: ['量化分析', '通用数据'] },
+    { feature: 'quant-watchlist', name: '保存分析标的', action: 'edit', permissionPath: ['量化分析', '分析标的'] },
+    { feature: 'quant-dashboard', name: '进入量化仪表盘', action: 'view', permissionPath: ['量化分析', '量化仪表盘'] },
+    { feature: 'quant-analysis-run', name: '运行量化分析', action: 'edit', permissionPath: ['量化分析', '量化仪表盘'] },
+    { feature: 'quant-strategy', name: '进入策略参数页', action: 'view', permissionPath: ['量化分析', '策略参数页'] },
+    { feature: 'quant-config', name: '保存策略参数', action: 'edit', permissionPath: ['量化分析', '策略参数页'] },
+    { feature: 'quant-backtest', name: '进入历史回测页', action: 'view', permissionPath: ['量化分析', '历史回测页'] },
+    { feature: 'quant-backtest-run', name: '运行历史回测', action: 'edit', permissionPath: ['量化分析', '历史回测页'] },
+    { feature: 'quant-paper', name: '进入模拟盘页', action: 'view', permissionPath: ['量化分析', '模拟盘'] },
+    { feature: 'quant-paper-settings', name: '保存模拟盘设置', action: 'edit', permissionPath: ['量化分析', '模拟盘'] },
+    { feature: 'quant-paper-sync', name: '执行模拟盘同步', action: 'edit', permissionPath: ['量化分析', '模拟盘'] },
+    { feature: 'quant-paper-reset', name: '重置模拟盘', action: 'edit', permissionPath: ['量化分析', '模拟盘'] },
+    { feature: 'dashboard', name: '显示看板', action: 'view', permissionPath: ['持仓', '看板'] },
+    { feature: 'pnl', name: '查询盈亏', action: 'view', permissionPath: ['持仓', '看板'] },
+    { feature: 'pnl-toggle', name: '盈亏显隐', action: 'view', permissionPath: ['持仓', '看板'] },
+    { feature: 'trades', name: '交易记录', action: 'view', permissionPath: ['持仓', '交易记录'] },
+    { feature: 'export', name: '导出交易', action: 'view', permissionPath: ['持仓', '交易记录'] },
+    { feature: 'import', name: '导入交易', action: 'edit', permissionPath: ['持仓', '交易记录'] },
+    { feature: 'columns', name: '列数据显隐控制', action: 'view', permissionPath: ['持仓', '持仓明细'] },
+    { feature: 'trade', name: '记一笔', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
+    { feature: 'refresh', name: '刷新价格', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
+    { feature: 'cash', name: '编辑现金', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
+    { feature: 'meta', name: '编辑目标价/打分', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
+    { feature: 'row-trade', name: '行内买卖/记录', action: 'edit', permissionPath: ['持仓', '持仓操作'] }
 ].concat(STOCK_MANAGE_HOLDINGS_COLUMNS.map(function(col) {
     return {
         feature: 'col-' + col.key,
         name: col.name,
         action: 'view',
         featureGroup: 'holdings-field',
+        permissionPath: ['持仓', '持仓明细字段'],
         columnKey: col.key
     };
 }));
@@ -82,29 +83,30 @@ function buildStockManagePermissions() {
             feature: item.feature,
             action: item.action,
             featureGroup: item.featureGroup || null,
-            columnKey: item.columnKey || null
+            columnKey: item.columnKey || null,
+            permissionPath: item.permissionPath || null
         };
     });
 }
 
 var QQQ_DIP_FEATURES = [
-    { feature: 'tab-monitor', name: '抄底监控 Tab', action: 'view' },
-    { feature: 'tab-qq', name: 'QQ 提醒 Tab', action: 'view' },
-    { feature: 'docs', name: '手册预览', action: 'view' },
-    { feature: 'buy-preview', name: '预览买入', action: 'view' },
-    { feature: 'refresh', name: '刷新行情', action: 'edit' },
-    { feature: 'monitor-control', name: '开始/停止监听', action: 'edit' },
-    { feature: 'cash', name: '弹药现金录入', action: 'edit' },
-    { feature: 'settings', name: '规则开关', action: 'edit' },
-    { feature: 'tier-exec', name: '标记档位已执行', action: 'edit' },
-    { feature: 'lots', name: '抄底仓位金额', action: 'view' },
-    { feature: 'lots-edit', name: '登记/删除仓位', action: 'edit' },
-    { feature: 'actions', name: '操作记录', action: 'view' },
-    { feature: 'actions-note', name: '手动记一笔', action: 'edit' },
-    { feature: 'qq-config', name: 'QQ 配置', action: 'view' },
-    { feature: 'qq-save', name: '保存 QQ 配置', action: 'edit' },
-    { feature: 'qq-test', name: '测试 QQ 通知', action: 'edit' },
-    { feature: 'qq-monitor', name: 'QQ 页监听控制', action: 'edit' }
+    { feature: 'tab-monitor', name: '进入抄底监控', action: 'view', permissionPath: ['抄底监控'] },
+    { feature: 'docs', name: '手册预览', action: 'view', permissionPath: ['抄底监控', '行情与规则'] },
+    { feature: 'buy-preview', name: '预览买入', action: 'view', permissionPath: ['抄底监控', '行情与规则'] },
+    { feature: 'refresh', name: '刷新行情', action: 'edit', permissionPath: ['抄底监控', '行情与规则'] },
+    { feature: 'monitor-control', name: '开始/停止监听', action: 'edit', permissionPath: ['抄底监控', '行情与规则'] },
+    { feature: 'cash', name: '弹药现金录入', action: 'edit', permissionPath: ['抄底监控', '资金与仓位'] },
+    { feature: 'lots', name: '查看抄底仓位金额', action: 'view', permissionPath: ['抄底监控', '资金与仓位'] },
+    { feature: 'lots-edit', name: '登记/删除仓位', action: 'edit', permissionPath: ['抄底监控', '资金与仓位'] },
+    { feature: 'settings', name: '规则开关', action: 'edit', permissionPath: ['抄底监控', '规则执行'] },
+    { feature: 'tier-exec', name: '标记档位已执行', action: 'edit', permissionPath: ['抄底监控', '规则执行'] },
+    { feature: 'actions', name: '查看操作记录', action: 'view', permissionPath: ['抄底监控', '操作记录'] },
+    { feature: 'actions-note', name: '手动记一笔', action: 'edit', permissionPath: ['抄底监控', '操作记录'] },
+    { feature: 'tab-qq', name: '进入 QQ 提醒', action: 'view', permissionPath: ['QQ 提醒'] },
+    { feature: 'qq-config', name: '查看 QQ 配置', action: 'view', permissionPath: ['QQ 提醒', '通知配置'] },
+    { feature: 'qq-save', name: '保存 QQ 配置', action: 'edit', permissionPath: ['QQ 提醒', '通知配置'] },
+    { feature: 'qq-test', name: '测试 QQ 通知', action: 'edit', permissionPath: ['QQ 提醒', '通知配置'] },
+    { feature: 'qq-monitor', name: '监听控制', action: 'edit', permissionPath: ['QQ 提醒', '监听控制'] }
 ];
 
 function qqqDipFeaturePermissionId(feature, action) {
@@ -119,7 +121,8 @@ function buildQqqDipPermissions() {
             group: '抄底监控',
             serviceId: QQQ_DIP_SERVICE_ID,
             feature: item.feature,
-            action: item.action
+            action: item.action,
+            permissionPath: item.permissionPath || null
         };
     });
 }
