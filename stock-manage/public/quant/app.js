@@ -35,6 +35,14 @@ function normalizeSymbols(raw) {
   return [...new Set(String(raw || '').split(/[，,\s]+/).map((value) => value.trim().toUpperCase()).filter((value) => /^[A-Z0-9][A-Z0-9.-]{0,23}$/.test(value)))].slice(0, 30);
 }
 
+function setSymbolInputs(value, source = null) {
+  ['#symbol-input', '#backtest-symbol-input'].forEach((selector) => {
+    const input = $(selector);
+    if (input && input !== source) input.value = value;
+  });
+  if (state.settings) state.settings.symbols = normalizeSymbols(value);
+}
+
 function hasNumber(value) { return value !== null && value !== '' && Number.isFinite(Number(value)); }
 function formatNumber(value, digits = 2) { return hasNumber(value) ? Number(value).toFixed(digits) : '—'; }
 function formatMoney(value) { return hasNumber(value) ? `$${Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'; }
@@ -117,8 +125,7 @@ async function saveSettings({ scope = 'watchlist', symbolsSource = '#symbol-inpu
     payload.paperPositionPct = (Number($('#paper-position-pct').value) || state.settings.paperPositionPct * 100) / 100;
   }
   state.settings = await api('/quant/settings', { method: 'PUT', body: JSON.stringify(payload) });
-  $('#symbol-input').value = state.settings.symbols.join(', ');
-  $('#backtest-symbol-input').value = state.settings.symbols.join(', ');
+  setSymbolInputs(state.settings.symbols.join(', '));
   renderConfig();
   $('#save-status').textContent = message;
   setTimeout(() => { $('#save-status').textContent = ''; }, 2500);
@@ -255,7 +262,7 @@ function renderBacktestResult(result) {
   $('#backtest-body').innerHTML = backtestResultRows(result.results, result.period);
   $('#backtest-overview-card').classList.remove('hidden');
   renderReturnChart('overview', $('#backtest-overview-chart'), result.equityCurve, result.initialCapital);
-  if (result.results?.length) $('#backtest-symbol-input').value = result.results.map((item) => item.symbol).join(', ');
+  if (result.results?.length) setSymbolInputs(result.results.map((item) => item.symbol).join(', '));
   if (result.period) $('#backtest-period').value = result.period;
   if (result.initialCapital) $('#backtest-capital').value = result.initialCapital;
   renderBacktestHistory();
@@ -472,6 +479,10 @@ function applyQuantPermissions() {
 
 function bindEvents() {
   $$('.quant-nav').forEach((button) => button.addEventListener('click', () => showView(button.dataset.view)));
+  ['#symbol-input', '#backtest-symbol-input'].forEach((selector) => {
+    const input = $(selector);
+    input.addEventListener('input', () => setSymbolInputs(input.value, input));
+  });
   $('#analysis-form').addEventListener('submit', (event) => { event.preventDefault(); runAnalysis(); });
   $('#refresh-button').addEventListener('click', runAnalysis);
   $('#save-watchlist').addEventListener('click', async () => { await saveSettings({ scope: 'watchlist', message: '自选池已保存' }); await runAnalysis(); });
@@ -531,8 +542,7 @@ async function init() {
   applyDipPermissions();
   applyQuantPermissions();
   state.settings = await api('/quant/settings');
-  $('#symbol-input').value = state.settings.symbols.join(', ');
-  $('#backtest-symbol-input').value = state.settings.symbols.join(', ');
+  setSymbolInputs(state.settings.symbols.join(', '));
   $('#period-select').value = state.settings.period;
   $('#backtest-period').value = state.settings.backtestPeriod || (state.settings.period === '3m' ? '6m' : state.settings.period);
   $('#backtest-capital').value = state.settings.backtestInitialCapital || 100000;
