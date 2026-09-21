@@ -44,7 +44,7 @@ function formatDate(value, includeTime = false) {
   if (!Number.isFinite(number) || number <= 0) return '—';
   return new Date(number).toLocaleString('zh-CN', includeTime ? { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } : { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
-function sourceLabel(source) { return source === 'polygon' ? 'Polygon' : source === 'sina' ? '新浪财经' : source === 'finnhub' ? 'Finnhub' : '行情接口'; }
+function sourceLabel(source) { return source === 'polygon' ? 'Polygon' : source === 'yahoo' ? 'Yahoo' : source === 'sina' ? '新浪财经' : source === 'finnhub' ? 'Finnhub' : '行情接口'; }
 function periodLabel(period) { return ({ '3m': '近 3 个月', '6m': '近 6 个月', '1y': '近 1 年', '2y': '近 2 年', '5y': '近 5 年' })[period] || period || '—'; }
 function signalLabel(signal) { return signal === 'BUY' ? '买入' : signal === 'SELL' ? '卖出' : '观望'; }
 function signalClass(signal) { return signal === 'BUY' ? 'buy' : signal === 'SELL' ? 'sell' : 'hold'; }
@@ -316,7 +316,7 @@ async function loadKline(symbol, period) {
     const result = await api(`/quant/history/${encodeURIComponent(symbol)}?period=${encodeURIComponent(period)}`);
     state.klineCandles = result.candles || [];
     state.klineHasMore = result.hasMore !== false;
-    status.textContent = `${state.klineCandles.length} 根日 K · ${sourceLabel(result.source)} · 左移到边界自动加载更早行情`;
+    status.textContent = `${state.klineCandles.length} 根日 K · ${sourceLabel(result.source)}${result.adjustedForSplits ? ' · 拆股复权' : ''} · 左移到边界自动加载更早行情`;
     if (!globalThis.echarts) throw new Error('图表组件加载失败');
     state.klineChart = globalThis.echarts.init(host, null, { renderer: 'canvas' });
     state.klineChart.setOption(klineOption(state.klineCandles));
@@ -383,7 +383,7 @@ async function loadOlderKline() {
       item.endValue = visibleEnd;
     });
     state.klineChart.setOption(option, true);
-    status.textContent = `${state.klineCandles.length} 根日 K · ${sourceLabel(result.source)}${state.klineHasMore ? ' · 左移继续加载' : ' · 已到可用历史起点'}`;
+    status.textContent = `${state.klineCandles.length} 根日 K · ${sourceLabel(result.source)}${result.adjustedForSplits ? ' · 拆股复权' : ''}${state.klineHasMore ? ' · 左移继续加载' : ' · 已到可用历史起点'}`;
   } catch (error) {
     status.textContent = `更早行情加载失败：${error.message}`;
   } finally {

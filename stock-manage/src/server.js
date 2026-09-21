@@ -445,7 +445,8 @@ async function analyzeQuantSymbols(rawSymbols, rawPeriod, rawConfig, userId = 'l
           config: strategyConfig
         });
       }
-      return analyzeCandles({
+      return {
+        ...analyzeCandles({
         symbol,
         name: quote.name && quote.name !== symbol ? quote.name : name,
         price: Number(quote.price),
@@ -454,7 +455,9 @@ async function analyzeQuantSymbols(rawSymbols, rawPeriod, rawConfig, userId = 'l
         config: strategyConfig,
         historySource: historyResult.value.source,
         quoteSource: quote.source || null
-      });
+        }),
+        adjustedForSplits: historyResult.value.adjustedForSplits === true
+      };
     });
 
     signals.sort((a, b) => {
@@ -509,6 +512,7 @@ app.get('/api/quant/history/:symbol', async (req, res) => {
       symbol,
       period: period.key,
       source: history.source,
+      adjustedForSplits: history.adjustedForSplits === true,
       candles,
       hasMore: candles.length >= Math.floor(days * 0.35),
       timestamp: Date.now()
@@ -585,7 +589,8 @@ app.post('/api/quant/backtest', async (req, res) => {
         const history = await quotes.getStockHistory(symbol, { days: period.days + 120 });
         return {
           ...backtestCandles({ symbol, candles: history.candles, config: strategyConfig, initialCapital: allocation, startTimestamp: backtestStart }),
-          historySource: history.source
+          historySource: history.source,
+          adjustedForSplits: history.adjustedForSplits === true
         };
       } catch (error) {
         return { symbol, status: 'error', message: error.message || '获取历史行情失败' };

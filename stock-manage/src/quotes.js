@@ -130,6 +130,48 @@ function ymdDaysAgo(days, endTimestamp = Date.now()) {
   return ymdUTC(endTimestamp - days * 86400000);
 }
 
+const COMMON_SPLIT_RATIOS = [1.5, 2, 3, 4, 5, 7, 8, 10, 20, 25, 50, 100];
+
+function splitPriceFactor(priceRatio) {
+  if (!Number.isFinite(priceRatio) || priceRatio <= 0) return 1;
+  let best = { factor: 1, error: Infinity };
+  for (const ratio of COMMON_SPLIT_RATIOS) {
+    for (const factor of [ratio, 1 / ratio]) {
+      const error = Math.abs(priceRatio / factor - 1);
+      if (error < best.error) best = { factor, error };
+    }
+  }
+  return best.error <= 0.12 ? best.factor : 1;
+}
+
+export function adjustCandlesForSplits(candles) {
+  const raw = (Array.isArray(candles) ? candles : [])
+    .map((candle) => ({ ...candle }))
+    .sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+  const adjusted = new Array(raw.length);
+  let cumulativeFactor = 1;
+  let splitCount = 0;
+  for (let index = raw.length - 1; index >= 0; index--) {
+    if (index < raw.length - 1) {
+      const transition = Number(raw[index + 1].close) / Number(raw[index].close);
+      const factor = splitPriceFactor(transition);
+      if (factor !== 1) {
+        cumulativeFactor *= factor;
+        splitCount += 1;
+      }
+    }
+    adjusted[index] = {
+      ...raw[index],
+      open: Number(raw[index].open) * cumulativeFactor,
+      high: Number(raw[index].high) * cumulativeFactor,
+      low: Number(raw[index].low) * cumulativeFactor,
+      close: Number(raw[index].close) * cumulativeFactor,
+      volume: cumulativeFactor ? (Number(raw[index].volume) || 0) / cumulativeFactor : Number(raw[index].volume) || 0
+    };
+  }
+  return { candles: adjusted, splitCount };
+}
+
 export function createQuoteService(config) {
   const finnhubKey = config.finnhubApiKey;
   const polygonKey = config.polygonApiKey;
@@ -194,7 +236,40 @@ export function createQuoteService(config) {
       .filter((bar) => [bar.timestamp, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite))
       .sort((a, b) => a.timestamp - b.timestamp);
     if (!candles.length) throw new Error('Polygon 无历史行情');
-    return { candles, source: 'polygon' };
+    return { candles, source: 'polygon', adjustedForSplits: true };
+  }
+
+  async function getStockHistoryFromYahoo(symbol, days, endTimestamp = Date.now()) {
+    const period1 = Math.floor((endTimestamp - days * 86400000) / 1000);
+    const period2 = Math.floor(endTimestamp / 1000) + 86400;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}` +
+      `?period1=${period1}&period2=${period2}&interval=1d&events=splits`;
+    let data;
+    try {
+      data = await fetchJson(url, { 'User-Agent': 'Mozilla/5.0' });
+    } catch (e) {
+      throw new Error(`Yahoo ${e.message}`);
+    }
+    const error = data?.chart?.error;
+    if (error) throw new Error(error.description || error.code || 'Yahoo 无历史行情');
+    const result = data?.chart?.result?.[0];
+    const quote = result?.indicators?.quote?.[0];
+    if (!Array.isArray(result?.timestamp) || !quote) throw new Error('Yahoo 无历史行情');
+    const candles = result.timestamp.map((timestamp, index) => ({
+      timestamp: Number(timestamp) * 1000,
+      open: Number(quote.open?.[index]),
+      high: Number(quote.high?.[index]),
+      low: Number(quote.low?.[index]),
+      close: Number(quote.close?.[index]),
+      volume: Number(quote.volume?.[index]) || 0
+    })).filter((bar) => [bar.timestamp, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite));
+    if (!candles.length) throw new Error('Yahoo 无历史行情');
+    return {
+      candles: candles.sort((a, b) => a.timestamp - b.timestamp),
+      source: 'yahoo',
+      adjustedForSplits: true,
+      splitCount: Object.keys(result.events?.splits || {}).length
+    };
   }
 
   async function getStockHistoryFromSina(symbol, days, endTimestamp = Date.now()) {
@@ -213,7 +288,7 @@ export function createQuoteService(config) {
     const rows = Array.isArray(data) ? data : data?.result?.data;
     if (!Array.isArray(rows)) throw new Error('新浪财经无历史行情');
     const from = endTimestamp - days * 86400000;
-    const candles = rows
+    const rawCandles = rows
       .map((row) => ({
         timestamp: Date.parse(`${row.d}T00:00:00Z`),
         open: Number(row.o),
@@ -222,14 +297,12 @@ export function createQuoteService(config) {
         close: Number(row.c),
         volume: Number(row.v) || 0
       }))
-      .filter((bar) => (
-        [bar.timestamp, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite)
-          && bar.timestamp >= from
-          && bar.timestamp <= endTimestamp
-      ))
+      .filter((bar) => [bar.timestamp, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite))
       .sort((a, b) => a.timestamp - b.timestamp);
+    const normalized = adjustCandlesForSplits(rawCandles);
+    const candles = normalized.candles.filter((bar) => bar.timestamp >= from && bar.timestamp <= endTimestamp);
     if (!candles.length) throw new Error('新浪财经无历史行情');
-    return { candles, source: 'sina' };
+    return { candles, source: 'sina', adjustedForSplits: true, splitCount: normalized.splitCount };
   }
 
   async function getStockHistoryFromFinnhub(symbol, days, endTimestamp = Date.now()) {
@@ -254,7 +327,8 @@ export function createQuoteService(config) {
       volume: Number(data.v?.[index]) || 0
     })).filter((bar) => [bar.timestamp, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite));
     if (!candles.length) throw new Error('Finnhub 无历史行情');
-    return { candles: candles.sort((a, b) => a.timestamp - b.timestamp), source: 'finnhub' };
+    const normalized = adjustCandlesForSplits(candles);
+    return { candles: normalized.candles, source: 'finnhub', adjustedForSplits: true, splitCount: normalized.splitCount };
   }
 
   async function getStockHistory(symbol, options = {}) {
@@ -277,6 +351,7 @@ export function createQuoteService(config) {
     const coverageTolerance = Math.max(45, Math.round(days * 0.05)) * 86400000;
     for (const [provider, loader, enabled] of [
       ['Polygon', getStockHistoryFromPolygon, polygonKey],
+      ['Yahoo', getStockHistoryFromYahoo, true],
       ['新浪财经', getStockHistoryFromSina, true],
       ['Finnhub', getStockHistoryFromFinnhub, finnhubKey]
     ]) {
