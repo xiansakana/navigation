@@ -349,7 +349,7 @@ function zoomKlineAtPointer(event) {
   const delta = Math.max(-300, Math.min(300, event.deltaY * unit));
   const nextSpan = Math.max(Math.min(10, dates.length), Math.min(dates.length, Math.round(currentSpan * Math.exp(delta * 0.002))));
   if (nextSpan === currentSpan) return;
-  const anchorIndex = startIndex + focusRatio * (currentSpan - 1);
+  const anchorIndex = Math.round(startIndex + focusRatio * (currentSpan - 1));
   let nextStart = Math.round(anchorIndex - focusRatio * (nextSpan - 1));
   nextStart = Math.max(0, Math.min(dates.length - nextSpan, nextStart));
   const nextEnd = nextStart + nextSpan - 1;
