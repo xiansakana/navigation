@@ -24,6 +24,10 @@
   box-shadow: 0 18px 45px rgba(0, 0, 0, .12);
 }
 
+@media (min-width: 701px) {
+  .quant-app.sm-app--full .quant-sidebar { left: 20px; }
+}
+
 .quant-brand {
   display: flex;
   align-items: center;
