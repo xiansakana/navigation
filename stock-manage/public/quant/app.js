@@ -354,6 +354,20 @@ async function loadOlderKline() {
   const oldest = Number(state.klineCandles[0].timestamp);
   const oldLength = state.klineCandles.length;
   const zoom = state.klineChart.getOption().dataZoom?.[0] || { start: 0, end: 100 };
+  const oldDates = state.klineCandles.map((item) => new Date(Number(item.timestamp)).toISOString().slice(0, 10));
+  const zoomIndex = (value, percent, fallback) => {
+    if (typeof value === 'string') {
+      const index = oldDates.indexOf(value);
+      if (index >= 0) return index;
+    }
+    if (Number.isFinite(Number(value))) {
+      return Math.max(0, Math.min(oldLength - 1, Math.round(Number(value))));
+    }
+    const ratio = Number.isFinite(Number(percent)) ? Number(percent) : fallback;
+    return Math.max(0, Math.min(oldLength - 1, Math.round(ratio / 100 * (oldLength - 1))));
+  };
+  const visibleStart = oldDates[zoomIndex(zoom.startValue, zoom.start, 0)];
+  const visibleEnd = oldDates[zoomIndex(zoom.endValue, zoom.end, 100)];
   status.textContent = `正在加载 ${formatDate(oldest)} 之前的行情…`;
   try {
     const result = await api(`/quant/history/${encodeURIComponent(state.klineSymbol)}?before=${oldest}&days=730`);
@@ -362,12 +376,12 @@ async function loadOlderKline() {
     const added = state.klineCandles.length - oldLength;
     state.klineHasMore = result.hasMore !== false && added > 0;
     const option = klineOption(state.klineCandles);
-    const oldEndIndex = Math.min(oldLength - 1, Math.round((Number(zoom.end) || 100) / 100 * (oldLength - 1)));
-    const dates = state.klineCandles.map((item) => new Date(Number(item.timestamp)).toISOString().slice(0, 10));
-    option.dataZoom[0].startValue = dates[Math.max(0, added)];
-    option.dataZoom[0].endValue = dates[Math.min(dates.length - 1, added + oldEndIndex)];
-    option.dataZoom[1].startValue = option.dataZoom[0].startValue;
-    option.dataZoom[1].endValue = option.dataZoom[0].endValue;
+    option.dataZoom.forEach((item) => {
+      delete item.start;
+      delete item.end;
+      item.startValue = visibleStart;
+      item.endValue = visibleEnd;
+    });
     state.klineChart.setOption(option, true);
     status.textContent = `${state.klineCandles.length} 根日 K · ${sourceLabel(result.source)}${state.klineHasMore ? ' · 左移继续加载' : ' · 已到可用历史起点'}`;
   } catch (error) {
