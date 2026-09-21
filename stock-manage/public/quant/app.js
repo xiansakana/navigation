@@ -14,6 +14,7 @@ const state = {
   klineLoadingOlder: false,
   klineHasMore: true,
   klineBoundaryTimer: null,
+  klineWheelHandler: null,
   backtestResults: new Map(),
   backtestHistory: [],
   activeBacktestId: '',
@@ -285,6 +286,9 @@ function clearBacktestResult() {
 function closeKline() {
   clearTimeout(state.klineBoundaryTimer);
   state.klineBoundaryTimer = null;
+  const host = $('#kline-chart');
+  if (host && state.klineWheelHandler) host.removeEventListener('wheel', state.klineWheelHandler);
+  state.klineWheelHandler = null;
   state.klineChart?.dispose();
   state.klineChart = null;
   state.klineSymbol = '';
@@ -307,16 +311,62 @@ function klineOption(candles) {
     grid: [{ left: 62, right: 24, top: 18, height: '62%' }, { left: 62, right: 24, top: '75%', height: '14%' }],
     xAxis: [{ type: 'category', data: dates, boundaryGap: true, axisLine: { lineStyle: { color: '#465267' } }, axisLabel: { color: '#8f9bad' }, min: 'dataMin', max: 'dataMax' }, { type: 'category', gridIndex: 1, data: dates, boundaryGap: true, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#465267' } }, axisTick: { show: false }, min: 'dataMin', max: 'dataMax' }],
     yAxis: [{ scale: true, splitLine: { lineStyle: { color: 'rgba(148,163,184,.12)' } }, axisLabel: { color: '#8f9bad' } }, { scale: true, gridIndex: 1, splitNumber: 2, axisLabel: { color: '#8f9bad', formatter: (value) => value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : `${(value / 1000).toFixed(0)}K` }, splitLine: { show: false } }],
-    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: Math.max(0, 100 - Math.min(100, 90 / candles.length * 100)), end: 100, zoomOnMouseWheel: true, moveOnMouseWheel: true, moveOnMouseMove: true }, { show: true, xAxisIndex: [0, 1], type: 'slider', bottom: 4, height: 20, borderColor: '#30394a', fillerColor: 'rgba(91,156,255,.16)', textStyle: { color: '#8f9bad' } }],
+    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: Math.max(0, 100 - Math.min(100, 90 / candles.length * 100)), end: 100, zoomOnMouseWheel: false, moveOnMouseWheel: false, moveOnMouseMove: true }, { show: true, xAxisIndex: [0, 1], type: 'slider', bottom: 4, height: 20, borderColor: '#30394a', fillerColor: 'rgba(91,156,255,.16)', textStyle: { color: '#8f9bad' } }],
     visualMap: { show: false, seriesIndex: 1, dimension: 2, pieces: [{ value: 1, color: '#3ddc84' }, { value: -1, color: '#ff7b7b' }] },
     series: [{ name: 'K 线', type: 'candlestick', data: values, itemStyle: { color: '#3ddc84', color0: '#ff7b7b', borderColor: '#3ddc84', borderColor0: '#ff7b7b' } }, { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: volumes }]
   };
+}
+
+function klineZoomIndex(dates, value, percent, fallback) {
+  if (typeof value === 'string') {
+    const index = dates.indexOf(value);
+    if (index >= 0) return index;
+  }
+  if (Number.isFinite(Number(value))) {
+    return Math.max(0, Math.min(dates.length - 1, Math.round(Number(value))));
+  }
+  const ratio = Number.isFinite(Number(percent)) ? Number(percent) : fallback;
+  return Math.max(0, Math.min(dates.length - 1, Math.round(ratio / 100 * (dates.length - 1))));
+}
+
+function zoomKlineAtPointer(event) {
+  if (!state.klineChart || state.klineCandles.length < 2) return;
+  event.preventDefault();
+  const chart = state.klineChart;
+  const dates = state.klineCandles.map((item) => new Date(Number(item.timestamp)).toISOString().slice(0, 10));
+  const zoom = chart.getOption().dataZoom?.[0] || { start: 0, end: 100 };
+  const startIndex = klineZoomIndex(dates, zoom.startValue, zoom.start, 0);
+  const endIndex = klineZoomIndex(dates, zoom.endValue, zoom.end, 100);
+  const hostRect = event.currentTarget.getBoundingClientRect();
+  const scaleX = hostRect.width ? chart.getWidth() / hostRect.width : 1;
+  const pointerX = (event.clientX - hostRect.left) * scaleX;
+  const gridRect = chart.getModel()?.getComponent('grid', 0)?.coordinateSystem?.getRect();
+  const gridLeft = Number(gridRect?.x) || 62;
+  const gridWidth = Number(gridRect?.width) || Math.max(1, chart.getWidth() - 86);
+  const focusRatio = Math.max(0, Math.min(1, (pointerX - gridLeft) / gridWidth));
+  const currentSpan = Math.max(2, endIndex - startIndex + 1);
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? hostRect.height : 1;
+  const delta = Math.max(-300, Math.min(300, event.deltaY * unit));
+  const nextSpan = Math.max(Math.min(10, dates.length), Math.min(dates.length, Math.round(currentSpan * Math.exp(delta * 0.002))));
+  if (nextSpan === currentSpan) return;
+  const anchorIndex = startIndex + focusRatio * (currentSpan - 1);
+  let nextStart = Math.round(anchorIndex - focusRatio * (nextSpan - 1));
+  nextStart = Math.max(0, Math.min(dates.length - nextSpan, nextStart));
+  const nextEnd = nextStart + nextSpan - 1;
+  chart.dispatchAction({
+    type: 'dataZoom',
+    dataZoomIndex: 0,
+    startValue: dates[nextStart],
+    endValue: dates[nextEnd]
+  });
 }
 
 async function loadKline(symbol, period) {
   const status = $('#kline-status');
   const host = $('#kline-chart');
   status.textContent = '正在加载真实历史行情…';
+  if (state.klineWheelHandler) host.removeEventListener('wheel', state.klineWheelHandler);
+  state.klineWheelHandler = null;
   state.klineChart?.dispose();
   state.klineChart = null;
   try {
@@ -332,8 +382,8 @@ async function loadKline(symbol, period) {
       state.klineBoundaryTimer = setTimeout(checkKlineBoundary, 80);
     };
     state.klineChart.on('datazoom', scheduleBoundaryCheck);
-    state.klineChart.getZr().on('mousewheel', scheduleBoundaryCheck);
-    host.addEventListener('wheel', scheduleBoundaryCheck, { passive: true });
+    state.klineWheelHandler = zoomKlineAtPointer;
+    host.addEventListener('wheel', state.klineWheelHandler, { passive: false });
   } catch (error) {
     status.textContent = error.message || 'K 线加载失败';
     host.innerHTML = `<div class="quant-kline-error">${escapeHtml(error.message || 'K 线加载失败')}</div>`;
@@ -362,19 +412,8 @@ async function loadOlderKline() {
   const oldLength = state.klineCandles.length;
   const zoom = state.klineChart.getOption().dataZoom?.[0] || { start: 0, end: 100 };
   const oldDates = state.klineCandles.map((item) => new Date(Number(item.timestamp)).toISOString().slice(0, 10));
-  const zoomIndex = (value, percent, fallback) => {
-    if (typeof value === 'string') {
-      const index = oldDates.indexOf(value);
-      if (index >= 0) return index;
-    }
-    if (Number.isFinite(Number(value))) {
-      return Math.max(0, Math.min(oldLength - 1, Math.round(Number(value))));
-    }
-    const ratio = Number.isFinite(Number(percent)) ? Number(percent) : fallback;
-    return Math.max(0, Math.min(oldLength - 1, Math.round(ratio / 100 * (oldLength - 1))));
-  };
-  const visibleStart = oldDates[zoomIndex(zoom.startValue, zoom.start, 0)];
-  const visibleEnd = oldDates[zoomIndex(zoom.endValue, zoom.end, 100)];
+  const visibleStart = oldDates[klineZoomIndex(oldDates, zoom.startValue, zoom.start, 0)];
+  const visibleEnd = oldDates[klineZoomIndex(oldDates, zoom.endValue, zoom.end, 100)];
   status.textContent = `正在加载 ${formatDate(oldest)} 之前的行情…`;
   try {
     const result = await api(`/quant/history/${encodeURIComponent(state.klineSymbol)}?before=${oldest}&days=730`);
