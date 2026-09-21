@@ -579,11 +579,12 @@ app.post('/api/quant/backtest', async (req, res) => {
     saved.backtestInitialCapital = initialCapital;
     quantStore.write(userId, savedState);
     const allocation = initialCapital / symbols.length;
+    const backtestStart = Date.now() - period.days * 86400000;
     const results = await mapWithConcurrency(symbols, 2, async (symbol) => {
       try {
-        const history = await quotes.getStockHistory(symbol, { days: period.days });
+        const history = await quotes.getStockHistory(symbol, { days: period.days + 120 });
         return {
-          ...backtestCandles({ symbol, candles: history.candles, config: strategyConfig, initialCapital: allocation }),
+          ...backtestCandles({ symbol, candles: history.candles, config: strategyConfig, initialCapital: allocation, startTimestamp: backtestStart }),
           historySource: history.source
         };
       } catch (error) {

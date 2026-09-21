@@ -312,7 +312,8 @@ export function backtestCandles({
   symbol,
   candles,
   config: rawConfig = DEFAULT_QUANT_CONFIG,
-  initialCapital = 10000
+  initialCapital = 10000,
+  startTimestamp = null
 }) {
   const config = normalizeQuantConfig(rawConfig);
   const capital = Math.max(100, Number(initialCapital) || 10000);
@@ -344,7 +345,10 @@ export function backtestCandles({
   let maxDrawdown = 0;
   const trades = [];
   const equityCurve = [];
-  const startIndex = minimumPoints - 1;
+  const requestedStartIndex = Number.isFinite(Number(startTimestamp))
+    ? cleanCandles.findIndex((candle) => candle.timestamp >= Number(startTimestamp))
+    : -1;
+  const startIndex = Math.max(minimumPoints - 1, requestedStartIndex >= 0 ? requestedStartIndex : 0);
   const firstPrice = cleanCandles[startIndex].close;
 
   for (let index = startIndex; index < cleanCandles.length; index += 1) {

@@ -95,3 +95,12 @@ test('backtests candles and returns an equity curve', () => {
   assert.ok(Array.isArray(result.trades));
   assert.ok(result.trades.every((trade) => ['BUY', 'SELL'].includes(trade.side)));
 });
+
+test('uses earlier candles only for warmup before the requested backtest range', () => {
+  const history = candles(220);
+  const startTimestamp = history[100].timestamp;
+  const result = backtestCandles({ symbol: 'AAPL', candles: history, initialCapital: 10000, startTimestamp });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.equityCurve[0].timestamp, startTimestamp);
+  assert.ok(result.trades.every((trade) => trade.timestamp >= startTimestamp));
+});

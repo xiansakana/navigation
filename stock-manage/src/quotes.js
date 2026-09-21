@@ -262,7 +262,7 @@ export function createQuoteService(config) {
     if (!sym || isAShareSymbol(sym) || parseOptionSymbol(sym)) {
       throw new Error('历史量化行情当前仅支持美股正股');
     }
-    const days = Math.min(1825, Math.max(90, Number(options.days) || 365));
+    const days = Math.min(2190, Math.max(90, Number(options.days) || 365));
     const requestedEnd = Number(options.endTimestamp);
     const endTimestamp = Number.isFinite(requestedEnd)
       ? Math.min(Date.now(), Math.max(Date.UTC(1990, 0, 1), requestedEnd))
