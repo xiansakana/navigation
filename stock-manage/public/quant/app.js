@@ -287,7 +287,7 @@ function closeKline() {
   clearTimeout(state.klineBoundaryTimer);
   state.klineBoundaryTimer = null;
   const host = $('#kline-chart');
-  if (host && state.klineWheelHandler) host.removeEventListener('wheel', state.klineWheelHandler);
+  if (host && state.klineWheelHandler) host.removeEventListener('wheel', state.klineWheelHandler, true);
   state.klineWheelHandler = null;
   state.klineChart?.dispose();
   state.klineChart = null;
@@ -365,7 +365,7 @@ async function loadKline(symbol, period) {
   const status = $('#kline-status');
   const host = $('#kline-chart');
   status.textContent = '正在加载真实历史行情…';
-  if (state.klineWheelHandler) host.removeEventListener('wheel', state.klineWheelHandler);
+  if (state.klineWheelHandler) host.removeEventListener('wheel', state.klineWheelHandler, true);
   state.klineWheelHandler = null;
   state.klineChart?.dispose();
   state.klineChart = null;
@@ -383,7 +383,7 @@ async function loadKline(symbol, period) {
     };
     state.klineChart.on('datazoom', scheduleBoundaryCheck);
     state.klineWheelHandler = zoomKlineAtPointer;
-    host.addEventListener('wheel', state.klineWheelHandler, { passive: false });
+    host.addEventListener('wheel', state.klineWheelHandler, { passive: false, capture: true });
   } catch (error) {
     status.textContent = error.message || 'K 线加载失败';
     host.innerHTML = `<div class="quant-kline-error">${escapeHtml(error.message || 'K 线加载失败')}</div>`;
