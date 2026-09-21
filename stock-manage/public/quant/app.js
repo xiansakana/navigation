@@ -332,6 +332,7 @@ function klineZoomIndex(dates, value, percent, fallback) {
 function zoomKlineAtPointer(event) {
   if (!state.klineChart || state.klineCandles.length < 2) return;
   event.preventDefault();
+  event.stopPropagation();
   const chart = state.klineChart;
   const dates = state.klineCandles.map((item) => new Date(Number(item.timestamp)).toISOString().slice(0, 10));
   const zoom = chart.getOption().dataZoom?.[0] || { start: 0, end: 100 };
