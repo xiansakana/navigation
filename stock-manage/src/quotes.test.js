@@ -82,3 +82,36 @@ test('stock history falls back to Finnhub when Polygon and Sina are unavailable'
   assert.equal(result.candles[0].timestamp, 100000);
   assert.equal(requested.length, 3);
 });
+
+test('stock history rejects a truncated provider range for five-year requests', async (context) => {
+  const originalFetch = global.fetch;
+  context.after(() => { global.fetch = originalFetch; });
+  const endTimestamp = Date.UTC(2026, 8, 21);
+  global.fetch = async (url) => {
+    if (String(url).includes('api.polygon.io')) {
+      return response({
+        results: Array.from({ length: 499 }, (_, index) => ({
+          t: Date.UTC(2024, 8, 20) + index * 86400000,
+          o: 100,
+          h: 102,
+          l: 99,
+          c: 101,
+          v: 1000
+        }))
+      });
+    }
+    return response(Array.from({ length: 40 }, (_, index) => ({
+      d: new Date(Date.UTC(2021, 8, 21) + index * 45 * 86400000).toISOString().slice(0, 10),
+      o: '100',
+      h: '102',
+      l: '99',
+      c: '101',
+      v: '1000'
+    })));
+  };
+
+  const service = createQuoteService({ finnhubApiKey: 'f', polygonApiKey: 'p' });
+  const result = await service.getStockHistory('AAPL', { days: 1825, endTimestamp });
+  assert.equal(result.source, 'sina');
+  assert.ok(result.candles[0].timestamp <= Date.UTC(2021, 10, 15));
+});

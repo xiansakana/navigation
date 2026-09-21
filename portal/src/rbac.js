@@ -42,6 +42,7 @@ var STOCK_MANAGE_FEATURES = [
     { feature: 'quant-config', name: '保存策略参数', action: 'edit', permissionPath: ['量化分析', '策略参数页'] },
     { feature: 'quant-backtest', name: '进入历史回测页', action: 'view', permissionPath: ['量化分析', '历史回测页'] },
     { feature: 'quant-backtest-run', name: '运行历史回测', action: 'edit', permissionPath: ['量化分析', '历史回测页'] },
+    { feature: 'quant-backtest-delete', name: '删除回测记录', action: 'edit', permissionPath: ['量化分析', '历史回测页'] },
     { feature: 'quant-paper', name: '进入模拟盘页', action: 'view', permissionPath: ['量化分析', '模拟盘'] },
     { feature: 'quant-paper-settings', name: '保存模拟盘设置', action: 'edit', permissionPath: ['量化分析', '模拟盘'] },
     { feature: 'quant-paper-sync', name: '执行模拟盘同步', action: 'edit', permissionPath: ['量化分析', '模拟盘'] },

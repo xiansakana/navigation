@@ -272,6 +272,9 @@ export function createQuoteService(config) {
     const cached = stockHistoryCache.get(cacheKey);
     if (cached && Date.now() - cached.at < stockHistoryCacheMs) return cached.value;
     const errors = [];
+    let bestPartial = null;
+    const requestedStart = endTimestamp - days * 86400000;
+    const coverageTolerance = Math.max(45, Math.round(days * 0.05)) * 86400000;
     for (const [provider, loader, enabled] of [
       ['Polygon', getStockHistoryFromPolygon, polygonKey],
       ['新浪财经', getStockHistoryFromSina, true],
@@ -283,11 +286,24 @@ export function createQuoteService(config) {
       }
       try {
         const value = await loader(sym, days, endTimestamp);
-        stockHistoryCache.set(cacheKey, { value, at: Date.now() });
-        return value;
+        const firstTimestamp = Number(value.candles[0]?.timestamp);
+        const coversRange = value.candles.length < 30
+          || firstTimestamp <= requestedStart + coverageTolerance;
+        if (coversRange) {
+          stockHistoryCache.set(cacheKey, { value, at: Date.now() });
+          return value;
+        }
+        errors.push(`${provider}: 仅返回 ${value.candles.length} 根，未覆盖请求区间`);
+        if (!bestPartial || firstTimestamp < Number(bestPartial.candles[0]?.timestamp)) {
+          bestPartial = value;
+        }
       } catch (e) {
         errors.push(`${provider}: ${e.message}`);
       }
+    }
+    if (bestPartial) {
+      stockHistoryCache.set(cacheKey, { value: bestPartial, at: Date.now() });
+      return bestPartial;
     }
     throw new Error(`历史行情不可用（${errors.join('; ')}）`);
   }

@@ -13,7 +13,10 @@ const state = {
   klineCandles: [],
   klineLoadingOlder: false,
   klineHasMore: true,
+  klineBoundaryTimer: null,
   backtestResults: new Map(),
+  backtestHistory: [],
+  activeBacktestId: '',
   returnCharts: new Map()
 };
 
@@ -42,6 +45,7 @@ function formatDate(value, includeTime = false) {
   return new Date(number).toLocaleString('zh-CN', includeTime ? { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } : { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
 function sourceLabel(source) { return source === 'polygon' ? 'Polygon' : source === 'sina' ? '新浪财经' : source === 'finnhub' ? 'Finnhub' : '行情接口'; }
+function periodLabel(period) { return ({ '3m': '近 3 个月', '6m': '近 6 个月', '1y': '近 1 年', '2y': '近 2 年', '5y': '近 5 年' })[period] || period || '—'; }
 function signalLabel(signal) { return signal === 'BUY' ? '买入' : signal === 'SELL' ? '卖出' : '观望'; }
 function signalClass(signal) { return signal === 'BUY' ? 'buy' : signal === 'SELL' ? 'sell' : 'hold'; }
 function badge(signal) { const icon = signal === 'BUY' ? '↗' : signal === 'SELL' ? '↘' : '—'; return `<span class="quant-badge quant-badge-${signalClass(signal)}"><b>${icon}</b>${signalLabel(signal)}</span>`; }
@@ -215,7 +219,65 @@ function backtestResultRows(results, period) {
   }).join('');
 }
 
+function renderBacktestHistory() {
+  $('#backtest-history-count').textContent = `${state.backtestHistory.length} 条记录`;
+  $('#backtest-history-list').innerHTML = state.backtestHistory.length
+    ? state.backtestHistory.map((item) => {
+      const symbols = (item.symbols || []).join(', ');
+      const active = item.id === state.activeBacktestId ? ' active' : '';
+      const range = item.from && item.to ? `${formatDate(item.from)} — ${formatDate(item.to)}` : periodLabel(item.period);
+      const deleteButton = can('quant-backtest-delete', 'edit')
+        ? `<button class="btn link quant-history-delete" type="button" data-delete-backtest="${escapeHtml(item.id)}">删除</button>`
+        : '';
+      return `<article class="quant-history-item${active}"><button type="button" class="quant-history-open" data-load-backtest="${escapeHtml(item.id)}"><span><strong>${periodLabel(item.period)} · ${escapeHtml(symbols)}</strong><small>${formatDate(Date.parse(item.createdAt), true)} · 实际区间 ${range}</small></span><span class="${Number(item.totalReturn) >= 0 ? 'pos' : 'neg'}">${formatPercent(item.totalReturn, true)}</span></button>${deleteButton}</article>`;
+    }).join('')
+    : '<p class="quant-trades-empty">暂无已保存的回测。</p>';
+}
+
+async function loadBacktestHistory() {
+  const result = await api('/quant/backtests?limit=20');
+  state.backtestHistory = result.items || [];
+  renderBacktestHistory();
+}
+
+function renderBacktestResult(result) {
+  state.activeBacktestId = result.id || '';
+  $('#bt-equity').textContent = formatMoney(result.finalEquity);
+  $('#bt-return').textContent = formatPercent(result.totalReturn, true);
+  $('#bt-return').className = result.totalReturn >= 0 ? 'pos' : 'neg';
+  $('#bt-drawdown').textContent = formatPercent(-result.maxDrawdown, true);
+  $('#bt-winrate').textContent = `${formatPercent(result.winRate, true)} / ${result.completedTrades}`;
+  const actualRange = result.from && result.to ? `，实际区间 ${formatDate(result.from)} 至 ${formatDate(result.to)}` : '';
+  $('#backtest-note').textContent = `${result.results.filter((item) => item.status === 'ok').length}/${result.results.length} 个标的完成，${periodLabel(result.period)}${actualRange}，买入持有同期平均 ${formatPercent(result.buyHoldReturn, true)}`;
+  state.returnCharts.forEach((chart) => chart.dispose());
+  state.returnCharts.clear();
+  state.backtestResults = new Map(result.results.filter((item) => item.status === 'ok').map((item) => [item.symbol, item]));
+  $('#backtest-body').innerHTML = backtestResultRows(result.results, result.period);
+  $('#backtest-overview-card').classList.remove('hidden');
+  renderReturnChart('overview', $('#backtest-overview-chart'), result.equityCurve, result.initialCapital);
+  if (result.results?.length) $('#backtest-symbol-input').value = result.results.map((item) => item.symbol).join(', ');
+  if (result.period) $('#backtest-period').value = result.period;
+  if (result.initialCapital) $('#backtest-capital').value = result.initialCapital;
+  renderBacktestHistory();
+}
+
+function clearBacktestResult() {
+  state.activeBacktestId = '';
+  state.backtestResults.clear();
+  state.returnCharts.forEach((chart) => chart.dispose());
+  state.returnCharts.clear();
+  $('#bt-equity').textContent = '—';
+  $('#bt-return').textContent = '—';
+  $('#bt-drawdown').textContent = '—';
+  $('#bt-winrate').textContent = '—';
+  $('#backtest-note').textContent = '设置资金和范围后运行回测。';
+  $('#backtest-body').innerHTML = '<tr><td colspan="8" class="quant-empty">尚未运行回测</td></tr>';
+  $('#backtest-overview-card').classList.add('hidden');
+}
+
 function closeKline() {
+  clearTimeout(state.klineBoundaryTimer);
+  state.klineBoundaryTimer = null;
   state.klineChart?.dispose();
   state.klineChart = null;
   state.klineSymbol = '';
@@ -238,7 +300,7 @@ function klineOption(candles) {
     grid: [{ left: 62, right: 24, top: 18, height: '62%' }, { left: 62, right: 24, top: '75%', height: '14%' }],
     xAxis: [{ type: 'category', data: dates, boundaryGap: true, axisLine: { lineStyle: { color: '#465267' } }, axisLabel: { color: '#8f9bad' }, min: 'dataMin', max: 'dataMax' }, { type: 'category', gridIndex: 1, data: dates, boundaryGap: true, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#465267' } }, axisTick: { show: false }, min: 'dataMin', max: 'dataMax' }],
     yAxis: [{ scale: true, splitLine: { lineStyle: { color: 'rgba(148,163,184,.12)' } }, axisLabel: { color: '#8f9bad' } }, { scale: true, gridIndex: 1, splitNumber: 2, axisLabel: { color: '#8f9bad', formatter: (value) => value >= 1000000 ? `${(value / 1000000).toFixed(1)}M` : `${(value / 1000).toFixed(0)}K` }, splitLine: { show: false } }],
-    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: Math.max(0, 100 - Math.min(100, 90 / candles.length * 100)), end: 100 }, { show: true, xAxisIndex: [0, 1], type: 'slider', bottom: 4, height: 20, borderColor: '#30394a', fillerColor: 'rgba(91,156,255,.16)', textStyle: { color: '#8f9bad' } }],
+    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: Math.max(0, 100 - Math.min(100, 90 / candles.length * 100)), end: 100, zoomOnMouseWheel: true, moveOnMouseWheel: true, moveOnMouseMove: true }, { show: true, xAxisIndex: [0, 1], type: 'slider', bottom: 4, height: 20, borderColor: '#30394a', fillerColor: 'rgba(91,156,255,.16)', textStyle: { color: '#8f9bad' } }],
     visualMap: { show: false, seriesIndex: 1, dimension: 2, pieces: [{ value: 1, color: '#3ddc84' }, { value: -1, color: '#ff7b7b' }] },
     series: [{ name: 'K 线', type: 'candlestick', data: values, itemStyle: { color: '#3ddc84', color0: '#ff7b7b', borderColor: '#3ddc84', borderColor0: '#ff7b7b' } }, { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: volumes }]
   };
@@ -258,14 +320,31 @@ async function loadKline(symbol, period) {
     if (!globalThis.echarts) throw new Error('图表组件加载失败');
     state.klineChart = globalThis.echarts.init(host, null, { renderer: 'canvas' });
     state.klineChart.setOption(klineOption(state.klineCandles));
-    state.klineChart.on('datazoom', (event) => {
-      const zoom = event.batch?.[0] || event;
-      if (Number(zoom.start) <= 3) loadOlderKline();
-    });
+    const scheduleBoundaryCheck = () => {
+      clearTimeout(state.klineBoundaryTimer);
+      state.klineBoundaryTimer = setTimeout(checkKlineBoundary, 80);
+    };
+    state.klineChart.on('datazoom', scheduleBoundaryCheck);
+    state.klineChart.getZr().on('mousewheel', scheduleBoundaryCheck);
+    host.addEventListener('wheel', scheduleBoundaryCheck, { passive: true });
   } catch (error) {
     status.textContent = error.message || 'K 线加载失败';
     host.innerHTML = `<div class="quant-kline-error">${escapeHtml(error.message || 'K 线加载失败')}</div>`;
   }
+}
+
+function checkKlineBoundary() {
+  if (!state.klineChart || state.klineLoadingOlder || !state.klineHasMore) return;
+  const zoom = state.klineChart.getOption().dataZoom?.[0] || {};
+  let nearLeft = Number.isFinite(Number(zoom.start)) && Number(zoom.start) <= 5;
+  if (!nearLeft && zoom.startValue != null) {
+    const dates = state.klineCandles.map((item) => new Date(Number(item.timestamp)).toISOString().slice(0, 10));
+    const index = typeof zoom.startValue === 'number'
+      ? zoom.startValue
+      : dates.indexOf(String(zoom.startValue));
+    nearLeft = index >= 0 && index <= 3;
+  }
+  if (nearLeft) loadOlderKline();
 }
 
 async function loadOlderKline() {
@@ -321,18 +400,21 @@ async function runBacktest() {
     const symbols = normalizeSymbols($('#backtest-symbol-input').value);
     if (!symbols.length) throw new Error('请至少输入一个有效美股代码');
     const result = await api('/quant/backtest', { method: 'POST', body: JSON.stringify({ symbols, period: $('#backtest-period').value, initialCapital: Number($('#backtest-capital').value), config: state.settings.config }) });
-    $('#bt-equity').textContent = formatMoney(result.finalEquity);
-    $('#bt-return').textContent = formatPercent(result.totalReturn, true);
-    $('#bt-return').className = result.totalReturn >= 0 ? 'pos' : 'neg';
-    $('#bt-drawdown').textContent = formatPercent(-result.maxDrawdown, true);
-    $('#bt-winrate').textContent = `${formatPercent(result.winRate, true)} / ${result.completedTrades}`;
-    $('#backtest-note').textContent = `${result.results.filter((item) => item.status === 'ok').length}/${result.results.length} 个标的完成，买入持有同期平均 ${formatPercent(result.buyHoldReturn, true)}`;
-    state.returnCharts.forEach((chart) => chart.dispose());
-    state.returnCharts.clear();
-    state.backtestResults = new Map(result.results.filter((item) => item.status === 'ok').map((item) => [item.symbol, item]));
-    $('#backtest-body').innerHTML = backtestResultRows(result.results, result.period);
-    $('#backtest-overview-card').classList.remove('hidden');
-    renderReturnChart('overview', $('#backtest-overview-chart'), result.equityCurve, result.initialCapital);
+    state.backtestHistory.unshift({
+      id: result.id,
+      createdAt: result.createdAt,
+      period: result.period,
+      symbols: result.results.map((item) => item.symbol),
+      initialCapital: result.initialCapital,
+      finalEquity: result.finalEquity,
+      totalReturn: result.totalReturn,
+      buyHoldReturn: result.buyHoldReturn,
+      completedTrades: result.completedTrades,
+      from: result.from,
+      to: result.to
+    });
+    state.backtestHistory = state.backtestHistory.slice(0, 20);
+    renderBacktestResult(result);
   } catch (error) { $('#backtest-body').innerHTML = `<tr><td colspan="8" class="quant-empty quant-error">${escapeHtml(error.message)}</td></tr>`; }
   finally { button.disabled = false; button.textContent = '运行回测'; }
 }
@@ -387,6 +469,24 @@ function bindEvents() {
   $('#paper-sync').addEventListener('click', async () => { const button = $('#paper-sync'); button.disabled = true; button.textContent = '同步中…'; try { const result = await api('/quant/paper/sync', { method: 'POST', body: '{}' }); renderPaper(result); } catch (error) { $('#paper-note').textContent = error.message; } finally { button.disabled = false; button.textContent = '同步信号并交易'; } });
   $('#paper-reset').addEventListener('click', async () => { if (!confirm('确定清空全部模拟持仓和交易记录？')) return; const result = await api('/quant/paper/reset', { method: 'POST', body: JSON.stringify({ initialCapital: Number($('#paper-capital').value) }) }); renderPaper(result); });
   document.addEventListener('click', (event) => {
+    const deleteBacktest = event.target.closest('[data-delete-backtest]');
+    if (deleteBacktest) {
+      const id = deleteBacktest.dataset.deleteBacktest;
+      if (!confirm('确定删除这条历史回测记录？')) return;
+      api(`/quant/backtests/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(() => {
+        state.backtestHistory = state.backtestHistory.filter((item) => item.id !== id);
+        if (state.activeBacktestId === id) clearBacktestResult();
+        renderBacktestHistory();
+      }).catch((error) => { $('#backtest-note').textContent = error.message; });
+      return;
+    }
+    const loadBacktest = event.target.closest('[data-load-backtest]');
+    if (loadBacktest) {
+      api(`/quant/backtests/${encodeURIComponent(loadBacktest.dataset.loadBacktest)}`)
+        .then(renderBacktestResult)
+        .catch((error) => { $('#backtest-note').textContent = error.message; });
+      return;
+    }
     const symbolButton = event.target.closest('[data-kline-symbol]');
     if (symbolButton) {
       showKline(symbolButton.dataset.klineSymbol, symbolButton.dataset.klinePeriod || '1y');
@@ -428,6 +528,7 @@ async function init() {
   const tasks = [];
   if (can('quant-analysis-run', 'edit')) tasks.push(runAnalysis());
   if (can('quant-paper')) tasks.push(loadPaper());
+  if (can('quant-backtest')) tasks.push(loadBacktestHistory());
   await Promise.all(tasks);
 }
 

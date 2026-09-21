@@ -30,12 +30,22 @@ export function initSchema(db) {
       data TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS quant_backtest_results (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_quant_backtests_user_created
+      ON quant_backtest_results (user_id, created_at DESC);
   `);
 
   const row = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get();
   if (!row) {
-    db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '2')").run();
-  } else if (Number(row.value) < 2) {
-    db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run();
+    db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '3')").run();
+  } else if (Number(row.value) < 3) {
+    db.prepare("UPDATE meta SET value = '3' WHERE key = 'schema_version'").run();
   }
 }

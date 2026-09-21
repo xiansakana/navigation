@@ -4,6 +4,7 @@ import XLSX from 'xlsx';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, createStore } from './storage.js';
 import { createQuantStore, resetPaper } from './quant-store.js';
+import { createQuantBacktestStore } from './quant-backtest-store.js';
 import { createQuoteService } from './quotes.js';
 import { parseImportBuffer } from './import-moomoo.js';
 import {
@@ -39,6 +40,7 @@ try {
 
 const store = createStore(config);
 const quantStore = createQuantStore(config);
+const quantBacktestStore = createQuantBacktestStore(config);
 const quotes = createQuoteService(config);
 const app = express();
 
@@ -542,6 +544,25 @@ app.put('/api/quant/settings', (req, res) => {
   res.json(quantStore.write(userId, current).settings);
 });
 
+app.get('/api/quant/backtests', (req, res) => {
+  if (!requireQuantPermission(req, res, 'quant-backtest')) return;
+  res.json({ items: quantBacktestStore.list(quantUserId(req), req.query.limit) });
+});
+
+app.get('/api/quant/backtests/:id', (req, res) => {
+  if (!requireQuantPermission(req, res, 'quant-backtest')) return;
+  const result = quantBacktestStore.get(quantUserId(req), req.params.id);
+  if (!result) return res.status(404).json({ error: '回测记录不存在' });
+  res.json(result);
+});
+
+app.delete('/api/quant/backtests/:id', (req, res) => {
+  if (!requireQuantPermission(req, res, 'quant-backtest-delete', 'edit')) return;
+  const removed = quantBacktestStore.remove(quantUserId(req), req.params.id);
+  if (!removed) return res.status(404).json({ error: '回测记录不存在' });
+  res.json({ ok: true });
+});
+
 app.post('/api/quant/backtest', async (req, res) => {
   if (!requireQuantPermission(req, res, 'quant-backtest-run', 'edit')) return;
   try {
@@ -591,7 +612,7 @@ app.post('/api/quant/backtest', async (req, res) => {
         buyHoldReturn: (buyHoldEquity - allocatedCapital) / allocatedCapital
       };
     });
-    res.json({
+    const response = {
       period: period.key,
       initialCapital: allocatedCapital,
       finalEquity,
@@ -602,8 +623,11 @@ app.post('/api/quant/backtest', async (req, res) => {
       completedTrades,
       equityCurve,
       results,
+      from: equityCurve[0]?.timestamp || null,
+      to: equityCurve.at(-1)?.timestamp || null,
       timestamp: Date.now()
-    });
+    };
+    res.json(quantBacktestStore.save(userId, response));
   } catch (error) {
     res.status(500).json({ error: error.message || '回测失败' });
   }
