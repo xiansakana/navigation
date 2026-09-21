@@ -7,12 +7,15 @@
     <script>(function(){try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
     <link rel="stylesheet" href="/portal.css">
 </head>
-<body class="has-navbar piclist-page">
+<body class="has-navbar piclist-page portal-layout-enabled">
     <header class="navbar">
         <div class="navbar-inner">
             <a class="navbar-brand" href="/"><span class="navbar-logo">⚡</span><span>服务导航</span></a>
             <span class="navbar-title">PicList 图床</span>
             <div class="navbar-actions">
+                <button type="button" class="btn ghost navbar-layout-btn" aria-pressed="false" aria-label="全宽布局">
+                    <span class="label">全宽</span>
+                </button>
                 <button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题">
                     <span class="navbar-theme-icon" aria-hidden="true">☀️</span>
                     <span class="label navbar-theme-label">日间</span>
@@ -21,7 +24,7 @@
         </div>
     </header>
 
-    <main class="piclist-shell">
+    <main class="piclist-shell" data-layout-container>
         <section class="piclist-hero">
             <div>
                 <span class="piclist-eyebrow">IMAGE HOSTING</span>
@@ -72,6 +75,7 @@
     </main>
 
     <script src="/theme.js"></script>
+    <script src="/layout.js"></script>
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
     <script src="/piclist-admin.js"></script>

@@ -1193,7 +1193,8 @@ body.portal-dialog-open {
 
 /* ── PicList management ── */
 .piclist-page { background: radial-gradient(circle at 70% -10%, var(--page-glow), transparent 38%), var(--bg); }
-.piclist-shell { width: min(1100px, calc(100% - 32px)); margin: 0 auto; padding: 38px 0 72px; }
+.piclist-shell { width: min(1200px, calc(100% - 32px)); margin: 0 auto; padding: 38px 0 72px; transition: width .2s ease, max-width .2s ease, padding .2s ease; }
+.piclist-shell.portal-layout--full { width: 100%; max-width: none; padding-left: 20px; padding-right: 20px; }
 .piclist-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .piclist-eyebrow { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .16em; }
 .piclist-hero h1 { margin: 5px 0 6px; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; letter-spacing: -.04em; }
