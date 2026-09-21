@@ -237,35 +237,23 @@ function ensureGuestAccess(data, config) {
     if (!data.roles) data.roles = [];
     if (!data.users) data.users = [];
     var guestUsername = config?.auth?.guestUsername || 'guest';
-    var denyGuest = [
-        'service:napcat:view',
-        'service:napcat:edit',
-        'service:notifications:view',
-        'service:notifications:edit',
-        'service:piclist:view',
-        'service:piclist:edit'
-    ];
 
     var guestRole = data.roles.find(function(r) { return r.id === 'role_guest'; });
-    if (guestRole) {
-        // 仅保证服务级入口；细粒度按钮/面板权限以管理员保存的勾选为准，
-        // 不要在每次 sync 时把 view 功能权限强行加回。
-        var guestPerms = new Set(guestRole.permissions || []);
-        if (guestPerms.has('service:stock-manage:view')) {
-            guestPerms.add('service:qqq-dip:view');
-        }
-        denyGuest.forEach(function(p) { guestPerms.delete(p); });
-        guestRole.permissions = Array.from(guestPerms);
-    }
     if (!guestRole) {
-        var guestPerms = buildDefaultGuestPermissions(config?.services);
-        var initial = new Set(guestPerms);
-        denyGuest.forEach(function(p) { initial.delete(p); });
+        var initialPermissions = new Set(buildDefaultGuestPermissions(config?.services));
+        [
+            'service:napcat:view',
+            'service:napcat:edit',
+            'service:notifications:view',
+            'service:notifications:edit',
+            'service:piclist:view',
+            'service:piclist:edit'
+        ].forEach(function(permission) { initialPermissions.delete(permission); });
         guestRole = {
             id: 'role_guest',
             name: '游客',
             description: '未登录访客的默认权限',
-            permissions: Array.from(initial)
+            permissions: Array.from(initialPermissions)
         };
         data.roles.push(guestRole);
     }
@@ -819,5 +807,6 @@ export {
     serviceEditPermissionId,
     stockManageFeaturePermissionId,
     qqqDipFeaturePermissionId,
+    ensureGuestAccess,
     newId
 };
