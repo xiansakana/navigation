@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PicList 图床</title>
+    <script>(function(){try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+    <link rel="stylesheet" href="/portal.css">
+</head>
+<body class="has-navbar piclist-page">
+    <header class="navbar">
+        <div class="navbar-inner">
+            <a class="navbar-brand" href="/"><span class="navbar-logo">⚡</span><span>服务导航</span></a>
+            <span class="navbar-title">PicList 图床</span>
+            <div class="navbar-actions">
+                <button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题">
+                    <span class="navbar-theme-icon" aria-hidden="true">☀️</span>
+                    <span class="label navbar-theme-label">日间</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="piclist-shell">
+        <section class="piclist-hero">
+            <div>
+                <span class="piclist-eyebrow">IMAGE HOSTING</span>
+                <h1>PicList 图床</h1>
+                <p>查看上传服务与 Backblaze B2 配置，安全更新连接参数。</p>
+            </div>
+            <button class="btn ghost" id="refresh" type="button">刷新状态</button>
+        </section>
+
+        <section class="piclist-status-grid" aria-live="polite">
+            <article class="piclist-status-card">
+                <span>HTTP 服务</span><strong id="http-status">检查中…</strong><small id="http-detail">—</small>
+            </article>
+            <article class="piclist-status-card">
+                <span>Docker 容器</span><strong id="container-status">检查中…</strong><small id="container-detail">—</small>
+            </article>
+            <article class="piclist-status-card">
+                <span>当前上传器</span><strong id="uploader-status">—</strong><small id="uploader-detail">—</small>
+            </article>
+            <article class="piclist-status-card">
+                <span>凭证状态</span><strong id="credential-status">—</strong><small id="credential-detail">—</small>
+            </article>
+        </section>
+
+        <section class="piclist-panel">
+            <div class="piclist-panel-head">
+                <div><h2>B2 / S3 配置</h2><p>密钥留空会保留服务器上的现有值，不会在页面中回显。</p></div>
+                <span class="piclist-checked" id="checked-at"></span>
+            </div>
+            <form id="config-form" class="piclist-form">
+                <label>桶名称<input name="bucketName" required autocomplete="off"></label>
+                <label>区域<input name="region" required autocomplete="off"></label>
+                <label class="wide">S3 端点<input name="endpoint" type="url" required autocomplete="off"></label>
+                <label class="wide">外链前缀<input name="urlPrefix" type="url" required autocomplete="off"></label>
+                <label>上传路径<input name="uploadPath" autocomplete="off" placeholder="留空表示桶根目录"></label>
+                <label>ACL<input name="acl" autocomplete="off" placeholder="public-read"></label>
+                <label>Access Key ID<input name="accessKeyID" type="password" autocomplete="new-password" placeholder="留空则保持原值"></label>
+                <label>Secret Access Key<input name="secretAccessKey" type="password" autocomplete="new-password" placeholder="留空则保持原值"></label>
+                <label class="piclist-check"><input name="pathStyleAccess" type="checkbox"> 使用 Path-style 访问</label>
+                <label class="piclist-check"><input name="disableBucketPrefixToURL" type="checkbox"> 外链不添加桶名前缀</label>
+                <label class="piclist-check wide"><input name="renamePluginEnabled" type="checkbox"> 启用时间戳重命名插件</label>
+                <div class="piclist-actions wide">
+                    <span id="permission-hint">保存后需重启 PicList 才能确保配置生效。</span>
+                    <div><button class="btn ghost" id="restart" type="button">仅重启服务</button><button class="btn primary" id="save" type="submit">保存并重启</button></div>
+                </div>
+            </form>
+        </section>
+    </main>
+
+    <script src="/theme.js"></script>
+    <script src="/toast.js"></script>
+    <script src="/dialog.js"></script>
+    <script src="/piclist-admin.js"></script>
+</body>
+</html>

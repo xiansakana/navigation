@@ -241,7 +241,9 @@ function ensureGuestAccess(data, config) {
         'service:napcat:view',
         'service:napcat:edit',
         'service:notifications:view',
-        'service:notifications:edit'
+        'service:notifications:edit',
+        'service:piclist:view',
+        'service:piclist:edit'
     ];
 
     var guestRole = data.roles.find(function(r) { return r.id === 'role_guest'; });

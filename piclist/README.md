@@ -26,6 +26,10 @@ ECS 默认对外端口：**http://123.56.235.12:36677**（需在安全组放行 
 | 上传接口 | `POST/PUT http://123.56.235.12:36677/upload?key=<密钥>` |
 | 鉴权 | URL 参数 `key`，对应 `.env` 的 `PICLIST_SERVER_KEY` |
 
+Portal 中为已授权账号提供 `/piclist/manage` 管理页，可查看 HTTP / Docker 状态、
+核对 B2 配置、更新非敏感参数或密钥，并重启 PicList。页面不会回显现有密钥；
+密钥输入留空时会保留服务器上的原值。
+
 **务必**设置强 `PICLIST_SERVER_KEY`，否则公网暴露后可能被恶意上传。
 
 ## 客户端配置

@@ -35,6 +35,7 @@ import { ensureSiyuanAuth, isSiyuanCheckAuthPath, resolveSiyuanRedirectTarget, h
 import { handleAdminApi } from './admin-api.js';
 import { wantsJsonResponse, renderErrorPage, sendHtml } from './error-page.js';
 import { handleOAuthStart, handleOAuthCallback, listOAuthProviders } from './oauth.js';
+import { getPiclistStatus, savePiclistConfig, restartPiclist } from './piclist-admin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -208,6 +209,52 @@ async function handleApi(req, res, url, session) {
     if (req.method === 'POST' && url.pathname === '/api/logout') {
         res.setHeader('Set-Cookie', clearSessionCookie());
         return json(res, 200, { ok: true });
+    }
+
+    if (url.pathname.startsWith('/api/piclist/')) {
+        var piclistService = (config.services || []).find(function(service) { return service.id === 'piclist'; });
+        if (!piclistService || !canViewService(session.permissions, 'piclist')) {
+            return json(res, 403, { ok: false, error: '无权访问 PicList 管理' });
+        }
+        if (req.method === 'GET' && url.pathname === '/api/piclist/status') {
+            try {
+                return json(res, 200, {
+                    ok: true,
+                    canEdit: canEditService(session.permissions, 'piclist'),
+                    status: await getPiclistStatus(piclistService)
+                });
+            } catch (err) {
+                return json(res, 500, { ok: false, error: err.message });
+            }
+        }
+        if (!canEditService(session.permissions, 'piclist')) {
+            return json(res, 403, { ok: false, error: '无权修改 PicList 配置' });
+        }
+        if (req.method === 'PUT' && url.pathname === '/api/piclist/config') {
+            try {
+                var piclistBody = await readJson(req);
+                var saved = savePiclistConfig(piclistBody);
+                try {
+                    var restarted = await restartPiclist();
+                    return json(res, 200, { ok: true, config: saved, restart: restarted });
+                } catch (restartError) {
+                    return json(res, 500, {
+                        ok: false,
+                        configSaved: true,
+                        error: '配置已保存，但 PicList 重启失败：' + restartError.message
+                    });
+                }
+            } catch (err) {
+                return json(res, 400, { ok: false, error: err.message });
+            }
+        }
+        if (req.method === 'POST' && url.pathname === '/api/piclist/restart') {
+            try {
+                return json(res, 200, { ok: true, restart: await restartPiclist() });
+            } catch (err) {
+                return json(res, 500, { ok: false, error: 'PicList 重启失败：' + err.message });
+            }
+        }
     }
 
     if (url.pathname.startsWith('/api/admin/')) {
@@ -458,6 +505,21 @@ var server = http.createServer(async function(req, res) {
 
     if (route.kind === 'not-found') {
         return json(res, 404, { ok: false, error: 'Not Found' });
+    }
+
+    if (req.method === 'GET' && (url.pathname === '/piclist/manage'
+        || url.pathname === '/piclist/manage/'
+        || url.pathname === '/piclist/manage/index.html')) {
+        var piclistSession = requireAuth(req, res, { requireLogin: true });
+        if (!piclistSession) return;
+        if (!canViewService(piclistSession.permissions, 'piclist')) {
+            return sendError(req, res, url, 403, '无权访问该服务', {
+                title: '无权访问 PicList',
+                message: '您没有访问「PicList 图床」的权限',
+                hint: '请联系管理员分配 PicList 查看权限。'
+            });
+        }
+        return serveStatic(path.join(PUBLIC_DIR, 'piclist.html'), res);
     }
 
     var hubPath = '/torn-toolbox';

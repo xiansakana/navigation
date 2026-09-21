@@ -108,6 +108,18 @@
       "icon": "🔗"
     },
     {
+      "id": "piclist",
+      "title": "PicList 图床",
+      "description": "查看图床状态并管理 Backblaze B2 配置",
+      "type": "proxy",
+      "path": "/piclist",
+      "entryPath": "/manage",
+      "internalUrl": "http://127.0.0.1:36677",
+      "injectBar": false,
+      "injectBase": false,
+      "icon": "🖼️"
+    },
+    {
       "id": "alist",
       "title": "AList 网盘",
       "description": "网盘聚合与文件浏览",

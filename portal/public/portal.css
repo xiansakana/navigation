@@ -1190,6 +1190,48 @@ body.portal-dialog-open {
 .btn.sm-btn { padding: 6px 10px !important; font-size: 13px !important; }
 .btn.danger { color: var(--red); border-color: rgba(255, 123, 123, 0.35); }
 .hidden { display: none !important; }
+
+/* ── PicList management ── */
+.piclist-page { background: radial-gradient(circle at 70% -10%, var(--page-glow), transparent 38%), var(--bg); }
+.piclist-shell { width: min(1100px, calc(100% - 32px)); margin: 0 auto; padding: 38px 0 72px; }
+.piclist-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+.piclist-eyebrow { color: var(--accent); font-size: 12px; font-weight: 800; letter-spacing: .16em; }
+.piclist-hero h1 { margin: 5px 0 6px; font-size: clamp(30px, 5vw, 44px); line-height: 1.1; letter-spacing: -.04em; }
+.piclist-hero p, .piclist-panel-head p { margin: 0; color: var(--muted); }
+.piclist-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+.piclist-status-card { display: grid; gap: 5px; min-height: 126px; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: var(--card); box-shadow: 0 12px 34px rgba(0, 0, 0, .12); }
+.piclist-status-card span { color: var(--muted); font-size: 13px; }
+.piclist-status-card strong { align-self: end; font-size: 21px; overflow-wrap: anywhere; }
+.piclist-status-card strong.ok { color: var(--green); }
+.piclist-status-card strong.bad { color: var(--red); }
+.piclist-status-card small { color: var(--muted); overflow-wrap: anywhere; }
+.piclist-panel { padding: 24px; border: 1px solid var(--border); border-radius: 18px; background: var(--card); box-shadow: 0 16px 42px rgba(0, 0, 0, .14); }
+.piclist-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+.piclist-panel-head h2 { margin: 0 0 3px; font-size: 20px; }
+.piclist-checked { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.piclist-form { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding-top: 20px; }
+.piclist-form label { display: grid; gap: 7px; color: var(--muted); font-size: 13px; }
+.piclist-form .wide { grid-column: 1 / -1; }
+.piclist-form input:not([type="checkbox"]) { width: 100%; padding: 10px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--input-bg); color: var(--text); outline: none; }
+.piclist-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+.piclist-form input:disabled { opacity: .7; cursor: not-allowed; }
+.piclist-check { display: flex !important; flex-direction: row; align-items: center; gap: 9px !important; min-height: 38px; color: var(--text) !important; }
+.piclist-check input { width: 17px; height: 17px; accent-color: var(--accent); }
+.piclist-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 4px; padding-top: 18px; border-top: 1px solid var(--border); }
+.piclist-actions > span { color: var(--muted); font-size: 13px; }
+.piclist-actions > div { display: flex; gap: 10px; flex: 0 0 auto; }
+
+@media (max-width: 860px) {
+    .piclist-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 620px) {
+    .piclist-shell { padding-top: 24px; }
+    .piclist-hero, .piclist-panel-head, .piclist-actions { align-items: stretch; flex-direction: column; }
+    .piclist-status-grid, .piclist-form { grid-template-columns: 1fr; }
+    .piclist-form .wide { grid-column: auto; }
+    .piclist-actions > div { display: grid; grid-template-columns: 1fr 1fr; }
+}
 .sm-muted { color: var(--muted); font-size: 13px; }
 .admin-perm-table { margin-top: 0; border: none; border-radius: 0; }
 .admin-perm-table code { font-size: 12px; }

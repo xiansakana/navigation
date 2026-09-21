@@ -73,6 +73,9 @@ SIYUAN_API_NAMESPACES.forEach(function(ns) {
     ['/api/me', 'GET', { kind: 'portal-api' }],
     ['/api/login', 'POST', { kind: 'portal-api' }],
     ['/api/admin/rbac', 'GET', { kind: 'portal-api' }],
+    ['/api/piclist/status', 'GET', { kind: 'portal-api' }],
+    ['/api/piclist/config', 'PUT', { kind: 'portal-api' }],
+    ['/api/piclist/restart', 'POST', { kind: 'portal-api' }],
     ['/api/oauth/github/start', 'GET', { kind: 'portal-oauth' }],
     ['/api/oauth/providers', 'GET', { kind: 'portal-oauth' }],
 ].forEach(function(c) { expectRoute(c[0], c[1], c[2]); });
@@ -117,6 +120,7 @@ SIYUAN_API_NAMESPACES.forEach(function(ns) {
     ['/alist/', 'GET', { kind: 'proxy', id: 'alist' }],
     ['/alist/api/me', 'GET', { kind: 'proxy', id: 'alist' }],
     ['/piclist/upload', 'POST', { kind: 'proxy', id: 'piclist' }],
+    ['/piclist/manage', 'GET', { kind: 'pass' }],
     ['/notes/stage/build/desktop/', 'GET', { kind: 'proxy', id: 'notes' }],
     ['/napcat/webui/', 'GET', { kind: 'proxy', id: 'napcat' }],
 ].forEach(function(c) { expectRoute(c[0], c[1], c[2]); });
