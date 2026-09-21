@@ -11,7 +11,7 @@
 
 .quant-sidebar {
   position: sticky;
-  top: 18px;
+  top: 72px;
   min-height: calc(100vh - 100px);
   padding: 17px 12px;
   background: color-mix(in srgb, var(--card) 98%, #080b11);
@@ -85,7 +85,6 @@
 .quant-paper-settings label { position: relative; display: flex; flex-direction: column; gap: 6px; width: 190px; }
 .quant-paper-settings label > span { color: var(--muted); font-size: 12px; }
 .quant-paper-settings label em { position: absolute; right: 12px; bottom: 11px; color: var(--muted); font-style: normal; font-size: 12px; }
-}
 
 .quant-header {
   display: flex;
@@ -447,6 +446,12 @@
 .quant-trades-table { width: 100%; border-collapse: collapse; }
 .quant-trades-table th, .quant-trades-table td { padding: 9px 18px; border-bottom: 1px solid rgba(148, 163, 184, .08); font-size: 11px; }
 .quant-trades-table th { position: sticky; top: 0; z-index: 1; color: var(--muted); background: color-mix(in srgb, var(--card) 97%, #080b11); }
+
+.quant-detail-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 18px 0; }
+.quant-detail-chart-head strong { font-size: 12px; }
+.quant-detail-chart-head span { color: var(--muted); font-size: 10px; }
+.quant-return-chart { width: 100%; height: 330px; padding: 2px 8px 8px; }
+.quant-return-chart--overview { height: 380px; }
 
 .quant-kline-modal { width: min(1120px, calc(100vw - 48px)); }
 .quant-kline-modal .sm-modal-head > div p { margin: 3px 0 0; color: var(--muted); font-size: 11px; font-weight: 400; }

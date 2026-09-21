@@ -24,10 +24,18 @@ export function initSchema(db) {
       symbol TEXT PRIMARY KEY,
       data TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS quant_user_state (
+      user_id TEXT PRIMARY KEY,
+      data TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   const row = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get();
   if (!row) {
-    db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '1')").run();
+    db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '2')").run();
+  } else if (Number(row.value) < 2) {
+    db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run();
   }
 }

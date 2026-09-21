@@ -89,6 +89,7 @@ test('backtests candles and returns an equity curve', () => {
   assert.equal(result.status, 'ok');
   assert.equal(result.initialCapital, 10000);
   assert.ok(result.equityCurve.length > 100);
+  assert.ok(result.equityCurve.every((point) => Number.isFinite(point.buyHoldEquity)));
   assert.ok(Number.isFinite(result.finalEquity));
   assert.ok(Number.isFinite(result.maxDrawdown));
   assert.ok(Array.isArray(result.trades));

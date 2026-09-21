@@ -1,4 +1,5 @@
 const QQQ_DIP_SERVICE = 'qqq-dip';
+const STOCK_MANAGE_SERVICE = 'stock-manage';
 
 let ctx = {
   portal: false,
@@ -26,6 +27,16 @@ export function can(feature, action = 'view') {
   if (perms.includes(fid)) return true;
   if (action === 'view' && perms.includes(featurePermId(feature, 'edit'))) return true;
   return false;
+}
+
+export function canStock(feature, action = 'view') {
+  if (!ctx.portal) return true;
+  const perms = ctx.permissions;
+  if (perms.includes('*')) return true;
+  if (perms.includes(`service:${STOCK_MANAGE_SERVICE}:edit`)) return true;
+  const id = `service:${STOCK_MANAGE_SERVICE}:${feature}:${action}`;
+  return perms.includes(id)
+    || (action === 'view' && perms.includes(`service:${STOCK_MANAGE_SERVICE}:${feature}:edit`));
 }
 
 export async function loadPortalContext() {

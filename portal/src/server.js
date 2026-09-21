@@ -16,6 +16,7 @@ import {
     canViewService,
     canEditService,
     canWriteService,
+    hasStockManageFeature,
     canViewAdmin,
     hasPermission,
     loadRbac,
@@ -313,6 +314,16 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
             });
             return true;
         }
+        if (ctx.service.id === 'stock-manage'
+            && browserUrl.pathname.startsWith('/stock-manage/quant')
+            && !hasStockManageFeature(proxySession.permissions, 'tab-quant', 'view')) {
+            sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '无权访问量化分析', {
+                title: '无权访问量化分析',
+                message: '您没有量化分析菜单权限',
+                hint: '请联系管理员分配「量化分析 Tab」权限。'
+            });
+            return true;
+        }
         var canWriteProxy = ctx.service.id === 'piclist'
             ? canEditService(proxySession.permissions, 'notes')
             : canWriteService(proxySession.permissions, ctx.service.id);
@@ -401,6 +412,16 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
         }
     }
 
+    delete req.headers['x-portal-user-id'];
+    delete req.headers['x-portal-username'];
+    delete req.headers['x-portal-permissions'];
+    if (ctx.service.id === 'stock-manage' && proxySession) {
+        req.headers['x-portal-user-id'] = String(proxySession.userId);
+        req.headers['x-portal-username'] = String(proxySession.username || '');
+        req.headers['x-portal-permissions'] = Buffer
+            .from(JSON.stringify(proxySession.permissions || []), 'utf8')
+            .toString('base64url');
+    }
     req.url = ctx.proxyUrl;
     proxyHttpRequest(ctx.service, req, res);
     return true;

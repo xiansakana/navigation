@@ -1,4 +1,4 @@
-import { loadPortalContext, can, isPortalMode } from './js/portal-auth.js';
+import { loadPortalContext, can, canStock, isPortalMode } from './js/portal-auth.js';
 
 const EVENT_LABELS = {
   T1: 'T1', T2: 'T2', T3: 'T3', T4: 'T4', T5: 'T5', T6: 'T6', T7: 'T7',
@@ -133,7 +133,9 @@ function renderTabs() {
   if (showMonitor) {
     tabsHtml += `<a class="sm-feature-tab ${tab === 'monitor' ? 'active' : ''}" href="${dipHref('monitor')}">抄底监控</a>`;
   }
-  tabsHtml += `<a class="sm-feature-tab" href="${quantHref()}">量化分析</a>`;
+  if (canStock('tab-quant')) {
+    tabsHtml += `<a class="sm-feature-tab" href="${quantHref()}">量化分析</a>`;
+  }
   if (showQq) {
     tabsHtml += `<a class="sm-feature-tab ${tab === 'qq' ? 'active' : ''}" href="${dipHref('qq')}">QQ 提醒</a>`;
   }

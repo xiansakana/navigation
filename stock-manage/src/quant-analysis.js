@@ -345,6 +345,7 @@ export function backtestCandles({
   const trades = [];
   const equityCurve = [];
   const startIndex = minimumPoints - 1;
+  const firstPrice = cleanCandles[startIndex].close;
 
   for (let index = startIndex; index < cleanCandles.length; index += 1) {
     const candle = cleanCandles[index];
@@ -371,14 +372,17 @@ export function backtestCandles({
     const equity = cash + shares * candle.close;
     peak = Math.max(peak, equity);
     maxDrawdown = Math.max(maxDrawdown, peak > 0 ? (peak - equity) / peak : 0);
-    equityCurve.push({ timestamp: candle.timestamp, equity: round(equity) });
+    equityCurve.push({
+      timestamp: candle.timestamp,
+      equity: round(equity),
+      buyHoldEquity: round(capital * candle.close / firstPrice)
+    });
   }
 
   const finalPrice = cleanCandles.at(-1).close;
   const finalEquity = cash + shares * finalPrice;
   const completed = trades.filter((trade) => trade.side === 'SELL');
   const winners = completed.filter((trade) => trade.pnl > 0).length;
-  const firstPrice = cleanCandles[startIndex].close;
   return {
     symbol,
     status: 'ok',

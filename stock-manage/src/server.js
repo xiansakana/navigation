@@ -46,6 +46,39 @@ if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 
 app.use(express.json({ limit: '2mb' }));
 
+function quantUserId(req) {
+  const value = String(req.headers['x-portal-user-id'] || 'local').trim();
+  return /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : 'local';
+}
+
+function portalPermissions(req) {
+  const encoded = String(req.headers['x-portal-permissions'] || '');
+  if (!encoded) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function hasQuantPermission(req, feature, action = 'view') {
+  const permissions = portalPermissions(req);
+  if (permissions === null) return true;
+  const exact = `service:stock-manage:${feature}:${action}`;
+  const edit = `service:stock-manage:${feature}:edit`;
+  return permissions.includes('*')
+    || permissions.includes('service:stock-manage:edit')
+    || permissions.includes(exact)
+    || (action === 'view' && permissions.includes(edit));
+}
+
+function requireQuantPermission(req, res, feature, action = 'view') {
+  if (hasQuantPermission(req, feature, action)) return true;
+  res.status(403).json({ error: '无权使用该量化分析功能' });
+  return false;
+}
+
 function buildPortfolio(data, pnlOpts = {}) {
   const rate = Number(data.usdCnyRate) > 0 ? Number(data.usdCnyRate) : DEFAULT_USD_CNY_RATE;
   const fxOpts = { ...pnlOpts, usdCnyRate: rate };
@@ -369,11 +402,11 @@ async function mapWithConcurrency(items, limit, worker) {
   return results;
 }
 
-async function analyzeQuantSymbols(rawSymbols, rawPeriod, rawConfig) {
+async function analyzeQuantSymbols(rawSymbols, rawPeriod, rawConfig, userId = 'local') {
     const data = store.read();
     const holdings = deriveHoldings(data.trades);
     const holdingMap = new Map(holdings.map((holding) => [normalizeSymbol(holding.symbol), holding]));
-    const saved = quantStore.read().settings;
+    const saved = quantStore.read(userId).settings;
     const symbols = quantSymbols(rawSymbols, saved.symbols);
     const strategyConfig = typeof rawConfig === 'string' ? quantConfig(rawConfig) : normalizeQuantConfig(rawConfig || saved.config);
     const period = quantPeriod(rawPeriod || saved.period);
@@ -438,30 +471,44 @@ async function analyzeQuantSymbols(rawSymbols, rawPeriod, rawConfig) {
 }
 
 app.get('/api/analysis', async (req, res) => {
+  if (!requireQuantPermission(req, res, 'quant-analysis-run', 'edit')) return;
   try {
-    res.json(await analyzeQuantSymbols(req.query.symbols, req.query.period, req.query.config));
+    res.json(await analyzeQuantSymbols(req.query.symbols, req.query.period, req.query.config, quantUserId(req)));
   } catch (e) {
     res.status(500).json({ error: e.message || '量化分析失败' });
   }
 });
 
-app.get('/api/quant/settings', (_req, res) => {
-  res.json(quantStore.read().settings);
+app.get('/api/quant/settings', (req, res) => {
+  if (!requireQuantPermission(req, res, 'quant-settings')) return;
+  res.json(quantStore.read(quantUserId(req)).settings);
 });
 
 app.get('/api/quant/history/:symbol', async (req, res) => {
+  if (!requireQuantPermission(req, res, 'quant-history')) return;
   const symbol = quantSymbols(req.params.symbol)[0];
   if (!symbol || inferMarket(symbol) !== 'US') {
     return res.status(400).json({ error: 'K 线当前仅支持美股正股' });
   }
   try {
+    const before = Number(req.query.before);
     const period = quantPeriod(req.query.period);
-    const history = await quotes.getStockHistory(symbol, { days: period.days });
+    const days = Number.isFinite(Number(req.query.days))
+      ? Math.min(1825, Math.max(90, Number(req.query.days)))
+      : period.days;
+    const history = await quotes.getStockHistory(symbol, {
+      days,
+      endTimestamp: Number.isFinite(before) ? before - 86400000 : undefined
+    });
+    const candles = Number.isFinite(before)
+      ? history.candles.filter((candle) => candle.timestamp < before)
+      : history.candles;
     res.json({
       symbol,
       period: period.key,
       source: history.source,
-      candles: history.candles,
+      candles,
+      hasMore: candles.length >= Math.floor(days * 0.35),
       timestamp: Date.now()
     });
   } catch (error) {
@@ -470,30 +517,46 @@ app.get('/api/quant/history/:symbol', async (req, res) => {
 });
 
 app.put('/api/quant/settings', (req, res) => {
-  const current = quantStore.read();
+  const scope = ['watchlist', 'config', 'paper'].includes(req.body?.scope) ? req.body.scope : 'watchlist';
+  const scopeFeature = {
+    watchlist: 'quant-watchlist',
+    config: 'quant-config',
+    paper: 'quant-paper-settings'
+  }[scope];
+  if (!requireQuantPermission(req, res, scopeFeature, 'edit')) return;
+  const userId = quantUserId(req);
+  const current = quantStore.read(userId);
   const body = req.body || {};
-  const rawSymbols = Array.isArray(body.symbols) ? body.symbols.join(',') : String(body.symbols || '');
-  const symbols = quantSymbols(rawSymbols);
-  if (!symbols.length) return res.status(400).json({ error: '请至少保存一个有效的美股代码' });
-  current.settings = {
-    symbols,
-    period: quantPeriod(body.period).key,
-    config: normalizeQuantConfig(body.config || current.settings.config),
-    paperInitialCapital: Math.max(1000, Math.min(100000000, Number(body.paperInitialCapital) || current.settings.paperInitialCapital)),
-    paperPositionPct: Math.max(0.01, Math.min(1, Number(body.paperPositionPct) || current.settings.paperPositionPct))
-  };
-  res.json(quantStore.write(current).settings);
+  if (scope === 'watchlist') {
+    const rawSymbols = Array.isArray(body.symbols) ? body.symbols.join(',') : String(body.symbols || '');
+    const symbols = quantSymbols(rawSymbols);
+    if (!symbols.length) return res.status(400).json({ error: '请至少保存一个有效的美股代码' });
+    current.settings.symbols = symbols;
+    current.settings.period = quantPeriod(body.period).key;
+  } else if (scope === 'config') {
+    current.settings.config = normalizeQuantConfig(body.config || current.settings.config);
+  } else {
+    current.settings.paperInitialCapital = Math.max(1000, Math.min(100000000, Number(body.paperInitialCapital) || current.settings.paperInitialCapital));
+    current.settings.paperPositionPct = Math.max(0.01, Math.min(1, Number(body.paperPositionPct) || current.settings.paperPositionPct));
+  }
+  res.json(quantStore.write(userId, current).settings);
 });
 
 app.post('/api/quant/backtest', async (req, res) => {
+  if (!requireQuantPermission(req, res, 'quant-backtest-run', 'edit')) return;
   try {
-    const saved = quantStore.read().settings;
+    const userId = quantUserId(req);
+    const savedState = quantStore.read(userId);
+    const saved = savedState.settings;
     const rawSymbols = Array.isArray(req.body?.symbols) ? req.body.symbols.join(',') : String(req.body?.symbols || '');
     const symbols = quantSymbols(rawSymbols, saved.symbols);
     if (!symbols.length) return res.status(400).json({ error: '请选择回测标的' });
     const period = quantPeriod(req.body?.period || saved.period);
     const strategyConfig = normalizeQuantConfig(req.body?.config || saved.config);
     const initialCapital = Math.max(1000, Math.min(100000000, Number(req.body?.initialCapital) || 100000));
+    saved.backtestPeriod = period.key === '3m' ? '6m' : period.key;
+    saved.backtestInitialCapital = initialCapital;
+    quantStore.write(userId, savedState);
     const allocation = initialCapital / symbols.length;
     const results = await mapWithConcurrency(symbols, 2, async (symbol) => {
       try {
@@ -512,6 +575,22 @@ app.post('/api/quant/backtest', async (req, res) => {
     const finalEquity = valid.reduce((sum, item) => sum + item.finalEquity, 0);
     const completedTrades = valid.reduce((sum, item) => sum + item.completedTrades, 0);
     const weightedWins = valid.reduce((sum, item) => sum + item.winRate * item.completedTrades, 0);
+    const curveMaps = valid.map((item) => new Map(item.equityCurve.map((point) => [point.timestamp, point])));
+    const commonTimestamps = valid[0].equityCurve
+      .map((point) => point.timestamp)
+      .filter((timestamp) => curveMaps.every((map) => map.has(timestamp)));
+    const equityCurve = commonTimestamps.map((timestamp) => {
+      const points = curveMaps.map((map) => map.get(timestamp));
+      const strategyEquity = points.reduce((sum, point) => sum + point.equity, 0);
+      const buyHoldEquity = points.reduce((sum, point) => sum + point.buyHoldEquity, 0);
+      return {
+        timestamp,
+        strategyEquity,
+        buyHoldEquity,
+        strategyReturn: (strategyEquity - allocatedCapital) / allocatedCapital,
+        buyHoldReturn: (buyHoldEquity - allocatedCapital) / allocatedCapital
+      };
+    });
     res.json({
       period: period.key,
       initialCapital: allocatedCapital,
@@ -521,6 +600,7 @@ app.post('/api/quant/backtest', async (req, res) => {
       maxDrawdown: Math.max(...valid.map((item) => item.maxDrawdown)),
       winRate: completedTrades ? weightedWins / completedTrades : 0,
       completedTrades,
+      equityCurve,
       results,
       timestamp: Date.now()
     });
@@ -554,21 +634,26 @@ function paperView(saved, signals = []) {
   };
 }
 
-app.get('/api/quant/paper', (_req, res) => {
-  res.json(paperView(quantStore.read()));
+app.get('/api/quant/paper', (req, res) => {
+  if (!requireQuantPermission(req, res, 'quant-paper')) return;
+  res.json(paperView(quantStore.read(quantUserId(req))));
 });
 
 app.post('/api/quant/paper/reset', (req, res) => {
-  const saved = quantStore.read();
+  if (!requireQuantPermission(req, res, 'quant-paper-reset', 'edit')) return;
+  const userId = quantUserId(req);
+  const saved = quantStore.read(userId);
   if (Number(req.body?.initialCapital) >= 1000) saved.settings.paperInitialCapital = Number(req.body.initialCapital);
   saved.paper = resetPaper(saved.settings);
-  res.json(paperView(quantStore.write(saved)));
+  res.json(paperView(quantStore.write(userId, saved)));
 });
 
-app.post('/api/quant/paper/sync', async (_req, res) => {
+app.post('/api/quant/paper/sync', async (req, res) => {
+  if (!requireQuantPermission(req, res, 'quant-paper-sync', 'edit')) return;
   try {
-    const saved = quantStore.read();
-    const analysis = await analyzeQuantSymbols(saved.settings.symbols.join(','), saved.settings.period, saved.settings.config);
+    const userId = quantUserId(req);
+    const saved = quantStore.read(userId);
+    const analysis = await analyzeQuantSymbols(saved.settings.symbols.join(','), saved.settings.period, saved.settings.config, userId);
     const now = Date.now();
     const trades = [];
     for (const signal of analysis.signals) {
@@ -605,7 +690,7 @@ app.post('/api/quant/paper/sync', async (_req, res) => {
     }
     saved.paper.trades = saved.paper.trades.concat(trades).slice(-500);
     saved.paper.updatedAt = now;
-    quantStore.write(saved);
+    quantStore.write(userId, saved);
     res.json({ ...paperView(saved, analysis.signals), executed: trades, signals: analysis.signals });
   } catch (error) {
     res.status(500).json({ error: error.message || '模拟盘同步失败' });

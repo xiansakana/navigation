@@ -62,10 +62,16 @@ body.has-navbar { padding-top: var(--navbar-height); }
 }
 
 .sm-feature-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 30;
     display: flex;
     gap: 8px;
     margin-bottom: 20px;
     flex-wrap: wrap;
+    padding: 8px 0;
+    background: color-mix(in srgb, var(--bg) 94%, transparent);
+    backdrop-filter: blur(12px);
 }
 
 .sm-feature-tab {

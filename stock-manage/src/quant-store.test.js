@@ -1,22 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { createQuantStore, resetPaper } from './quant-store.js';
 
-test('persists an independent quant watchlist and settings', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-quant-'));
-  const file = path.join(directory, 'quant.json');
-  const store = createQuantStore({ dataFile: path.join(directory, 'portfolio.json') }, file);
-  const value = store.read();
+function memoryDatabase() {
+  const rows = new Map();
+  return {
+    prepare(sql) {
+      if (sql.startsWith('SELECT')) return { get: (userId) => rows.has(userId) ? { data: rows.get(userId) } : undefined };
+      return { run: (userId, data) => rows.set(userId, data) };
+    }
+  };
+}
+
+test('persists isolated quant settings per user', () => {
+  const store = createQuantStore({ dataFile: 'missing.json' }, memoryDatabase());
+  const value = store.read('user-a');
   value.settings.symbols = ['aapl', 'MSFT', 'AAPL', 'bad symbol'];
   value.settings.period = '2y';
-  store.write(value);
-  const saved = store.read();
+  store.write('user-a', value);
+  const saved = store.read('user-a');
   assert.deepEqual(saved.settings.symbols, ['AAPL', 'MSFT']);
   assert.equal(saved.settings.period, '2y');
-  fs.rmSync(directory, { recursive: true, force: true });
+  assert.notDeepEqual(store.read('user-b').settings.symbols, saved.settings.symbols);
 });
 
 test('resets paper portfolio without touching the watchlist', () => {

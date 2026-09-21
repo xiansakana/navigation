@@ -1,9 +1,21 @@
-import { loadPortalContext, canDip } from '../js/portal-auth.js';
+import { loadPortalContext, can, canDip } from '../js/portal-auth.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const DEFAULT_CONFIG = Object.freeze({ rsiPeriod: 14, rsiOverbought: 58, rsiOversold: 42, macdFast: 12, macdSlow: 26, macdSignal: 9, bollingerPeriod: 20, bollingerStdDev: 2, buyThreshold: 0.25, sellThreshold: -0.3 });
-const state = { settings: null, signals: [], loading: false, updatedAt: null, klineChart: null, klineSymbol: '' };
+const state = {
+  settings: null,
+  signals: [],
+  loading: false,
+  updatedAt: null,
+  klineChart: null,
+  klineSymbol: '',
+  klineCandles: [],
+  klineLoadingOlder: false,
+  klineHasMore: true,
+  backtestResults: new Map(),
+  returnCharts: new Map()
+};
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
@@ -53,7 +65,11 @@ function signalRow(item) {
   const score = Number(item.combinedScore);
   const status = item.status === 'ok' ? '' : `<span class="quant-row-message">${escapeHtml(item.message || '暂无可用数据')}</span>`;
   const dataInfo = item.status === 'ok' ? `${Number(item.dataPoints) || 0} 根 · ${formatDate(item.asOf)} · ${sourceLabel(item.historySource)}` : '未生成指标';
-  return `<tr><td><button class="quant-symbol-link" type="button" data-kline-symbol="${escapeHtml(item.symbol)}" data-kline-period="${escapeHtml($('#period-select').value)}">${escapeHtml(item.symbol)}</button>${item.name && item.name !== item.symbol ? `<span class="quant-name">${escapeHtml(item.name)}</span>` : ''}${status}</td><td class="align-right"><strong>${formatMoney(item.price)}</strong><span class="quant-sub ${changeClass}">${formatPercent(item.changePercent)}</span></td><td class="align-center">${badge(item.signal)}</td><td class="align-center">${strengthBar(item)}</td><td class="align-center"><strong>${formatNumber(item.rsi, 1)}</strong><span class="quant-sub">${miniSignal(item.rsiSignal)}</span></td><td class="align-center"><strong>${formatNumber(item.macd, 4)}</strong><span class="quant-sub">${miniSignal(item.macdSignal)}</span></td><td class="align-center"><strong>${hasNumber(item.bollingerPosition) ? `${formatNumber(item.bollingerPosition, 1)}%` : '—'}</strong><span class="quant-sub">${miniSignal(item.bollingerSignal)}</span></td><td class="align-center">${trendLabel(item.trend)}</td><td class="align-right"><strong class="${score > 0 ? 'pos' : score < 0 ? 'neg' : ''}">${Number.isFinite(score) ? `${score > 0 ? '+' : ''}${score.toFixed(2)}` : '—'}</strong><span class="quant-sub">${dataInfo}</span></td></tr>`;
+  const symbol = escapeHtml(item.symbol);
+  const symbolCell = can('quant-history')
+    ? `<button class="quant-symbol-link" type="button" data-kline-symbol="${symbol}" data-kline-period="${escapeHtml($('#period-select').value)}">${symbol}</button>`
+    : `<strong>${symbol}</strong>`;
+  return `<tr><td>${symbolCell}${item.name && item.name !== item.symbol ? `<span class="quant-name">${escapeHtml(item.name)}</span>` : ''}${status}</td><td class="align-right"><strong>${formatMoney(item.price)}</strong><span class="quant-sub ${changeClass}">${formatPercent(item.changePercent)}</span></td><td class="align-center">${badge(item.signal)}</td><td class="align-center">${strengthBar(item)}</td><td class="align-center"><strong>${formatNumber(item.rsi, 1)}</strong><span class="quant-sub">${miniSignal(item.rsiSignal)}</span></td><td class="align-center"><strong>${formatNumber(item.macd, 4)}</strong><span class="quant-sub">${miniSignal(item.macdSignal)}</span></td><td class="align-center"><strong>${hasNumber(item.bollingerPosition) ? `${formatNumber(item.bollingerPosition, 1)}%` : '—'}</strong><span class="quant-sub">${miniSignal(item.bollingerSignal)}</span></td><td class="align-center">${trendLabel(item.trend)}</td><td class="align-right"><strong class="${score > 0 ? 'pos' : score < 0 ? 'neg' : ''}">${Number.isFinite(score) ? `${score > 0 ? '+' : ''}${score.toFixed(2)}` : '—'}</strong><span class="quant-sub">${dataInfo}</span></td></tr>`;
 }
 
 function renderSignals(message = '') {
@@ -85,10 +101,20 @@ function renderConfig() {
   $('#formula-description').textContent = `综合评分叠加 SMA50 趋势修正；评分 > ${config.buyThreshold} 为买入，评分 < ${config.sellThreshold} 为卖出。`;
 }
 
-async function saveSettings({ includeWatchlist = true, message = '设置已保存' } = {}) {
-  const symbols = includeWatchlist ? normalizeSymbols($('#symbol-input').value) : state.settings.symbols;
-  const payload = { ...state.settings, symbols, period: $('#period-select').value, config: readConfig(), paperInitialCapital: Number($('#paper-capital').value) || state.settings.paperInitialCapital, paperPositionPct: (Number($('#paper-position-pct').value) || state.settings.paperPositionPct * 100) / 100 };
+async function saveSettings({ scope = 'watchlist', symbolsSource = '#symbol-input', message = '设置已保存' } = {}) {
+  const payload = { scope };
+  if (scope === 'watchlist') {
+    payload.symbols = normalizeSymbols($(symbolsSource).value);
+    payload.period = symbolsSource === '#backtest-symbol-input' ? state.settings.period : $('#period-select').value;
+  } else if (scope === 'config') {
+    payload.config = readConfig();
+  } else {
+    payload.paperInitialCapital = Number($('#paper-capital').value) || state.settings.paperInitialCapital;
+    payload.paperPositionPct = (Number($('#paper-position-pct').value) || state.settings.paperPositionPct * 100) / 100;
+  }
   state.settings = await api('/quant/settings', { method: 'PUT', body: JSON.stringify(payload) });
+  $('#symbol-input').value = state.settings.symbols.join(', ');
+  $('#backtest-symbol-input').value = state.settings.symbols.join(', ');
   renderConfig();
   $('#save-status').textContent = message;
   setTimeout(() => { $('#save-status').textContent = ''; }, 2500);
@@ -120,7 +146,10 @@ async function runAnalysis() {
 }
 
 function showView(view) {
-  const valid = ['dashboard', 'strategy', 'backtest', 'paper'].includes(view) ? view : 'dashboard';
+  const available = $$('.quant-nav').filter((button) => !button.hidden).map((button) => button.dataset.view);
+  const requested = ['dashboard', 'strategy', 'backtest', 'paper'].includes(view) ? view : 'dashboard';
+  const valid = available.includes(requested) ? requested : available[0];
+  if (!valid) return;
   $$('.quant-nav').forEach((button) => button.classList.toggle('active', button.dataset.view === valid));
   $$('.quant-view').forEach((panel) => panel.classList.toggle('active', panel.dataset.viewPanel === valid));
   const url = new URL(location.href);
@@ -134,11 +163,55 @@ function backtestTradeRows(item) {
   return `<div class="quant-trades-title"><strong>${escapeHtml(item.symbol)} 买卖操作记录</strong><span>${item.trades.length} 次操作${item.openPosition ? ' · 期末仍持仓' : ''}</span></div><div class="quant-trades-scroll"><table class="quant-trades-table"><thead><tr><th>#</th><th>日期</th><th>方向</th><th class="align-right">成交价</th><th class="align-right">数量</th><th class="align-right">已实现盈亏</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
+function returnChartOption(curve, initialCapital, trades = []) {
+  const dates = curve.map((point) => new Date(Number(point.timestamp)).toISOString().slice(0, 10));
+  const strategy = curve.map((point) => Number.isFinite(Number(point.strategyReturn))
+    ? Number(point.strategyReturn) * 100
+    : (Number(point.equity) / initialCapital - 1) * 100);
+  const buyHold = curve.map((point) => Number.isFinite(Number(point.buyHoldReturn))
+    ? Number(point.buyHoldReturn) * 100
+    : (Number(point.buyHoldEquity) / initialCapital - 1) * 100);
+  const byTimestamp = new Map(curve.map((point, index) => [Number(point.timestamp), index]));
+  const markers = trades.map((trade) => {
+    const index = byTimestamp.get(Number(trade.timestamp));
+    if (!Number.isInteger(index)) return null;
+    return {
+      name: trade.side === 'BUY' ? '买入' : '卖出',
+      coord: [dates[index], strategy[index]],
+      value: trade.side === 'BUY' ? '买' : '卖',
+      itemStyle: { color: trade.side === 'BUY' ? '#3ddc84' : '#ff7b7b' },
+      label: { color: '#fff', fontSize: 9 }
+    };
+  }).filter(Boolean);
+  return {
+    animation: false,
+    tooltip: { trigger: 'axis', valueFormatter: (value) => `${Number(value).toFixed(2)}%` },
+    legend: { top: 4, textStyle: { color: '#8f9bad' }, data: ['策略收益', '买入持有'] },
+    grid: { left: 58, right: 22, top: 42, bottom: 42 },
+    xAxis: { type: 'category', data: dates, boundaryGap: false, axisLabel: { color: '#8f9bad' }, axisLine: { lineStyle: { color: '#465267' } } },
+    yAxis: { type: 'value', axisLabel: { color: '#8f9bad', formatter: '{value}%' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,.12)' } } },
+    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 4, borderColor: '#30394a', textStyle: { color: '#8f9bad' } }],
+    series: [
+      { name: '策略收益', type: 'line', data: strategy, showSymbol: false, smooth: false, lineStyle: { width: 2, color: '#5b9cff' }, itemStyle: { color: '#5b9cff' }, markPoint: { symbolSize: 34, data: markers } },
+      { name: '买入持有', type: 'line', data: buyHold, showSymbol: false, lineStyle: { width: 1.5, type: 'dashed', color: '#f5b942' }, itemStyle: { color: '#f5b942' } }
+    ]
+  };
+}
+
+function renderReturnChart(key, host, curve, initialCapital, trades = []) {
+  state.returnCharts.get(key)?.dispose();
+  if (!globalThis.echarts || !host || !curve?.length) return;
+  const chart = globalThis.echarts.init(host, null, { renderer: 'canvas' });
+  chart.setOption(returnChartOption(curve, initialCapital, trades));
+  state.returnCharts.set(key, chart);
+}
+
 function backtestResultRows(results, period) {
   return results.map((item) => {
     if (item.status !== 'ok') return `<tr><td><strong>${escapeHtml(item.symbol)}</strong></td><td colspan="7" class="quant-error">${escapeHtml(item.message)}</td></tr>`;
     const symbol = escapeHtml(item.symbol);
-    return `<tr class="quant-backtest-result"><td><button class="quant-symbol-link" type="button" data-kline-symbol="${symbol}" data-kline-period="${escapeHtml(period)}">${symbol}</button></td><td class="align-right">${formatMoney(item.finalEquity)}</td><td class="align-right ${item.totalReturn >= 0 ? 'pos' : 'neg'}">${formatPercent(item.totalReturn, true)}</td><td class="align-right ${item.buyHoldReturn >= 0 ? 'pos' : 'neg'}">${formatPercent(item.buyHoldReturn, true)}</td><td class="align-right neg">${formatPercent(-item.maxDrawdown, true)}</td><td class="align-right">${item.completedTrades}</td><td>${sourceLabel(item.historySource)}</td><td class="align-center"><button type="button" class="quant-expand-button" data-toggle-trades="${symbol}" aria-expanded="false">展开 <span>⌄</span></button></td></tr><tr class="quant-trade-detail hidden" data-trades-for="${symbol}"><td colspan="8">${backtestTradeRows(item)}</td></tr>`;
+    const symbolCell = can('quant-history') ? `<button class="quant-symbol-link" type="button" data-kline-symbol="${symbol}" data-kline-period="${escapeHtml(period)}">${symbol}</button>` : `<strong>${symbol}</strong>`;
+    return `<tr class="quant-backtest-result"><td>${symbolCell}</td><td class="align-right">${formatMoney(item.finalEquity)}</td><td class="align-right ${item.totalReturn >= 0 ? 'pos' : 'neg'}">${formatPercent(item.totalReturn, true)}</td><td class="align-right ${item.buyHoldReturn >= 0 ? 'pos' : 'neg'}">${formatPercent(item.buyHoldReturn, true)}</td><td class="align-right neg">${formatPercent(-item.maxDrawdown, true)}</td><td class="align-right">${item.completedTrades}</td><td>${sourceLabel(item.historySource)}</td><td class="align-center"><button type="button" class="quant-expand-button" data-toggle-trades="${symbol}" aria-expanded="false">展开 <span>⌄</span></button></td></tr><tr class="quant-trade-detail hidden" data-trades-for="${symbol}"><td colspan="8"><div class="quant-detail-chart-head"><strong>${symbol} 收益率曲线</strong><span>买卖标记显示在策略曲线上</span></div><div class="quant-return-chart" data-return-chart="${symbol}"></div>${backtestTradeRows(item)}</td></tr>`;
   }).join('');
 }
 
@@ -146,6 +219,9 @@ function closeKline() {
   state.klineChart?.dispose();
   state.klineChart = null;
   state.klineSymbol = '';
+  state.klineCandles = [];
+  state.klineHasMore = true;
+  state.klineLoadingOlder = false;
   $('#modal-root').innerHTML = '';
 }
 
@@ -176,23 +252,63 @@ async function loadKline(symbol, period) {
   state.klineChart = null;
   try {
     const result = await api(`/quant/history/${encodeURIComponent(symbol)}?period=${encodeURIComponent(period)}`);
-    status.textContent = `${result.candles.length} 根日 K · ${sourceLabel(result.source)}`;
+    state.klineCandles = result.candles || [];
+    state.klineHasMore = result.hasMore !== false;
+    status.textContent = `${state.klineCandles.length} 根日 K · ${sourceLabel(result.source)} · 左移到边界自动加载更早行情`;
     if (!globalThis.echarts) throw new Error('图表组件加载失败');
     state.klineChart = globalThis.echarts.init(host, null, { renderer: 'canvas' });
-    state.klineChart.setOption(klineOption(result.candles));
+    state.klineChart.setOption(klineOption(state.klineCandles));
+    state.klineChart.on('datazoom', (event) => {
+      const zoom = event.batch?.[0] || event;
+      if (Number(zoom.start) <= 3) loadOlderKline();
+    });
   } catch (error) {
     status.textContent = error.message || 'K 线加载失败';
     host.innerHTML = `<div class="quant-kline-error">${escapeHtml(error.message || 'K 线加载失败')}</div>`;
   }
 }
 
+async function loadOlderKline() {
+  if (state.klineLoadingOlder || !state.klineHasMore || !state.klineCandles.length || !state.klineChart) return;
+  state.klineLoadingOlder = true;
+  const status = $('#kline-status');
+  const oldest = Number(state.klineCandles[0].timestamp);
+  const oldLength = state.klineCandles.length;
+  const zoom = state.klineChart.getOption().dataZoom?.[0] || { start: 0, end: 100 };
+  status.textContent = `正在加载 ${formatDate(oldest)} 之前的行情…`;
+  try {
+    const result = await api(`/quant/history/${encodeURIComponent(state.klineSymbol)}?before=${oldest}&days=730`);
+    const merged = new Map([...result.candles, ...state.klineCandles].map((candle) => [Number(candle.timestamp), candle]));
+    state.klineCandles = [...merged.values()].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+    const added = state.klineCandles.length - oldLength;
+    state.klineHasMore = result.hasMore !== false && added > 0;
+    const option = klineOption(state.klineCandles);
+    const oldEndIndex = Math.min(oldLength - 1, Math.round((Number(zoom.end) || 100) / 100 * (oldLength - 1)));
+    const dates = state.klineCandles.map((item) => new Date(Number(item.timestamp)).toISOString().slice(0, 10));
+    option.dataZoom[0].startValue = dates[Math.max(0, added)];
+    option.dataZoom[0].endValue = dates[Math.min(dates.length - 1, added + oldEndIndex)];
+    option.dataZoom[1].startValue = option.dataZoom[0].startValue;
+    option.dataZoom[1].endValue = option.dataZoom[0].endValue;
+    state.klineChart.setOption(option, true);
+    status.textContent = `${state.klineCandles.length} 根日 K · ${sourceLabel(result.source)}${state.klineHasMore ? ' · 左移继续加载' : ' · 已到可用历史起点'}`;
+  } catch (error) {
+    status.textContent = `更早行情加载失败：${error.message}`;
+  } finally {
+    state.klineLoadingOlder = false;
+  }
+}
+
 function showKline(symbol, period = '1y') {
   state.klineSymbol = symbol;
   const root = $('#modal-root');
-  root.innerHTML = `<div class="sm-modal-backdrop quant-kline-backdrop"><div class="sm-modal sm-modal--xl quant-kline-modal" role="dialog" aria-modal="true" aria-labelledby="kline-title"><div class="sm-modal-head"><div><h3 id="kline-title">${escapeHtml(symbol)} · 日 K 线</h3><p id="kline-status">准备加载行情…</p></div><button type="button" class="btn link" data-kline-close>关闭</button></div><div class="quant-kline-toolbar"><label>历史范围 <select id="kline-period"><option value="3m">近 3 个月</option><option value="6m">近 6 个月</option><option value="1y">近 1 年</option><option value="2y">近 2 年</option><option value="5y">近 5 年</option></select></label><span>拖动底部缩放条可查看区间行情</span></div><div class="sm-modal-body quant-kline-body"><div id="kline-chart"></div></div></div></div>`;
+  root.innerHTML = `<div class="sm-modal-backdrop quant-kline-backdrop"><div class="sm-modal sm-modal--xl quant-kline-modal" role="dialog" aria-modal="true" aria-labelledby="kline-title"><div class="sm-modal-head"><div><h3 id="kline-title">${escapeHtml(symbol)} · 日 K 线</h3><p id="kline-status">准备加载行情…</p></div><button type="button" class="btn link" data-kline-close>关闭</button></div><div class="quant-kline-toolbar"><label>初始范围 <select id="kline-period"><option value="3m">近 3 个月</option><option value="6m">近 6 个月</option><option value="1y">近 1 年</option><option value="2y">近 2 年</option><option value="5y">近 5 年</option></select></label><span>滚轮缩放或拖动到左边界时，会自动加载更早行情</span></div><div class="sm-modal-body quant-kline-body"><div id="kline-chart"></div></div></div></div>`;
   $('#kline-period').value = period;
   root.querySelector('[data-kline-close]').addEventListener('click', closeKline);
-  root.querySelector('.quant-kline-backdrop').addEventListener('click', (event) => { if (event.target.classList.contains('quant-kline-backdrop')) closeKline(); });
+  const backdrop = root.querySelector('.quant-kline-backdrop');
+  let pressedOnBackdrop = false;
+  backdrop.addEventListener('pointerdown', (event) => { pressedOnBackdrop = event.target === backdrop; });
+  backdrop.addEventListener('pointerup', (event) => { if (pressedOnBackdrop && event.target === backdrop) closeKline(); pressedOnBackdrop = false; });
+  backdrop.addEventListener('pointercancel', () => { pressedOnBackdrop = false; });
   $('#kline-period').addEventListener('change', (event) => loadKline(symbol, event.target.value));
   loadKline(symbol, period);
 }
@@ -202,14 +318,21 @@ async function runBacktest() {
   button.disabled = true; button.textContent = '回测中…';
   $('#backtest-body').innerHTML = '<tr><td colspan="8"><span class="quant-skeleton"></span></td></tr>';
   try {
-    const result = await api('/quant/backtest', { method: 'POST', body: JSON.stringify({ symbols: state.settings.symbols, period: $('#backtest-period').value, initialCapital: Number($('#backtest-capital').value), config: state.settings.config }) });
+    const symbols = normalizeSymbols($('#backtest-symbol-input').value);
+    if (!symbols.length) throw new Error('请至少输入一个有效美股代码');
+    const result = await api('/quant/backtest', { method: 'POST', body: JSON.stringify({ symbols, period: $('#backtest-period').value, initialCapital: Number($('#backtest-capital').value), config: state.settings.config }) });
     $('#bt-equity').textContent = formatMoney(result.finalEquity);
     $('#bt-return').textContent = formatPercent(result.totalReturn, true);
     $('#bt-return').className = result.totalReturn >= 0 ? 'pos' : 'neg';
     $('#bt-drawdown').textContent = formatPercent(-result.maxDrawdown, true);
     $('#bt-winrate').textContent = `${formatPercent(result.winRate, true)} / ${result.completedTrades}`;
     $('#backtest-note').textContent = `${result.results.filter((item) => item.status === 'ok').length}/${result.results.length} 个标的完成，买入持有同期平均 ${formatPercent(result.buyHoldReturn, true)}`;
+    state.returnCharts.forEach((chart) => chart.dispose());
+    state.returnCharts.clear();
+    state.backtestResults = new Map(result.results.filter((item) => item.status === 'ok').map((item) => [item.symbol, item]));
     $('#backtest-body').innerHTML = backtestResultRows(result.results, result.period);
+    $('#backtest-overview-card').classList.remove('hidden');
+    renderReturnChart('overview', $('#backtest-overview-chart'), result.equityCurve, result.initialCapital);
   } catch (error) { $('#backtest-body').innerHTML = `<tr><td colspan="8" class="quant-empty quant-error">${escapeHtml(error.message)}</td></tr>`; }
   finally { button.disabled = false; button.textContent = '运行回测'; }
 }
@@ -229,18 +352,38 @@ function renderPaper(paper) {
 async function loadPaper() { renderPaper(await api('/quant/paper')); }
 
 function applyDipPermissions() {
-  $$('.sm-feature-tab').forEach((link) => { const href = link.getAttribute('href') || ''; if (href.includes('tab=qq')) link.hidden = !canDip('tab-qq'); else if (href.includes('/dip/')) link.hidden = !canDip('tab-monitor'); });
+  $$('.sm-feature-tab').forEach((link) => {
+    const href = link.getAttribute('href') || '';
+    if (href.includes('tab=qq')) link.hidden = !canDip('tab-qq');
+    else if (href.includes('/quant/')) link.hidden = !can('tab-quant');
+    else if (href.includes('/dip/')) link.hidden = !canDip('tab-monitor');
+  });
+}
+
+function applyQuantPermissions() {
+  $$('[data-permission]').forEach((button) => { button.hidden = !can(button.dataset.permission); });
+  $('#save-watchlist').hidden = !can('quant-watchlist', 'edit');
+  $('#backtest-save-watchlist').hidden = !can('quant-watchlist', 'edit');
+  $('#analyze-button').hidden = !can('quant-analysis-run', 'edit');
+  $('#refresh-button').hidden = !can('quant-analysis-run', 'edit');
+  $('#config-reset').hidden = !can('quant-config', 'edit');
+  $('#config-save').hidden = !can('quant-config', 'edit');
+  $('#backtest-button').hidden = !can('quant-backtest-run', 'edit');
+  $('#paper-settings-save').hidden = !can('quant-paper-settings', 'edit');
+  $('#paper-sync').hidden = !can('quant-paper-sync', 'edit');
+  $('#paper-reset').hidden = !can('quant-paper-reset', 'edit');
 }
 
 function bindEvents() {
   $$('.quant-nav').forEach((button) => button.addEventListener('click', () => showView(button.dataset.view)));
   $('#analysis-form').addEventListener('submit', (event) => { event.preventDefault(); runAnalysis(); });
   $('#refresh-button').addEventListener('click', runAnalysis);
-  $('#save-watchlist').addEventListener('click', async () => { await saveSettings({ message: '自选池已保存' }); await runAnalysis(); });
+  $('#save-watchlist').addEventListener('click', async () => { await saveSettings({ scope: 'watchlist', message: '自选池已保存' }); await runAnalysis(); });
+  $('#backtest-save-watchlist').addEventListener('click', async () => { await saveSettings({ scope: 'watchlist', symbolsSource: '#backtest-symbol-input', message: '回测标的已同步保存' }); });
   $('#config-reset').addEventListener('click', () => { state.settings.config = { ...DEFAULT_CONFIG }; renderConfig(); });
-  $('#config-save').addEventListener('click', async () => { await saveSettings({ includeWatchlist: false, message: '策略参数已保存' }); await runAnalysis(); });
+  $('#config-save').addEventListener('click', async () => { await saveSettings({ scope: 'config', message: '策略参数已保存' }); await runAnalysis(); });
   $('#backtest-form').addEventListener('submit', (event) => { event.preventDefault(); runBacktest(); });
-  $('#paper-settings-save').addEventListener('click', () => saveSettings({ includeWatchlist: false, message: '模拟盘设置已保存；重置后初始资金生效' }));
+  $('#paper-settings-save').addEventListener('click', () => saveSettings({ scope: 'paper', message: '模拟盘设置已保存；重置后初始资金生效' }));
   $('#paper-sync').addEventListener('click', async () => { const button = $('#paper-sync'); button.disabled = true; button.textContent = '同步中…'; try { const result = await api('/quant/paper/sync', { method: 'POST', body: '{}' }); renderPaper(result); } catch (error) { $('#paper-note').textContent = error.message; } finally { button.disabled = false; button.textContent = '同步信号并交易'; } });
   $('#paper-reset').addEventListener('click', async () => { if (!confirm('确定清空全部模拟持仓和交易记录？')) return; const result = await api('/quant/paper/reset', { method: 'POST', body: JSON.stringify({ initialCapital: Number($('#paper-capital').value) }) }); renderPaper(result); });
   document.addEventListener('click', (event) => {
@@ -256,22 +399,36 @@ function bindEvents() {
     const expanded = !detail.classList.toggle('hidden');
     toggle.setAttribute('aria-expanded', String(expanded));
     toggle.innerHTML = `${expanded ? '收起' : '展开'} <span>${expanded ? '⌃' : '⌄'}</span>`;
+    const symbol = toggle.dataset.toggleTrades;
+    if (expanded) {
+      const item = state.backtestResults.get(symbol);
+      renderReturnChart(`symbol:${symbol}`, detail.querySelector('[data-return-chart]'), item?.equityCurve, item?.initialCapital, item?.trades);
+    } else {
+      state.returnCharts.get(`symbol:${symbol}`)?.dispose();
+      state.returnCharts.delete(`symbol:${symbol}`);
+    }
   });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && state.klineSymbol) closeKline(); });
-  window.addEventListener('resize', () => state.klineChart?.resize());
+  window.addEventListener('resize', () => { state.klineChart?.resize(); state.returnCharts.forEach((chart) => chart.resize()); });
 }
 
 async function init() {
   await loadPortalContext();
   applyDipPermissions();
+  applyQuantPermissions();
   state.settings = await api('/quant/settings');
   $('#symbol-input').value = state.settings.symbols.join(', ');
+  $('#backtest-symbol-input').value = state.settings.symbols.join(', ');
   $('#period-select').value = state.settings.period;
-  $('#backtest-period').value = state.settings.period === '3m' ? '6m' : state.settings.period;
+  $('#backtest-period').value = state.settings.backtestPeriod || (state.settings.period === '3m' ? '6m' : state.settings.period);
+  $('#backtest-capital').value = state.settings.backtestInitialCapital || 100000;
   $('#paper-capital').value = state.settings.paperInitialCapital;
   $('#paper-position-pct').value = Math.round(state.settings.paperPositionPct * 100);
   renderConfig(); bindEvents(); showView(new URLSearchParams(location.search).get('view') || 'dashboard');
-  await Promise.all([runAnalysis(), loadPaper()]);
+  const tasks = [];
+  if (can('quant-analysis-run', 'edit')) tasks.push(runAnalysis());
+  if (can('quant-paper')) tasks.push(loadPaper());
+  await Promise.all(tasks);
 }
 
 init().catch((error) => { $('#signal-body').innerHTML = `<tr><td colspan="9" class="quant-empty quant-error">${escapeHtml(error.message)}</td></tr>`; });

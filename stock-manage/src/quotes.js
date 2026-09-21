@@ -126,8 +126,8 @@ function ymdUTC(ms) {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-function ymdDaysAgo(days) {
-  return ymdUTC(Date.now() - days * 86400000);
+function ymdDaysAgo(days, endTimestamp = Date.now()) {
+  return ymdUTC(endTimestamp - days * 86400000);
 }
 
 export function createQuoteService(config) {
@@ -167,11 +167,11 @@ export function createQuoteService(config) {
     };
   }
 
-  async function getStockHistoryFromPolygon(symbol, days) {
+  async function getStockHistoryFromPolygon(symbol, days, endTimestamp = Date.now()) {
     if (!polygonKey) throw new Error('未配置 Polygon API Key');
     const url =
       `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(symbol)}` +
-      `/range/1/day/${ymdDaysAgo(days)}/${ymdUTC(Date.now())}` +
+      `/range/1/day/${ymdDaysAgo(days, endTimestamp)}/${ymdUTC(endTimestamp)}` +
       `?adjusted=true&sort=asc&limit=50000&apiKey=${polygonKey}`;
     let data;
     try {
@@ -197,7 +197,7 @@ export function createQuoteService(config) {
     return { candles, source: 'polygon' };
   }
 
-  async function getStockHistoryFromSina(symbol, days) {
+  async function getStockHistoryFromSina(symbol, days, endTimestamp = Date.now()) {
     const url =
       'https://stock.finance.sina.com.cn/usstock/api/json.php/' +
       `US_MinKService.getDailyK?symbol=${encodeURIComponent(symbol)}&___qn=3`;
@@ -212,7 +212,7 @@ export function createQuoteService(config) {
     }
     const rows = Array.isArray(data) ? data : data?.result?.data;
     if (!Array.isArray(rows)) throw new Error('新浪财经无历史行情');
-    const from = Date.now() - days * 86400000;
+    const from = endTimestamp - days * 86400000;
     const candles = rows
       .map((row) => ({
         timestamp: Date.parse(`${row.d}T00:00:00Z`),
@@ -225,15 +225,16 @@ export function createQuoteService(config) {
       .filter((bar) => (
         [bar.timestamp, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite)
           && bar.timestamp >= from
+          && bar.timestamp <= endTimestamp
       ))
       .sort((a, b) => a.timestamp - b.timestamp);
     if (!candles.length) throw new Error('新浪财经无历史行情');
     return { candles, source: 'sina' };
   }
 
-  async function getStockHistoryFromFinnhub(symbol, days) {
+  async function getStockHistoryFromFinnhub(symbol, days, endTimestamp = Date.now()) {
     if (!finnhubKey) throw new Error('未配置 Finnhub API Key');
-    const to = Math.floor(Date.now() / 1000);
+    const to = Math.floor(endTimestamp / 1000);
     const from = to - Math.round(days * 86400);
     const url = `https://finnhub.io/api/v1/stock/candle?symbol=${encodeURIComponent(symbol)}&resolution=D&from=${from}&to=${to}&token=${finnhubKey}`;
     let data;
@@ -262,7 +263,12 @@ export function createQuoteService(config) {
       throw new Error('历史量化行情当前仅支持美股正股');
     }
     const days = Math.min(1825, Math.max(90, Number(options.days) || 365));
-    const cacheKey = `${sym}:${days}`;
+    const requestedEnd = Number(options.endTimestamp);
+    const endTimestamp = Number.isFinite(requestedEnd)
+      ? Math.min(Date.now(), Math.max(Date.UTC(1990, 0, 1), requestedEnd))
+      : Date.now();
+    const endDay = ymdUTC(endTimestamp);
+    const cacheKey = `${sym}:${days}:${endDay}`;
     const cached = stockHistoryCache.get(cacheKey);
     if (cached && Date.now() - cached.at < stockHistoryCacheMs) return cached.value;
     const errors = [];
@@ -276,7 +282,7 @@ export function createQuoteService(config) {
         continue;
       }
       try {
-        const value = await loader(sym, days);
+        const value = await loader(sym, days, endTimestamp);
         stockHistoryCache.set(cacheKey, { value, at: Date.now() });
         return value;
       } catch (e) {

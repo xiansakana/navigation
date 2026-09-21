@@ -32,6 +32,20 @@ var STOCK_MANAGE_HOLDINGS_COLUMNS = [
 ];
 
 var STOCK_MANAGE_FEATURES = [
+    { feature: 'tab-quant', name: '量化分析 Tab', action: 'view' },
+    { feature: 'quant-settings', name: '读取量化用户设置', action: 'view' },
+    { feature: 'quant-dashboard', name: '量化仪表盘', action: 'view' },
+    { feature: 'quant-strategy', name: '量化策略页', action: 'view' },
+    { feature: 'quant-backtest', name: '历史回测页', action: 'view' },
+    { feature: 'quant-paper', name: '模拟盘页', action: 'view' },
+    { feature: 'quant-history', name: '查看 K 线', action: 'view' },
+    { feature: 'quant-watchlist', name: '保存分析标的', action: 'edit' },
+    { feature: 'quant-analysis-run', name: '运行量化分析', action: 'edit' },
+    { feature: 'quant-config', name: '保存策略参数', action: 'edit' },
+    { feature: 'quant-backtest-run', name: '运行历史回测', action: 'edit' },
+    { feature: 'quant-paper-settings', name: '保存模拟盘设置', action: 'edit' },
+    { feature: 'quant-paper-sync', name: '执行模拟盘同步', action: 'edit' },
+    { feature: 'quant-paper-reset', name: '重置模拟盘', action: 'edit' },
     { feature: 'dashboard', name: '显示看板', action: 'view' },
     { feature: 'pnl', name: '查询盈亏', action: 'view' },
     { feature: 'pnl-toggle', name: '盈亏显隐', action: 'view' },
@@ -578,6 +592,7 @@ export function canWriteService(userPerms, serviceId) {
 export function hasStockManageFeature(userPerms, feature, action) {
     if (!feature) return true;
     if ((userPerms || []).includes('*')) return true;
+    if ((userPerms || []).includes(serviceEditPermissionId(STOCK_MANAGE_SERVICE_ID))) return true;
     var fid = stockManageFeaturePermissionId(feature, action);
     if (userPerms.includes(fid)) return true;
     if (action === 'view') {

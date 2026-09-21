@@ -14,7 +14,7 @@ function featurePermId(service, feature, action) {
 function checkPerm(service, feature, action) {
   const perms = ctx.permissions;
   if (perms.includes('*')) return true;
-  if (action === 'edit' && perms.includes(`service:${service}:edit`)) return true;
+  if (perms.includes(`service:${service}:edit`)) return true;
   const fid = featurePermId(service, feature, action);
   if (perms.includes(fid)) return true;
   if (action === 'view' && perms.includes(featurePermId(service, feature, 'edit'))) return true;

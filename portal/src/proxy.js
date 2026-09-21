@@ -10,6 +10,7 @@ function pickHeaders(reqHeaders, extra, opts) {
     var keys = [
         'content-type', 'authorization', 'x-api-key', 'accept', 'accept-language', 'cache-control',
         'cookie', 'user-agent', 'referer', 'origin',
+        'x-portal-user-id', 'x-portal-username', 'x-portal-permissions',
         'range', 'if-range',
         // AList 上传/操作依赖这些自定义头；丢掉 File-Path 会报 storage not found
         'file-path', 'as-task', 'password', 'overwrite',
