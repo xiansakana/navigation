@@ -11,7 +11,7 @@
 
 .quant-sidebar {
   position: sticky;
-  top: 72px;
+  top: calc(var(--navbar-height, 0px) + 72px);
   min-height: calc(100vh - 100px);
   padding: 17px 12px;
   background: color-mix(in srgb, var(--card) 98%, #080b11);

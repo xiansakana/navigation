@@ -462,7 +462,7 @@ body.has-navbar {
 .sm-modal-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .sm-feature-tabs {
     position: sticky;
-    top: 0;
+    top: var(--navbar-height, 0px);
     z-index: 30;
     display: flex;
     gap: 8px;
