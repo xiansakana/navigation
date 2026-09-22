@@ -51,10 +51,39 @@ test('QQQ 1DTE chain falls back to the free Cboe delayed chain without a Polygon
   const chain = await service.getQqq1dteChain();
   assert.equal(chain.source, 'cboe-delayed');
   assert.equal(chain.marketDate, '2099-12-30');
-  assert.match(chain.capturedAt, /^2099-12-30T/);
+  assert.equal(chain.capturedAt, '2099-12-30T10:00:00.000Z');
   assert.equal(chain.expiration, '2099-12-31');
   assert.equal(chain.contracts[0].right, 'P');
   assert.equal(chain.contracts[0].delta, -0.45);
+});
+
+test('QQQ previous-session summary preserves daily OHLC and uses the 16:00 ET close', async (context) => {
+  const originalFetch = global.fetch;
+  context.after(() => { global.fetch = originalFetch; });
+  global.fetch = async () => response({
+    timestamp: '2026-09-22 11:00:00',
+    data: {
+      current_price: 742.4,
+      close: 741.47,
+      options: [{
+        option: 'QQQ260922C00740000', bid: 5.1, ask: 5.3, bid_size: 2, ask_size: 3,
+        delta: 0.55, gamma: 0.02, theta: -0.1, vega: 0.04, iv: 0.25,
+        open_interest: 20, volume: 10, last_trade_price: 5.2,
+        last_trade_time: '2026-09-21T15:59:10', open: 4.1, high: 6.2, low: 3.8,
+        prev_day_close: 4
+      }]
+    }
+  });
+  const service = createQuoteService({ finnhubApiKey: '', polygonApiKey: '' });
+  const summary = await service.getQqqPreviousSessionSummary();
+  assert.equal(summary.captureKind, 'daily-summary');
+  assert.equal(summary.marketDate, '2026-09-21');
+  assert.equal(summary.capturedAt, '2026-09-21T20:00:00.000Z');
+  assert.equal(summary.underlyingPrice, 741.47);
+  assert.equal(summary.expiration, '2026-09-22');
+  assert.equal(summary.contracts[0].lastTradeAt, '2026-09-21T19:59:10.000Z');
+  assert.equal(summary.contracts[0].open, 4.1);
+  assert.equal(summary.contracts[0].prevClose, 4);
 });
 
 test('stock history uses Polygon aggregates and normalizes candles', async (context) => {

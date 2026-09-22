@@ -17,14 +17,15 @@ export function createYoloStore(config, databaseOverride = null) {
       last_error=excluded.last_error, updated_at=excluded.updated_at
   `);
   const insertCapture = db.prepare(`
-    INSERT INTO yolo_captures (user_id, captured_at, market_date, expiration, underlying_price, source, contract_count)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO yolo_captures (user_id, captured_at, market_date, expiration, underlying_price, source, capture_kind, contract_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const findCapture = db.prepare('SELECT id FROM yolo_captures WHERE user_id = ? AND captured_at = ?');
   const insertQuote = db.prepare(`
     INSERT INTO yolo_option_quotes (capture_id, user_id, option_symbol, right_type, strike, expiration,
-      bid, ask, bid_size, ask_size, last_price, delta, gamma, theta, vega, iv, volume, open_interest)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      bid, ask, bid_size, ask_size, last_price, last_trade_at, open_price, high_price, low_price, prev_close,
+      delta, gamma, theta, vega, iv, volume, open_interest)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   function ensure(userId) {
@@ -81,11 +82,13 @@ export function createYoloStore(config, databaseOverride = null) {
       return Number(existing.id);
     }
     const info = insertCapture.run(id, snapshot.capturedAt, snapshot.marketDate, snapshot.expiration,
-      snapshot.underlyingPrice || null, snapshot.source || '', snapshot.contracts.length);
+      snapshot.underlyingPrice || null, snapshot.source || '', snapshot.captureKind || 'intraday', snapshot.contracts.length);
     for (const quote of snapshot.contracts) {
       insertQuote.run(info.lastInsertRowid, id, quote.optionSymbol, quote.right, quote.strike, quote.expiration,
-        quote.bid, quote.ask, quote.bidSize, quote.askSize, quote.last, quote.delta, quote.gamma,
-        quote.theta, quote.vega, quote.iv, quote.volume, quote.openInterest);
+        quote.bid, quote.ask, quote.bidSize ?? null, quote.askSize ?? null, quote.last ?? null,
+        quote.lastTradeAt ?? null, quote.open ?? null, quote.high ?? null, quote.low ?? null, quote.prevClose ?? null,
+        quote.delta ?? null, quote.gamma ?? null, quote.theta ?? null, quote.vega ?? null, quote.iv ?? null,
+        quote.volume ?? null, quote.openInterest ?? null);
     }
     markAttempt(id, null, snapshot.capturedAt);
     return Number(info.lastInsertRowid);
@@ -102,28 +105,33 @@ export function createYoloStore(config, databaseOverride = null) {
     const cfg = settings(id);
     const stats = db.prepare(`
       SELECT COUNT(*) captures, COUNT(DISTINCT market_date) days, COALESCE(SUM(contract_count), 0) quote_rows,
+        COALESCE(SUM(CASE WHEN capture_kind = 'intraday' THEN 1 ELSE 0 END), 0) intraday_captures,
+        COALESCE(SUM(CASE WHEN capture_kind = 'daily-summary' THEN 1 ELSE 0 END), 0) summary_captures,
         MIN(captured_at) first_capture_at, MAX(captured_at) latest_capture_at
       FROM yolo_captures WHERE user_id = ?
     `).get(id);
     const recent = db.prepare(`
-      SELECT id, captured_at, market_date, expiration, underlying_price, source, contract_count
+      SELECT id, captured_at, market_date, expiration, underlying_price, source, capture_kind, contract_count
       FROM yolo_captures WHERE user_id = ? ORDER BY captured_at DESC LIMIT 12
     `).all(id);
     return { settings: cfg, stats: { captures: stats.captures, days: stats.days, quoteRows: stats.quote_rows,
+      intradayCaptures: stats.intraday_captures, summaryCaptures: stats.summary_captures,
       firstCaptureAt: stats.first_capture_at, latestCaptureAt: stats.latest_capture_at }, recent };
   }
 
   function dataset(userId) {
     const id = safeUserId(userId);
-    const captures = db.prepare(`SELECT * FROM yolo_captures WHERE user_id = ? ORDER BY captured_at`).all(id);
+    const captures = db.prepare(`
+      SELECT * FROM yolo_captures WHERE user_id = ? AND capture_kind = 'intraday' ORDER BY captured_at
+    `).all(id);
     const quoteRows = db.prepare(`
       SELECT q.* FROM yolo_option_quotes q JOIN yolo_captures c ON c.id = q.capture_id
-      WHERE q.user_id = ? ORDER BY c.captured_at, q.option_symbol
+      WHERE q.user_id = ? AND c.capture_kind = 'intraday' ORDER BY c.captured_at, q.option_symbol
     `).all(id);
     const grouped = new Map();
     captures.forEach((row) => grouped.set(row.id, {
       id: row.id, capturedAt: row.captured_at, marketDate: row.market_date, expiration: row.expiration,
-      underlyingPrice: row.underlying_price, quotes: []
+      underlyingPrice: row.underlying_price, source: row.source, captureKind: row.capture_kind, quotes: []
     }));
     quoteRows.forEach((row) => grouped.get(row.capture_id)?.quotes.push({
       optionSymbol: row.option_symbol, right: row.right_type, strike: row.strike, expiration: row.expiration,

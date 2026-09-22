@@ -730,6 +730,50 @@ export function createQuoteService(config) {
     return new Date(wallClockUtc - (displayedAsUtc - wallClockUtc)).toISOString();
   }
 
+  function cboeUtcTimestampToIso(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+    if (!match) return null;
+    return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]),
+      Number(match[4]), Number(match[5]), Number(match[6]))).toISOString();
+  }
+
+  function parseCboeOption(item, marketDate) {
+    const match = String(item?.option || '').match(/^QQQ(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/);
+    if (!match) return null;
+    const expiration = `20${match[1]}-${match[2]}-${match[3]}`;
+    if (expiration <= marketDate) return null;
+    const bid = Number(item.bid);
+    const ask = Number(item.ask);
+    if (!(ask >= bid) || bid < 0) return null;
+    return { item, expiration, right: match[4], strike: Number(match[5]) / 1000, bid, ask };
+  }
+
+  function normalizeCboeContracts(rows, expiration, underlyingPrice) {
+    return filterUsefulQqqContracts(rows.filter((row) => row.expiration === expiration).map((row) => ({
+      optionSymbol: `O:${row.item.option}`,
+      right: row.right,
+      strike: row.strike,
+      expiration: row.expiration,
+      bid: row.bid,
+      ask: row.ask,
+      bidSize: Number(row.item.bid_size) || 0,
+      askSize: Number(row.item.ask_size) || 0,
+      last: Number(row.item.last_trade_price) || null,
+      lastTradeAt: newYorkLocalTimestampToIso(row.item.last_trade_time),
+      open: Number.isFinite(Number(row.item.open)) ? Number(row.item.open) : null,
+      high: Number.isFinite(Number(row.item.high)) ? Number(row.item.high) : null,
+      low: Number.isFinite(Number(row.item.low)) ? Number(row.item.low) : null,
+      prevClose: Number.isFinite(Number(row.item.prev_day_close)) ? Number(row.item.prev_day_close) : null,
+      delta: Number.isFinite(Number(row.item.delta)) ? Number(row.item.delta) : null,
+      gamma: Number.isFinite(Number(row.item.gamma)) ? Number(row.item.gamma) : null,
+      theta: Number.isFinite(Number(row.item.theta)) ? Number(row.item.theta) : null,
+      vega: Number.isFinite(Number(row.item.vega)) ? Number(row.item.vega) : null,
+      iv: Number.isFinite(Number(row.item.iv)) ? Number(row.item.iv) : null,
+      volume: Number(row.item.volume) || 0,
+      openInterest: Number(row.item.open_interest) || 0
+    })), underlyingPrice);
+  }
+
   function filterUsefulQqqContracts(contracts, underlyingPrice) {
     return contracts.filter((item) => {
       const nearSpot = underlyingPrice > 0 && Math.abs(item.strike / underlyingPrice - 1) <= 0.05;
@@ -801,49 +845,50 @@ export function createQuoteService(config) {
       expiration,
       underlyingPrice,
       source: 'polygon-opra-snapshot',
+      captureKind: 'intraday',
       contracts: normalized
     };
   }
 
   async function getCboeDelayedQqq1dteChain() {
     const data = await fetchJson('https://cdn.cboe.com/api/global/delayed_quotes/options/QQQ.json');
-    const providerTimestamp = newYorkLocalTimestampToIso(data?.timestamp);
+    const providerTimestamp = cboeUtcTimestampToIso(data?.timestamp);
     const etDate = String(data?.timestamp || '').slice(0, 10) || qqqChainDate();
-    const parsed = (data?.data?.options || []).flatMap((item) => {
-      const match = String(item.option || '').match(/^QQQ(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/);
-      if (!match) return [];
-      const expiration = `20${match[1]}-${match[2]}-${match[3]}`;
-      if (expiration <= etDate) return [];
-      const bid = Number(item.bid);
-      const ask = Number(item.ask);
-      if (!(ask >= bid) || bid < 0) return [];
-      return [{ item, expiration, right: match[4], strike: Number(match[5]) / 1000, bid, ask }];
-    });
+    const parsed = (data?.data?.options || []).map((item) => parseCboeOption(item, etDate)).filter(Boolean);
     const expiration = parsed.map((row) => row.expiration).sort()[0];
     if (!expiration) throw new Error('Cboe 延时链未找到 QQQ 下一到期合约');
     const underlyingPrice = Number(data?.data?.current_price) || 0;
-    const contracts = filterUsefulQqqContracts(parsed.filter((row) => row.expiration === expiration).map((row) => ({
-      optionSymbol: `O:${row.item.option}`,
-      right: row.right,
-      strike: row.strike,
-      expiration: row.expiration,
-      bid: row.bid,
-      ask: row.ask,
-      bidSize: Number(row.item.bid_size) || 0,
-      askSize: Number(row.item.ask_size) || 0,
-      last: Number(row.item.last_trade_price) || null,
-      delta: Number.isFinite(Number(row.item.delta)) ? Number(row.item.delta) : null,
-      gamma: Number.isFinite(Number(row.item.gamma)) ? Number(row.item.gamma) : null,
-      theta: Number.isFinite(Number(row.item.theta)) ? Number(row.item.theta) : null,
-      vega: Number.isFinite(Number(row.item.vega)) ? Number(row.item.vega) : null,
-      iv: Number.isFinite(Number(row.item.iv)) ? Number(row.item.iv) : null,
-      volume: Number(row.item.volume) || 0,
-      openInterest: Number(row.item.open_interest) || 0
-    })), underlyingPrice);
+    const contracts = normalizeCboeContracts(parsed, expiration, underlyingPrice);
     if (!contracts.length) throw new Error('Cboe 延时链没有可记录的有效 QQQ NBBO');
     return {
       capturedAt: providerTimestamp || new Date().toISOString(), marketDate: etDate, expiration,
-      underlyingPrice, source: 'cboe-delayed', contracts
+      underlyingPrice, source: 'cboe-delayed', captureKind: 'intraday', contracts
+    };
+  }
+
+  async function getQqqPreviousSessionSummary() {
+    const data = await fetchJson('https://cdn.cboe.com/api/global/delayed_quotes/options/QQQ.json');
+    const providerDate = String(data?.timestamp || '').slice(0, 10) || qqqChainDate();
+    const previousDate = (data?.data?.options || [])
+      .map((item) => String(item?.last_trade_time || '').slice(0, 10))
+      .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date) && date < providerDate)
+      .sort()
+      .at(-1);
+    if (!previousDate) throw new Error('Cboe 没有可回填的上一交易日数据');
+    const parsed = (data?.data?.options || []).map((item) => parseCboeOption(item, previousDate)).filter(Boolean);
+    const expiration = parsed.map((row) => row.expiration).sort()[0];
+    if (!expiration) throw new Error('Cboe 上一交易日没有 QQQ 1DTE 合约');
+    const underlyingPrice = Number(data?.data?.close) || Number(data?.data?.prev_day_close) || 0;
+    const contracts = normalizeCboeContracts(parsed, expiration, underlyingPrice);
+    if (!contracts.length) throw new Error('Cboe 上一交易日摘要没有有效 QQQ 报价');
+    return {
+      capturedAt: newYorkLocalTimestampToIso(`${previousDate} 16:00:00`),
+      marketDate: previousDate,
+      expiration,
+      underlyingPrice,
+      source: 'cboe-daily-summary',
+      captureKind: 'daily-summary',
+      contracts
     };
   }
 
@@ -890,5 +935,5 @@ export function createQuoteService(config) {
     return getStockFromFinnhub(sym);
   }
 
-  return { getStock, getOption, getQqq1dteChain, getQuote, getStockHistory, getAShareQuote, getUsdCny, search };
+  return { getStock, getOption, getQqq1dteChain, getQqqPreviousSessionSummary, getQuote, getStockHistory, getAShareQuote, getUsdCny, search };
 }

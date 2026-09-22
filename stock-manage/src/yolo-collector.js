@@ -42,6 +42,21 @@ export function createYoloCollector({ store, quotes, logger = console }) {
     finally { running = false; }
   }
 
+  async function backfillPreviousSession(userId) {
+    if (running) throw new Error('采集器正在写入，请稍后重试');
+    running = true;
+    try {
+      const snapshot = await quotes.getQqqPreviousSessionSummary();
+      store.saveCapture(userId, snapshot);
+      return snapshot;
+    } catch (error) {
+      store.markAttempt(userId, error.message || String(error));
+      throw error;
+    } finally {
+      running = false;
+    }
+  }
+
   function start() {
     if (timer) return;
     timer = setInterval(() => tick().catch((error) => logger.warn(`梭哈采集失败: ${error.message}`)), 15000);
@@ -50,5 +65,12 @@ export function createYoloCollector({ store, quotes, logger = console }) {
   }
 
   function stop() { if (timer) clearInterval(timer); timer = null; }
-  return { start, stop, tick, captureNow: (userId) => tick(true, userId), isRunning: () => running };
+  return {
+    start,
+    stop,
+    tick,
+    captureNow: (userId) => tick(true, userId),
+    backfillPreviousSession,
+    isRunning: () => running
+  };
 }

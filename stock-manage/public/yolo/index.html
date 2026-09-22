@@ -22,6 +22,7 @@
       <div><div class="quant-eyebrow">QQQ · NEXT EXPIRY · REAL NBBO</div><h1>梭哈</h1><p>从今天起积累自己的 QQQ 1DTE 分钟数据库，用真实 ask 买入、bid 卖出回测。</p></div>
       <div class="quant-header-actions">
         <span class="yolo-market" id="market-status">检查市场…</span>
+        <button class="btn ghost" id="backfill-close" type="button">回填昨日收盘</button>
         <button class="btn ghost" id="capture-now" type="button">立即采集</button>
       </div>
     </header>
@@ -42,7 +43,7 @@
           <button class="btn primary" id="save-collector" type="button">保存</button>
         </div>
         <p class="yolo-message" id="collector-message">正在读取采集状态…</p>
-        <p class="quant-disclaimer">需要 Polygon/Massive 的期权快照权限。这里只记录市场数据并做模拟回测，不连接券商，也不会自动下实盘单。</p>
+        <p class="quant-disclaimer">Polygon/Massive 优先；未配置时使用 Cboe 延迟行情。昨日收盘摘要只用于横截面分析，不参与分钟路径回测。这里只记录市场数据并做模拟回测，不连接券商，也不会自动下实盘单。</p>
       </section>
 
       <section class="quant-card">
@@ -73,7 +74,7 @@
 
     <section class="quant-card">
       <div class="quant-card-head"><div><h2>最近采集</h2><p>每次快照仅保存QQQ附近及有效Delta范围内的下一到期合约。</p></div></div>
-      <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>时间</th><th>市场日</th><th>到期日</th><th class="align-right">QQQ</th><th class="align-right">合约数</th><th>来源</th></tr></thead><tbody id="capture-body"><tr><td colspan="6" class="quant-empty">尚无数据</td></tr></tbody></table></div>
+      <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>时间</th><th>类型</th><th>市场日</th><th>到期日</th><th class="align-right">QQQ</th><th class="align-right">合约数</th><th>来源</th></tr></thead><tbody id="capture-body"><tr><td colspan="7" class="quant-empty">尚无数据</td></tr></tbody></table></div>
     </section>
 
     <section class="quant-card">
@@ -81,6 +82,6 @@
       <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>日期</th><th>方向 / 合约</th><th class="align-right">入场 / 退出</th><th class="align-right">Delta</th><th class="align-right">收益</th><th>退出原因</th></tr></thead><tbody id="trade-body"><tr><td colspan="6" class="quant-empty">尚未运行回测</td></tr></tbody></table></div>
     </section>
   </main>
-  <script type="module" src="./app.js?v=20260922-1"></script>
+  <script type="module" src="./app.js?v=20260922-2"></script>
 </body>
 </html>

@@ -59,6 +59,7 @@ export function initSchema(db) {
       expiration TEXT NOT NULL,
       underlying_price REAL,
       source TEXT,
+      capture_kind TEXT NOT NULL DEFAULT 'intraday',
       contract_count INTEGER NOT NULL DEFAULT 0
     );
 
@@ -74,6 +75,11 @@ export function initSchema(db) {
       bid_size REAL,
       ask_size REAL,
       last_price REAL,
+      last_trade_at TEXT,
+      open_price REAL,
+      high_price REAL,
+      low_price REAL,
+      prev_close REAL,
       delta REAL,
       gamma REAL,
       theta REAL,
@@ -91,10 +97,21 @@ export function initSchema(db) {
       ON yolo_option_quotes (user_id, option_symbol, capture_id);
   `);
 
+  const ensureColumn = (table, column, definition) => {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (!columns.some((item) => item.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  };
+  ensureColumn('yolo_captures', 'capture_kind', "TEXT NOT NULL DEFAULT 'intraday'");
+  ensureColumn('yolo_option_quotes', 'last_trade_at', 'TEXT');
+  ensureColumn('yolo_option_quotes', 'open_price', 'REAL');
+  ensureColumn('yolo_option_quotes', 'high_price', 'REAL');
+  ensureColumn('yolo_option_quotes', 'low_price', 'REAL');
+  ensureColumn('yolo_option_quotes', 'prev_close', 'REAL');
+
   const row = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get();
   if (!row) {
-    db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '4')").run();
-  } else if (Number(row.value) < 4) {
-    db.prepare("UPDATE meta SET value = '4' WHERE key = 'schema_version'").run();
+    db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '5')").run();
+  } else if (Number(row.value) < 5) {
+    db.prepare("UPDATE meta SET value = '5' WHERE key = 'schema_version'").run();
   }
 }

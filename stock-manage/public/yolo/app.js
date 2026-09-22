@@ -31,6 +31,7 @@ function applyPermissions() {
   });
   const editable = can('yolo-control', 'edit');
   $('#capture-now').hidden = !editable;
+  $('#backfill-close').hidden = !editable;
   $('#save-collector').hidden = !editable;
   $('#collector-enabled').disabled = !editable;
   $('#capture-interval').disabled = !editable;
@@ -60,7 +61,7 @@ function renderStatus(data) {
       ? `自动记录已开启，每 ${settings.intervalSeconds} 秒检查一次；休市期间不请求。`
       : '自动记录已暂停。';
   $('#collector-message').className = `yolo-message${settings.lastError ? ' error' : ''}`;
-  $('#capture-body').innerHTML = recent.length ? recent.map((item) => `<tr><td>${dateTime(item.captured_at)}</td><td>${escapeHtml(item.market_date)}</td><td>${escapeHtml(item.expiration)}</td><td class="align-right">${money(item.underlying_price)}</td><td class="align-right">${Number(item.contract_count).toLocaleString()}</td><td>${escapeHtml(item.source || '—')}</td></tr>`).join('') : '<tr><td colspan="6" class="quant-empty">尚无数据；开盘后自动开始积累。</td></tr>';
+  $('#capture-body').innerHTML = recent.length ? recent.map((item) => `<tr><td>${dateTime(item.captured_at)}</td><td>${item.capture_kind === 'daily-summary' ? '收盘摘要' : '日内快照'}</td><td>${escapeHtml(item.market_date)}</td><td>${escapeHtml(item.expiration)}</td><td class="align-right">${money(item.underlying_price)}</td><td class="align-right">${Number(item.contract_count).toLocaleString()}</td><td>${escapeHtml(item.source || '—')}</td></tr>`).join('') : '<tr><td colspan="7" class="quant-empty">尚无数据；可先回填昨日收盘，开盘后自动积累分钟快照。</td></tr>';
 }
 
 async function loadStatus(silent = false) {
@@ -87,6 +88,22 @@ async function captureNow() {
     $('#collector-message').textContent = `已写入 ${result.contracts} 个真实期权报价。`;
   } catch (error) { $('#collector-message').textContent = error.message; $('#collector-message').className = 'yolo-message error'; await loadStatus(true); }
   finally { button.disabled = false; button.textContent = '立即采集'; }
+}
+
+async function backfillPreviousClose() {
+  const button = $('#backfill-close');
+  button.disabled = true; button.textContent = '回填中…';
+  try {
+    const result = await api('/yolo/backfill-previous-close', { method: 'POST', body: '{}' });
+    renderStatus({ ...result.status, marketOpen: state.status?.marketOpen, collectorRunning: false });
+    $('#collector-message').textContent = `已回填 ${result.marketDate} 收盘摘要：${result.contracts} 个合约；该摘要不参与分钟回测。`;
+  } catch (error) {
+    $('#collector-message').textContent = error.message;
+    $('#collector-message').className = 'yolo-message error';
+    await loadStatus(true);
+  } finally {
+    button.disabled = false; button.textContent = '回填昨日收盘';
+  }
 }
 
 function renderBacktest(result) {
@@ -123,6 +140,7 @@ async function init() {
   await loadStatus();
   $('#save-collector').addEventListener('click', saveCollector);
   $('#capture-now').addEventListener('click', captureNow);
+  $('#backfill-close').addEventListener('click', backfillPreviousClose);
   $('#yolo-backtest-form').addEventListener('submit', runBacktest);
   state.timer = setInterval(() => loadStatus(true), 30000);
 }

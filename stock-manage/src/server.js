@@ -780,6 +780,23 @@ app.post('/api/yolo/capture', async (req, res) => {
   }
 });
 
+app.post('/api/yolo/backfill-previous-close', async (req, res) => {
+  if (!requireQuantPermission(req, res, 'yolo-control', 'edit')) return;
+  try {
+    const userId = quantUserId(req);
+    const snapshot = await yoloCollector.backfillPreviousSession(userId);
+    res.json({
+      ok: true,
+      marketDate: snapshot.marketDate,
+      expiration: snapshot.expiration,
+      contracts: snapshot.contracts.length,
+      status: yoloStore.status(userId)
+    });
+  } catch (error) {
+    res.status(502).json({ error: error.message || '昨日收盘摘要回填失败', status: yoloStore.status(quantUserId(req)) });
+  }
+});
+
 app.post('/api/yolo/backtest', (req, res) => {
   if (!requireQuantPermission(req, res, 'yolo-backtest-run', 'edit')) return;
   try {
