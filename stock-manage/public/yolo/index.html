@@ -81,14 +81,19 @@
       <div class="quant-card-head"><div><h2>期权链明细</h2><p>选择快照查看真实记录的合约价格；价差为 (ask-bid) / 中间价。</p></div></div>
       <div class="yolo-chain-controls">
         <label><span>采集快照</span><select id="chain-capture"><option value="">尚无快照</option></select></label>
-        <label><span>方向</span><select id="chain-right"><option value="all">Call + Put</option><option value="C">Call</option><option value="P">Put</option></select></label>
+        <label><span>显示列</span><select id="chain-mode"><option value="price">简洁报价</option><option value="greeks">报价 + Greeks</option><option value="all">全部数据</option></select></label>
+        <label><span>价内/价外</span><select id="chain-moneyness"><option value="all">全部</option><option value="otm">仅价外</option><option value="itm">仅价内</option></select></label>
         <label><span>最小行权价</span><input id="chain-strike-min" type="number" step="1" placeholder="不限"></label>
         <label><span>最大行权价</span><input id="chain-strike-max" type="number" step="1" placeholder="不限"></label>
         <label><span>最小 |Delta|</span><input id="chain-delta-min" type="number" min="0" max="1" step="0.05" placeholder="0"></label>
-        <label class="yolo-switch yolo-otm"><input id="chain-otm" type="checkbox"><span></span><b>仅虚值</b></label>
       </div>
+      <div class="yolo-chain-metrics" id="chain-metrics"></div>
       <p class="yolo-message" id="chain-message">选择一次采集以查看合约。</p>
-      <div class="quant-table-wrap"><table class="quant-table yolo-chain-table"><thead><tr><th>合约</th><th>方向</th><th class="align-right">行权价</th><th>价内/价外</th><th class="align-right">Bid × Size</th><th class="align-right">Ask × Size</th><th class="align-right">价差</th><th class="align-right">Last</th><th class="align-right">Open</th><th class="align-right">High</th><th class="align-right">Low</th><th class="align-right">前收</th><th class="align-right">Delta</th><th class="align-right">Gamma</th><th class="align-right">Theta</th><th class="align-right">Vega</th><th class="align-right">IV</th><th class="align-right">成交量</th><th class="align-right">持仓量</th><th>最后成交</th></tr></thead><tbody id="chain-body"><tr><td colspan="20" class="quant-empty">尚未选择快照</td></tr></tbody></table></div>
+      <div class="yolo-contract-detail" id="chain-detail"><span>点击 Call 或 Put 任意报价单元格，查看该合约完整数据</span></div>
+      <div class="yolo-chain-scroll"><table class="yolo-chain-table" id="chain-table">
+        <thead id="chain-head"></thead>
+        <tbody id="chain-body"><tr><td colspan="13" class="quant-empty">尚未选择快照</td></tr></tbody>
+      </table></div>
     </section>
 
     <section class="quant-card">
@@ -96,6 +101,6 @@
       <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>日期</th><th>方向 / 合约</th><th class="align-right">入场 / 退出</th><th class="align-right">Delta</th><th class="align-right">收益</th><th>退出原因</th></tr></thead><tbody id="trade-body"><tr><td colspan="6" class="quant-empty">尚未运行回测</td></tr></tbody></table></div>
     </section>
   </main>
-  <script type="module" src="./app.js?v=20260922-3"></script>
+  <script type="module" src="./app.js?v=20260922-4"></script>
 </body>
 </html>
