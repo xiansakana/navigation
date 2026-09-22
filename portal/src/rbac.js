@@ -56,6 +56,7 @@ var STOCK_MANAGE_FEATURES = [
     { feature: 'columns', name: '列数据显隐控制', action: 'view', permissionPath: ['持仓', '持仓明细'] },
     { feature: 'trade', name: '记一笔', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
     { feature: 'refresh', name: '刷新价格', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
+    { feature: 'cash', name: '查看现金', action: 'view', permissionPath: ['持仓', '资金'] },
     { feature: 'cash', name: '编辑现金', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
     { feature: 'meta', name: '编辑目标价/打分', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
     { feature: 'row-trade', name: '行内买卖/记录', action: 'edit', permissionPath: ['持仓', '持仓操作'] }
@@ -225,7 +226,7 @@ function buildDefaultGuestPermissions(services) {
         }
     });
     buildStockManagePermissions().forEach(function(item) {
-        if (item.action === 'view') perms.add(item.id);
+        if (item.action === 'view' && item.feature !== 'cash') perms.add(item.id);
     });
     buildQqqDipPermissions().forEach(function(item) {
         if (item.action === 'view') perms.add(item.id);
@@ -257,6 +258,10 @@ function ensureGuestAccess(data, config) {
         };
         data.roles.push(guestRole);
     }
+    guestRole.permissions = (guestRole.permissions || []).filter(function(permission) {
+        return permission !== stockManageFeaturePermissionId('cash', 'view')
+            && permission !== stockManageFeaturePermissionId('cash', 'edit');
+    });
 
     var guestUser = data.users.find(function(u) { return u.username === guestUsername; });
     if (!guestUser) {

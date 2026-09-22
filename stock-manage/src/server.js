@@ -26,6 +26,7 @@ import {
 import { inferMarket, normalizeSymbol } from './markets.js';
 import { DEFAULT_USD_CNY_RATE } from '../../shared/db/portfolio-store.js';
 import { analyzeCandles, backtestCandles, DEFAULT_QUANT_CONFIG, normalizeQuantConfig } from './quant-analysis.js';
+import { redactPortfolioCash } from './portfolio-visibility.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -64,7 +65,7 @@ function portalPermissions(req) {
   }
 }
 
-function hasQuantPermission(req, feature, action = 'view') {
+function hasStockPermission(req, feature, action = 'view') {
   const permissions = portalPermissions(req);
   if (permissions === null) return true;
   const exact = `service:stock-manage:${feature}:${action}`;
@@ -73,6 +74,16 @@ function hasQuantPermission(req, feature, action = 'view') {
     || permissions.includes('service:stock-manage:edit')
     || permissions.includes(exact)
     || (action === 'view' && permissions.includes(edit));
+}
+
+function hasQuantPermission(req, feature, action = 'view') {
+  return hasStockPermission(req, feature, action);
+}
+
+function requireStockPermission(req, res, feature, action = 'view') {
+  if (hasStockPermission(req, feature, action)) return true;
+  res.status(403).json({ error: '无权使用该持仓功能' });
+  return false;
 }
 
 function requireQuantPermission(req, res, feature, action = 'view') {
@@ -135,8 +146,13 @@ function pnlOptsFromReq(req) {
   };
 }
 
+function portfolioForRequest(req, data = store.read()) {
+  const portfolio = buildPortfolio(data, pnlOptsFromReq(req));
+  return hasStockPermission(req, 'cash') ? { ...portfolio, cashVisible: true } : redactPortfolioCash(portfolio);
+}
+
 function sendPortfolio(res, req) {
-  res.json(buildPortfolio(store.read(), pnlOptsFromReq(req)));
+  res.json(portfolioForRequest(req));
 }
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
@@ -146,6 +162,7 @@ app.get('/api/portfolio', (req, res) => {
 });
 
 app.put('/api/cash', (req, res) => {
+  if (!requireStockPermission(req, res, 'cash', 'edit')) return;
   const data = store.read();
   const body = req.body || {};
   let cashUsd = data.cashUsd;
@@ -765,7 +782,7 @@ app.post('/api/quotes/refresh', async (req, res) => {
   data.quotes = updated;
   data.cash = cashUsdEquivalent(data.cashUsd, data.cashCny, data.usdCnyRate);
   store.write(data);
-  const payload = buildPortfolio(data, pnlOptsFromReq(req));
+  const payload = portfolioForRequest(req, data);
   payload.refresh = { ok, failed: errors.length, errors };
   if (!ok && errors.length) {
     return res.status(502).json({ error: '行情刷新全部失败', ...payload });

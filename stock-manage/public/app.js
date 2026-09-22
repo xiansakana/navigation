@@ -230,6 +230,7 @@ function renderDashboard() {
   $('#toggle-pnl-visible').checked = pnlVisible;
   el.classList.remove('hidden');
   const s = state.summary || {};
+  const cashVisible = can('cash') && state.cashVisible !== false;
   const cashEq = Number.isFinite(s.cashUsdEq) ? s.cashUsdEq : state.cash;
   const cashPct = s.totalAssets > 0 ? (cashEq / s.totalAssets * 100) : 0;
   const usPnl = s.totalPnlUsd;
@@ -280,6 +281,7 @@ function renderDashboard() {
   const totalAssetsLine = `${fmtUsd(s.totalAssets)}（${fmtCny(totalAssetsCny)}）`;
   el.innerHTML = `
     <div class="sm-summary-grid">
+      ${cashVisible ? `
       <div class="sm-summary-card sm-summary-card--accent sm-summary-card--assets">
         <div class="label">总资产</div>
         <div class="value">${maskDashboardValue(totalAssetsLine)}</div>
@@ -294,7 +296,7 @@ function renderDashboard() {
           </div>
         </div>
         <div class="hint">美元口径含 A 股折汇；分币种为持仓+现金本币合计</div>
-      </div>
+      </div>` : ''}
       <div class="sm-summary-card">
         <div class="label">股票市值</div>
         <div class="value">${maskDashboardValue(fmtUsd(s.stockMv))}</div>
@@ -316,11 +318,11 @@ function renderDashboard() {
         ${dailyPnlAshare}
         ${dailyMetaHint ? `<div class="hint">${maskDashboardValue(maskPnlValue(dailyMetaHint))}</div>` : ''}
       </div>
-      <div class="sm-summary-card sm-summary-card--cash">
+      ${cashVisible ? `<div class="sm-summary-card sm-summary-card--cash">
         <div class="label">现金</div>
         ${cashField}
         <div class="hint">${rateHint}</div>
-      </div>
+      </div>` : ''}
     </div>`;
   bindCashInput();
 }
@@ -483,7 +485,9 @@ function renderHoldings() {
 
   const cashEq = Number.isFinite(state.summary?.cashUsdEq) ? state.summary.cashUsdEq : state.cash;
   const cashPct = state.summary?.totalAssets > 0 ? (cashEq / state.summary.totalAssets * 100) : 0;
-  html += `<tr class="sm-cash-row">${renderCashRowCells(cashPct)}</tr>`;
+  if (can('cash') && state.cashVisible !== false) {
+    html += `<tr class="sm-cash-row">${renderCashRowCells(cashPct)}</tr>`;
+  }
 
   const colCount = cols.length || 1;
   $('#holdings-body').innerHTML = html || `<tr><td colspan="${colCount}" class="empty">暂无持仓</td></tr>`;

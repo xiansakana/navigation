@@ -12,7 +12,9 @@ test('sync preserves permissions saved for every existing role', function() {
                 name: '游客',
                 permissions: [
                     'service:piclist:view',
-                    'service:notifications:edit'
+                    'service:notifications:edit',
+                    'service:stock-manage:cash:view',
+                    'service:stock-manage:cash:edit'
                 ]
             },
             {
