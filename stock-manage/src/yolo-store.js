@@ -21,6 +21,16 @@ export function createYoloStore(config, databaseOverride = null) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const findCapture = db.prepare('SELECT id FROM yolo_captures WHERE user_id = ? AND captured_at = ?');
+  const getCapture = db.prepare(`
+    SELECT id, captured_at, market_date, expiration, underlying_price, source, capture_kind, contract_count
+    FROM yolo_captures WHERE id = ? AND user_id = ?
+  `);
+  const getCaptureQuotes = db.prepare(`
+    SELECT option_symbol, right_type, strike, expiration, bid, ask, bid_size, ask_size, last_price,
+      last_trade_at, open_price, high_price, low_price, prev_close, delta, gamma, theta, vega, iv,
+      volume, open_interest
+    FROM yolo_option_quotes WHERE capture_id = ? AND user_id = ? ORDER BY strike, right_type
+  `);
   const insertQuote = db.prepare(`
     INSERT INTO yolo_option_quotes (capture_id, user_id, option_symbol, right_type, strike, expiration,
       bid, ask, bid_size, ask_size, last_price, last_trade_at, open_price, high_price, low_price, prev_close,
@@ -140,7 +150,16 @@ export function createYoloStore(config, databaseOverride = null) {
     return [...grouped.values()];
   }
 
+  function captureDetails(userId, captureId) {
+    const id = safeUserId(userId);
+    const numericId = Number(captureId);
+    if (!Number.isSafeInteger(numericId) || numericId < 1) return null;
+    const capture = getCapture.get(numericId, id);
+    if (!capture) return null;
+    return { capture, quotes: getCaptureQuotes.all(numericId, id) };
+  }
+
   function backtest(userId, options) { return backtestYoloDataset(dataset(userId), options); }
 
-  return { ensure, settings, updateSettings, markAttempt, saveCapture, enabledUsers, status, dataset, backtest };
+  return { ensure, settings, updateSettings, markAttempt, saveCapture, enabledUsers, status, captureDetails, dataset, backtest };
 }

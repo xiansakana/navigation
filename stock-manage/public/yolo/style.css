@@ -24,5 +24,14 @@
 .yolo-quality div:nth-last-child(-n+2) { border-bottom: 0; }
 .yolo-quality dt { color: var(--muted); font-size: 10px; }
 .yolo-quality dd { margin: 6px 0 0; font: 700 12px ui-monospace, monospace; overflow-wrap: anywhere; }
+.yolo-chain-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.yolo-chain-controls label:not(.yolo-switch) { display: flex; flex-direction: column; gap: 6px; min-width: 130px; }
+.yolo-chain-controls label:first-child { flex: 1 1 310px; }
+.yolo-chain-controls label > span { color: var(--muted); font-size: 11px; }
+.yolo-chain-controls .yolo-otm { min-width: 95px; }
+.yolo-chain-table { min-width: 2100px; }
+.yolo-chain-table td, .yolo-chain-table th { white-space: nowrap; }
+.yolo-capture-row { cursor: pointer; }
+.yolo-capture-row:hover { background: rgba(96, 165, 250, .07); }
 @media (max-width: 900px) { .yolo-grid { grid-template-columns: 1fr; } }
-@media (max-width: 700px) { .yolo-settings, .yolo-backtest-form { align-items: stretch; flex-direction: column; } .yolo-settings label:not(.yolo-switch), .yolo-backtest-form label { width: 100%; } }
+@media (max-width: 700px) { .yolo-settings, .yolo-backtest-form { align-items: stretch; flex-direction: column; } .yolo-settings label:not(.yolo-switch), .yolo-backtest-form label, .yolo-chain-controls label:not(.yolo-switch) { width: 100%; } }

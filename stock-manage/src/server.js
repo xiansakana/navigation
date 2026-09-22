@@ -763,6 +763,13 @@ app.get('/api/yolo/status', (req, res) => {
   res.json({ ...yoloStore.status(userId), marketOpen: isUsOptionMarketOpen(), collectorRunning: yoloCollector.isRunning() });
 });
 
+app.get('/api/yolo/captures/:id/quotes', (req, res) => {
+  if (!requireQuantPermission(req, res, 'yolo-dashboard')) return;
+  const result = yoloStore.captureDetails(quantUserId(req), req.params.id);
+  if (!result) return res.status(404).json({ error: '期权快照不存在' });
+  res.json(result);
+});
+
 app.put('/api/yolo/settings', (req, res) => {
   if (!requireQuantPermission(req, res, 'yolo-control', 'edit')) return;
   const settings = yoloStore.updateSettings(quantUserId(req), req.body || {});

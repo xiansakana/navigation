@@ -1,7 +1,7 @@
 import { loadPortalContext, can, canDip } from '../js/portal-auth.js';
 
 const $ = (selector) => document.querySelector(selector);
-const state = { status: null, timer: null };
+const state = { status: null, timer: null, chain: null, chainCaptureId: null };
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -20,6 +20,12 @@ function dateTime(value) {
 }
 function money(value) { return Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '—'; }
 function percent(value) { return Number.isFinite(Number(value)) ? `${Number(value) >= 0 ? '+' : ''}${(Number(value) * 100).toFixed(2)}%` : '—'; }
+function decimal(value, digits = 4) { return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—'; }
+
+function captureLabel(item) {
+  const kind = item.capture_kind === 'daily-summary' ? '收盘摘要' : '日内';
+  return `${item.market_date} · ${kind} · ${dateTime(item.captured_at)}`;
+}
 
 function applyPermissions() {
   document.querySelectorAll('.sm-feature-tab').forEach((link) => {
@@ -61,7 +67,64 @@ function renderStatus(data) {
       ? `自动记录已开启，每 ${settings.intervalSeconds} 秒检查一次；休市期间不请求。`
       : '自动记录已暂停。';
   $('#collector-message').className = `yolo-message${settings.lastError ? ' error' : ''}`;
-  $('#capture-body').innerHTML = recent.length ? recent.map((item) => `<tr><td>${dateTime(item.captured_at)}</td><td>${item.capture_kind === 'daily-summary' ? '收盘摘要' : '日内快照'}</td><td>${escapeHtml(item.market_date)}</td><td>${escapeHtml(item.expiration)}</td><td class="align-right">${money(item.underlying_price)}</td><td class="align-right">${Number(item.contract_count).toLocaleString()}</td><td>${escapeHtml(item.source || '—')}</td></tr>`).join('') : '<tr><td colspan="7" class="quant-empty">尚无数据；可先回填昨日收盘，开盘后自动积累分钟快照。</td></tr>';
+  $('#capture-body').innerHTML = recent.length ? recent.map((item) => `<tr class="yolo-capture-row" data-capture-id="${item.id}"><td>${dateTime(item.captured_at)}</td><td>${item.capture_kind === 'daily-summary' ? '收盘摘要' : '日内快照'}</td><td>${escapeHtml(item.market_date)}</td><td>${escapeHtml(item.expiration)}</td><td class="align-right">${money(item.underlying_price)}</td><td class="align-right">${Number(item.contract_count).toLocaleString()}</td><td>${escapeHtml(item.source || '—')}</td></tr>`).join('') : '<tr><td colspan="7" class="quant-empty">尚无数据；可先回填昨日收盘，开盘后自动积累分钟快照。</td></tr>';
+  const captureSelect = $('#chain-capture');
+  const selected = String(state.chainCaptureId || captureSelect.value || '');
+  captureSelect.innerHTML = recent.length
+    ? recent.map((item) => `<option value="${item.id}">${escapeHtml(captureLabel(item))}</option>`).join('')
+    : '<option value="">尚无快照</option>';
+  const available = recent.some((item) => String(item.id) === selected);
+  const nextId = available ? selected : String(recent[0]?.id || '');
+  captureSelect.value = nextId;
+  if (nextId && nextId !== String(state.chainCaptureId || '')) loadCaptureDetails(nextId);
+}
+
+function moneyness(quote, spot) {
+  if (!(spot > 0)) return { label: '—', otm: false };
+  const gap = quote.strike / spot - 1;
+  if (Math.abs(gap) <= 0.002) return { label: '近平值', otm: false };
+  const otm = quote.right_type === 'C' ? quote.strike > spot : quote.strike < spot;
+  return { label: otm ? '价外' : '价内', otm };
+}
+
+function renderChain() {
+  const payload = state.chain;
+  if (!payload) return;
+  const spot = Number(payload.capture.underlying_price);
+  const right = $('#chain-right').value;
+  const minStrike = Number($('#chain-strike-min').value);
+  const maxStrike = Number($('#chain-strike-max').value);
+  const minDelta = Number($('#chain-delta-min').value);
+  const onlyOtm = $('#chain-otm').checked;
+  const rows = payload.quotes.filter((quote) => {
+    if (right !== 'all' && quote.right_type !== right) return false;
+    if ($('#chain-strike-min').value && quote.strike < minStrike) return false;
+    if ($('#chain-strike-max').value && quote.strike > maxStrike) return false;
+    if ($('#chain-delta-min').value && Math.abs(Number(quote.delta)) < minDelta) return false;
+    if (onlyOtm && !moneyness(quote, spot).otm) return false;
+    return true;
+  });
+  $('#chain-message').textContent = `${payload.capture.market_date} · QQQ ${money(spot)} · ${payload.capture.expiration} 到期 · 显示 ${rows.length}/${payload.quotes.length} 个合约`;
+  $('#chain-body').innerHTML = rows.length ? rows.map((quote) => {
+    const moneyState = moneyness(quote, spot);
+    const mid = (Number(quote.bid) + Number(quote.ask)) / 2;
+    const spread = mid > 0 ? (Number(quote.ask) - Number(quote.bid)) / mid : null;
+    return `<tr><td><strong>${escapeHtml(String(quote.option_symbol).replace(/^O:/, ''))}</strong></td><td>${quote.right_type === 'C' ? 'Call' : 'Put'}</td><td class="align-right">${money(quote.strike)}</td><td>${moneyState.label}</td><td class="align-right">${money(quote.bid)} × ${Number(quote.bid_size || 0).toLocaleString()}</td><td class="align-right">${money(quote.ask)} × ${Number(quote.ask_size || 0).toLocaleString()}</td><td class="align-right">${spread == null ? '—' : percent(spread)}</td><td class="align-right">${money(quote.last_price)}</td><td class="align-right">${money(quote.open_price)}</td><td class="align-right">${money(quote.high_price)}</td><td class="align-right">${money(quote.low_price)}</td><td class="align-right">${money(quote.prev_close)}</td><td class="align-right">${decimal(quote.delta)}</td><td class="align-right">${decimal(quote.gamma)}</td><td class="align-right">${decimal(quote.theta)}</td><td class="align-right">${decimal(quote.vega)}</td><td class="align-right">${quote.iv == null ? '—' : percent(quote.iv)}</td><td class="align-right">${Number(quote.volume || 0).toLocaleString()}</td><td class="align-right">${Number(quote.open_interest || 0).toLocaleString()}</td><td>${dateTime(quote.last_trade_at)}</td></tr>`;
+  }).join('') : '<tr><td colspan="20" class="quant-empty">没有符合当前筛选条件的合约。</td></tr>';
+}
+
+async function loadCaptureDetails(captureId) {
+  if (!captureId) return;
+  state.chainCaptureId = String(captureId);
+  $('#chain-message').textContent = '正在读取期权链…';
+  try {
+    state.chain = await api(`/yolo/captures/${encodeURIComponent(captureId)}/quotes`);
+    renderChain();
+  } catch (error) {
+    state.chain = null;
+    $('#chain-message').textContent = error.message;
+    $('#chain-body').innerHTML = '<tr><td colspan="20" class="quant-empty">期权链加载失败。</td></tr>';
+  }
 }
 
 async function loadStatus(silent = false) {
@@ -141,6 +204,16 @@ async function init() {
   $('#save-collector').addEventListener('click', saveCollector);
   $('#capture-now').addEventListener('click', captureNow);
   $('#backfill-close').addEventListener('click', backfillPreviousClose);
+  $('#chain-capture').addEventListener('change', (event) => loadCaptureDetails(event.target.value));
+  ['#chain-right', '#chain-strike-min', '#chain-strike-max', '#chain-delta-min', '#chain-otm']
+    .forEach((selector) => $(selector).addEventListener('input', renderChain));
+  $('#capture-body').addEventListener('click', (event) => {
+    const row = event.target.closest('[data-capture-id]');
+    if (!row) return;
+    $('#chain-capture').value = row.dataset.captureId;
+    loadCaptureDetails(row.dataset.captureId);
+    $('#option-chain-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
   $('#yolo-backtest-form').addEventListener('submit', runBacktest);
   state.timer = setInterval(() => loadStatus(true), 30000);
 }

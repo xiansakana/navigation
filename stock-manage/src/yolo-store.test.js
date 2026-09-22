@@ -45,6 +45,13 @@ test('stores QQQ option captures per user and exposes backtest dataset', (contex
   assert.equal(store.status('user-b').stats.captures, 0);
   assert.equal(store.dataset('user-a').length, 1);
   assert.equal(store.dataset('user-a')[0].quotes[0].bid, 1);
+  const summaryCapture = store.status('user-a').recent.find((item) => item.capture_kind === 'daily-summary');
+  const details = store.captureDetails('user-a', summaryCapture.id);
+  assert.equal(details.capture.underlying_price, 600);
+  assert.equal(details.quotes.length, 1);
+  assert.equal(details.quotes[0].ask, 1.1);
+  assert.equal(details.quotes[0].high_price, 1.4);
+  assert.equal(store.captureDetails('user-b', summaryCapture.id), null);
   const daily = db.prepare("SELECT q.* FROM yolo_option_quotes q JOIN yolo_captures c ON c.id=q.capture_id WHERE c.capture_kind='daily-summary'").get();
   assert.equal(daily.open_price, 0.9);
   assert.equal(daily.last_trade_at, '2026-09-21T19:59:00.000Z');
