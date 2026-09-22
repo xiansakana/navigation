@@ -33,6 +33,11 @@ var STOCK_MANAGE_HOLDINGS_COLUMNS = [
 
 var STOCK_MANAGE_FEATURES = [
     { feature: 'tab-quant', name: '进入量化分析', action: 'view', permissionPath: ['量化分析'] },
+    { feature: 'tab-yolo', name: '进入梭哈平台', action: 'view', permissionPath: ['梭哈'] },
+    { feature: 'yolo-dashboard', name: '查看1DTE数据库', action: 'view', permissionPath: ['梭哈', '数据采集'] },
+    { feature: 'yolo-control', name: '控制1DTE数据采集', action: 'edit', permissionPath: ['梭哈', '数据采集'] },
+    { feature: 'yolo-backtest', name: '查看1DTE回测', action: 'view', permissionPath: ['梭哈', '真实报价回测'] },
+    { feature: 'yolo-backtest-run', name: '运行1DTE回测', action: 'edit', permissionPath: ['梭哈', '真实报价回测'] },
     { feature: 'quant-settings', name: '读取用户量化设置', action: 'view', permissionPath: ['量化分析', '通用数据'] },
     { feature: 'quant-history', name: '查看 K 线', action: 'view', permissionPath: ['量化分析', '通用数据'] },
     { feature: 'quant-watchlist', name: '保存分析标的', action: 'edit', permissionPath: ['量化分析', '分析标的'] },

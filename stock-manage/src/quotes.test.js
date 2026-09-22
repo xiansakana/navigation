@@ -10,6 +10,53 @@ function response(data, status = 200) {
   };
 }
 
+test('QQQ 1DTE chain selects the next expiry and normalizes executable quotes', async (context) => {
+  const originalFetch = global.fetch;
+  context.after(() => { global.fetch = originalFetch; });
+  const requested = [];
+  global.fetch = async (url) => {
+    requested.push(String(url));
+    if (String(url).includes('/reference/options/contracts')) {
+      return response({ results: [{ expiration_date: '2026-09-23' }] });
+    }
+    return response({ results: [{
+      details: { ticker: 'O:QQQ260923C00600000', contract_type: 'call', expiration_date: '2026-09-23', strike_price: 600 },
+      underlying_asset: { price: 600.5 }, last_quote: { bid: 1.1, ask: 1.2, bid_size: 4, ask_size: 7 },
+      last_trade: { price: 1.15 }, greeks: { delta: 0.45, gamma: 0.03, theta: -0.2, vega: 0.05 },
+      implied_volatility: 0.25, open_interest: 100, day: { volume: 50 }
+    }] });
+  };
+  const service = createQuoteService({ finnhubApiKey: '', polygonApiKey: 'secret' });
+  const chain = await service.getQqq1dteChain();
+  assert.equal(chain.expiration, '2026-09-23');
+  assert.equal(chain.contracts.length, 1);
+  assert.equal(chain.contracts[0].right, 'C');
+  assert.equal(chain.contracts[0].bid, 1.1);
+  assert.equal(chain.contracts[0].delta, 0.45);
+  assert.equal(requested.length, 2);
+});
+
+test('QQQ 1DTE chain falls back to the free Cboe delayed chain without a Polygon key', async (context) => {
+  const originalFetch = global.fetch;
+  context.after(() => { global.fetch = originalFetch; });
+  global.fetch = async (url) => {
+    assert.match(String(url), /cdn\.cboe\.com\/api\/global\/delayed_quotes\/options\/QQQ\.json/);
+    return response({ timestamp: '2099-12-30 10:00:00', data: { current_price: 600, options: [{
+      option: 'QQQ991231P00600000', bid: 1.2, ask: 1.3, bid_size: 2, ask_size: 3,
+      delta: -0.45, gamma: 0.02, theta: -0.1, vega: 0.04, iv: 0.25,
+      open_interest: 20, volume: 10, last_trade_price: 1.25
+    }] } });
+  };
+  const service = createQuoteService({ finnhubApiKey: '', polygonApiKey: '' });
+  const chain = await service.getQqq1dteChain();
+  assert.equal(chain.source, 'cboe-delayed');
+  assert.equal(chain.marketDate, '2099-12-30');
+  assert.match(chain.capturedAt, /^2099-12-30T/);
+  assert.equal(chain.expiration, '2099-12-31');
+  assert.equal(chain.contracts[0].right, 'P');
+  assert.equal(chain.contracts[0].delta, -0.45);
+});
+
 test('stock history uses Polygon aggregates and normalizes candles', async (context) => {
   const originalFetch = global.fetch;
   context.after(() => { global.fetch = originalFetch; });

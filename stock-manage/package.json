@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test src/markets.test.js src/trades.test.js src/quotes.test.js src/quant-analysis.test.js src/quant-store.test.js src/quant-backtest-store.test.js src/portfolio-visibility.test.js ../shared/db/portfolio-bridge.test.js"
+    "test": "node --test src/markets.test.js src/trades.test.js src/quotes.test.js src/quant-analysis.test.js src/quant-store.test.js src/quant-backtest-store.test.js src/yolo-backtest.test.js src/yolo-collector.test.js src/yolo-store.test.js src/portfolio-visibility.test.js ../shared/db/portfolio-bridge.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

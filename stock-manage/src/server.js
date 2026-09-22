@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, createStore } from './storage.js';
 import { createQuantStore, resetPaper } from './quant-store.js';
 import { createQuantBacktestStore } from './quant-backtest-store.js';
+import { createYoloStore } from './yolo-store.js';
+import { createYoloCollector, isUsOptionMarketOpen } from './yolo-collector.js';
 import { createQuoteService } from './quotes.js';
 import { parseImportBuffer } from './import-moomoo.js';
 import {
@@ -43,6 +45,8 @@ const store = createStore(config);
 const quantStore = createQuantStore(config);
 const quantBacktestStore = createQuantBacktestStore(config);
 const quotes = createQuoteService(config);
+const yoloStore = createYoloStore(config);
+const yoloCollector = createYoloCollector({ store: yoloStore, quotes });
 const app = express();
 
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
@@ -752,6 +756,39 @@ app.get('/api/option/:symbol', async (req, res) => {
   }
 });
 
+app.get('/api/yolo/status', (req, res) => {
+  if (!requireQuantPermission(req, res, 'yolo-dashboard')) return;
+  const userId = quantUserId(req);
+  yoloStore.ensure(userId);
+  res.json({ ...yoloStore.status(userId), marketOpen: isUsOptionMarketOpen(), collectorRunning: yoloCollector.isRunning() });
+});
+
+app.put('/api/yolo/settings', (req, res) => {
+  if (!requireQuantPermission(req, res, 'yolo-control', 'edit')) return;
+  const settings = yoloStore.updateSettings(quantUserId(req), req.body || {});
+  res.json(settings);
+});
+
+app.post('/api/yolo/capture', async (req, res) => {
+  if (!requireQuantPermission(req, res, 'yolo-control', 'edit')) return;
+  try {
+    const snapshot = await yoloCollector.captureNow(quantUserId(req));
+    res.json({ ok: true, capturedAt: snapshot?.capturedAt || null, contracts: snapshot?.contracts?.length || 0,
+      status: yoloStore.status(quantUserId(req)) });
+  } catch (error) {
+    res.status(502).json({ error: error.message || '期权链采集失败', status: yoloStore.status(quantUserId(req)) });
+  }
+});
+
+app.post('/api/yolo/backtest', (req, res) => {
+  if (!requireQuantPermission(req, res, 'yolo-backtest-run', 'edit')) return;
+  try {
+    res.json(yoloStore.backtest(quantUserId(req), req.body || {}));
+  } catch (error) {
+    res.status(500).json({ error: error.message || '梭哈回测失败' });
+  }
+});
+
 app.post('/api/quotes/refresh', async (req, res) => {
   const data = store.read();
   const symbol = req.body?.symbol;
@@ -801,4 +838,5 @@ app.get('*', (_req, res) => {
 const { host, port } = config.server;
 app.listen(port, host, () => {
   console.log(`stock-manage http://${host}:${port}`);
+  yoloCollector.start();
 });

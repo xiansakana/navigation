@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>梭哈 · QQQ 1DTE</title>
+  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="../quant/style.css">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="sm-app quant-app yolo-app">
+    <nav class="sm-feature-tabs" aria-label="股票功能">
+      <a class="sm-feature-tab" href="/stock-manage/">持仓</a>
+      <a class="sm-feature-tab" href="/stock-manage/dip/">抄底监控</a>
+      <a class="sm-feature-tab" href="/stock-manage/quant/">量化分析</a>
+      <a class="sm-feature-tab active" href="/stock-manage/yolo/">梭哈</a>
+      <a class="sm-feature-tab" href="/stock-manage/dip/?tab=qq">QQ 提醒</a>
+    </nav>
+
+    <header class="quant-header yolo-header">
+      <div><div class="quant-eyebrow">QQQ · NEXT EXPIRY · REAL NBBO</div><h1>梭哈</h1><p>从今天起积累自己的 QQQ 1DTE 分钟数据库，用真实 ask 买入、bid 卖出回测。</p></div>
+      <div class="quant-header-actions">
+        <span class="yolo-market" id="market-status">检查市场…</span>
+        <button class="btn ghost" id="capture-now" type="button">立即采集</button>
+      </div>
+    </header>
+
+    <section class="quant-summary">
+      <article class="quant-stat"><span>◉</span><div><small>采集状态</small><strong id="collector-state">—</strong></div></article>
+      <article class="quant-stat"><span>▦</span><div><small>交易日</small><strong id="capture-days">0</strong></div></article>
+      <article class="quant-stat"><span>≋</span><div><small>快照 / 报价</small><strong id="capture-counts">0 / 0</strong></div></article>
+      <article class="quant-stat"><span>◷</span><div><small>最后采集</small><strong class="quant-time" id="last-capture">尚无数据</strong></div></article>
+    </section>
+
+    <section class="yolo-grid">
+      <section class="quant-card">
+        <div class="quant-card-head"><div><h2>自动采集</h2><p>仅在美东工作日 09:30–16:00 请求下一到期期权链。</p></div><span class="quant-live-dot"><i></i>SQLite</span></div>
+        <div class="yolo-settings">
+          <label class="yolo-switch"><input id="collector-enabled" type="checkbox"><span></span><b>自动记录</b></label>
+          <label><span>采集间隔</span><select id="capture-interval"><option value="30">30 秒</option><option value="60">60 秒</option><option value="120">2 分钟</option><option value="300">5 分钟</option></select></label>
+          <button class="btn primary" id="save-collector" type="button">保存</button>
+        </div>
+        <p class="yolo-message" id="collector-message">正在读取采集状态…</p>
+        <p class="quant-disclaimer">需要 Polygon/Massive 的期权快照权限。这里只记录市场数据并做模拟回测，不连接券商，也不会自动下实盘单。</p>
+      </section>
+
+      <section class="quant-card">
+        <div class="quant-card-head"><div><h2>数据质量</h2><p>真实回测至少需要多个完整交易日。</p></div></div>
+        <dl class="yolo-quality"><div><dt>首条数据</dt><dd id="first-capture">—</dd></div><div><dt>最新到期日</dt><dd id="latest-expiration">—</dd></div><div><dt>最新 QQQ</dt><dd id="latest-spot">—</dd></div><div><dt>行情源</dt><dd id="latest-source">—</dd></div></dl>
+      </section>
+    </section>
+
+    <section class="quant-card">
+      <div class="quant-card-head"><div><h2>真实报价回测</h2><p>09:45按QQQ开盘15分钟方向入场；目标Delta选择真实上市合约。</p></div></div>
+      <form class="yolo-backtest-form" id="yolo-backtest-form">
+        <label><span>目标 |Delta|</span><input id="bt-delta" type="number" min="0.1" max="0.8" step="0.05" value="0.45"></label>
+        <label><span>最小15分钟涨跌</span><input id="bt-move" type="number" min="0" max="2" step="0.05" value="0.15"><em>%</em></label>
+        <label><span>权利金止损</span><input id="bt-stop" type="number" min="5" max="95" step="5" value="35"><em>%</em></label>
+        <label><span>权利金止盈</span><input id="bt-target" type="number" min="5" max="500" step="5" value="55"><em>%</em></label>
+        <label><span>账户资金</span><input id="bt-capital" type="number" min="1000" step="1000" value="100000"></label>
+        <button class="btn primary" id="run-yolo-backtest" type="submit">运行回测</button>
+      </form>
+      <p class="yolo-message" id="backtest-message">数据积累后即可运行。</p>
+    </section>
+
+    <section class="quant-summary">
+      <article class="quant-stat"><span>↗</span><div><small>总收益</small><strong id="bt-return">—</strong></div></article>
+      <article class="quant-stat"><span>×</span><div><small>Profit Factor</small><strong id="bt-pf">—</strong></div></article>
+      <article class="quant-stat"><span>✓</span><div><small>胜率 / 笔数</small><strong id="bt-winrate">—</strong></div></article>
+      <article class="quant-stat"><span>⌄</span><div><small>最大回撤</small><strong id="bt-drawdown">—</strong></div></article>
+    </section>
+
+    <section class="quant-card">
+      <div class="quant-card-head"><div><h2>最近采集</h2><p>每次快照仅保存QQQ附近及有效Delta范围内的下一到期合约。</p></div></div>
+      <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>时间</th><th>市场日</th><th>到期日</th><th class="align-right">QQQ</th><th class="align-right">合约数</th><th>来源</th></tr></thead><tbody id="capture-body"><tr><td colspan="6" class="quant-empty">尚无数据</td></tr></tbody></table></div>
+    </section>
+
+    <section class="quant-card">
+      <div class="quant-card-head"><div><h2>回测交易</h2><p>入场付ask、退出收bid，止损穿价按实际观察到的bid结算。</p></div></div>
+      <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>日期</th><th>方向 / 合约</th><th class="align-right">入场 / 退出</th><th class="align-right">Delta</th><th class="align-right">收益</th><th>退出原因</th></tr></thead><tbody id="trade-body"><tr><td colspan="6" class="quant-empty">尚未运行回测</td></tr></tbody></table></div>
+    </section>
+  </main>
+  <script type="module" src="./app.js?v=20260922-1"></script>
+</body>
+</html>

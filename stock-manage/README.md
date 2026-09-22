@@ -28,6 +28,12 @@ cd /opt/navigation/stock-manage
 
 portal 中访问路径：`/stock-manage/`（需在 `portal/config.json` 注册，`injectBar: false` 以免样式冲突）。
 
+## 梭哈 · QQQ 1DTE 数据库
+
+`/stock-manage/yolo/` 在美股交易时段自动采集 QQQ 下一到期期权链。数据按登录用户写入共享 SQLite，包含标的价格、真实 NBBO、Greeks、IV、成交量和未平仓量。默认每60秒采集，可在页面暂停或调整为30秒至15分钟。
+
+回测采用ask入场、bid退出，并计入每张每边佣金；当前不会连接券商或提交实盘订单。采集优先使用 `polygonApiKey`/`POLYGON_API_KEY` 的期权快照；未配置或套餐无权限时自动降级为免费的 Cboe 延时期权链，并在页面行情源中明确标识。
+
 ## 配置
 
 复制 `config.example.json` 为 `config.json`：

@@ -711,6 +711,152 @@ export function createQuoteService(config) {
     };
   }
 
+  function qqqChainDate() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(new Date());
+  }
+
+  function newYorkLocalTimestampToIso(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+    if (!match) return null;
+    const wallClockUtc = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]));
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+    }).formatToParts(new Date(wallClockUtc));
+    const p = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const displayedAsUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
+    return new Date(wallClockUtc - (displayedAsUtc - wallClockUtc)).toISOString();
+  }
+
+  function filterUsefulQqqContracts(contracts, underlyingPrice) {
+    return contracts.filter((item) => {
+      const nearSpot = underlyingPrice > 0 && Math.abs(item.strike / underlyingPrice - 1) <= 0.05;
+      const usefulDelta = Number.isFinite(item.delta) && Math.abs(item.delta) >= 0.08 && Math.abs(item.delta) <= 0.85;
+      return !(underlyingPrice > 0) || nearSpot || usefulDelta;
+    });
+  }
+
+  async function getPolygonQqq1dteChain() {
+    if (!polygonKey) throw new Error('未配置 Polygon API Key');
+    const etDate = qqqChainDate();
+    const referenceParams = new URLSearchParams({
+      underlying_ticker: 'QQQ',
+      'expiration_date.gt': etDate,
+      expired: 'false',
+      order: 'asc',
+      sort: 'expiration_date',
+      limit: '10',
+      apiKey: polygonKey
+    });
+    const reference = await fetchJson(`https://api.polygon.io/v3/reference/options/contracts?${referenceParams}`);
+    const expiration = reference?.results?.[0]?.expiration_date;
+    if (!expiration) throw new Error('未找到 QQQ 下一到期日期');
+
+    const contracts = [];
+    let nextUrl = `https://api.polygon.io/v3/snapshot/options/QQQ?expiration_date=${encodeURIComponent(expiration)}&limit=250&apiKey=${polygonKey}`;
+    let pages = 0;
+    while (nextUrl && pages < 10) {
+      const data = await fetchJson(nextUrl);
+      contracts.push(...(Array.isArray(data?.results) ? data.results : []));
+      nextUrl = data?.next_url
+        ? `${data.next_url}${data.next_url.includes('?') ? '&' : '?'}apiKey=${polygonKey}`
+        : '';
+      pages += 1;
+    }
+    const underlyingPrice = Number(contracts.find((item) => Number(item?.underlying_asset?.price) > 0)?.underlying_asset?.price) || 0;
+    const normalized = filterUsefulQqqContracts(contracts.flatMap((item) => {
+      const details = item?.details || {};
+      const quote = item?.last_quote || {};
+      const greeks = item?.greeks || {};
+      const strike = Number(details.strike_price);
+      const bid = Number(quote.bid);
+      const ask = Number(quote.ask);
+      const delta = Number(greeks.delta);
+      if (!details.ticker || !Number.isFinite(strike) || !(ask >= bid) || bid < 0) return [];
+      return [{
+        optionSymbol: details.ticker,
+        right: String(details.contract_type || '').toLowerCase() === 'put' ? 'P' : 'C',
+        strike,
+        expiration: details.expiration_date || expiration,
+        bid,
+        ask,
+        bidSize: Number(quote.bid_size) || 0,
+        askSize: Number(quote.ask_size) || 0,
+        last: Number(item?.last_trade?.price) || null,
+        delta: Number.isFinite(delta) ? delta : null,
+        gamma: Number.isFinite(Number(greeks.gamma)) ? Number(greeks.gamma) : null,
+        theta: Number.isFinite(Number(greeks.theta)) ? Number(greeks.theta) : null,
+        vega: Number.isFinite(Number(greeks.vega)) ? Number(greeks.vega) : null,
+        iv: Number.isFinite(Number(item?.implied_volatility)) ? Number(item.implied_volatility) : null,
+        volume: Number(item?.day?.volume) || 0,
+        openInterest: Number(item?.open_interest) || 0
+      }];
+    }), underlyingPrice);
+    if (!normalized.length) throw new Error('QQQ 期权链没有可记录的有效 NBBO');
+    return {
+      capturedAt: new Date().toISOString(),
+      marketDate: etDate,
+      expiration,
+      underlyingPrice,
+      source: 'polygon-opra-snapshot',
+      contracts: normalized
+    };
+  }
+
+  async function getCboeDelayedQqq1dteChain() {
+    const data = await fetchJson('https://cdn.cboe.com/api/global/delayed_quotes/options/QQQ.json');
+    const providerTimestamp = newYorkLocalTimestampToIso(data?.timestamp);
+    const etDate = String(data?.timestamp || '').slice(0, 10) || qqqChainDate();
+    const parsed = (data?.data?.options || []).flatMap((item) => {
+      const match = String(item.option || '').match(/^QQQ(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/);
+      if (!match) return [];
+      const expiration = `20${match[1]}-${match[2]}-${match[3]}`;
+      if (expiration <= etDate) return [];
+      const bid = Number(item.bid);
+      const ask = Number(item.ask);
+      if (!(ask >= bid) || bid < 0) return [];
+      return [{ item, expiration, right: match[4], strike: Number(match[5]) / 1000, bid, ask }];
+    });
+    const expiration = parsed.map((row) => row.expiration).sort()[0];
+    if (!expiration) throw new Error('Cboe 延时链未找到 QQQ 下一到期合约');
+    const underlyingPrice = Number(data?.data?.current_price) || 0;
+    const contracts = filterUsefulQqqContracts(parsed.filter((row) => row.expiration === expiration).map((row) => ({
+      optionSymbol: `O:${row.item.option}`,
+      right: row.right,
+      strike: row.strike,
+      expiration: row.expiration,
+      bid: row.bid,
+      ask: row.ask,
+      bidSize: Number(row.item.bid_size) || 0,
+      askSize: Number(row.item.ask_size) || 0,
+      last: Number(row.item.last_trade_price) || null,
+      delta: Number.isFinite(Number(row.item.delta)) ? Number(row.item.delta) : null,
+      gamma: Number.isFinite(Number(row.item.gamma)) ? Number(row.item.gamma) : null,
+      theta: Number.isFinite(Number(row.item.theta)) ? Number(row.item.theta) : null,
+      vega: Number.isFinite(Number(row.item.vega)) ? Number(row.item.vega) : null,
+      iv: Number.isFinite(Number(row.item.iv)) ? Number(row.item.iv) : null,
+      volume: Number(row.item.volume) || 0,
+      openInterest: Number(row.item.open_interest) || 0
+    })), underlyingPrice);
+    if (!contracts.length) throw new Error('Cboe 延时链没有可记录的有效 QQQ NBBO');
+    return {
+      capturedAt: providerTimestamp || new Date().toISOString(), marketDate: etDate, expiration,
+      underlyingPrice, source: 'cboe-delayed', contracts
+    };
+  }
+
+  async function getQqq1dteChain() {
+    if (polygonKey) {
+      try { return await getPolygonQqq1dteChain(); }
+      catch (error) {
+        console.warn(`Polygon QQQ 期权链不可用，改用 Cboe 延时链: ${error.message}`);
+      }
+    }
+    return getCboeDelayedQqq1dteChain();
+  }
+
   async function search(q) {
     const query = String(q || '').trim();
     if (query.length < 1) return [];
@@ -744,5 +890,5 @@ export function createQuoteService(config) {
     return getStockFromFinnhub(sym);
   }
 
-  return { getStock, getOption, getQuote, getStockHistory, getAShareQuote, getUsdCny, search };
+  return { getStock, getOption, getQqq1dteChain, getQuote, getStockHistory, getAShareQuote, getUsdCny, search };
 }

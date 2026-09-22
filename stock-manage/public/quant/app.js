@@ -498,6 +498,7 @@ function applyDipPermissions() {
   $$('.sm-feature-tab').forEach((link) => {
     const href = link.getAttribute('href') || '';
     if (href.includes('tab=qq')) link.hidden = !canDip('tab-qq');
+    else if (href.includes('/yolo/')) link.hidden = !can('tab-yolo');
     else if (href.includes('/quant/')) link.hidden = !can('tab-quant');
     else if (href.includes('/dip/')) link.hidden = !canDip('tab-monitor');
   });
