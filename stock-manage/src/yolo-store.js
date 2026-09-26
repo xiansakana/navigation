@@ -31,6 +31,14 @@ export function createYoloStore(config, databaseOverride = null) {
       volume, open_interest
     FROM yolo_option_quotes WHERE capture_id = ? AND user_id = ? ORDER BY strike, right_type
   `);
+  const getOptionHistoryRows = db.prepare(`
+    SELECT c.captured_at, c.market_date, c.expiration, q.option_symbol, q.bid, q.ask, q.last_price,
+      q.volume, q.open_interest
+    FROM yolo_option_quotes q
+    JOIN yolo_captures c ON c.id = q.capture_id
+    WHERE q.user_id = ? AND q.option_symbol = ?
+    ORDER BY c.captured_at
+  `);
   const insertQuote = db.prepare(`
     INSERT INTO yolo_option_quotes (capture_id, user_id, option_symbol, right_type, strike, expiration,
       bid, ask, bid_size, ask_size, last_price, last_trade_at, open_price, high_price, low_price, prev_close,
@@ -159,7 +167,41 @@ export function createYoloStore(config, databaseOverride = null) {
     return { capture, quotes: getCaptureQuotes.all(numericId, id) };
   }
 
+  function optionHistory(userId, optionSymbol, intervalMinutes = 1) {
+    const id = safeUserId(userId);
+    const symbol = String(optionSymbol || '').trim().toUpperCase();
+    const interval = Math.min(1440, Math.max(1, Number(intervalMinutes) || 1));
+    if (!symbol) return { optionSymbol: '', intervalMinutes: interval, candles: [] };
+    const rows = getOptionHistoryRows.all(id, symbol);
+    const buckets = new Map();
+    for (const row of rows) {
+      const capturedAt = Date.parse(row.captured_at);
+      if (!Number.isFinite(capturedAt)) continue;
+      const last = Number(row.last_price);
+      const bid = Number(row.bid);
+      const ask = Number(row.ask);
+      const midpoint = bid > 0 && ask > 0 ? (bid + ask) / 2 : 0;
+      const price = last > 0 ? last : midpoint;
+      if (!(price > 0)) continue;
+      const bucket = Math.floor(capturedAt / (interval * 60000)) * interval * 60000;
+      const candle = buckets.get(bucket);
+      if (!candle) {
+        buckets.set(bucket, { timestamp: bucket, open: price, high: price, low: price, close: price,
+          samples: 1, volume: Number(row.volume) || 0 });
+      } else {
+        candle.high = Math.max(candle.high, price);
+        candle.low = Math.min(candle.low, price);
+        candle.close = price;
+        candle.samples += 1;
+        candle.volume = Math.max(candle.volume, Number(row.volume) || 0);
+      }
+    }
+    const candles = [...buckets.values()].sort((a, b) => a.timestamp - b.timestamp);
+    return { optionSymbol: symbol, intervalMinutes: interval, candles, samples: rows.length,
+      firstCapturedAt: rows[0]?.captured_at || null, lastCapturedAt: rows.at(-1)?.captured_at || null };
+  }
+
   function backtest(userId, options) { return backtestYoloDataset(dataset(userId), options); }
 
-  return { ensure, settings, updateSettings, markAttempt, saveCapture, enabledUsers, status, captureDetails, dataset, backtest };
+  return { ensure, settings, updateSettings, markAttempt, saveCapture, enabledUsers, status, captureDetails, optionHistory, dataset, backtest };
 }

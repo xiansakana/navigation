@@ -89,7 +89,7 @@
       </div>
       <div class="yolo-chain-metrics" id="chain-metrics"></div>
       <p class="yolo-message" id="chain-message">选择一次采集以查看合约。</p>
-      <div class="yolo-contract-detail" id="chain-detail"><span>点击 Call 或 Put 任意报价单元格，查看该合约完整数据</span></div>
+      <div class="yolo-contract-detail" id="chain-detail"><span>单击查看报价详情，双击 Call 或 Put 任意报价单元格查看该合约 K 线</span></div>
       <div class="yolo-chain-scroll"><table class="yolo-chain-table" id="chain-table">
         <thead id="chain-head"></thead>
         <tbody id="chain-body"><tr><td colspan="13" class="quant-empty">尚未选择快照</td></tr></tbody>
@@ -101,6 +101,7 @@
       <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>日期</th><th>方向 / 合约</th><th class="align-right">入场 / 退出</th><th class="align-right">Delta</th><th class="align-right">收益</th><th>退出原因</th></tr></thead><tbody id="trade-body"><tr><td colspan="6" class="quant-empty">尚未运行回测</td></tr></tbody></table></div>
     </section>
   </main>
-  <script type="module" src="./app.js?v=20260922-4"></script>
+  <script src="../vendor/echarts.min.js"></script>
+  <script type="module" src="./app.js?v=20260926-1"></script>
 </body>
 </html>

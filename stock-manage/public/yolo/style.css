@@ -41,6 +41,19 @@
 .yolo-detail-grid div { display: flex; justify-content: space-between; gap: 8px; }
 .yolo-detail-grid span { color: var(--muted); }
 .yolo-detail-grid b { color: var(--text); font-family: ui-monospace, monospace; }
+.yolo-expiry-row td { padding: 0 !important; background: #111a29; border-top: 1px solid rgba(100, 116, 139, .38); }
+.yolo-expiry-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px 14px; color: #e2e8f0; background: transparent; border: 0; cursor: pointer; text-align: left; }
+.yolo-expiry-toggle:hover { background: rgba(96, 165, 250, .1); }
+.yolo-expiry-toggle span { width: 15px; color: #94a3b8; font-size: 18px; }
+.yolo-expiry-toggle strong { font: 700 12px system-ui, sans-serif; }
+.yolo-expiry-toggle small { color: #94a3b8; font: 11px system-ui, sans-serif; }
+.yolo-kline-backdrop { z-index: 30; }
+.yolo-kline-modal { width: min(1100px, calc(100vw - 28px)); }
+.yolo-kline-toolbar { display: flex; align-items: center; gap: 18px; padding: 12px 16px; color: var(--muted); border-bottom: 1px solid var(--border); font-size: 11px; }
+.yolo-kline-toolbar label { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.yolo-kline-toolbar select { min-height: 32px; }
+.yolo-kline-body { min-height: 460px; padding: 10px 14px 16px; }
+#yolo-kline-chart { width: 100%; height: 440px; }
 .yolo-chain-scroll { width: 100%; max-height: 720px; overflow: auto; background: #0d131f; scrollbar-color: #334155 transparent; }
 .yolo-chain-table { width: 100% !important; min-width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; color: #dbeafe; font: 11px ui-monospace, monospace; }
 .yolo-chain-table th, .yolo-chain-table td { height: 35px; padding: 6px 8px; text-align: center; white-space: nowrap; border-bottom: 1px solid rgba(71, 85, 105, .22); }
@@ -70,6 +83,7 @@
 .yolo-capture-row:hover { background: rgba(96, 165, 250, .07); }
 @media (max-width: 1050px) { .yolo-detail-grid { grid-template-columns: repeat(3, minmax(110px, 1fr)); } }
 @media (max-width: 900px) { .yolo-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .yolo-kline-toolbar { align-items: flex-start; flex-direction: column; gap: 8px; } .yolo-kline-body { min-height: 360px; } #yolo-kline-chart { height: 340px; } }
 @media (max-width: 700px) {
   .yolo-settings, .yolo-backtest-form { align-items: stretch; flex-direction: column; }
   .yolo-settings label:not(.yolo-switch), .yolo-backtest-form label, .yolo-chain-controls label { width: 100%; }

@@ -1,7 +1,7 @@
 import { loadPortalContext, can, canDip } from '../js/portal-auth.js';
 
 const $ = (selector) => document.querySelector(selector);
-const state = { status: null, timer: null, chain: null, chainCaptureId: null, selectedOptionSymbol: null };
+const state = { status: null, timer: null, chain: null, chainCaptureId: null, selectedOptionSymbol: null, collapsedExpirations: new Set(), optionChart: null };
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -172,7 +172,7 @@ function optionCells(quote, side, isItm = false, mode = 'price') {
 
 function renderContractDetail(quote = null) {
   if (!quote) {
-    $('#chain-detail').innerHTML = '<span>点击 Call 或 Put 任意报价单元格，查看该合约完整数据</span>';
+    $('#chain-detail').innerHTML = '<span>单击查看报价详情，双击 Call 或 Put 任意报价单元格查看该合约 K 线</span>';
     return;
   }
   state.selectedOptionSymbol = quote.option_symbol;
@@ -201,31 +201,45 @@ function renderChain() {
   $('#chain-table').dataset.mode = mode;
   renderChainHead(mode);
   renderChainMetrics(payload, spot);
-  const pairs = new Map();
+  const groups = new Map();
   payload.quotes.forEach((quote) => {
-    if ($('#chain-strike-min').value && quote.strike < minStrike) return;
-    if ($('#chain-strike-max').value && quote.strike > maxStrike) return;
-    if (!pairs.has(quote.strike)) pairs.set(quote.strike, { strike: quote.strike, call: null, put: null });
-    pairs.get(quote.strike)[quote.right_type === 'C' ? 'call' : 'put'] = quote;
+    const expiration = quote.expiration || payload.capture.expiration || '未知到期日';
+    if (!groups.has(expiration)) groups.set(expiration, []);
+    groups.get(expiration).push(quote);
   });
-  const rows = [...pairs.values()].sort((a, b) => a.strike - b.strike).map((pair) => ({
-    ...pair,
-    call: quoteAllowed(pair.call, spot) ? pair.call : null,
-    put: quoteAllowed(pair.put, spot) ? pair.put : null
-  })).filter((pair) => pair.call || pair.put);
-  $('#chain-message').textContent = `${payload.capture.market_date} · ${payload.capture.capture_kind === 'daily-summary' ? '收盘摘要' : '日内快照'} · 显示 ${rows.length} 个行权价 / ${payload.quotes.length} 个合约`;
   const output = [];
-  let spotInserted = false;
-  rows.forEach((pair) => {
-    if (!spotInserted && pair.strike >= spot) {
-      output.push(`<tr class="yolo-spot-row"><td colspan="${sideSpan}">CALL</td><td><span>QQQ ${optionPrice(spot)}</span></td><td colspan="${sideSpan}">PUT</td></tr>`);
-      spotInserted = true;
-    }
-    const callItm = pair.call && !moneyness(pair.call, spot).otm && moneyness(pair.call, spot).label !== '近平值';
-    const putItm = pair.put && !moneyness(pair.put, spot).otm && moneyness(pair.put, spot).label !== '近平值';
-    output.push(`<tr>${optionCells(pair.call, 'call', callItm, mode)}<td class="yolo-strike">${optionPrice(pair.strike)}</td>${optionCells(pair.put, 'put', putItm, mode)}</tr>`);
+  let visibleRows = 0;
+  groups.forEach((quotes, expiration) => {
+    const pairs = new Map();
+    quotes.forEach((quote) => {
+      if ($('#chain-strike-min').value && quote.strike < minStrike) return;
+      if ($('#chain-strike-max').value && quote.strike > maxStrike) return;
+      if (!pairs.has(quote.strike)) pairs.set(quote.strike, { strike: quote.strike, call: null, put: null });
+      pairs.get(quote.strike)[quote.right_type === 'C' ? 'call' : 'put'] = quote;
+    });
+    const rows = [...pairs.values()].sort((a, b) => a.strike - b.strike).map((pair) => ({
+      ...pair,
+      call: quoteAllowed(pair.call, spot) ? pair.call : null,
+      put: quoteAllowed(pair.put, spot) ? pair.put : null
+    })).filter((pair) => pair.call || pair.put);
+    visibleRows += rows.length;
+    const groupKey = `${payload.capture.id}:${expiration}`;
+    const collapsed = state.collapsedExpirations.has(groupKey);
+    output.push(`<tr class="yolo-expiry-row" data-expiry-toggle="${escapeHtml(groupKey)}"><td colspan="${totalSpan}"><button type="button" class="yolo-expiry-toggle" aria-expanded="${!collapsed}"><span>${collapsed ? '›' : '⌄'}</span><strong>${escapeHtml(expiration)}</strong><small>${rows.length} 个行权价 · ${quotes.length} 个合约</small></button></td></tr>`);
+    if (collapsed) return;
+    let spotInserted = false;
+    rows.forEach((pair) => {
+      if (!spotInserted && pair.strike >= spot) {
+        output.push(`<tr class="yolo-spot-row"><td colspan="${sideSpan}">CALL</td><td><span>QQQ ${optionPrice(spot)}</span></td><td colspan="${sideSpan}">PUT</td></tr>`);
+        spotInserted = true;
+      }
+      const callItm = pair.call && !moneyness(pair.call, spot).otm && moneyness(pair.call, spot).label !== '近平值';
+      const putItm = pair.put && !moneyness(pair.put, spot).otm && moneyness(pair.put, spot).label !== '近平值';
+      output.push(`<tr>${optionCells(pair.call, 'call', callItm, mode)}<td class="yolo-strike">${optionPrice(pair.strike)}</td>${optionCells(pair.put, 'put', putItm, mode)}</tr>`);
+    });
+    if (!spotInserted && rows.length) output.push(`<tr class="yolo-spot-row"><td colspan="${sideSpan}">CALL</td><td><span>QQQ ${optionPrice(spot)}</span></td><td colspan="${sideSpan}">PUT</td></tr>`);
   });
-  if (!spotInserted && rows.length) output.push(`<tr class="yolo-spot-row"><td colspan="${sideSpan}">CALL</td><td><span>QQQ ${optionPrice(spot)}</span></td><td colspan="${sideSpan}">PUT</td></tr>`);
+  $('#chain-message').textContent = `${payload.capture.market_date} · ${payload.capture.capture_kind === 'daily-summary' ? '收盘摘要' : '日内快照'} · 显示 ${visibleRows} 个行权价 / ${payload.quotes.length} 个合约`;
   $('#chain-body').innerHTML = output.length ? output.join('') : `<tr><td colspan="${totalSpan}" class="quant-empty">没有符合当前筛选条件的合约。</td></tr>`;
   requestAnimationFrame(() => {
     const scroller = document.querySelector('.yolo-chain-scroll');
@@ -234,6 +248,65 @@ function renderChain() {
   });
   const selected = payload.quotes.find((quote) => quote.option_symbol === state.selectedOptionSymbol);
   renderContractDetail(selected || null);
+}
+
+const optionIntervals = [
+  [1, '1 分钟'], [3, '3 分钟'], [5, '5 分钟'], [10, '10 分钟'], [15, '15 分钟'],
+  [30, '30 分钟'], [60, '1 小时'], [120, '2 小时'], [240, '4 小时'], [1440, '1 日']
+];
+
+function closeOptionChart() {
+  if (!state.optionChart) return;
+  state.optionChart.chart?.dispose();
+  state.optionChart.modal?.remove();
+  state.optionChart = null;
+}
+
+function optionChartOption(payload) {
+  const candles = payload.candles || [];
+  const labels = candles.map((c) => new Date(c.timestamp).toLocaleString('zh-CN', { timeZone: 'America/New_York', hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
+  return {
+    animation: false,
+    backgroundColor: 'transparent',
+    grid: { left: 58, right: 20, top: 28, bottom: 42 },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    xAxis: { type: 'category', data: labels, boundaryGap: true, axisLabel: { color: '#94a3b8', hideOverlap: true } },
+    yAxis: { scale: true, axisLabel: { color: '#94a3b8', formatter: (value) => `$${Number(value).toFixed(2)}` }, splitLine: { lineStyle: { color: 'rgba(100,116,139,.18)' } } },
+    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 8 }],
+    series: [{ type: 'candlestick', name: '权利金', data: candles.map((c) => [c.open, c.close, c.low, c.high]), itemStyle: { color: '#fb7185', color0: '#34d399', borderColor: '#fb7185', borderColor0: '#34d399' } }]
+  };
+}
+
+async function showOptionChart(symbol) {
+  closeOptionChart();
+  const modal = document.createElement('div');
+  modal.className = 'sm-modal-backdrop yolo-kline-backdrop';
+  modal.innerHTML = `<div class="sm-modal sm-modal--xl yolo-kline-modal" role="dialog" aria-modal="true" aria-labelledby="yolo-kline-title"><div class="sm-modal-head"><div><h3 id="yolo-kline-title">${escapeHtml(String(symbol).replace(/^O:/, ''))} · 期权 K 线</h3><p id="yolo-kline-status">正在读取累计采集数据…</p></div><button type="button" class="btn link" data-yolo-kline-close>关闭</button></div><div class="yolo-kline-toolbar"><label>时间单位 <select id="yolo-kline-interval">${optionIntervals.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select></label><span>价格优先使用 Last，无 Last 时使用 Bid/Ask 中间价；只展示本站已采集数据。</span></div><div class="sm-modal-body yolo-kline-body"><div id="yolo-kline-chart"></div></div></div>`;
+  document.body.appendChild(modal);
+  const chartHost = modal.querySelector('#yolo-kline-chart');
+  const chart = globalThis.echarts ? globalThis.echarts.init(chartHost, null, { renderer: 'canvas' }) : null;
+  state.optionChart = { modal, chart, symbol };
+  const close = () => closeOptionChart();
+  modal.querySelector('[data-yolo-kline-close]').addEventListener('click', close);
+  modal.addEventListener('click', (event) => { if (event.target === modal) close(); });
+  const load = async () => {
+    const interval = Number(modal.querySelector('#yolo-kline-interval').value);
+    const status = modal.querySelector('#yolo-kline-status');
+    status.textContent = '正在读取累计采集数据…';
+    try {
+      const payload = await api(`/yolo/option-history?symbol=${encodeURIComponent(symbol)}&interval=${interval}`);
+      if (!payload.candles?.length) {
+        status.textContent = `暂无该合约的累计采集数据（原始样本 ${payload.samples || 0} 条）。`;
+        chart?.clear();
+        return;
+      }
+      status.textContent = `${payload.candles.length} 根 K 线 · ${payload.firstCapturedAt ? dateTime(payload.firstCapturedAt) : '—'} 至 ${payload.lastCapturedAt ? dateTime(payload.lastCapturedAt) : '—'}`;
+      chart?.setOption(optionChartOption(payload), true);
+    } catch (error) { status.textContent = error.message; }
+  };
+  modal.querySelector('#yolo-kline-interval').addEventListener('change', load);
+  window.addEventListener('keydown', function escape(event) { if (event.key === 'Escape' && state.optionChart?.modal === modal) { window.removeEventListener('keydown', escape); close(); } });
+  window.requestAnimationFrame(() => { chart?.resize(); load(); });
 }
 
 async function loadCaptureDetails(captureId) {
@@ -331,9 +404,23 @@ async function init() {
   ['#chain-mode', '#chain-moneyness', '#chain-strike-min', '#chain-strike-max', '#chain-delta-min']
     .forEach((selector) => $(selector).addEventListener('input', renderChain));
   $('#chain-body').addEventListener('click', (event) => {
+    const expiry = event.target.closest('[data-expiry-toggle]');
+    if (expiry) {
+      const key = expiry.dataset.expiryToggle;
+      if (state.collapsedExpirations.has(key)) state.collapsedExpirations.delete(key);
+      else state.collapsedExpirations.add(key);
+      renderChain();
+      return;
+    }
     const cell = event.target.closest('[data-option]');
     if (!cell || !state.chain) return;
     renderContractDetail(state.chain.quotes.find((quote) => quote.option_symbol === cell.dataset.option));
+  });
+  $('#chain-body').addEventListener('dblclick', (event) => {
+    const cell = event.target.closest('[data-option]');
+    if (!cell || !state.chain) return;
+    const quote = state.chain.quotes.find((item) => item.option_symbol === cell.dataset.option);
+    if (quote) showOptionChart(quote.option_symbol);
   });
   $('#capture-body').addEventListener('click', (event) => {
     const row = event.target.closest('[data-capture-id]');
@@ -342,7 +429,7 @@ async function init() {
     loadCaptureDetails(row.dataset.captureId);
     $('#option-chain-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
-  window.addEventListener('resize', renderChain);
+  window.addEventListener('resize', () => { renderChain(); state.optionChart?.chart?.resize(); });
   $('#yolo-backtest-form').addEventListener('submit', runBacktest);
   state.timer = setInterval(() => loadStatus(true), 30000);
 }

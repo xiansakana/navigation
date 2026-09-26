@@ -770,6 +770,13 @@ app.get('/api/yolo/captures/:id/quotes', (req, res) => {
   res.json(result);
 });
 
+app.get('/api/yolo/option-history', (req, res) => {
+  if (!requireQuantPermission(req, res, 'yolo-dashboard')) return;
+  const symbol = String(req.query.symbol || '').trim();
+  if (!symbol) return res.status(400).json({ error: '缺少 option symbol' });
+  res.json(yoloStore.optionHistory(quantUserId(req), symbol, req.query.interval));
+});
+
 app.put('/api/yolo/settings', (req, res) => {
   if (!requireQuantPermission(req, res, 'yolo-control', 'edit')) return;
   const settings = yoloStore.updateSettings(quantUserId(req), req.body || {});
