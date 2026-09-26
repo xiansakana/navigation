@@ -41,7 +41,7 @@
 .yolo-detail-grid div { display: flex; justify-content: space-between; gap: 8px; }
 .yolo-detail-grid span { color: var(--muted); }
 .yolo-detail-grid b { color: var(--text); font-family: ui-monospace, monospace; }
-.yolo-expiry-row td { padding: 0 !important; background: #111a29; border-top: 1px solid rgba(100, 116, 139, .38); }
+.yolo-expiry-row td { position: sticky; top: 68px; z-index: 3; padding: 0 !important; background: #111a29; border-top: 1px solid rgba(100, 116, 139, .38); box-shadow: 0 2px 7px rgba(0, 0, 0, .28); }
 .yolo-expiry-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px 14px; color: #e2e8f0; background: transparent; border: 0; cursor: pointer; text-align: left; }
 .yolo-expiry-toggle:hover { background: rgba(96, 165, 250, .1); }
 .yolo-expiry-toggle span { width: 15px; color: #94a3b8; font-size: 18px; }
