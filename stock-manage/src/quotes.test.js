@@ -10,6 +10,66 @@ function response(data, status = 200) {
   };
 }
 
+test('US stock quote falls back to Yahoo when Finnhub is not configured', async (context) => {
+  const originalFetch = global.fetch;
+  context.after(() => { global.fetch = originalFetch; });
+  const requested = [];
+  global.fetch = async (url) => {
+    requested.push(String(url));
+    assert.match(String(url), /query1\.finance\.yahoo\.com\/v8\/finance\/chart\/GOOG/);
+    return response({ chart: { result: [{ meta: {
+      symbol: 'GOOG', regularMarketPrice: 245.5, chartPreviousClose: 242.25
+    } }], error: null } });
+  };
+  const service = createQuoteService({ finnhubApiKey: '', polygonApiKey: '' });
+  const quote = await service.getQuote('goog');
+  assert.equal(quote.symbol, 'GOOG');
+  assert.equal(quote.price, 245.5);
+  assert.equal(quote.prevClose, 242.25);
+  assert.equal(quote.source, 'yahoo');
+  assert.equal(quote.delayed, true);
+  assert.equal(requested.length, 1);
+});
+
+test('US stock quote falls back to Yahoo when Finnhub request fails', async (context) => {
+  const originalFetch = global.fetch;
+  context.after(() => { global.fetch = originalFetch; });
+  const requested = [];
+  global.fetch = async (url) => {
+    requested.push(String(url));
+    if (String(url).includes('finnhub.io')) return response({ error: 'rate limited' });
+    return response({ chart: { result: [{ meta: {
+      symbol: 'SOFI', regularMarketPrice: 25.2, previousClose: 24.8
+    } }], error: null } });
+  };
+  const service = createQuoteService({ finnhubApiKey: 'key', polygonApiKey: '' });
+  const quote = await service.getStock('SOFI');
+  assert.equal(quote.symbol, 'SOFI');
+  assert.equal(quote.source, 'yahoo');
+  assert.ok(Math.abs(quote.change - 0.4) < 1e-9);
+  assert.equal(requested.length, 2);
+});
+
+test('US stock quote falls back to Nasdaq when Yahoo is blocked', async (context) => {
+  const originalFetch = global.fetch;
+  context.after(() => { global.fetch = originalFetch; });
+  global.fetch = async (url) => {
+    const target = String(url);
+    if (target.includes('query1.finance.yahoo.com')) return response({ error: 'blocked' }, 403);
+    assert.match(target, /api\.nasdaq\.com\/api\/quote\/SOFI\/info/);
+    return response({ data: {
+      companyName: 'SoFi Technologies, Inc.',
+      primaryData: { lastSalePrice: '$25.20', netChange: '+0.40', percentageChange: '+1.61%' }
+    } });
+  };
+  const service = createQuoteService({ finnhubApiKey: '', polygonApiKey: '' });
+  const quote = await service.getQuote('SOFI');
+  assert.equal(quote.source, 'nasdaq');
+  assert.equal(quote.price, 25.2);
+  assert.equal(quote.prevClose, 24.8);
+  assert.equal(quote.delayed, true);
+});
+
 test('QQQ 1DTE chain selects the next expiry and normalizes executable quotes', async (context) => {
   const originalFetch = global.fetch;
   context.after(() => { global.fetch = originalFetch; });

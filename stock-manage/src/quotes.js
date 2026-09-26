@@ -179,7 +179,7 @@ export function createQuoteService(config) {
   const stockHistoryCacheMs = 5 * 60 * 1000;
 
   if (!finnhubKey) {
-    console.warn('stock-manage: finnhubApiKey 未配置，美股行情不可用');
+    console.warn('stock-manage: finnhubApiKey 未配置，美股行情将回退 Yahoo 延时行情');
   }
   if (!polygonKey) {
     console.warn('stock-manage: polygonApiKey 未配置，期权行情不可用');
@@ -384,7 +384,8 @@ export function createQuoteService(config) {
   }
 
   async function getYahooQuote(symbol) {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
+    const sym = String(symbol).toUpperCase();
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
     const data = await fetchJson(url, { 'User-Agent': 'Mozilla/5.0' });
     const result = data?.chart?.result?.[0];
     const meta = result?.meta;
@@ -392,13 +393,67 @@ export function createQuoteService(config) {
     if (!Number.isFinite(price) || price <= 0) throw new Error('Yahoo 无有效价');
     const prev = Number(meta?.chartPreviousClose || meta?.previousClose) || price;
     return {
-      symbol,
+      symbol: sym,
       price,
       change: price - prev,
       changePercent: prev ? ((price - prev) / prev) * 100 : 0,
       prevClose: prev,
-      source: 'yahoo'
+      currency: 'USD',
+      source: 'yahoo',
+      delayed: true
     };
+  }
+
+  async function getNasdaqQuote(symbol) {
+    const sym = String(symbol).toUpperCase();
+    const url = `https://api.nasdaq.com/api/quote/${encodeURIComponent(sym)}/info?assetclass=stocks`;
+    const data = await fetchJson(url, {
+      Accept: 'application/json, text/plain, */*',
+      Origin: 'https://www.nasdaq.com',
+      'User-Agent': 'Mozilla/5.0'
+    });
+    const quote = data?.data?.primaryData;
+    const parseNumber = (value) => Number(String(value ?? '').replace(/[$,%+,]/g, '').trim());
+    const price = parseNumber(quote?.lastSalePrice);
+    const change = parseNumber(quote?.netChange);
+    if (!Number.isFinite(price) || price <= 0) throw new Error('Nasdaq 无有效价');
+    const delta = Number.isFinite(change) ? change : 0;
+    return {
+      symbol: sym,
+      name: data?.data?.companyName || sym,
+      price,
+      change: delta,
+      changePercent: Number.isFinite(parseNumber(quote?.percentageChange)) ? parseNumber(quote?.percentageChange) : 0,
+      prevClose: price - delta,
+      currency: 'USD',
+      source: 'nasdaq',
+      delayed: true
+    };
+  }
+
+  async function getUsStockQuote(symbol) {
+    const sym = String(symbol).toUpperCase();
+    const errors = [];
+    if (finnhubKey) {
+      try {
+        return await getStockFromFinnhub(sym);
+      } catch (e) {
+        errors.push(`Finnhub: ${e.message}`);
+      }
+    } else {
+      errors.push('Finnhub: 未配置 API Key');
+    }
+    try {
+      return await getYahooQuote(sym);
+    } catch (e) {
+      errors.push(`Yahoo: ${e.message}`);
+    }
+    try {
+      return await getNasdaqQuote(sym);
+    } catch (e) {
+      errors.push(`Nasdaq: ${e.message}`);
+    }
+    throw new Error(`${sym} 行情不可用（${errors.join('; ')}）`);
   }
 
   async function getAShareFromTencent(code) {
@@ -568,7 +623,7 @@ export function createQuoteService(config) {
 
   async function getStock(symbol) {
     if (isAShareSymbol(symbol)) return getAShareQuote(symbol);
-    return getStockFromFinnhub(symbol);
+    return getUsStockQuote(symbol);
   }
 
   function pickOptionPrice(snap) {
@@ -932,7 +987,7 @@ export function createQuoteService(config) {
     const sym = normalizeSymbol(symbol);
     if (/^[A-Z]+\d{6}[CP]\d/i.test(sym)) return getOption(sym);
     if (isAShareSymbol(sym)) return getAShareQuote(sym);
-    return getStockFromFinnhub(sym);
+    return getUsStockQuote(sym);
   }
 
   return { getStock, getOption, getQqq1dteChain, getQqqPreviousSessionSummary, getQuote, getStockHistory, getAShareQuote, getUsdCny, search };
