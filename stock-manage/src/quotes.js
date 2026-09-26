@@ -921,6 +921,29 @@ export function createQuoteService(config) {
     };
   }
 
+  async function getCboeDelayedQqqChains() {
+    const data = await fetchJson('https://cdn.cboe.com/api/global/delayed_quotes/options/QQQ.json');
+    const providerTimestamp = cboeUtcTimestampToIso(data?.timestamp);
+    const etDate = String(data?.timestamp || '').slice(0, 10) || qqqChainDate();
+    const parsed = (data?.data?.options || []).map((item) => parseCboeOption(item, etDate)).filter(Boolean);
+    const underlyingPrice = Number(data?.data?.current_price) || 0;
+    const byExpiration = new Map();
+    parsed.forEach((row) => {
+      if (!byExpiration.has(row.expiration)) byExpiration.set(row.expiration, []);
+      byExpiration.get(row.expiration).push(row);
+    });
+    const chains = [...byExpiration.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([expiration, rows]) => ({
+      expiration,
+      underlyingPrice,
+      contracts: normalizeCboeContracts(rows, expiration, underlyingPrice)
+    })).filter((chain) => chain.contracts.length);
+    if (!chains.length) throw new Error('Cboe 延时链没有可记录的有效 QQQ 到期日');
+    return {
+      capturedAt: providerTimestamp || new Date().toISOString(), marketDate: etDate,
+      source: 'cboe-delayed', captureKind: 'intraday', chains
+    };
+  }
+
   async function getQqqPreviousSessionSummary() {
     const data = await fetchJson('https://cdn.cboe.com/api/global/delayed_quotes/options/QQQ.json');
     const providerDate = String(data?.timestamp || '').slice(0, 10) || qqqChainDate();
@@ -957,6 +980,12 @@ export function createQuoteService(config) {
     return getCboeDelayedQqq1dteChain();
   }
 
+  async function getQqqOptionChains() {
+    // Cboe delayed quotes expose the full expiration ladder in one response.
+    // Keep the individual expiration groups separate so they can be queried and backtested independently.
+    return getCboeDelayedQqqChains();
+  }
+
   async function search(q) {
     const query = String(q || '').trim();
     if (query.length < 1) return [];
@@ -990,5 +1019,5 @@ export function createQuoteService(config) {
     return getUsStockQuote(sym);
   }
 
-  return { getStock, getOption, getQqq1dteChain, getQqqPreviousSessionSummary, getQuote, getStockHistory, getAShareQuote, getUsdCny, search };
+  return { getStock, getOption, getQqq1dteChain, getQqqOptionChains, getQqqPreviousSessionSummary, getQuote, getStockHistory, getAShareQuote, getUsdCny, search };
 }

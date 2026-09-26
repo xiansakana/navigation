@@ -20,7 +20,7 @@ export function createYoloStore(config, databaseOverride = null) {
     INSERT INTO yolo_captures (user_id, captured_at, market_date, expiration, underlying_price, source, capture_kind, contract_count)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  const findCapture = db.prepare('SELECT id FROM yolo_captures WHERE user_id = ? AND captured_at = ?');
+  const findCapture = db.prepare('SELECT id FROM yolo_captures WHERE user_id = ? AND captured_at = ? AND expiration = ?');
   const getCapture = db.prepare(`
     SELECT id, captured_at, market_date, expiration, underlying_price, source, capture_kind, contract_count
     FROM yolo_captures WHERE id = ? AND user_id = ?
@@ -104,22 +104,28 @@ export function createYoloStore(config, databaseOverride = null) {
 
   const saveCapture = db.transaction((userId, snapshot) => {
     const id = safeUserId(userId);
-    const existing = findCapture.get(id, snapshot.capturedAt);
-    if (existing) {
-      markAttempt(id, null, snapshot.capturedAt);
-      return Number(existing.id);
-    }
-    const info = insertCapture.run(id, snapshot.capturedAt, snapshot.marketDate, snapshot.expiration,
-      snapshot.underlyingPrice || null, snapshot.source || '', snapshot.captureKind || 'intraday', snapshot.contracts.length);
-    for (const quote of snapshot.contracts) {
-      insertQuote.run(info.lastInsertRowid, id, quote.optionSymbol, quote.right, quote.strike, quote.expiration,
-        quote.bid, quote.ask, quote.bidSize ?? null, quote.askSize ?? null, quote.last ?? null,
-        quote.lastTradeAt ?? null, quote.open ?? null, quote.high ?? null, quote.low ?? null, quote.prevClose ?? null,
-        quote.delta ?? null, quote.gamma ?? null, quote.theta ?? null, quote.vega ?? null, quote.iv ?? null,
-        quote.volume ?? null, quote.openInterest ?? null);
+    const groups = Array.isArray(snapshot.chains) && snapshot.chains.length
+      ? snapshot.chains
+      : [snapshot];
+    let lastId = null;
+    for (const chain of groups) {
+      const expiration = chain.expiration || chain.contracts?.[0]?.expiration || snapshot.expiration || '';
+      const existing = findCapture.get(id, snapshot.capturedAt, expiration);
+      if (existing) { lastId = Number(existing.id); continue; }
+      const contracts = Array.isArray(chain.contracts) ? chain.contracts : [];
+      const info = insertCapture.run(id, snapshot.capturedAt, snapshot.marketDate, expiration,
+        chain.underlyingPrice ?? snapshot.underlyingPrice ?? null, snapshot.source || '', snapshot.captureKind || 'intraday', contracts.length);
+      lastId = Number(info.lastInsertRowid);
+      for (const quote of contracts) {
+        insertQuote.run(info.lastInsertRowid, id, quote.optionSymbol, quote.right, quote.strike, quote.expiration,
+          quote.bid, quote.ask, quote.bidSize ?? null, quote.askSize ?? null, quote.last ?? null,
+          quote.lastTradeAt ?? null, quote.open ?? null, quote.high ?? null, quote.low ?? null, quote.prevClose ?? null,
+          quote.delta ?? null, quote.gamma ?? null, quote.theta ?? null, quote.vega ?? null, quote.iv ?? null,
+          quote.volume ?? null, quote.openInterest ?? null);
+      }
     }
     markAttempt(id, null, snapshot.capturedAt);
-    return Number(info.lastInsertRowid);
+    return lastId;
   });
 
   function enabledUsers() {

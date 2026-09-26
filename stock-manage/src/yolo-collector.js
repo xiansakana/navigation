@@ -21,7 +21,7 @@ export function createYoloCollector({ store, quotes, logger = console }) {
     if (!users.length) return null;
     let snapshot;
     try {
-      snapshot = await quotes.getQqq1dteChain();
+      snapshot = await quotes.getQqqOptionChains();
     } catch (error) {
       users.forEach((user) => store.markAttempt(user.userId, error.message || String(error)));
       throw error;

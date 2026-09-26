@@ -117,6 +117,20 @@ test('QQQ 1DTE chain falls back to the free Cboe delayed chain without a Polygon
   assert.equal(chain.contracts[0].delta, -0.45);
 });
 
+test('QQQ option chain collector preserves multiple Cboe expirations', async (context) => {
+  const originalFetch = global.fetch;
+  context.after(() => { global.fetch = originalFetch; });
+  global.fetch = async () => response({ timestamp: '2026-09-22 15:00:00', data: { current_price: 600, options: [
+    { option: 'QQQ260923C00600000', bid: 1.2, ask: 1.3, delta: 0.45, iv: 0.25, open_interest: 20, volume: 10, last_trade_price: 1.25 },
+    { option: 'QQQ260924P00600000', bid: 1.4, ask: 1.5, delta: -0.45, iv: 0.26, open_interest: 21, volume: 11, last_trade_price: 1.45 }
+  ] } });
+  const service = createQuoteService({ finnhubApiKey: '', polygonApiKey: '' });
+  const result = await service.getQqqOptionChains();
+  assert.equal(result.chains.length, 2);
+  assert.deepEqual(result.chains.map((chain) => chain.expiration), ['2026-09-23', '2026-09-24']);
+  assert.equal(result.chains[1].contracts[0].right, 'P');
+});
+
 test('QQQ previous-session summary preserves daily OHLC and uses the 16:00 ET close', async (context) => {
   const originalFetch = global.fetch;
   context.after(() => { global.fetch = originalFetch; });
