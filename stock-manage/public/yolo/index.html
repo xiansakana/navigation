@@ -78,9 +78,8 @@
     </section>
 
     <section class="quant-card" id="option-chain-card">
-      <div class="quant-card-head"><div><h2>期权链明细</h2><p>选择快照查看真实记录的合约价格；价差为 (ask-bid) / 中间价。</p></div></div>
+      <div class="quant-card-head"><div><h2>期权链</h2><p>按到期日浏览本站累计采集的最近一份真实链数据，点击到期日展开 Call / Put 明细。</p></div></div>
       <div class="yolo-chain-controls">
-        <label><span>采集快照</span><select id="chain-capture"><option value="">尚无快照</option></select></label>
         <label><span>显示列</span><select id="chain-mode"><option value="price">简洁报价</option><option value="greeks">报价 + Greeks</option><option value="all">全部数据</option></select></label>
         <label><span>价内/价外</span><select id="chain-moneyness"><option value="all">全部</option><option value="otm">仅价外</option><option value="itm">仅价内</option></select></label>
         <label><span>最小行权价</span><input id="chain-strike-min" type="number" step="1" placeholder="不限"></label>

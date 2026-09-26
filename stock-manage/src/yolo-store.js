@@ -25,6 +25,16 @@ export function createYoloStore(config, databaseOverride = null) {
     SELECT id, captured_at, market_date, expiration, underlying_price, source, capture_kind, contract_count
     FROM yolo_captures WHERE id = ? AND user_id = ?
   `);
+  const getLatestExpirationCaptures = db.prepare(`
+    SELECT c.id, c.captured_at, c.market_date, c.expiration, c.underlying_price, c.source, c.capture_kind, c.contract_count
+    FROM yolo_captures c
+    WHERE c.user_id = ? AND c.id = (
+      SELECT c2.id FROM yolo_captures c2
+      WHERE c2.user_id = c.user_id AND c2.expiration = c.expiration
+      ORDER BY c2.captured_at DESC LIMIT 1
+    )
+    ORDER BY c.expiration
+  `);
   const getCaptureQuotes = db.prepare(`
     SELECT option_symbol, right_type, strike, expiration, bid, ask, bid_size, ask_size, last_price,
       last_trade_at, open_price, high_price, low_price, prev_close, delta, gamma, theta, vega, iv,
@@ -167,6 +177,15 @@ export function createYoloStore(config, databaseOverride = null) {
     return { capture, quotes: getCaptureQuotes.all(numericId, id) };
   }
 
+  function optionChain(userId) {
+    const id = safeUserId(userId);
+    const groups = getLatestExpirationCaptures.all(id).map((capture) => ({
+      capture,
+      quotes: getCaptureQuotes.all(capture.id, id)
+    }));
+    return { groups };
+  }
+
   function optionHistory(userId, optionSymbol, intervalMinutes = 1) {
     const id = safeUserId(userId);
     const symbol = String(optionSymbol || '').trim().toUpperCase();
@@ -203,5 +222,5 @@ export function createYoloStore(config, databaseOverride = null) {
 
   function backtest(userId, options) { return backtestYoloDataset(dataset(userId), options); }
 
-  return { ensure, settings, updateSettings, markAttempt, saveCapture, enabledUsers, status, captureDetails, optionHistory, dataset, backtest };
+  return { ensure, settings, updateSettings, markAttempt, saveCapture, enabledUsers, status, captureDetails, optionChain, optionHistory, dataset, backtest };
 }

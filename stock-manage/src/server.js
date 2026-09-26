@@ -770,6 +770,11 @@ app.get('/api/yolo/captures/:id/quotes', (req, res) => {
   res.json(result);
 });
 
+app.get('/api/yolo/option-chain', (req, res) => {
+  if (!requireQuantPermission(req, res, 'yolo-dashboard')) return;
+  res.json(yoloStore.optionChain(quantUserId(req)));
+});
+
 app.get('/api/yolo/option-history', (req, res) => {
   if (!requireQuantPermission(req, res, 'yolo-dashboard')) return;
   const symbol = String(req.query.symbol || '').trim();

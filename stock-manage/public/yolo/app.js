@@ -1,7 +1,7 @@
 import { loadPortalContext, can, canDip } from '../js/portal-auth.js';
 
 const $ = (selector) => document.querySelector(selector);
-const state = { status: null, timer: null, chain: null, chainCaptureId: null, selectedOptionSymbol: null, collapsedExpirations: new Set(), optionChart: null };
+const state = { status: null, timer: null, chain: null, selectedOptionSymbol: null, collapsedExpirations: new Set(), optionChart: null };
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -68,15 +68,7 @@ function renderStatus(data) {
       : '自动记录已暂停。';
   $('#collector-message').className = `yolo-message${settings.lastError ? ' error' : ''}`;
   $('#capture-body').innerHTML = recent.length ? recent.map((item) => `<tr class="yolo-capture-row" data-capture-id="${item.id}"><td>${dateTime(item.captured_at)}</td><td>${item.capture_kind === 'daily-summary' ? '收盘摘要' : '日内快照'}</td><td>${escapeHtml(item.market_date)}</td><td>${escapeHtml(item.expiration)}</td><td class="align-right">${money(item.underlying_price)}</td><td class="align-right">${Number(item.contract_count).toLocaleString()}</td><td>${escapeHtml(item.source || '—')}</td></tr>`).join('') : '<tr><td colspan="7" class="quant-empty">尚无数据；可先回填昨日收盘，开盘后自动积累分钟快照。</td></tr>';
-  const captureSelect = $('#chain-capture');
-  const selected = String(state.chainCaptureId || captureSelect.value || '');
-  captureSelect.innerHTML = recent.length
-    ? recent.map((item) => `<option value="${item.id}">${escapeHtml(captureLabel(item))}</option>`).join('')
-    : '<option value="">尚无快照</option>';
-  const available = recent.some((item) => String(item.id) === selected);
-  const nextId = available ? selected : String(recent[0]?.id || '');
-  captureSelect.value = nextId;
-  if (nextId && nextId !== String(state.chainCaptureId || '')) loadCaptureDetails(nextId);
+  if (!state.chain) loadOptionChain();
 }
 
 function moneyness(quote, spot) {
@@ -192,7 +184,9 @@ function renderContractDetail(quote = null) {
 function renderChain() {
   const payload = state.chain;
   if (!payload) return;
-  const spot = Number(payload.capture.underlying_price);
+  const groups = payload.groups || [{ capture: payload.capture, quotes: payload.quotes || [] }];
+  const primary = groups[0] || { capture: {}, quotes: [] };
+  const spot = Number(primary.capture.underlying_price);
   const minStrike = Number($('#chain-strike-min').value);
   const maxStrike = Number($('#chain-strike-max').value);
   const mode = window.innerWidth <= 700 ? 'mobile' : $('#chain-mode').value;
@@ -200,16 +194,15 @@ function renderChain() {
   const totalSpan = sideSpan * 2 + 1;
   $('#chain-table').dataset.mode = mode;
   renderChainHead(mode);
-  renderChainMetrics(payload, spot);
-  const groups = new Map();
-  payload.quotes.forEach((quote) => {
-    const expiration = quote.expiration || payload.capture.expiration || '未知到期日';
-    if (!groups.has(expiration)) groups.set(expiration, []);
-    groups.get(expiration).push(quote);
-  });
+  renderChainMetrics({ capture: primary.capture, quotes: primary.quotes }, spot);
   const output = [];
   let visibleRows = 0;
-  groups.forEach((quotes, expiration) => {
+  let visibleQuotes = 0;
+  groups.forEach((group) => {
+    const quotes = group.quotes || [];
+    const capture = group.capture || {};
+    const expiration = capture.expiration || quotes[0]?.expiration || '未知到期日';
+    visibleQuotes += quotes.length;
     const pairs = new Map();
     quotes.forEach((quote) => {
       if ($('#chain-strike-min').value && quote.strike < minStrike) return;
@@ -223,7 +216,7 @@ function renderChain() {
       put: quoteAllowed(pair.put, spot) ? pair.put : null
     })).filter((pair) => pair.call || pair.put);
     visibleRows += rows.length;
-    const groupKey = `${payload.capture.id}:${expiration}`;
+    const groupKey = `${capture.id}:${expiration}`;
     const collapsed = state.collapsedExpirations.has(groupKey);
     output.push(`<tr class="yolo-expiry-row" data-expiry-toggle="${escapeHtml(groupKey)}"><td colspan="${totalSpan}"><button type="button" class="yolo-expiry-toggle" aria-expanded="${!collapsed}"><span>${collapsed ? '›' : '⌄'}</span><strong>${escapeHtml(expiration)}</strong><small>${rows.length} 个行权价 · ${quotes.length} 个合约</small></button></td></tr>`);
     if (collapsed) return;
@@ -239,14 +232,14 @@ function renderChain() {
     });
     if (!spotInserted && rows.length) output.push(`<tr class="yolo-spot-row"><td colspan="${sideSpan}">CALL</td><td><span>QQQ ${optionPrice(spot)}</span></td><td colspan="${sideSpan}">PUT</td></tr>`);
   });
-  $('#chain-message').textContent = `${payload.capture.market_date} · ${payload.capture.capture_kind === 'daily-summary' ? '收盘摘要' : '日内快照'} · 显示 ${visibleRows} 个行权价 / ${payload.quotes.length} 个合约`;
+  $('#chain-message').textContent = `${groups.length} 个到期日 · 显示 ${visibleRows} 个行权价 / ${visibleQuotes} 个合约；点击到期日展开链明细`;
   $('#chain-body').innerHTML = output.length ? output.join('') : `<tr><td colspan="${totalSpan}" class="quant-empty">没有符合当前筛选条件的合约。</td></tr>`;
   requestAnimationFrame(() => {
     const scroller = document.querySelector('.yolo-chain-scroll');
     const spotRow = scroller?.querySelector('.yolo-spot-row');
     if (scroller && spotRow) scroller.scrollTop = Math.max(0, spotRow.offsetTop - scroller.clientHeight / 2);
   });
-  const selected = payload.quotes.find((quote) => quote.option_symbol === state.selectedOptionSymbol);
+  const selected = groups.flatMap((group) => group.quotes || []).find((quote) => quote.option_symbol === state.selectedOptionSymbol);
   renderContractDetail(selected || null);
 }
 
@@ -320,12 +313,11 @@ async function showOptionChart(symbol) {
   window.requestAnimationFrame(() => { chart?.resize(); load(); });
 }
 
-async function loadCaptureDetails(captureId) {
-  if (!captureId) return;
-  state.chainCaptureId = String(captureId);
+async function loadOptionChain() {
   $('#chain-message').textContent = '正在读取期权链…';
   try {
-    state.chain = await api(`/yolo/captures/${encodeURIComponent(captureId)}/quotes`);
+    state.chain = await api('/yolo/option-chain');
+    state.collapsedExpirations = new Set((state.chain.groups || []).map((group) => `${group.capture.id}:${group.capture.expiration}`));
     renderChain();
   } catch (error) {
     state.chain = null;
@@ -411,7 +403,6 @@ async function init() {
   $('#save-collector').addEventListener('click', saveCollector);
   $('#capture-now').addEventListener('click', captureNow);
   $('#backfill-close').addEventListener('click', backfillPreviousClose);
-  $('#chain-capture').addEventListener('change', (event) => loadCaptureDetails(event.target.value));
   ['#chain-mode', '#chain-moneyness', '#chain-strike-min', '#chain-strike-max', '#chain-delta-min']
     .forEach((selector) => $(selector).addEventListener('input', renderChain));
   $('#chain-body').addEventListener('click', (event) => {
@@ -425,19 +416,18 @@ async function init() {
     }
     const cell = event.target.closest('[data-option]');
     if (!cell || !state.chain) return;
-    renderContractDetail(state.chain.quotes.find((quote) => quote.option_symbol === cell.dataset.option));
+    const quote = (state.chain.groups || []).flatMap((group) => group.quotes || []).find((item) => item.option_symbol === cell.dataset.option);
+    renderContractDetail(quote);
   });
   $('#chain-body').addEventListener('dblclick', (event) => {
     const cell = event.target.closest('[data-option]');
     if (!cell || !state.chain) return;
-    const quote = state.chain.quotes.find((item) => item.option_symbol === cell.dataset.option);
+    const quote = (state.chain.groups || []).flatMap((group) => group.quotes || []).find((item) => item.option_symbol === cell.dataset.option);
     if (quote) showOptionChart(quote.option_symbol);
   });
   $('#capture-body').addEventListener('click', (event) => {
     const row = event.target.closest('[data-capture-id]');
     if (!row) return;
-    $('#chain-capture').value = row.dataset.captureId;
-    loadCaptureDetails(row.dataset.captureId);
     $('#option-chain-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   window.addEventListener('resize', () => { renderChain(); state.optionChart?.chart?.resize(); });
