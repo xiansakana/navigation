@@ -185,7 +185,7 @@ function renderChain() {
   const payload = state.chain;
   if (!payload) return;
   const groups = payload.groups || [{ capture: payload.capture, quotes: payload.quotes || [] }];
-  const primary = groups[0] || { capture: {}, quotes: [] };
+  const primary = groups[groups.length - 1] || { capture: {}, quotes: [] };
   const spot = Number(primary.capture.underlying_price);
   const minStrike = Number($('#chain-strike-min').value);
   const maxStrike = Number($('#chain-strike-max').value);
