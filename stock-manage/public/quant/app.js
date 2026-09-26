@@ -302,11 +302,23 @@ function klineOption(candles) {
   const dates = candles.map((item) => new Date(Number(item.timestamp)).toISOString().slice(0, 10));
   const values = candles.map((item) => [Number(item.open), Number(item.close), Number(item.low), Number(item.high)]);
   const volumes = candles.map((item, index) => [index, Number(item.volume) || 0, Number(item.close) >= Number(item.open) ? 1 : -1]);
+  const signed = (value, digits = 2) => `${value >= 0 ? '+' : ''}${Number(value).toFixed(digits)}`;
   return {
     animation: false,
     backgroundColor: 'transparent',
     legend: { show: false },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, backgroundColor: '#171c25', borderColor: '#30394a', textStyle: { color: '#e6edf7' } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, backgroundColor: '#171c25', borderColor: '#30394a', textStyle: { color: '#e6edf7' }, formatter: (params) => {
+      const list = Array.isArray(params) ? params : [params];
+      const candleParam = list.find((item) => item.seriesName === 'K 线') || list[0];
+      const index = Number(candleParam?.dataIndex);
+      const candle = values[index];
+      if (!candle) return '';
+      const base = index > 0 ? values[index - 1][1] : candle[0];
+      const change = candle[1] - base;
+      const pct = base ? change / base * 100 : 0;
+      const volume = Number(candles[index]?.volume);
+      return `${dates[index]}<br/>开 ${candle[0].toFixed(2)}　高 ${candle[3].toFixed(2)}<br/>低 ${candle[2].toFixed(2)}　收 ${candle[1].toFixed(2)}<br/><span style="color:${change >= 0 ? '#3ddc84' : '#ff7b7b'}">涨跌 ${signed(change)} (${signed(pct)}%)</span>${Number.isFinite(volume) ? `<br/>成交量 ${volume.toLocaleString()}` : ''}`;
+    } },
     axisPointer: { link: [{ xAxisIndex: 'all' }], label: { backgroundColor: '#465267' } },
     grid: [{ left: 62, right: 24, top: 18, height: '62%' }, { left: 62, right: 24, top: '75%', height: '14%' }],
     xAxis: [{ type: 'category', data: dates, boundaryGap: true, axisLine: { lineStyle: { color: '#465267' } }, axisLabel: { color: '#8f9bad' }, min: 'dataMin', max: 'dataMax' }, { type: 'category', gridIndex: 1, data: dates, boundaryGap: true, axisLabel: { show: false }, axisLine: { lineStyle: { color: '#465267' } }, axisTick: { show: false }, min: 'dataMin', max: 'dataMax' }],

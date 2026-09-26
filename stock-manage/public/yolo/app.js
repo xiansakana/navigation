@@ -265,15 +265,26 @@ function closeOptionChart() {
 function optionChartOption(payload) {
   const candles = payload.candles || [];
   const labels = candles.map((c) => new Date(c.timestamp).toLocaleString('zh-CN', { timeZone: 'America/New_York', hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
+  const values = candles.map((c) => [Number(c.open), Number(c.close), Number(c.low), Number(c.high)]);
+  const signed = (value, digits = 2) => `${value >= 0 ? '+' : ''}${Number(value).toFixed(digits)}`;
   return {
     animation: false,
     backgroundColor: 'transparent',
     grid: { left: 58, right: 20, top: 28, bottom: 42 },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, formatter: (params) => {
+      const item = Array.isArray(params) ? params[0] : params;
+      const index = Number(item?.dataIndex);
+      const candle = values[index];
+      if (!candle) return '';
+      const base = index > 0 ? values[index - 1][1] : candle[0];
+      const change = candle[1] - base;
+      const pct = base ? change / base * 100 : 0;
+      return `${labels[index]}<br/>开 ${candle[0].toFixed(3)}　高 ${candle[3].toFixed(3)}<br/>低 ${candle[2].toFixed(3)}　收 ${candle[1].toFixed(3)}<br/><span style="color:${change >= 0 ? '#fb7185' : '#34d399'}">涨跌 ${signed(change, 3)} (${signed(pct, 2)}%)</span>`;
+    } },
     xAxis: { type: 'category', data: labels, boundaryGap: true, axisLabel: { color: '#94a3b8', hideOverlap: true } },
     yAxis: { scale: true, axisLabel: { color: '#94a3b8', formatter: (value) => `$${Number(value).toFixed(2)}` }, splitLine: { lineStyle: { color: 'rgba(100,116,139,.18)' } } },
     dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 8 }],
-    series: [{ type: 'candlestick', name: '权利金', data: candles.map((c) => [c.open, c.close, c.low, c.high]), itemStyle: { color: '#fb7185', color0: '#34d399', borderColor: '#fb7185', borderColor0: '#34d399' } }]
+    series: [{ type: 'candlestick', name: '权利金', data: values, itemStyle: { color: '#fb7185', color0: '#34d399', borderColor: '#fb7185', borderColor0: '#34d399' } }]
   };
 }
 
