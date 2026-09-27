@@ -11,6 +11,7 @@ function configServicesKey(config) {
 
 var STOCK_MANAGE_SERVICE_ID = 'stock-manage';
 var QQQ_DIP_SERVICE_ID = 'qqq-dip';
+var NOTIFICATIONS_SERVICE_ID = 'notifications';
 
 var STOCK_MANAGE_HOLDINGS_COLUMNS = [
     { key: 'type', name: '类型' },
@@ -130,6 +131,24 @@ function buildQqqDipPermissions() {
             feature: item.feature,
             action: item.action,
             permissionPath: item.permissionPath || null
+        };
+    });
+}
+
+var NOTIFICATION_FEATURES = [
+    { feature: 'slack-test', name: '发送 Slack 测试', action: 'edit', permissionPath: ['Slack 通知'] }
+];
+
+function buildNotificationPermissions() {
+    return NOTIFICATION_FEATURES.map(function(item) {
+        return {
+            id: 'service:' + NOTIFICATIONS_SERVICE_ID + ':' + item.feature + ':' + item.action,
+            name: item.name,
+            group: '通知管理',
+            serviceId: NOTIFICATIONS_SERVICE_ID,
+            feature: item.feature,
+            action: item.action,
+            permissionPath: item.permissionPath
         };
     });
 }
@@ -442,8 +461,9 @@ export function syncRbacPermissions(data, config) {
     var servicePerms = buildServicePermissions(config.services);
     var stockManagePerms = buildStockManagePermissions();
     var qqqDipPerms = buildQqqDipPermissions();
+    var notificationPerms = buildNotificationPermissions();
     var known = {};
-    SYSTEM_PERMISSIONS.concat(servicePerms).concat(stockManagePerms).concat(qqqDipPerms).forEach(function(p) { known[p.id] = p; });
+    SYSTEM_PERMISSIONS.concat(servicePerms).concat(stockManagePerms).concat(qqqDipPerms).concat(notificationPerms).forEach(function(p) { known[p.id] = p; });
     (data.permissions || []).forEach(function(p) {
         if (!known[p.id]) known[p.id] = p;
     });
@@ -573,6 +593,11 @@ export function canViewService(userPerms, serviceId) {
 
 export function canEditService(userPerms, serviceId) {
     return hasPermission(userPerms, serviceEditPermissionId(serviceId));
+}
+
+export function canTestNotificationSlack(userPerms) {
+    return canEditService(userPerms, NOTIFICATIONS_SERVICE_ID)
+        || hasPermission(userPerms, 'service:notifications:slack-test:edit');
 }
 
 export function canWriteService(userPerms, serviceId) {

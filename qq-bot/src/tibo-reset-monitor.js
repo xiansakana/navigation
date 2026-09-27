@@ -111,8 +111,20 @@ function formatMessage(tweet, decision) {
     ].join('\n');
 }
 
+export async function deliverToChannels(config, message, alreadySent, send, onDelivered) {
+    var sent = new Set(alreadySent || []);
+    for (var channel of config.monitors?.tiboReset?.channels || ['qq']) {
+        if (sent.has(channel)) continue;
+        await send(config, channel, message);
+        sent.add(channel);
+        onDelivered?.(Array.from(sent));
+    }
+    return Array.from(sent);
+}
+
 export function startTiboResetMonitor(getConfig, hooks) {
     var state = readState();
+    state.sentChannels = state.sentChannels || {};
     var timer = null;
     var running = false;
     var runtime = { lastCheckedAt: state.lastCheckedAt || null, lastError: null, lastTweet: state.lastTweet || null, lastSignal: state.lastSignal || null };
@@ -136,12 +148,21 @@ export function startTiboResetMonitor(getConfig, hooks) {
                     var decision = classifyResetOpportunity(tweet);
                     runtime.lastTweet = { id: tweet.id, text: tweet.text, at: tweet.at, url: tweet.url, decision: decision };
                     if (decision.relevant) {
-                        await sendMessage(config.napcat, {
-                            type: config.defaultTarget.type || 'private',
-                            userId: config.defaultTarget.userId,
-                            groupId: config.defaultTarget.groupId,
-                            atUserId: config.defaultTarget.atUserId
-                        }, formatMessage(tweet, decision));
+                        await deliverToChannels(config, formatMessage(tweet, decision), state.sentChannels[tweet.id],
+                            async function(currentConfig, channel, message) {
+                                if (hooks?.send) return hooks.send(currentConfig, channel, message);
+                                if (channel !== 'qq') throw new Error('监听器缺少 ' + channel + ' 发送器');
+                                return sendMessage(currentConfig.napcat, {
+                                    type: currentConfig.defaultTarget.type || 'private',
+                                    userId: currentConfig.defaultTarget.userId,
+                                    groupId: currentConfig.defaultTarget.groupId,
+                                    atUserId: currentConfig.defaultTarget.atUserId
+                                }, message);
+                            }, function(sent) {
+                                state.sentChannels[tweet.id] = sent;
+                                writeState(state);
+                            });
+                        delete state.sentChannels[tweet.id];
                         runtime.lastSignal = runtime.lastTweet;
                         hooks?.onSignal?.(runtime.lastSignal);
                     }
@@ -149,6 +170,9 @@ export function startTiboResetMonitor(getConfig, hooks) {
                 }
             }
             state.seenIds = Array.from(seen).slice(-MAX_SEEN);
+            Object.keys(state.sentChannels).forEach(function(id) {
+                if (seen.has(id)) delete state.sentChannels[id];
+            });
             state.lastCheckedAt = new Date().toISOString();
             state.lastTweet = runtime.lastTweet;
             state.lastSignal = runtime.lastSignal;

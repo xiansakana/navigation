@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyResetOpportunity, parseRss } from './tibo-reset-monitor.js';
+import { classifyResetOpportunity, parseRss, deliverToChannels } from './tibo-reset-monitor.js';
 
 test('classifies confirmed, announced and possible reset signals', function() {
     assert.equal(classifyResetOpportunity({ text: 'Reset all propagated. Sweet dreams.' }).level, 'confirmed');
@@ -25,4 +25,19 @@ test('parses public RSS items into canonical X tweets', function() {
     assert.equal(tweets.length, 1);
     assert.equal(tweets[0].text, 'Reset soon & enjoy');
     assert.equal(tweets[0].url, 'https://x.com/thsottiaux/status/2100122479947817059');
+});
+
+test('failed Slack delivery resumes without repeating QQ', async function() {
+    var config = { monitors: { tiboReset: { channels: ['qq', 'slack'] } } };
+    var sent = [];
+    var checkpoint = [];
+    await assert.rejects(deliverToChannels(config, 'signal', [], async function(_, channel) {
+        sent.push(channel);
+        if (channel === 'slack') throw new Error('temporarily unavailable');
+    }, function(channels) { checkpoint = channels; }), /temporarily unavailable/);
+    assert.deepEqual(checkpoint, ['qq']);
+    await deliverToChannels(config, 'signal', checkpoint, async function(_, channel) {
+        sent.push(channel);
+    });
+    assert.deepEqual(sent, ['qq', 'slack', 'slack']);
 });

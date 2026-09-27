@@ -4,12 +4,13 @@ import { once } from 'node:events';
 import { createNotificationServer } from './server.js';
 import { normalizeConfig } from './config.js';
 
-async function withServer(run) {
+async function withServer(run, settings) {
     var server = createNotificationServer(normalizeConfig({
         napcat: { baseUrl: 'http://127.0.0.1:3000', accessToken: 'secret' },
         defaultTarget: { type: 'private', userId: '123' },
-        server: { notifyToken: 'notify-secret' }
-    }));
+        server: { notifyToken: 'notify-secret' },
+        channels: settings?.channels
+    }), settings?.adapters);
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     try {
@@ -32,6 +33,33 @@ test('management page and redacted config API are available', async function() {
         assert.equal(body.config.napcat.hasAccessToken, true);
         assert.equal(body.config.napcat.accessToken, undefined);
         assert.equal(body.channels[0].ready, true);
+    });
+});
+
+test('Slack test and unified notification routes use the configured webhook', async function() {
+    var sent = [];
+    await withServer(async function(base) {
+        var status = await (await fetch(base + '/api/config')).json();
+        assert.equal(status.config.channels.slack.hasWebhookUrl, true);
+        assert.equal(status.config.channels.slack.webhookUrl, undefined);
+        assert.equal(status.channels.find(function(channel) { return channel.id === 'slack'; }).ready, true);
+
+        var testResponse = await fetch(base + '/api/test/slack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: '测试 Slack' })
+        });
+        assert.equal(testResponse.status, 200);
+        var notifyResponse = await fetch(base + '/notify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer notify-secret' },
+            body: JSON.stringify({ channel: 'slack', message: '业务通知' })
+        });
+        assert.equal(notifyResponse.status, 200);
+        assert.deepEqual(sent, ['测试 Slack', '业务通知']);
+    }, {
+        channels: { slack: { enabled: true, webhookUrl: 'https://hooks.slack.com/services/T/B/secret' } },
+        adapters: { sendSlack: async function(_, message) { sent.push(message); return { ok: true }; } }
     });
 });
 

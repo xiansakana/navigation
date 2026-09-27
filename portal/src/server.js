@@ -15,6 +15,7 @@ import {
     getVisibleMenus,
     canViewService,
     canEditService,
+    canTestNotificationSlack,
     canWriteService,
     hasStockManageFeature,
     canViewAdmin,
@@ -374,6 +375,11 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
         var canWriteProxy = ctx.service.id === 'piclist'
             ? canEditService(proxySession.permissions, 'notes')
             : canWriteService(proxySession.permissions, ctx.service.id);
+        if (ctx.service.id === 'notifications'
+            && browserUrl.pathname === '/notifications/api/test/slack'
+            && req.method === 'POST') {
+            canWriteProxy = canTestNotificationSlack(proxySession.permissions);
+        }
         if (isWriteMethod(req.method) && !canWriteProxy) {
             sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '该服务为只读权限，无法修改');
             return true;

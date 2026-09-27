@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>通知管理</title>
-    <link rel="stylesheet" href="style.css?v=4e108fb">
+    <link rel="stylesheet" href="style.css?v=slack1">
 </head>
 <body>
     <main class="notify-app">
@@ -27,11 +27,16 @@
                 <span class="channel-icon x-icon">𝕏</span>
                 <div>
                     <div class="monitor-title"><h2>Tibo 重置机会监听</h2><span id="monitor-badge" class="monitor-badge">加载中</span></div>
-                    <p>持续检查 @thsottiaux 的每条新推文，判断 Codex 是否可能即将重置额度；命中后通过 QQ 通知。</p>
+                    <p>持续检查 @thsottiaux 的每条新推文，判断 Codex 是否可能即将重置额度；命中后通过所选渠道通知。</p>
                     <div id="monitor-detail" class="monitor-detail">正在读取监听状态…</div>
                 </div>
             </div>
             <div class="monitor-controls">
+                <fieldset class="monitor-channels"><legend>推送到</legend>
+                    <label><input id="monitor-channel-qq" type="checkbox" value="qq"> QQ</label>
+                    <label><input id="monitor-channel-email" type="checkbox" value="email"> 邮件</label>
+                    <label><input id="monitor-channel-slack" type="checkbox" value="slack"> Slack</label>
+                </fieldset>
                 <label class="switch"><input id="monitor-enabled" type="checkbox"><span></span></label>
                 <label class="interval-label">检查间隔
                     <select id="monitor-interval"><option value="3">3 分钟</option><option value="5">5 分钟</option><option value="10">10 分钟</option><option value="15">15 分钟</option></select>
@@ -74,6 +79,18 @@
                     <label>默认收件人<input id="email-to" placeholder="you@example.com"></label>
                 </div>
                 <button class="test-btn" data-test="email" type="button">发送邮件测试</button>
+            </article>
+
+            <article class="channel-card slack-card" data-channel="slack">
+                <div class="channel-head">
+                    <div class="channel-identity"><span class="channel-icon slack">S</span><div><h2>Slack 通知</h2><p>使用 Incoming Webhook 推送到指定频道</p></div></div>
+                    <label class="switch"><input id="slack-enabled" type="checkbox"><span></span></label>
+                </div>
+                <div class="status-row"><span class="status-dot"></span><span class="status-text">检查中</span></div>
+                <div class="form-grid">
+                    <label class="wide">Webhook URL<input id="slack-webhook-url" type="password" autocomplete="new-password" placeholder="https://hooks.slack.com/services/…"></label>
+                </div>
+                <button class="test-btn" data-test="slack" type="button">发送 Slack 测试</button>
             </article>
         </section>
 
