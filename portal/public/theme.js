@@ -1,6 +1,15 @@
 (function () {
   var KEY = 'portal-theme';
 
+  function finishLoading() {
+    document.documentElement.classList.remove('portal-loading');
+    document.documentElement.removeAttribute('aria-busy');
+  }
+
+  if (document.readyState === 'complete') finishLoading();
+  else window.addEventListener('load', finishLoading, { once: true });
+  window.setTimeout(finishLoading, 15000);
+
   function stored() {
     try {
       var t = localStorage.getItem(KEY);

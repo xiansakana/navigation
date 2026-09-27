@@ -37,6 +37,36 @@
 
 * { box-sizing: border-box; }
 
+html.portal-loading::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 1800;
+    background: var(--bg);
+    opacity: .92;
+}
+
+html.portal-loading::after {
+    content: "";
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    width: 42px;
+    height: 42px;
+    margin: -21px 0 0 -21px;
+    border: 4px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    z-index: 1801;
+    animation: portal-loading-spin .8s linear infinite;
+}
+
+@keyframes portal-loading-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+    html.portal-loading::after { animation-duration: 2s; }
+}
+
 body {
     margin: 0;
     font-family: "Segoe UI", system-ui, sans-serif;
@@ -822,7 +852,7 @@ body.notes-proxied {
     left: 50%;
     right: auto;
     transform: translateX(-50%);
-    z-index: 1200;
+    z-index: 1600;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -832,7 +862,7 @@ body.notes-proxied {
 }
 
 body.login-page .portal-toast-host {
-    top: 12px;
+    top: 64px;
 }
 
 .portal-toast {
