@@ -1,6 +1,6 @@
 #!/bin/bash
 # 在 ECS 上更新 navigation 仓库并重启服务
-# 用法: ./scripts/ecs-update.sh [--skip-pull] [--only undercut,company,qq-bot,portal,napcat,stock-manage,qqq-dip,siyuan,siyuan-share,piclist,alist]
+# 用法: ./scripts/ecs-update.sh --expected-sha <已推送的提交> [--only undercut,company,qq-bot,portal,napcat,stock-manage,qqq-dip,siyuan,siyuan-share,piclist,alist]
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -8,11 +8,13 @@ cd "$ROOT"
 
 SKIP_PULL=false
 ONLY=""
+EXPECTED_SHA=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --skip-pull) SKIP_PULL=true; shift ;;
         --only) ONLY="$2"; shift 2 ;;
+        --expected-sha) EXPECTED_SHA="$2"; shift 2 ;;
         *) echo "未知参数: $1"; exit 1 ;;
     esac
 done
@@ -38,17 +40,38 @@ git_pull_with_retry() {
     done
     echo ""
     echo "错误: 无法从 GitHub 拉取代码（国内网络访问 GitHub 443 不稳定）。"
-    echo "可选方案:"
-    echo "  1. 本机 D:\\code\\navigation 执行: .\\scripts\\ecs-deploy-from-local.ps1"
-    echo "  2. 稍后在 ECS 上重试: ./scripts/ecs-update.sh"
-    echo "  3. 改用 SSH: git remote set-url origin git@github.com:xiansakana/navigation.git"
+    echo "部署已停止；请检查 GitHub 连接并重试，勿自动改用 SCP。"
     return 1
 }
 
+if [[ "$SKIP_PULL" != true && -z "$EXPECTED_SHA" ]]; then
+    echo "错误: 常规部署必须提供 --expected-sha，先推送本地提交再部署。"
+    exit 1
+fi
+
+if [[ -n "$EXPECTED_SHA" && ! "$EXPECTED_SHA" =~ ^[0-9a-fA-F]{7,40}$ ]]; then
+    echo "错误: --expected-sha 必须是 7-40 位十六进制提交哈希。"
+    exit 1
+fi
+
 if [[ "$SKIP_PULL" != true ]]; then
+    if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
+        echo "错误: ECS 仓库存在未提交或未跟踪文件。请先人工核对并保留这些改动，勿直接覆盖。"
+        exit 1
+    fi
     git_pull_with_retry
 else
-    echo "==> 跳过 git pull（代码已由本机同步）"
+    echo "警告: 已跳过 git pull；此模式仅用于明确授权的紧急维护。"
+fi
+
+if [[ -n "$EXPECTED_SHA" ]]; then
+    actual_sha="$(git rev-parse HEAD)"
+    expected_full="$(git rev-parse "$EXPECTED_SHA^{commit}")"
+    if [[ "$actual_sha" != "$expected_full" ]]; then
+        echo "错误: ECS HEAD ($actual_sha) 与目标提交 ($expected_full) 不一致，已停止部署。"
+        exit 1
+    fi
+    echo "==> 已核对部署提交: $actual_sha"
 fi
 
 if should_run qq-bot; then

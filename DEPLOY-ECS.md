@@ -10,9 +10,9 @@
 
 ```powershell
 cd D:\code\navigation
-git add .
+git add <本次变更的文件>
 git commit -m "描述"
-git push
+git push origin main
 ```
 
 `config.json` 已在各服务 `.gitignore` 中，不会上传密钥。
@@ -36,7 +36,7 @@ cd navigation
 若 ECS 上已有 `/opt/xiansakana-torn-scripts`：
 
 ```bash
-cd /opt/navigation   # 克隆或本机 scp 完成后
+cd /opt/navigation   # 克隆完成后
 bash scripts/migrate-ecs-from-torn-scripts.sh
 ```
 
@@ -44,27 +44,33 @@ bash scripts/migrate-ecs-from-torn-scripts.sh
 
 ## 三、日常更新
 
-**ECS：**
-
-```bash
-cd /opt/navigation
-./scripts/ecs-update.sh
-```
-
-**本机（GitHub 超时时）：**
+先在本机推送，然后让 ECS 拉取同一个提交：
 
 ```powershell
 cd D:\code\navigation
-git push
-.\scripts\ecs-deploy-from-local.ps1
+$revision = (git rev-parse HEAD).Trim()
+git push origin main
+if ($LASTEXITCODE -ne 0) { throw 'Git push failed; deployment stopped' }
+ssh root@123.56.235.12 "cd /opt/navigation && ./scripts/ecs-update.sh --expected-sha $revision --only portal"
 ```
 
-按需重启：
+将 `portal` 换成实际受影响服务列表；共享代码变更应包含所有受影响服务。脚本会检查 ECS 工作区是否干净、只允许快进拉取，并核对部署提交与 `$revision` 一致。只有已提交的代码可以声明与生产一致。
+
+如需在 ECS 交互式执行：
 
 ```bash
-./scripts/ecs-update.sh --only undercut
-./scripts/ecs-update.sh --only company,qq-bot,portal
+cd /opt/navigation
+./scripts/ecs-update.sh --expected-sha <已推送的提交哈希> --only portal
 ```
+
+按需指定服务：
+
+```bash
+./scripts/ecs-update.sh --expected-sha <已推送的提交哈希> --only undercut
+./scripts/ecs-update.sh --expected-sha <已推送的提交哈希> --only company,qq-bot,portal
+```
+
+若 push、pull、工作区检查或提交校验失败，停止部署并检查差异；不要自动改用 SCP、`--skip-pull`、`git reset` 或覆盖服务器文件。`scripts/ecs-deploy-from-local.ps1` 仅保留作经用户明确授权的紧急例外，不能保证 Git 提交一致性。
 
 ---
 

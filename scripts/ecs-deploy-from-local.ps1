@@ -1,15 +1,20 @@
-# 兜底：仅在 ECS git pull 失败时用 scp 同步（日常部署请 git push + ECS ./scripts/ecs-update.sh）
+# 紧急例外：仅在用户明确授权时使用 SCP；常规部署必须 git push + ECS git pull。
 # 注意：不同步各服务的 config.json，避免本机开发配置覆盖 ECS 生产配置（含 torn-toolbox hub 结构）
 # Usage:
 #   git push origin main
 #   ssh root@123.56.235.12 "cd /opt/navigation && ./scripts/ecs-update.sh"
-# 兜底 scp:
-#   .\scripts\ecs-deploy-from-local.ps1
+# 经用户明确授权的紧急 SCP:
+#   .\scripts\ecs-deploy-from-local.ps1 -AllowEmergencyScp
 param(
-    [string]$Only = ""
+    [string]$Only = "",
+    [switch]$AllowEmergencyScp
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $AllowEmergencyScp) {
+    throw "SCP 部署仅限用户明确授权的紧急例外。常规流程请先 git push，再由 ECS git pull。"
+}
 
 $RepoRoot = Split-Path $PSScriptRoot -Parent
 $Key = Join-Path $env:USERPROFILE ".ssh\ecs_torn"

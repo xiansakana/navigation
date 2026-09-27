@@ -22,12 +22,10 @@ Torn 浏览器用户脚本在独立仓库 [xiansakana-torn-scripts](https://gith
 
 ```powershell
 # 本机（仓库根目录）
-git push
-.\scripts\ecs-deploy-from-local.ps1
+git push origin main
+if ($LASTEXITCODE -ne 0) { throw 'Git push failed; deployment stopped' }
+$revision = (git rev-parse HEAD).Trim()
+ssh root@123.56.235.12 "cd /opt/navigation && ./scripts/ecs-update.sh --expected-sha $revision --only portal"
 ```
 
-```bash
-# ECS
-cd /opt/navigation
-./scripts/ecs-update.sh
-```
+先确认本地更改已提交且推送成功；`--only` 按实际受影响服务调整。拉取失败时停止并排查，不改用 SCP。详细流程见 [DEPLOY-ECS.md](./DEPLOY-ECS.md)。
