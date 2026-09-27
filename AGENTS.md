@@ -27,12 +27,13 @@ npm start                       # start the current service
 
 There is no repository-wide build step. Keep service-specific deployment scripts and `DEPLOY-ECS.md` in sync when deployment behavior changes.
 
-## Production Deployment
+## Remote ECS Development and Deployment
 
-- Deploy through Git only: test, commit the intended files, push the commit to `origin/main`, then run `/opt/navigation/scripts/ecs-update.sh --expected-sha <pushed-commit> --only <affected-services>` on ECS. A successful push is required before any server pull or restart.
-- Confirm the ECS checkout is clean before pulling, use a fast-forward-only pull, and verify both ECS `HEAD` and the pushed commit match. Verify service health and the production UI/API after restart. Only committed files are covered by the revision match; never describe unrelated local uncommitted files as deployed.
-- If push, pull, revision verification, or the clean-checkout check fails, stop and report the blocker. Do not fall back to SCP, `--skip-pull`, or copying local files for a normal deployment. Do not reset, discard, or overwrite ECS changes to make a pull succeed; reconcile them separately with user approval.
-- `scripts/ecs-deploy-from-local.ps1` is an emergency-only legacy tool, not a normal deployment path. Use it only if the user explicitly authorizes an exception and understands that Git revision parity will not be guaranteed.
+- The ECS checkout at `/opt/navigation` is the primary development workspace. Use Cursor/VS Code Remote SSH to edit, test, commit, and push from ECS; the local checkout is an optional mirror, not a second source of truth.
+- Before committing on ECS, review `git status` and `git diff`. Commit application code and intentional documentation only; never commit `config.json`, secrets, SQLite databases, logs, uploads, caches, or other runtime data.
+- After an ECS commit, push that exact commit to `origin/main`, verify the remote ref, then restart only affected services and verify their health plus the production UI/API. Record the deployed commit hash.
+- Keep the ECS working tree clean after deployment. If unrelated local changes, secrets, or runtime files appear, stop and classify them; do not reset, discard, or overwrite them automatically.
+- Local-to-ECS SCP synchronization and local pushes are no longer the normal workflow. `scripts/ecs-deploy-from-local.ps1` is an emergency-only legacy tool and requires explicit authorization.
 
 ## Coding Style & Naming Conventions
 

@@ -20,12 +20,15 @@ Torn 浏览器用户脚本在独立仓库 [xiansakana-torn-scripts](https://gith
 
 见 [DEPLOY-ECS.md](./DEPLOY-ECS.md)。
 
-```powershell
-# 本机（仓库根目录）
+```bash
+# 通过 Cursor/VS Code Remote SSH 连接 ECS 后，在服务器上执行
+cd /opt/navigation
+git status
+git add <本次变更的文件>
+git commit -m "描述"
 git push origin main
-if ($LASTEXITCODE -ne 0) { throw 'Git push failed; deployment stopped' }
-$revision = (git rev-parse HEAD).Trim()
-ssh root@123.56.235.12 "cd /opt/navigation && ./scripts/ecs-update.sh --expected-sha $revision --only portal"
+revision=$(git rev-parse HEAD)
+./scripts/ecs-update.sh --expected-sha "$revision" --only portal
 ```
 
-先确认本地更改已提交且推送成功；`--only` 按实际受影响服务调整。拉取失败时停止并排查，不改用 SCP。详细流程见 [DEPLOY-ECS.md](./DEPLOY-ECS.md)。
+`--only` 按实际受影响服务调整。提交前必须确认没有把配置、数据库、日志或运行时文件加入 Git；拉取或校验失败时停止并排查，不改用 SCP。详细流程见 [DEPLOY-ECS.md](./DEPLOY-ECS.md)。

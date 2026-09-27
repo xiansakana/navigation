@@ -6,20 +6,33 @@
 
 ---
 
-## 一、本机开发
+## 一、ECS Remote SSH 开发（主流程）
 
-```powershell
-cd D:\code\navigation
+通过 Cursor/VS Code Remote SSH 连接 ECS，在 `/opt/navigation` 直接编辑和测试。ECS 工作区是唯一主工作区，本地副本只用于查看、备份或辅助验证。
+
+```bash
+ssh root@<ECS公网IP>
+cd /opt/navigation
+git status
+```
+
+## 二、ECS 提交与部署
+
+```bash
+ssh root@<ECS公网IP>
+cd /opt/navigation
 git add <本次变更的文件>
 git commit -m "描述"
 git push origin main
+revision=$(git rev-parse HEAD)
+./scripts/ecs-update.sh --expected-sha "$revision" --only portal
 ```
 
 `config.json` 已在各服务 `.gitignore` 中，不会上传密钥。
 
 ---
 
-## 二、ECS 首次部署
+## 三、ECS 首次部署
 
 ```bash
 cd /opt
@@ -42,19 +55,18 @@ bash scripts/migrate-ecs-from-torn-scripts.sh
 
 ---
 
-## 三、日常更新
+## 四、日常更新
 
-先在本机推送，然后让 ECS 拉取同一个提交：
+正常情况下直接在 ECS Remote SSH 会话中提交并部署：
 
-```powershell
-cd D:\code\navigation
-$revision = (git rev-parse HEAD).Trim()
+```bash
+cd /opt/navigation
+revision=$(git rev-parse HEAD)
 git push origin main
-if ($LASTEXITCODE -ne 0) { throw 'Git push failed; deployment stopped' }
-ssh root@123.56.235.12 "cd /opt/navigation && ./scripts/ecs-update.sh --expected-sha $revision --only portal"
+./scripts/ecs-update.sh --expected-sha "$revision" --only portal
 ```
 
-将 `portal` 换成实际受影响服务列表；共享代码变更应包含所有受影响服务。脚本会检查 ECS 工作区是否干净、只允许快进拉取，并核对部署提交与 `$revision` 一致。只有已提交的代码可以声明与生产一致。
+将 `portal` 换成实际受影响服务列表；共享代码变更应包含所有受影响服务。脚本会核对部署提交与 `$revision` 一致。只有已提交的代码可以声明与生产一致。
 
 如需在 ECS 交互式执行：
 
@@ -74,7 +86,7 @@ cd /opt/navigation
 
 ---
 
-## 四、Deploy Key（ECS 拉 GitHub）
+## 五、Deploy Key（ECS 推送 GitHub）
 
 ```bash
 # ~/.ssh/config 见 xiansakana-torn-scripts 文档或旧 DEPLOY-ECS 第四节
@@ -86,13 +98,13 @@ Deploy Key 需加到 **navigation** 仓库（可与 torn-scripts 共用同一密
 
 ---
 
-## 五、添加非 Torn 服务
+## 六、添加非 Torn 服务
 
 在 `portal/config.json` 的 `services` 增加卡片；新服务放在本仓库根目录（与 `qq-bot` 平级），独立端口 + pm2，仅 portal :80 对外。
 
 ---
 
-## 六、访问
+## 七、访问
 
 ```
 http://<ECS公网IP>/
