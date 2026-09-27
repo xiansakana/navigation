@@ -30,12 +30,17 @@
         "user": "name@example.com",
         "pass": "填写 SMTP 密码或授权码"
       }
+    },
+    "slack": {
+      "enabled": false,
+      "webhookUrl": ""
     }
   },
   "monitors": {
     "tiboReset": {
       "enabled": false,
       "intervalMinutes": 5,
+      "channels": ["qq"],
       "feedUrl": "https://codex-reset.com/api/feed",
       "rssUrl": "https://x.noodl3.net/thsottiaux/rss"
     }

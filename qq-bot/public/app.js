@@ -1,4 +1,5 @@
 var currentConfig = null;
+var access = { canEdit: false, canTestSlack: false };
 var byId = function(id) { return document.getElementById(id); };
 
 async function api(path, options) {
@@ -42,10 +43,42 @@ function fill(data) {
     byId('smtp-pass').placeholder = config.channels.email.smtp.hasPassword ? '已设置，留空则保持原值' : '尚未设置';
     byId('email-from').value = config.channels.email.from || '';
     byId('email-to').value = config.channels.email.to || '';
+    byId('slack-enabled').checked = !!config.channels.slack.enabled;
+    byId('slack-webhook-url').value = '';
+    byId('slack-webhook-url').placeholder = config.channels.slack.hasWebhookUrl ? '已设置，留空则保持原值' : 'https://hooks.slack.com/services/…';
     byId('monitor-enabled').checked = !!config.monitors.tiboReset.enabled;
     byId('monitor-interval').value = String(config.monitors.tiboReset.intervalMinutes || 5);
+    ['qq', 'email', 'slack'].forEach(function(channel) {
+        byId('monitor-channel-' + channel).checked = (config.monitors.tiboReset.channels || ['qq']).includes(channel);
+    });
     updateTargetFields();
     renderStatus(data.channels || []);
+    applyAccess();
+}
+
+function applyAccess() {
+    document.querySelectorAll('.notify-app input, .notify-app select').forEach(function(element) {
+        element.disabled = !access.canEdit;
+    });
+    byId('save').disabled = !access.canEdit;
+    byId('monitor-check').disabled = !access.canEdit;
+    document.querySelectorAll('[data-test]').forEach(function(button) {
+        button.disabled = button.dataset.test === 'slack' ? !access.canTestSlack : !access.canEdit;
+    });
+}
+
+async function loadAccess() {
+    if (!location.pathname.startsWith('/notifications')) {
+        access = { canEdit: true, canTestSlack: true };
+        return;
+    }
+    var me = await fetch('/api/me').then(function(response) {
+        if (!response.ok) throw new Error('权限读取失败');
+        return response.json();
+    });
+    var permissions = me.permissions || [];
+    access.canEdit = permissions.includes('*') || permissions.includes('service:notifications:edit');
+    access.canTestSlack = access.canEdit || permissions.includes('service:notifications:slack-test:edit');
 }
 
 function renderMonitor(status) {
@@ -100,9 +133,19 @@ function payload() {
                     user: byId('smtp-user').value,
                     pass: byId('smtp-pass').value
                 }
+            },
+            slack: {
+                enabled: byId('slack-enabled').checked,
+                webhookUrl: byId('slack-webhook-url').value
             }
         },
-        monitors: { tiboReset: { enabled: byId('monitor-enabled').checked, intervalMinutes: Number(byId('monitor-interval').value) } }
+        monitors: { tiboReset: {
+            enabled: byId('monitor-enabled').checked,
+            intervalMinutes: Number(byId('monitor-interval').value),
+            channels: ['qq', 'email', 'slack'].filter(function(channel) {
+                return byId('monitor-channel-' + channel).checked;
+            })
+        } }
     };
 }
 
@@ -112,12 +155,14 @@ document.querySelectorAll('input,select').forEach(function(input) {
 });
 
 byId('save').addEventListener('click', async function() {
+    if (!access.canEdit) return;
     var button = byId('save');
     button.disabled = true;
     try {
         var data = await api('api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload()) });
         byId('qq-token').value = '';
         byId('smtp-pass').value = '';
+        byId('slack-webhook-url').value = '';
         fill(data);
         await loadMonitor();
         byId('save-state').textContent = '配置已保存';
@@ -127,6 +172,7 @@ byId('save').addEventListener('click', async function() {
 });
 
 byId('monitor-check').addEventListener('click', async function() {
+    if (!access.canEdit) return;
     var button = byId('monitor-check');
     button.disabled = true;
     try {
@@ -140,13 +186,17 @@ byId('monitor-check').addEventListener('click', async function() {
 document.querySelectorAll('[data-test]').forEach(function(button) {
     button.addEventListener('click', async function() {
         var channel = button.dataset.test;
+        if (channel === 'slack' ? !access.canTestSlack : !access.canEdit) return;
         button.disabled = true;
         try {
-            await api('api/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: channel, message: byId('test-message').value }) });
-            toast((channel === 'qq' ? 'QQ' : '邮件') + '测试通知已发送');
+            await api(channel === 'slack' ? 'api/test/slack' : 'api/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: channel, message: byId('test-message').value }) });
+            toast(({ qq: 'QQ', email: '邮件', slack: 'Slack' })[channel] + '测试通知已发送');
         } catch (err) { toast(err.message, true); }
-        finally { button.disabled = false; }
+        finally { applyAccess(); }
     });
 });
 
-api('api/config').then(function(data) { fill(data); return loadMonitor(); }).catch(function(err) { toast('加载失败：' + err.message, true); });
+Promise.all([api('api/config'), loadAccess()]).then(function(results) {
+    fill(results[0]);
+    return loadMonitor();
+}).catch(function(err) { toast('加载失败：' + err.message, true); });

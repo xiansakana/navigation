@@ -1,7 +1,7 @@
 /**
  * 通知管理服务。
  *
- * - Web 管理页：配置、启停并测试 QQ / 邮件渠道
+ * - Web 管理页：配置、启停并测试 QQ / 邮件 / Slack 渠道
  * - POST /notify：供后续业务统一发送通知
  *
  * Torn 工具箱与股票管理当前仍使用各自的提醒实现，不在此处迁移。
@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, saveConfig, publicConfig, applyPublicConfig } from './config.js';
 import { sendMessage } from './napcat.js';
 import { sendEmail } from './email.js';
+import { sendSlack } from './slack.js';
 import { startLoginWatchdog } from './watchdog.js';
 import { startTiboResetMonitor } from './tibo-reset-monitor.js';
 
@@ -77,7 +78,7 @@ function qqTarget(config, body) {
     };
 }
 
-async function sendThrough(config, channel, body) {
+async function sendThrough(config, channel, body, adapters) {
     if (!body.message) throw new Error('缺少 message 字段');
     if (channel === 'qq') {
         if (!config.channels.qq.enabled) throw new Error('QQ 渠道未启用');
@@ -86,6 +87,10 @@ async function sendThrough(config, channel, body) {
     if (channel === 'email') {
         if (!config.channels.email.enabled) throw new Error('邮件渠道未启用');
         return sendEmail(config.channels.email, body.message, body);
+    }
+    if (channel === 'slack') {
+        if (!config.channels.slack.enabled) throw new Error('Slack 渠道未启用');
+        return (adapters?.sendSlack || sendSlack)(config.channels.slack, body.message);
     }
     throw new Error('不支持的通知渠道：' + channel);
 }
@@ -99,13 +104,21 @@ function channelStatus(config) {
         {
             id: 'email', name: '邮件', enabled: !!config.channels.email.enabled,
             ready: !!config.channels.email.smtp.host && !!config.channels.email.to
+        },
+        {
+            id: 'slack', name: 'Slack', enabled: !!config.channels.slack.enabled,
+            ready: !!config.channels.slack.webhookUrl
         }
     ];
 }
 
 export function createNotificationServer(initialConfig, options) {
     var config = initialConfig || loadConfig();
-    var monitor = options?.startMonitors ? startTiboResetMonitor(function() { return config; }) : null;
+    var monitor = options?.startMonitors ? startTiboResetMonitor(function() { return config; }, {
+        send: function(currentConfig, channel, message) {
+            return sendThrough(currentConfig, channel, { message: message }, options);
+        }
+    }) : null;
     var server = http.createServer(async function(req, res) {
         var url = new URL(req.url, 'http://127.0.0.1');
         try {
@@ -127,13 +140,13 @@ export function createNotificationServer(initialConfig, options) {
                 if (!monitor) return json(res, 503, { ok: false, error: '监听器未启动' });
                 return json(res, 200, { ok: true, status: await monitor.checkNow() });
             }
-            if (req.method === 'POST' && url.pathname === '/api/test') {
+            if (req.method === 'POST' && (url.pathname === '/api/test' || url.pathname === '/api/test/slack')) {
                 var testBody = await readJson(req);
-                var channel = testBody.channel || 'qq';
+                var channel = url.pathname === '/api/test/slack' ? 'slack' : testBody.channel || 'qq';
                 var result = await sendThrough(config, channel, {
                     ...testBody,
                     message: testBody.message || ('通知管理测试成功 · ' + new Date().toLocaleString('zh-CN'))
-                });
+                }, options);
                 return json(res, 200, { ok: true, channel: channel, result: result });
             }
             if (req.method === 'POST' && url.pathname === '/notify') {
@@ -144,7 +157,7 @@ export function createNotificationServer(initialConfig, options) {
                 var requested = Array.isArray(body.channels) ? body.channels : [body.channel || 'qq'];
                 var results = [];
                 for (var channelId of requested) {
-                    results.push({ channel: channelId, result: await sendThrough(config, channelId, body) });
+                    results.push({ channel: channelId, result: await sendThrough(config, channelId, body, options) });
                 }
                 return json(res, 200, { ok: true, results: results });
             }
