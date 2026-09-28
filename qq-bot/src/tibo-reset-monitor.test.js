@@ -1,6 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyResetOpportunity, parseRss, deliverToChannels } from './tibo-reset-monitor.js';
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
+import { classifyResetOpportunity, parseRss, deliverToChannels, fetchText } from './tibo-reset-monitor.js';
+
+test('tweet source uses IPv4 HTTPS transport and reports response failures', async function() {
+    var requestOptions;
+    var fakeGet = function(url, options, callback) {
+        requestOptions = options;
+        queueMicrotask(function() {
+            var response = Readable.from(['{"tweets":[]}']);
+            response.statusCode = 200;
+            response.headers = {};
+            callback(response);
+        });
+        return new EventEmitter();
+    };
+    assert.equal(await fetchText('https://codex-reset.com/api/feed', { request: fakeGet }), '{"tweets":[]}');
+    assert.equal(requestOptions.family, 4);
+    await assert.rejects(fetchText('http://codex-reset.com/api/feed', { request: fakeGet }), /HTTPS/);
+});
 
 test('classifies confirmed, announced and possible reset signals', function() {
     assert.equal(classifyResetOpportunity({ text: 'Reset all propagated. Sweet dreams.' }).level, 'confirmed');

@@ -46,6 +46,7 @@ function mergeWatcherNotify(incoming, previous) {
     var incomingQq = incoming.notify?.qq || {};
     return {
         desktop: incoming.notify?.desktop ?? prev.notify?.desktop ?? true,
+        slack: { enabled: incoming.notify?.slack?.enabled ?? prev.notify?.slack?.enabled ?? false },
         qq: {
             enabled: incomingQq.enabled ?? prevQq.enabled ?? true,
             targets: mergeQqTargets(incomingQq.targets, prevQq)
@@ -79,6 +80,7 @@ export function maskWatcherForClient(watcher) {
         apiKey: watcher.apiKey ? '***' + String(watcher.apiKey).slice(-4) : '',
         notify: {
             desktop: watcher.notify?.desktop !== false,
+            slack: { enabled: watcher.notify?.slack?.enabled === true },
             qq: {
                 enabled: watcher.notify?.qq?.enabled !== false,
                 targets: normalizeQqTargets(watcher.notify?.qq)

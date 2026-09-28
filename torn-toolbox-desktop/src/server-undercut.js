@@ -142,6 +142,7 @@ async function handleApi(req, res) {
             var testBody = await readJson(req);
             var testNotify = {
                 desktop: config.notify?.desktop,
+                slack: config.notify?.slack,
                 qq: {
                     url: testBody.notify?.qq?.url || config.notify?.qq?.url,
                     token: (testBody.notify?.qq?.token && String(testBody.notify.qq.token).trim())

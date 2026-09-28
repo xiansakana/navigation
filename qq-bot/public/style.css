@@ -69,6 +69,7 @@ textarea { resize:vertical; }
 .action-bar span { color:var(--muted); }
 #save { padding:10px 24px; border:0; border-radius:9px; background:var(--accent); color:#07111f; font-weight:800; cursor:pointer; }
 .toast { position:fixed; z-index:10; top:18px; left:50%; transform:translateX(-50%); max-width:min(420px,calc(100% - 32px)); padding:11px 16px; border-radius:10px; background:var(--text); color:var(--bg); box-shadow:0 12px 34px var(--shadow); }
+body.has-navbar .toast { top:calc(var(--navbar-height, 56px) + 12px); z-index:1900; }
 .toast.error { background:var(--toast-error-bg); color:var(--red); }
 .hidden { display:none!important; }
 @media (max-width:780px) { .notify-app{padding-top:24px}.hero{align-items:flex-start;flex-direction:column}.summary{text-align:left}.monitor-card{align-items:stretch;flex-direction:column}.monitor-controls{justify-content:flex-start;flex-wrap:wrap}.channel-grid{grid-template-columns:1fr}.slack-card{grid-column:auto}.send-test{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.action-bar{bottom:10px}.action-bar span{font-size:12px} }

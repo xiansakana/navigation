@@ -27,7 +27,8 @@ function bizCard(item) {
     var qq = id === 'stock' ? item.notify?.qq || {} : item.notify?.qq || {};
     if (!item.ok) return '<article id="business-' + id + '" class="business-card" data-source="' + id + '"><h3>' + businessNames[id] + '</h3><p class="biz-error">服务暂不可用：' + bizEscape(item.error) + '</p></article>';
     var html = '<article id="business-' + id + '" class="business-card" data-source="' + id + '"><div class="business-card-head"><div><h3>' + businessNames[id] + '</h3><p>' + (id === 'stock' ? '抄底监控事件' : '独立监听账号') + '</p></div><span class="biz-state">已连接</span></div>';
-    html += '<div class="biz-global"><label class="biz-check"><input data-field="qqEnabled" type="checkbox"' + (qq.enabled !== false ? ' checked' : '') + '> QQ 推送</label>';
+    html += '<div class="biz-global"><label class="biz-check"><input data-field="qqEnabled" type="checkbox"' + (qq.enabled !== false ? ' checked' : '') + '> QQ 推送</label>'
+        + '<label class="biz-check"><input data-field="slackEnabled" type="checkbox"' + (item.notify?.slack?.enabled === true ? ' checked' : '') + '> Slack 推送</label>';
     if (id !== 'stock') html += '<label class="biz-check"><input data-field="desktop" type="checkbox"' + (item.notify?.desktop !== false ? ' checked' : '') + '> 桌面通知</label>';
     html += '</div><div class="biz-endpoint"><label>推送地址<input data-field="url" value="' + bizEscape(qq.url || '') + '" placeholder="http://127.0.0.1:8787/notify"></label>'
         + '<label>推送 Token<input data-field="token" type="password" autocomplete="new-password" placeholder="' + (qq.hasToken ? '已保存，留空保持原值' : '留空保持现有配置') + '"></label></div>';
@@ -41,6 +42,7 @@ function bizCard(item) {
         (item.watchers || []).forEach(function(watcher) {
             html += '<div class="biz-watcher" data-watcher="' + bizEscape(watcher.id) + '"><div class="biz-watcher-head"><h4>' + bizEscape(watcher.label) + '</h4><button class="biz-link" type="button" data-action="test-watcher">测试此账号</button></div>'
                 + '<div class="biz-global"><label class="biz-check"><input data-field="watcherQq" type="checkbox"' + (watcher.notify?.qq?.enabled !== false ? ' checked' : '') + '> QQ</label>'
+                + '<label class="biz-check"><input data-field="watcherSlack" type="checkbox"' + (watcher.notify?.slack?.enabled === true ? ' checked' : '') + '> Slack</label>'
                 + '<label class="biz-check"><input data-field="watcherDesktop" type="checkbox"' + (watcher.notify?.desktop !== false ? ' checked' : '') + '> 桌面</label></div>'
                 + bizTargets(watcher.notify?.qq?.targets || [], watcher.id) + '</div>';
         });
@@ -63,6 +65,7 @@ function bizReadCard(card) {
     if (!item?.ok) return null;
     var qq = item.notify.qq || {};
     qq.enabled = card.querySelector('[data-field="qqEnabled"]').checked;
+    item.notify.slack = { enabled: card.querySelector('[data-field="slackEnabled"]').checked };
     qq.url = card.querySelector('[data-field="url"]').value.trim();
     qq.token = card.querySelector('[data-field="token"]').value.trim();
     if (item.id === 'stock') {
@@ -74,6 +77,7 @@ function bizReadCard(card) {
             var row = Array.from(card.querySelectorAll('.biz-watcher')).find(function(el) { return el.dataset.watcher === watcher.id; });
             if (!row) return;
             watcher.notify.qq.enabled = row.querySelector('[data-field="watcherQq"]').checked;
+            watcher.notify.slack = { enabled: row.querySelector('[data-field="watcherSlack"]').checked };
             watcher.notify.desktop = row.querySelector('[data-field="watcherDesktop"]').checked;
             watcher.notify.qq.targets = bizReadTargets(row.querySelector('.biz-targets'));
         });
@@ -126,7 +130,7 @@ byId('business-grid').addEventListener('click', async function(event) {
     button.disabled = true;
     try {
         if (action === 'save') {
-            var patch = item.id === 'stock' ? { qq: item.notify.qq, targets: item.notify.targets, events: item.notify.events }
+            var patch = item.id === 'stock' ? { qq: item.notify.qq, slack: item.notify.slack, targets: item.notify.targets, events: item.notify.events }
                 : { notify: item.notify, watchers: item.watchers.map(function(w) { return { id: w.id, notify: w.notify }; }) };
             var saved = await api('api/integrations/' + item.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
             businessState[item.id] = saved.integration;

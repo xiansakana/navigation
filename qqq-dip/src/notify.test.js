@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { appendMarketSnapshot } from './notify.js';
+import { appendMarketSnapshot, sendSlackNotification } from './notify.js';
+import { defaultNotify } from './store.js';
 
 test('QQ market snapshot includes price, daily change and drawdown from H', () => {
   const text = appendMarketSnapshot('T2 触发。', {
@@ -27,4 +28,17 @@ test('QQ market snapshot keeps unavailable quote fields explicit', () => {
   assert.match(text, /SOXL 现价 100\.00/);
   assert.match(text, /当日涨跌幅 \+1\.20%/);
   assert.match(text, /相对 H 回撤 —（H —）/);
+});
+
+test('stock Slack switch defaults off and sends through notification hub when enabled', async () => {
+  assert.equal(defaultNotify().slack.enabled, false);
+  const notify = defaultNotify({ slack: { enabled: true }, qq: { url: 'http://127.0.0.1:8787/notify', token: 'secret' } });
+  let request;
+  await sendSlackNotification(notify, '[抄底] 测试', { fetch: async (url, options) => {
+    request = { url, options };
+    return { ok: true };
+  } });
+  assert.equal(request.url, 'http://127.0.0.1:8787/notify');
+  assert.equal(request.options.headers.Authorization, 'Bearer secret');
+  assert.deepEqual(JSON.parse(request.options.body), { channel: 'slack', message: '[抄底] 测试' });
 });

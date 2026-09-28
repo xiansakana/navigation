@@ -27,13 +27,13 @@ npm start                       # start the current service
 
 There is no repository-wide build step. Keep service-specific deployment scripts and `DEPLOY-ECS.md` in sync when deployment behavior changes.
 
-## Remote ECS Development and Deployment
+## Local Development and ECS Deployment
 
-- The ECS checkout at `/opt/navigation` is the primary development workspace. Use Cursor/VS Code Remote SSH to edit, test, commit, and push from ECS; the local checkout is an optional mirror, not a second source of truth.
-- Before committing on ECS, review `git status` and `git diff`. Commit application code and intentional documentation only; never commit `config.json`, secrets, SQLite databases, logs, uploads, caches, or other runtime data.
-- After an ECS commit, push that exact commit to `origin/main`, verify the remote ref, then restart only affected services and verify their health plus the production UI/API. Record the deployed commit hash.
-- Keep the ECS working tree clean after deployment. If unrelated local changes, secrets, or runtime files appear, stop and classify them; do not reset, discard, or overwrite them automatically.
-- Local-to-ECS SCP synchronization and local pushes are no longer the normal workflow. `scripts/ecs-deploy-from-local.ps1` is an emergency-only legacy tool and requires explicit authorization.
+- The local checkout is the primary editing and testing workspace. Before editing, inspect `git status` and classify existing changes; preserve unrelated work. Do not edit production source directly during normal development.
+- Review `git diff`, test affected services, and commit only intentional code/docs locally. Do not leave task-related changes staged or uncommitted at handoff; report any pre-existing unrelated changes separately. Never commit `config.json`, secrets, SQLite databases, logs, uploads, or caches.
+- Push the exact local commit to `origin/main` through Git. Prefer direct push when authenticated. If local GitHub transport is unavailable, push the commit to a non-checked-out incoming ref on ECS via SSH, have ECS push that ref to `origin/main`, verify the remote SHA, and then run a clean `git pull --ff-only` on ECS. Do not copy files with SCP or edit ECS working files as a substitute.
+- Deploy only after ECS has pulled the verified SHA, using `scripts/ecs-update.sh --expected-sha <sha> --only <services>`; verify affected service health and production UI/API. Keep ECS clean and record the deployed commit.
+- If any push, pull, SHA comparison, or clean-tree check fails, stop and diagnose; never reset or overwrite either checkout automatically. `scripts/ecs-deploy-from-local.ps1` is emergency-only and requires explicit authorization.
 
 ## Coding Style & Naming Conventions
 

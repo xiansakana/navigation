@@ -14,10 +14,12 @@ export function validateSlackWebhookUrl(value) {
 export async function sendSlack(channel, message, options) {
     if (!channel?.webhookUrl) throw new Error('Slack Webhook URL 尚未配置');
     var webhookUrl = validateSlackWebhookUrl(channel.webhookUrl);
+    var text = String(message);
+    if (!text.includes('<!channel>')) text = '<!channel> ' + text;
     var response = await (options?.fetch || fetch)(webhookUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        body: JSON.stringify({ text: String(message) }),
+        body: JSON.stringify({ text: text }),
         redirect: 'error',
         signal: AbortSignal.timeout(10_000)
     });

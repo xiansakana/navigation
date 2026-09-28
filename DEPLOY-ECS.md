@@ -6,26 +6,29 @@
 
 ---
 
-## 一、ECS Remote SSH 开发（主流程）
+## 一、本地开发（主流程）
 
-通过 Cursor/VS Code Remote SSH 连接 ECS，在 `/opt/navigation` 直接编辑和测试。ECS 工作区是唯一主工作区，本地副本只用于查看、备份或辅助验证。
+在本地仓库编辑与测试。开始前检查并分类已有改动，只提交本次任务文件；交付时不得遗留本次任务的暂存或未提交修改。
 
 ```bash
-ssh root@<ECS公网IP>
-cd /opt/navigation
-git status
+git status --short
+git diff --check
+git add <本次变更的文件>
+git commit -m "feat: 描述"
+git rev-parse HEAD
 ```
 
-## 二、ECS 提交与部署
+## 二、推送并由 ECS 拉取部署
+
+优先从本机把提交推送到 GitHub `origin/main`。若本机 GitHub TLS/SSH 不可用，可通过 SSH 将**提交对象**推到 ECS 的非检出分支 `refs/heads/codex-incoming`，然后由 ECS 推送 GitHub `main`；ECS 工作树仍需随后从 GitHub 拉取，不能直接改文件。中转前核对两端 Git 状态和快进关系；任何校验失败就停止。
 
 ```bash
-ssh root@<ECS公网IP>
+# 本机：直连 GitHub 成功时仅需 git push origin main；失败时使用 ECS 中转
+git push <ECS-SSH-Git-URL> HEAD:refs/heads/codex-incoming
+# ECS：确认 codex-incoming 的 SHA 与本地一致，且 main 工作树干净
+git push origin refs/heads/codex-incoming:refs/heads/main
 cd /opt/navigation
-git add <本次变更的文件>
-git commit -m "描述"
-git push origin main
-revision=$(git rev-parse HEAD)
-./scripts/ecs-update.sh --expected-sha "$revision" --only portal
+./scripts/ecs-update.sh --expected-sha <本地提交SHA> --only portal
 ```
 
 `config.json` 已在各服务 `.gitignore` 中，不会上传密钥。
@@ -57,16 +60,14 @@ bash scripts/migrate-ecs-from-torn-scripts.sh
 
 ## 四、日常更新
 
-正常情况下直接在 ECS Remote SSH 会话中提交并部署：
+正常情况下在本机提交、推送，再让 ECS 拉取并部署：
 
 ```bash
 cd /opt/navigation
-revision=$(git rev-parse HEAD)
-git push origin main
-./scripts/ecs-update.sh --expected-sha "$revision" --only portal
+./scripts/ecs-update.sh --expected-sha <本地提交SHA> --only portal
 ```
 
-将 `portal` 换成实际受影响服务列表；共享代码变更应包含所有受影响服务。脚本会核对部署提交与 `$revision` 一致。只有已提交的代码可以声明与生产一致。
+将 `portal` 换成实际受影响服务列表；共享代码变更应包含所有受影响服务。脚本会核对部署提交与传入的 SHA 一致。只有已提交的代码可以声明与生产一致。
 
 如需在 ECS 交互式执行：
 

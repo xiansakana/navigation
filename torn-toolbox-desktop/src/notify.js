@@ -59,6 +59,22 @@ export async function sendQqNotification(qqConfig, text) {
     }
 }
 
+export function canSendWatcherSlack(globalNotify, watcherNotify) {
+    return globalNotify?.slack?.enabled === true && watcherNotify?.slack?.enabled === true;
+}
+
+export async function sendSlackNotification(globalNotify, text, options) {
+    var url = String(globalNotify?.qq?.url || '').trim();
+    if (!url) throw new Error('请先配置通知管理推送地址');
+    var headers = { 'Content-Type': 'application/json; charset=utf-8' };
+    if (globalNotify.qq?.token) headers.Authorization = 'Bearer ' + globalNotify.qq.token;
+    var response = await (options?.fetch || fetch)(url, {
+        method: 'POST', headers: headers,
+        body: JSON.stringify({ channel: 'slack', message: text })
+    });
+    if (!response.ok) throw new Error('Slack 推送失败 (' + response.status + '): ' + await response.text());
+}
+
 export async function notifyUndercutAlert(globalNotify, watcherNotify, alert, alertText) {
     var sourceLabel = alert.source === 'Bazaar' ? 'Bazaar' : 'Item Market';
     var title = 'Torn 压价 · ' + sourceLabel;
@@ -69,6 +85,9 @@ export async function notifyUndercutAlert(globalNotify, watcherNotify, alert, al
     buildWatcherQqConfigs(globalNotify, watcherNotify).forEach(function(qqConfig) {
         tasks.push(sendQqNotification(qqConfig, '[Torn压价] ' + alertText));
     });
+    if (canSendWatcherSlack(globalNotify, watcherNotify)) {
+        tasks.push(sendSlackNotification(globalNotify, '[Torn压价] ' + alertText));
+    }
     await Promise.allSettled(tasks).then(function(results) {
         results.forEach(function(result) {
             if (result.status === 'rejected') {
@@ -81,13 +100,9 @@ export async function notifyUndercutAlert(globalNotify, watcherNotify, alert, al
 export async function testUndercutWatcherNotify(globalNotify, watcher) {
     var label = watcher.label || '测试';
     var watcherNotify = watcher.notify || {};
-    if (!watcherNotify.qq?.enabled) {
-        throw new Error('请先启用该账号的 QQ 通知');
-    }
     var configs = buildWatcherQqConfigs(globalNotify, watcherNotify);
-    if (!configs.length) {
-        throw new Error('请至少添加一个有效的 QQ 通知方式（群号或私聊 QQ 号）');
-    }
+    var useSlack = canSendWatcherSlack(globalNotify, watcherNotify);
+    if (!configs.length && !useSlack) throw new Error('请先启用 QQ 或 Slack，并配置有效的通知目标');
     var text = '[' + label + '] 测试通知 - 压价助手配置正常';
     var sent = [];
     var errors = [];
@@ -99,6 +114,10 @@ export async function testUndercutWatcherNotify(globalNotify, watcher) {
         } catch (err) {
             errors.push(describeQqTarget(cfg) + ': ' + err.message);
         }
+    }
+    if (useSlack) {
+        try { await sendSlackNotification(globalNotify, '[Torn压价] ' + text); sent.push('Slack'); }
+        catch (err) { errors.push('Slack: ' + err.message); }
     }
     if (!sent.length) {
         throw new Error(errors.join('；'));
@@ -134,6 +153,9 @@ export async function notifyCompanyApplications(globalNotify, watcherNotify, lab
     buildWatcherQqConfigs(globalNotify, watcherNotify).forEach(function(qqConfig) {
         tasks.push(sendQqNotification(qqConfig, '[Torn公司] ' + text));
     });
+    if (canSendWatcherSlack(globalNotify, watcherNotify)) {
+        tasks.push(sendSlackNotification(globalNotify, '[Torn公司] ' + text));
+    }
     await Promise.allSettled(tasks).then(function(results) {
         results.forEach(function(result) {
             if (result.status === 'rejected') {
@@ -146,13 +168,9 @@ export async function notifyCompanyApplications(globalNotify, watcherNotify, lab
 export async function testCompanyWatcherNotify(globalNotify, watcher) {
     var label = watcher.label || '测试';
     var watcherNotify = watcher.notify || {};
-    if (!watcherNotify.qq?.enabled) {
-        throw new Error('请先启用该账号的 QQ 通知');
-    }
     var configs = buildWatcherQqConfigs(globalNotify, watcherNotify);
-    if (!configs.length) {
-        throw new Error('请至少添加一个有效的 QQ 通知方式（群号或私聊 QQ 号）');
-    }
+    var useSlack = canSendWatcherSlack(globalNotify, watcherNotify);
+    if (!configs.length && !useSlack) throw new Error('请先启用 QQ 或 Slack，并配置有效的通知目标');
     var text = '[' + label + '] 测试通知 - 公司监听配置正常';
     var sent = [];
     var errors = [];
@@ -164,6 +182,10 @@ export async function testCompanyWatcherNotify(globalNotify, watcher) {
         } catch (err) {
             errors.push(describeQqTarget(cfg) + ': ' + err.message);
         }
+    }
+    if (useSlack) {
+        try { await sendSlackNotification(globalNotify, '[Torn公司] ' + text); sent.push('Slack'); }
+        catch (err) { errors.push('Slack: ' + err.message); }
     }
     if (!sent.length) {
         throw new Error(errors.join('；'));

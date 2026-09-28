@@ -15,8 +15,19 @@ test('Slack sender posts text to the configured webhook', async function() {
     assert.deepEqual(result, { ok: true });
     assert.equal(request.url, webhookUrl);
     assert.equal(request.options.method, 'POST');
-    assert.deepEqual(JSON.parse(request.options.body), { text: '通知测试' });
+    assert.deepEqual(JSON.parse(request.options.body), { text: '<!channel> 通知测试' });
     assert.equal(request.options.redirect, 'error');
+});
+
+test('Slack sender does not duplicate an existing channel-wide mention', async function() {
+    var body;
+    await sendSlack({ webhookUrl: webhookUrl }, '<!channel> 已有提醒', {
+        fetch: async function(_, options) {
+            body = JSON.parse(options.body);
+            return { ok: true };
+        }
+    });
+    assert.deepEqual(body, { text: '<!channel> 已有提醒' });
 });
 
 test('Slack sender rejects non-Slack URLs and reports delivery failure', async function() {

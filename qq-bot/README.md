@@ -1,10 +1,10 @@
 # 通知管理服务
 
-集中管理 QQ、邮件和 Slack 通知渠道。QQ 通过 [NapCat](https://napneko.github.io/) 发送私聊/群消息，邮件通过 SMTP 发送，Slack 通过 Incoming Webhook 发送到指定频道。Portal 首页的“通知管理”卡片可进入配置页面。
+集中管理 QQ、邮件和 Slack 通知渠道。QQ 通过 [NapCat](https://napneko.github.io/) 发送私聊/群消息，邮件通过 SMTP 发送，Slack 通过 Incoming Webhook 发送到指定频道，并在每条 Slack 消息中提醒该频道所有成员（`@channel`）。Portal 首页的“通知管理”卡片可进入配置页面。
 
 内置 Tibo 重置机会监听：合并公开 feed 与 RSS，逐条检查 `@thsottiaux` 的新推文，对“可能重置、已预告、已确认”的 Codex 额度信号按所选渠道发送通知。首次启用只建立当前推文基线，不补发历史消息。
 
-> Torn 工具箱和股票管理当前仍使用各自的提醒配置，暂未迁移到本服务。
+股票管理抄底提醒、Torn 压价提醒和公司申请提醒的渠道开关、目标与测试已汇总到本页。业务监控规则仍由原服务执行；QQ 与 Slack 发送均通过本服务的 `/notify` 接口。Slack 按业务单独启用，Torn 还可按监听账号启用；默认关闭，不会自动增加推送。
 
 ## 目录结构
 

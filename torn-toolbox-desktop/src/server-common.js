@@ -125,6 +125,7 @@ export function createSseBroadcaster() {
 export function maskNotifyForClient(notify) {
     return {
         desktop: notify?.desktop,
+        slack: { enabled: notify?.slack?.enabled === true },
         qq: {
             enabled: notify?.qq?.enabled,
             url: notify?.qq?.url,

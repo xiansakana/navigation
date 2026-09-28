@@ -88,6 +88,19 @@ export async function sendQqNotification(qqConfig, text) {
   }
 }
 
+export async function sendSlackNotification(notify, text, options) {
+  if (!notify?.slack?.enabled) return;
+  const url = String(notify.qq?.url || '').trim();
+  if (!url) throw new Error('请先配置通知管理推送地址');
+  const headers = { 'Content-Type': 'application/json; charset=utf-8' };
+  if (notify.qq?.token) headers.Authorization = `Bearer ${notify.qq.token}`;
+  const response = await (options?.fetch || fetch)(url, {
+    method: 'POST', headers,
+    body: JSON.stringify({ channel: 'slack', message: text })
+  });
+  if (!response.ok) throw new Error(`Slack 推送失败 (${response.status}): ${await response.text()}`);
+}
+
 export function eventAllowed(notify, eventKey) {
   const events = { ...DEFAULT_EVENTS, ...(notify?.events || {}) };
   return events[eventKey] !== false;
@@ -96,7 +109,7 @@ export function eventAllowed(notify, eventKey) {
 export async function notifyDipEvent(notify, eventKey, text) {
   if (!eventAllowed(notify, eventKey)) return { skipped: true };
   const configs = buildQqConfigs(notify);
-  if (!configs.length) return { skipped: true, reason: 'no-targets' };
+  if (!configs.length && !notify?.slack?.enabled) return { skipped: true, reason: 'no-targets' };
   const sent = [];
   const errors = [];
   for (const cfg of configs) {
@@ -107,15 +120,17 @@ export async function notifyDipEvent(notify, eventKey, text) {
       errors.push(`${describeQqTarget(cfg)}: ${err.message}`);
     }
   }
+  if (notify.slack?.enabled) {
+    try { await sendSlackNotification(notify, `[抄底] ${text}`); sent.push('Slack'); }
+    catch (err) { errors.push(`Slack: ${err.message}`); }
+  }
   return { sent, errors };
 }
 
 export async function testDipNotify(notify) {
-  if (!notify?.qq?.enabled) {
-    throw new Error('请先启用 QQ 通知');
-  }
+  if (!notify?.qq?.enabled && !notify?.slack?.enabled) throw new Error('请先启用 QQ 或 Slack 通知');
   const configs = buildQqConfigs(notify);
-  if (!configs.length) {
+  if (!configs.length && !notify?.slack?.enabled) {
     throw new Error('请至少添加一个有效的 QQ 通知方式（群号或私聊 QQ 号）');
   }
   const text = '测试通知 - 抄底监控配置正常';
@@ -128,6 +143,10 @@ export async function testDipNotify(notify) {
     } catch (err) {
       errors.push(`${describeQqTarget(cfg)}: ${err.message}`);
     }
+  }
+  if (notify.slack?.enabled) {
+    try { await sendSlackNotification(notify, `[抄底] ${text}`); sent.push('Slack'); }
+    catch (err) { errors.push(`Slack: ${err.message}`); }
   }
   if (!sent.length) throw new Error(errors.join('；'));
   return { targets: sent, errors: errors.length ? errors : undefined };
@@ -143,6 +162,7 @@ export function maskNotifyForClient(notify) {
       hasToken: !!(n.qq?.token),
       token: n.qq?.token ? `***${n.qq.token.slice(-4)}` : ''
     },
+    slack: { enabled: n.slack?.enabled === true },
     targets: n.targets || [],
     events: { ...DEFAULT_EVENTS, ...(n.events || {}) }
   };

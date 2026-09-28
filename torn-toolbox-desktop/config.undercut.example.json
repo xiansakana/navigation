@@ -19,6 +19,7 @@
         "selectedItems": [],
         "notify": {
           "desktop": true,
+          "slack": { "enabled": false },
           "qq": {
             "enabled": true,
             "targets": [
@@ -36,6 +37,7 @@
   },
   "notify": {
     "desktop": false,
+    "slack": { "enabled": false },
     "qq": {
       "enabled": true,
       "url": "http://127.0.0.1:8787/notify",

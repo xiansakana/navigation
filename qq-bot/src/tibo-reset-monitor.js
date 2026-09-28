@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import https from 'node:https';
 import { fileURLToPath } from 'node:url';
 import { sendMessage } from './napcat.js';
 
@@ -60,13 +61,43 @@ function writeState(state) {
     fs.renameSync(temp, STATE_PATH);
 }
 
-async function fetchText(url) {
-    var response = await fetch(url, {
-        headers: { 'User-Agent': 'navigation-notification-monitor/1.0' },
-        signal: AbortSignal.timeout(20_000)
+export function fetchText(url, options) {
+    var request = options?.request || https.get;
+    var current = new URL(url);
+    if (current.protocol !== 'https:') return Promise.reject(new Error('推文源必须使用 HTTPS'));
+    return new Promise(function(resolve, reject) {
+        var req = request(current, {
+            family: 4,
+            timeout: 20_000,
+            headers: { 'User-Agent': 'navigation-notification-monitor/1.0' }
+        }, function(response) {
+            if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                response.resume();
+                if ((options?.redirects || 0) >= 3) return reject(new Error('推文源重定向次数过多'));
+                var next = new URL(response.headers.location, current);
+                fetchText(next, { request: request, redirects: (options?.redirects || 0) + 1 }).then(resolve, reject);
+                return;
+            }
+            if (response.statusCode !== 200) {
+                response.resume();
+                return reject(new Error(current.hostname + ' 返回 HTTP ' + response.statusCode));
+            }
+            var chunks = [];
+            var bytes = 0;
+            response.on('data', function(chunk) {
+                bytes += chunk.length;
+                if (bytes > 5 * 1024 * 1024) {
+                    response.destroy(new Error('推文源响应过大'));
+                    return;
+                }
+                chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            });
+            response.on('end', function() { resolve(Buffer.concat(chunks).toString('utf8')); });
+            response.on('error', reject);
+        });
+        req.on('timeout', function() { req.destroy(new Error(current.hostname + ' 连接超时')); });
+        req.on('error', reject);
     });
-    if (!response.ok) throw new Error(url + ' 返回 HTTP ' + response.status);
-    return response.text();
 }
 
 async function fetchTweets(options) {

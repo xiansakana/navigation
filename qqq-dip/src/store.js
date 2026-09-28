@@ -41,6 +41,7 @@ export function defaultNotify(seed = {}) {
       url: seed.qq?.url || 'http://127.0.0.1:8787/notify',
       token: seed.qq?.token || ''
     },
+    slack: { enabled: seed.slack?.enabled === true },
     targets: Array.isArray(seed.targets) && seed.targets.length
       ? seed.targets
       : [{ id: 't-default', type: 'group', groupId: '', atUserId: '', userId: '' }],
@@ -179,6 +180,7 @@ export function createStore(config) {
     data.notify = {
       desktop: incoming.desktop ?? prev.desktop,
       qq,
+      slack: { enabled: incoming.slack?.enabled ?? prev.slack.enabled },
       targets: targets.map((t, i) => ({
         id: t.id || `t-${Date.now()}-${i}`,
         type: t.type === 'private' ? 'private' : 'group',

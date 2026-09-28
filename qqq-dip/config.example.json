@@ -12,6 +12,7 @@
       "enabled": true,
       "url": "http://127.0.0.1:8787/notify",
       "token": ""
-    }
+    },
+    "slack": { "enabled": false }
   }
 }

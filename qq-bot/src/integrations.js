@@ -33,6 +33,7 @@ function sanitizeWatcher(item) {
         id: String(item.id || '').slice(0, 80),
         notify: {
             desktop: item.notify?.desktop !== false,
+            slack: { enabled: item.notify?.slack?.enabled === true },
             qq: {
                 enabled: item.notify?.qq?.enabled !== false,
                 targets: (item.notify?.qq?.targets || []).map(sanitizeTarget)
@@ -78,12 +79,14 @@ export async function saveIntegration(source, patch, fetcher = fetch) {
         }
         await request(source, SOURCES[source].save, 'PUT', {
             qq: { enabled: qq.enabled === true, url: String(qq.url || '').trim(), token: String(qq.token || '') },
+            slack: { enabled: patch.slack?.enabled === true },
             targets: (patch.targets || []).map(sanitizeTarget), events
         }, fetcher);
     } else {
         await request(source, SOURCES[source].save, 'PUT', {
             notify: {
                 desktop: patch.notify?.desktop !== false,
+                slack: { enabled: patch.notify?.slack?.enabled === true },
                 qq: {
                     enabled: patch.notify?.qq?.enabled !== false,
                     url: String(patch.notify?.qq?.url || '').trim(),
