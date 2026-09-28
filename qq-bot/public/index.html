@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>通知管理</title>
     <link rel="stylesheet" href="style.css?v=slack1">
+    <link rel="stylesheet" href="integrations.css?v=1">
 </head>
 <body>
     <main class="notify-app">
@@ -19,7 +20,7 @@
 
         <div class="notice">
             <span>i</span>
-            <p>Torn 工具箱和股票管理仍使用原有提醒配置，本页暂不影响它们。</p>
+            <p>业务监控继续由股票管理和 Torn 工具箱执行；其通知开关、目标及测试可在下方统一管理。</p>
         </div>
 
         <section class="monitor-card">
@@ -43,6 +44,11 @@
                 </label>
                 <button id="monitor-check" class="test-btn compact" type="button">立即检查</button>
             </div>
+        </section>
+
+        <section class="business-section" aria-labelledby="business-heading">
+            <div class="business-heading"><div><span class="eyebrow">BUSINESS NOTIFICATIONS</span><h2 id="business-heading">业务提醒</h2><p>直接读取现有配置，不会重置已有收件目标或推送凭据。</p></div><button id="business-refresh" class="test-btn compact" type="button">刷新状态</button></div>
+            <div id="business-grid" class="business-grid" aria-live="polite"><div class="business-loading"><span class="business-spinner"></span>正在读取业务提醒…</div></div>
         </section>
 
         <section class="channel-grid">
@@ -106,5 +112,6 @@
     </main>
     <div class="toast" id="toast" hidden></div>
     <script src="app.js"></script>
+    <script src="integrations.js"></script>
 </body>
 </html>

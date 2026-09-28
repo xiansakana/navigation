@@ -111,6 +111,10 @@ function snapshot() {
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'qqq-dip' }));
 
+app.get('/api/notification-settings', (_req, res) => {
+  res.json({ ok: true, notify: maskNotifyForClient(store.getNotify()), monitor: monitor.status() });
+});
+
 app.get('/api/state', async (_req, res) => {
   await maybeRefreshFx();
   res.json(snapshot());

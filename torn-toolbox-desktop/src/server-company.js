@@ -78,6 +78,23 @@ async function handleApi(req, res) {
         }
     }
 
+    if (req.method === 'PUT' && url.pathname === '/api/notification-settings') {
+        try {
+            var patch = await readJson(req);
+            var updates = Array.isArray(patch.watchers) ? patch.watchers : [];
+            if (updates.some(function(item) { return !config.company?.watchers?.some(function(w) { return w.id === item.id; }); })) {
+                return json(res, 400, { ok: false, error: '监听账号不存在' });
+            }
+            mergeNotifyConfig(patch.notify, config);
+            config.company.watchers = (config.company?.watchers || []).map(function(watcher) {
+                var update = updates.find(function(item) { return item.id === watcher.id; });
+                return update ? mergeWatcherConfig({ ...watcher, notify: update.notify }, watcher, config.tornApiKey) : watcher;
+            });
+            saveServiceConfig('company', config);
+            return json(res, 200, { ok: true });
+        } catch (err) { return json(res, 400, { ok: false, error: err.message }); }
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/company/start') {
         try {
             config.company = { ...config.company, autoStart: true };

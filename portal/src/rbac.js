@@ -136,7 +136,9 @@ function buildQqqDipPermissions() {
 }
 
 var NOTIFICATION_FEATURES = [
-    { feature: 'slack-test', name: '发送 Slack 测试', action: 'edit', permissionPath: ['Slack 通知'] }
+    { feature: 'slack-test', name: '发送 Slack 测试', action: 'edit', permissionPath: ['Slack 通知'] },
+    { feature: 'business-save', name: '保存业务提醒配置', action: 'edit', permissionPath: ['业务提醒'] },
+    { feature: 'business-test', name: '发送业务提醒测试', action: 'edit', permissionPath: ['业务提醒'] }
 ];
 
 function buildNotificationPermissions() {
@@ -598,6 +600,11 @@ export function canEditService(userPerms, serviceId) {
 export function canTestNotificationSlack(userPerms) {
     return canEditService(userPerms, NOTIFICATIONS_SERVICE_ID)
         || hasPermission(userPerms, 'service:notifications:slack-test:edit');
+}
+
+export function canManageBusinessNotification(userPerms, action) {
+    return canEditService(userPerms, NOTIFICATIONS_SERVICE_ID)
+        || hasPermission(userPerms, 'service:notifications:business-' + action + ':edit');
 }
 
 export function canWriteService(userPerms, serviceId) {

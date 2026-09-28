@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { ensureGuestAccess, canTestNotificationSlack, canWriteService } from './rbac.js';
+import { ensureGuestAccess, canTestNotificationSlack, canWriteService, canManageBusinessNotification } from './rbac.js';
 
 test('sync preserves permissions saved for every existing role', function() {
     var data = {
@@ -61,4 +61,11 @@ test('Slack test permission grants only that notification action', function() {
     assert.equal(canWriteService(slackOnly, 'notifications'), false);
     assert.equal(canTestNotificationSlack(['service:notifications:view']), false);
     assert.equal(canTestNotificationSlack(['service:notifications:edit']), true);
+});
+
+test('business notification save and test permissions remain separate', function() {
+    assert.equal(canManageBusinessNotification(['service:notifications:business-save:edit'], 'save'), true);
+    assert.equal(canManageBusinessNotification(['service:notifications:business-save:edit'], 'test'), false);
+    assert.equal(canManageBusinessNotification(['service:notifications:business-test:edit'], 'test'), true);
+    assert.equal(canManageBusinessNotification(['service:notifications:edit'], 'save'), true);
 });

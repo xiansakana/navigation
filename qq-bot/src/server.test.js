@@ -73,3 +73,29 @@ test('notify endpoint still requires the configured bearer token', async functio
         assert.equal(response.status, 401);
     });
 });
+
+test('business integration API reads and saves only notification settings', async function() {
+    var calls = [];
+    var adapter = async function(url, options) {
+        calls.push({ url: url, options: options });
+        if (url.endsWith('/api/notification-settings')) {
+            return { ok: true, json: async function() { return { ok: true, notify: { qq: { enabled: true }, targets: [], events: {} }, monitor: { running: false } }; } };
+        }
+        if (url.endsWith('/api/state')) {
+            var source = url.includes(':8790') ? 'undercut' : 'company';
+            return { ok: true, json: async function() { return { ok: true, config: { notify: { qq: { enabled: true } }, [source]: { watchers: [] } } }; } };
+        }
+        return { ok: true, json: async function() { return { ok: true }; } };
+    };
+    await withServer(async function(base) {
+        var listed = await (await fetch(base + '/api/integrations')).json();
+        assert.deepEqual(listed.integrations.map(function(item) { return item.id; }), ['stock', 'undercut', 'company']);
+        var saved = await fetch(base + '/api/integrations/stock', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ qq: { enabled: true }, targets: [], events: {} })
+        });
+        assert.equal(saved.status, 200);
+        assert.ok(calls.some(function(call) { return call.url.endsWith('/api/notify') && call.options.method === 'PUT'; }));
+        assert.equal((await fetch(base + '/integrations.js')).status, 200);
+    }, { adapters: { fetch: adapter } });
+});

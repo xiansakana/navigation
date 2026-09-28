@@ -16,6 +16,7 @@ import {
     canViewService,
     canEditService,
     canTestNotificationSlack,
+    canManageBusinessNotification,
     canWriteService,
     hasStockManageFeature,
     canViewAdmin,
@@ -379,6 +380,12 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
             && browserUrl.pathname === '/notifications/api/test/slack'
             && req.method === 'POST') {
             canWriteProxy = canTestNotificationSlack(proxySession.permissions);
+        }
+        if (ctx.service.id === 'notifications'
+            && /^\/notifications\/api\/integrations\/(stock|undercut|company)(\/test)?$/.test(browserUrl.pathname)
+            && isWriteMethod(req.method)) {
+            canWriteProxy = canManageBusinessNotification(proxySession.permissions,
+                browserUrl.pathname.endsWith('/test') ? 'test' : 'save');
         }
         if (isWriteMethod(req.method) && !canWriteProxy) {
             sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '该服务为只读权限，无法修改');

@@ -1,5 +1,5 @@
 var currentConfig = null;
-var access = { canEdit: false, canTestSlack: false };
+var access = { canEdit: false, canTestSlack: false, canBusinessSave: false, canBusinessTest: false };
 var byId = function(id) { return document.getElementById(id); };
 
 async function api(path, options) {
@@ -69,7 +69,7 @@ function applyAccess() {
 
 async function loadAccess() {
     if (!location.pathname.startsWith('/notifications')) {
-        access = { canEdit: true, canTestSlack: true };
+        access = { canEdit: true, canTestSlack: true, canBusinessSave: true, canBusinessTest: true };
         return;
     }
     var me = await fetch('/api/me').then(function(response) {
@@ -79,6 +79,8 @@ async function loadAccess() {
     var permissions = me.permissions || [];
     access.canEdit = permissions.includes('*') || permissions.includes('service:notifications:edit');
     access.canTestSlack = access.canEdit || permissions.includes('service:notifications:slack-test:edit');
+    access.canBusinessSave = access.canEdit || permissions.includes('service:notifications:business-save:edit');
+    access.canBusinessTest = access.canEdit || permissions.includes('service:notifications:business-test:edit');
 }
 
 function renderMonitor(status) {

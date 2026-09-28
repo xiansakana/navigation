@@ -25,7 +25,7 @@ function buildQqPayload(qqConfig, text) {
 export function buildWatcherQqConfigs(globalNotify, watcherNotify) {
     if (!watcherNotify?.qq?.enabled) return [];
     var globalQq = globalNotify?.qq || {};
-    if (!globalQq.url) return [];
+    if (globalQq.enabled === false || !globalQq.url) return [];
     return normalizeQqTargets(watcherNotify.qq).map(function(target) {
         return {
             enabled: true,
