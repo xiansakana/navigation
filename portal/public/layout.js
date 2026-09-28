@@ -15,6 +15,8 @@
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       btn.title = on ? '退出全宽布局' : '全宽布局';
       btn.setAttribute('aria-label', on ? '退出全宽布局' : '全宽布局');
+      var label = btn.querySelector('.label');
+      if (label) label.textContent = on ? '退出全宽' : '全宽';
     });
   }
 

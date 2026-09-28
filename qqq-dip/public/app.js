@@ -144,9 +144,6 @@ function renderTabs() {
   if (canStock('tab-yolo')) {
     tabsHtml += `<a class="sm-feature-tab" href="${yoloHref()}">梭哈</a>`;
   }
-  if (showQq) {
-    tabsHtml += '<a class="sm-feature-tab" href="/notifications/#business-stock">提醒设置 ↗</a>';
-  }
   $('#feature-tabs').innerHTML = tabsHtml;
   if (!showMonitor && !showQq) {
     $('#panel-monitor').hidden = true;

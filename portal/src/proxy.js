@@ -301,14 +301,14 @@ function injectPortalShell(html, service) {
     var themeJs = '<script src="/theme.js"></script>';
     var toastJs = '<script src="/toast.js"></script>';
     var dialogJs = '<script src="/dialog.js"></script>';
-    var layoutJs = '<script src="/layout.js"></script>';
+    var layoutJs = '<script src="/layout.js?v=0615296"></script>';
     var themeBtn = '<button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题"><span class="navbar-theme-icon" aria-hidden="true">☀️</span><span class="label navbar-theme-label">日间</span></button>';
     var layoutBtn = '<button type="button" class="btn ghost navbar-layout-btn" aria-pressed="false" aria-label="全宽布局"><span class="label">全宽</span></button>';
     var baseTag = '';
     if (service.injectBase !== false) {
         baseTag = '<base href="' + service.path.replace(/\/$/, '') + '/">';
     }
-    var portalCss = '<link rel="stylesheet" href="/portal.css">';
+    var portalCss = '<link rel="stylesheet" href="/portal.css?v=0615296">';
     if (service.injectBar === false) {
         var isSiyuanAuthPage = service.id === 'notes' && html.includes('id="authCode"');
         var skipShell = service.id === 'napcat' || service.id === 'siyuan-publish'
