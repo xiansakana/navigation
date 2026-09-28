@@ -4,7 +4,7 @@
  * - Web 管理页：配置、启停并测试 QQ / 邮件 / Slack 渠道
  * - POST /notify：供后续业务统一发送通知
  *
- * 业务提醒规则由原监控进程执行，通知管理页集中管理其通知配置。
+ * 监控进程只上报业务事件；提醒规则和投递由本服务执行。
  */
 
 import http from 'node:http';
@@ -17,7 +17,7 @@ import { sendEmail } from './email.js';
 import { sendSlack } from './slack.js';
 import { startLoginWatchdog } from './watchdog.js';
 import { startTiboResetMonitor } from './tibo-reset-monitor.js';
-import { listIntegrations, saveIntegration, testIntegration } from './integrations.js';
+import { createBusinessService } from './business.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -115,6 +115,12 @@ function channelStatus(config) {
 
 export function createNotificationServer(initialConfig, options) {
     var config = initialConfig || loadConfig();
+    var business = createBusinessService(config, {
+        fetcher: options?.fetch || fetch,
+        persist: options?.saveBusiness || saveConfig,
+        desktop: options?.sendDesktop,
+        send: (channel, body) => sendThrough(config, channel, body, options)
+    });
     var monitor = options?.startMonitors ? startTiboResetMonitor(function() { return config; }, {
         send: function(currentConfig, channel, message) {
             return sendThrough(currentConfig, channel, { message: message }, options);
@@ -130,18 +136,24 @@ export function createNotificationServer(initialConfig, options) {
                 return json(res, 200, { ok: true, config: publicConfig(config), channels: channelStatus(config) });
             }
             if (req.method === 'GET' && url.pathname === '/api/integrations') {
-                return json(res, 200, { ok: true, integrations: await listIntegrations(options?.fetch || fetch) });
+                return json(res, 200, { ok: true, integrations: await business.list() });
             }
             var integrationMatch = url.pathname.match(/^\/api\/integrations\/(stock|undercut|company)(\/test)?$/);
             if (integrationMatch && req.method === 'PUT' && !integrationMatch[2]) {
-                return json(res, 200, { ok: true, integration: await saveIntegration(integrationMatch[1], await readJson(req), options?.fetch || fetch) });
+                return json(res, 200, { ok: true, integration: await business.save(integrationMatch[1], await readJson(req)) });
             }
             if (integrationMatch && req.method === 'POST' && integrationMatch[2]) {
                 var testInput = await readJson(req);
-                return json(res, 200, { ok: true, result: await testIntegration(integrationMatch[1], testInput.watcherId, options?.fetch || fetch) });
+                return json(res, 200, { ok: true, result: await business.test(integrationMatch[1], testInput.watcherId) });
+            }
+            if (req.method === 'POST' && url.pathname === '/api/business-events') {
+                if (!config.server.notifyToken) return json(res, 503, { ok: false, error: '未配置业务事件认证 Token' });
+                if (!checkNotifyAuth(req, config.server.notifyToken)) return json(res, 401, { ok: false, error: 'Unauthorized' });
+                var event = await readJson(req);
+                return json(res, 200, { ok: true, result: await business.dispatch(event.source, event.watcherId, event.eventKey, event.message) });
             }
             if (req.method === 'PUT' && url.pathname === '/api/config') {
-                config = saveConfig(applyPublicConfig(config, await readJson(req)));
+                Object.assign(config, saveConfig(applyPublicConfig(config, await readJson(req))));
                 monitor?.reschedule();
                 return json(res, 200, { ok: true, config: publicConfig(config), channels: channelStatus(config) });
             }

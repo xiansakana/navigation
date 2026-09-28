@@ -11,9 +11,7 @@
     "start": "node src/server-undercut.js",
     "start:undercut": "node src/server-undercut.js",
     "start:company": "node src/server-company.js",
-    "migrate-config": "node scripts/migrate-config.mjs"
-  },
-  "dependencies": {
-    "node-notifier": "^10.0.1"
+    "migrate-config": "node scripts/migrate-config.mjs",
+    "test": "node --test src/watchers.test.js"
   }
 }

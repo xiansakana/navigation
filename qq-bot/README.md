@@ -4,7 +4,9 @@
 
 内置 Tibo 重置机会监听：合并公开 feed 与 RSS，逐条检查 `@thsottiaux` 的新推文，对“可能重置、已预告、已确认”的 Codex 额度信号按所选渠道发送通知。首次启用只建立当前推文基线，不补发历史消息。
 
-股票管理抄底提醒、Torn 压价提醒和公司申请提醒的渠道开关、目标与测试已汇总到本页。业务监控规则仍由原服务执行；QQ 与 Slack 发送均通过本服务的 `/notify` 接口。Slack 按业务单独启用，Torn 还可按监听账号启用；默认关闭，不会自动增加推送。
+股票管理抄底提醒、Torn 压价提醒和公司申请提醒的规则、渠道开关、目标与测试由本服务统一管理。原服务只保留市场/Torn 监控和事件发现，并通过经 Bearer Token 鉴权的本机 `/api/business-events` 上报事件；QQ、Slack 和桌面投递均由本服务决定。已有配置首次读取时按业务分别导入本服务的 `config.json`，之后不再回写原服务。Slack 按业务单独启用，Torn 还可按监听账号启用；默认关闭。
+
+部署顺序：先在 ECS 运行 `node scripts/check-business-migration.mjs` 检查三个监控进程的本机上报地址与 Token，再更新通知管理服务并确认三个业务卡片均已成功导入原有配置，最后重启股票与 Torn 监控。请勿提交包含业务目标与密钥的运行时 `config.json`；原监控服务中的推送地址和 Token 仅用于上报事件，其通知设置接口已改为只读/停用。
 
 ## 目录结构
 
@@ -17,6 +19,7 @@ qq-bot/
     email.js            # SMTP 邮件客户端
     slack.js            # Slack Incoming Webhook 客户端
     send-test.js        # 命令行测试发送
+    business.js         # 业务提醒规则、旧配置导入和统一投递
     server.js           # 管理页面、配置 API 与统一通知 API
   public/               # 通知管理页面
 ```

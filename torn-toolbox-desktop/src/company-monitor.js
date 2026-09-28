@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { fetchCompanyApplications } from './torn-api.js';
-import { notifyCompanyApplications } from './notify.js';
+import { publishBusinessEvent } from '../../shared/business-events.js';
+import { formatApplicationSummary } from './utils.js';
 import { normalizeCompanyWatchers } from './watchers.js';
 
 export class CompanyMonitor extends EventEmitter {
@@ -136,7 +137,11 @@ export class CompanyMonitor extends EventEmitter {
 
                 if (newApps.length) {
                     allNewApps = allNewApps.concat(newApps);
-                    await notifyCompanyApplications(config.notify, watcher.notify, watcher.label, newApps);
+                    await publishBusinessEvent(config.notify, {
+                        source: 'company', watcherId: watcher.id, eventKey: 'application',
+                        message: '[' + watcher.label + '] 发现 ' + newApps.length + ' 个新申请：'
+                            + newApps.map(formatApplicationSummary).join('；')
+                    });
                 }
                 state.lastError = '';
             } catch (err) {

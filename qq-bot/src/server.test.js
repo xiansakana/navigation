@@ -10,7 +10,7 @@ async function withServer(run, settings) {
         defaultTarget: { type: 'private', userId: '123' },
         server: { notifyToken: 'notify-secret' },
         channels: settings?.channels
-    }), settings?.adapters);
+    }), { saveBusiness: () => {}, ...settings?.adapters });
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     try {
@@ -74,7 +74,7 @@ test('notify endpoint still requires the configured bearer token', async functio
     });
 });
 
-test('business integration API reads and saves only notification settings', async function() {
+test('business integration API stores rules in the hub without writing the monitor', async function() {
     var calls = [];
     var adapter = async function(url, options) {
         calls.push({ url: url, options: options });
@@ -95,7 +95,36 @@ test('business integration API reads and saves only notification settings', asyn
             body: JSON.stringify({ qq: { enabled: true }, targets: [], events: {} })
         });
         assert.equal(saved.status, 200);
-        assert.ok(calls.some(function(call) { return call.url.endsWith('/api/notify') && call.options.method === 'PUT'; }));
+        assert.ok(!calls.some(function(call) { return call.options.method === 'PUT'; }));
         assert.equal((await fetch(base + '/integrations.js')).status, 200);
     }, { adapters: { fetch: adapter } });
+});
+
+test('monitor event endpoint requires a token and applies hub-owned Slack rules', async function() {
+    var sent = [];
+    var source = async function(url) {
+        return { ok: true, json: async function() { return {
+            ok: true, notify: { qq: { enabled: false }, slack: { enabled: true }, targets: [], events: { T1: true, T2: false } },
+            monitor: { running: true }
+        }; } };
+    };
+    await withServer(async function(base) {
+        var event = { source: 'stock', eventKey: 'T1', message: '触发' };
+        var denied = await fetch(base + '/api/business-events', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(event)
+        });
+        assert.equal(denied.status, 401);
+        var allowed = await fetch(base + '/api/business-events', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer notify-secret' }, body: JSON.stringify(event)
+        });
+        assert.equal(allowed.status, 200);
+        assert.deepEqual(sent, ['[抄底] 触发']);
+        event.eventKey = 'T2';
+        var muted = await fetch(base + '/api/business-events', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer notify-secret' }, body: JSON.stringify(event)
+        });
+        assert.equal((await muted.json()).result.skipped, true);
+        assert.equal(sent.length, 1);
+    }, { channels: { slack: { enabled: true, webhookUrl: 'https://hooks.slack.com/services/T/B/secret' } },
+        adapters: { fetch: source, sendSlack: async function(_, message) { sent.push(message); } } });
 });

@@ -30,8 +30,7 @@ function bizCard(item) {
     html += '<div class="biz-global"><label class="biz-check"><input data-field="qqEnabled" type="checkbox"' + (qq.enabled !== false ? ' checked' : '') + '> QQ 推送</label>'
         + '<label class="biz-check"><input data-field="slackEnabled" type="checkbox"' + (item.notify?.slack?.enabled === true ? ' checked' : '') + '> Slack 推送</label>';
     if (id !== 'stock') html += '<label class="biz-check"><input data-field="desktop" type="checkbox"' + (item.notify?.desktop !== false ? ' checked' : '') + '> 桌面通知</label>';
-    html += '</div><div class="biz-endpoint"><label>推送地址<input data-field="url" value="' + bizEscape(qq.url || '') + '" placeholder="http://127.0.0.1:8787/notify"></label>'
-        + '<label>推送 Token<input data-field="token" type="password" autocomplete="new-password" placeholder="' + (qq.hasToken ? '已保存，留空保持原值' : '留空保持现有配置') + '"></label></div>';
+    html += '</div><p class="biz-hint">由通知管理统一判断提醒规则并通过上方渠道发送；监控服务只上报事件。</p>';
     if (id === 'stock') {
         html += '<h4>通知目标</h4>' + bizTargets(item.notify?.targets || [], 'stock') + '<h4>事件类型</h4><div class="biz-events">';
         Object.entries(item.notify?.events || {}).forEach(function(entry) {
@@ -66,8 +65,6 @@ function bizReadCard(card) {
     var qq = item.notify.qq || {};
     qq.enabled = card.querySelector('[data-field="qqEnabled"]').checked;
     item.notify.slack = { enabled: card.querySelector('[data-field="slackEnabled"]').checked };
-    qq.url = card.querySelector('[data-field="url"]').value.trim();
-    qq.token = card.querySelector('[data-field="token"]').value.trim();
     if (item.id === 'stock') {
         item.notify.targets = bizReadTargets(card.querySelector('[data-owner="stock"]'));
         card.querySelectorAll('[data-event]').forEach(function(input) { item.notify.events[input.dataset.event] = input.checked; });

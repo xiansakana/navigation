@@ -145,7 +145,7 @@ function renderTabs() {
     tabsHtml += `<a class="sm-feature-tab" href="${yoloHref()}">梭哈</a>`;
   }
   if (showQq) {
-    tabsHtml += `<a class="sm-feature-tab ${tab === 'qq' ? 'active' : ''}" href="${dipHref('qq')}">QQ 提醒</a>`;
+    tabsHtml += '<a class="sm-feature-tab" href="/notifications/#business-stock">提醒设置 ↗</a>';
   }
   $('#feature-tabs').innerHTML = tabsHtml;
   if (!showMonitor && !showQq) {
@@ -158,8 +158,8 @@ function renderTabs() {
     }
     return;
   }
-  if (tab === 'monitor' && !showMonitor && showQq) {
-    location.replace(dipHref('qq'));
+  if (tab === 'qq' || (!showMonitor && showQq)) {
+    location.replace('/notifications/#business-stock');
     return;
   }
   if (tab === 'qq' && !showQq && showMonitor) {

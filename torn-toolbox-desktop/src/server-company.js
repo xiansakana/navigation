@@ -3,11 +3,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadServiceConfig, saveServiceConfig } from './config.js';
 import { CompanyMonitor } from './company-monitor.js';
-import { testCompanyWatcherNotify } from './notify.js';
 import { maskWatcherForClient, mergeWatcherConfig } from './watchers.js';
 import {
     readJson, json, createStaticHandler, openBrowser, createAuthGuard,
-    denyAccess, createSseBroadcaster, maskNotifyForClient, mergeNotifyConfig
+    denyAccess, createSseBroadcaster, maskNotifyForClient
 } from './server-common.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -66,11 +65,10 @@ async function handleApi(req, res) {
                         var prev = prevCompanyWatchers.find(function(item) { return item.id === watcher.id; })
                             || prevCompanyWatchers[index]
                             || {};
-                        return mergeWatcherConfig(watcher, prev, config.tornApiKey);
+                        return mergeWatcherConfig({ ...watcher, notify: prev.notify || watcher.notify }, prev, config.tornApiKey);
                     });
                 }
             }
-            mergeNotifyConfig(body.notify, config);
             saveServiceConfig('company', config);
             return json(res, 200, { ok: true });
         } catch (err) {
@@ -79,20 +77,7 @@ async function handleApi(req, res) {
     }
 
     if (req.method === 'PUT' && url.pathname === '/api/notification-settings') {
-        try {
-            var patch = await readJson(req);
-            var updates = Array.isArray(patch.watchers) ? patch.watchers : [];
-            if (updates.some(function(item) { return !config.company?.watchers?.some(function(w) { return w.id === item.id; }); })) {
-                return json(res, 400, { ok: false, error: '监听账号不存在' });
-            }
-            mergeNotifyConfig(patch.notify, config);
-            config.company.watchers = (config.company?.watchers || []).map(function(watcher) {
-                var update = updates.find(function(item) { return item.id === watcher.id; });
-                return update ? mergeWatcherConfig({ ...watcher, notify: update.notify }, watcher, config.tornApiKey) : watcher;
-            });
-            saveServiceConfig('company', config);
-            return json(res, 200, { ok: true });
-        } catch (err) { return json(res, 400, { ok: false, error: err.message }); }
+        return json(res, 410, { ok: false, error: '提醒配置已迁移至通知管理页面' });
     }
 
     if (req.method === 'POST' && url.pathname === '/api/company/start') {
@@ -112,23 +97,7 @@ async function handleApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/company/test-notify') {
-        try {
-            var testBody = await readJson(req);
-            var testNotify = {
-                desktop: config.notify?.desktop,
-                slack: config.notify?.slack,
-                qq: {
-                    url: testBody.notify?.qq?.url || config.notify?.qq?.url,
-                    token: (testBody.notify?.qq?.token && String(testBody.notify.qq.token).trim())
-                        ? testBody.notify.qq.token.trim()
-                        : (config.notify?.qq?.token || '')
-                }
-            };
-            var testResult = await testCompanyWatcherNotify(testNotify, testBody.watcher || {});
-            return json(res, 200, { ok: true, ...testResult });
-        } catch (err) {
-            return json(res, 400, { ok: false, error: err.message });
-        }
+        return json(res, 410, { ok: false, error: '请在通知管理页面测试提醒' });
     }
 
     return json(res, 404, { ok: false, error: 'Not Found' });

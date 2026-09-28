@@ -7,7 +7,7 @@ import {
     fetchUserItemMarket,
     fetchWeav3rBazaarLowest
 } from './torn-api.js';
-import { notifyUndercutAlert } from './notify.js';
+import { publishBusinessEvent } from '../../shared/business-events.js';
 import { normalizeUndercutWatchers } from './watchers.js';
 
 export class UndercutMonitor extends EventEmitter {
@@ -253,7 +253,9 @@ export class UndercutMonitor extends EventEmitter {
             this.alerts += newAlerts.length;
             for (var j = 0; j < newAlerts.length; j++) {
                 var text = this.buildAlertText(newAlerts[j]);
-                await notifyUndercutAlert(config.notify, watcher.notify, newAlerts[j], text);
+                await publishBusinessEvent(config.notify, {
+                    source: 'undercut', watcherId: watcher.id, eventKey: 'undercut', message: text
+                });
             }
         }
 

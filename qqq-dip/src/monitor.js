@@ -1,6 +1,7 @@
 import { evaluate, applyRoundFromEval, newAlertKeys, buildBuyPreview } from './playbook.js';
 import { marketStatus, isOpenSummaryTime, isRth } from './market-hours.js';
-import { appendMarketSnapshot, eventAllowed, notifyDipEvent } from './notify.js';
+import { appendMarketSnapshot } from './notify.js';
+import { publishBusinessEvent } from '../../shared/business-events.js';
 
 const SYMBOLS = ['QQQ', 'TQQQ', 'SOXL', 'SPY'];
 
@@ -115,7 +116,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
         if (!opts.silent && !quietOffHours) {
           const market = alertMarket(ev, alert);
           const qqText = appendMarketSnapshot(alert.message, market.stats, market.symbol);
-          const qq = await notifyDipEvent(notify, alert.event, qqText);
+          const qq = await publishBusinessEvent(notify, { source: 'stock', eventKey: alert.event, message: qqText });
           pushResults.push({ key: alert.key, qq });
           store.addAction({
             type: 'notify',
@@ -135,9 +136,9 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
       // gives live quote providers time to roll over from the previous session.
       const openKey = `openSummary:${lastMarketStatus.ymd}`;
       const openAlready = !!(nextRound.firedAlerts || {})[openKey];
-      if (!opts.silent && isOpenSummaryTime() && !openAlready && eventAllowed(notify, 'openSummary')) {
+      if (!opts.silent && isOpenSummaryTime() && !openAlready) {
         const text = ev.primary ? `${ev.primary.title}：${ev.primary.body}` : '抄底监控已开盘';
-        const qq = await notifyDipEvent(notify, 'openSummary', appendMarketSnapshot(text, ev.qqq, 'QQQ'));
+        const qq = await publishBusinessEvent(notify, { source: 'stock', eventKey: 'openSummary', message: appendMarketSnapshot(text, ev.qqq, 'QQQ') });
         nextRound.firedAlerts = { ...(nextRound.firedAlerts || {}), [openKey]: new Date().toISOString() };
         store.addAction({
           type: 'notify',

@@ -5,7 +5,7 @@ import { loadConfig } from './config.js';
 import { createStore } from './store.js';
 import { createQuoteService } from './quotes.js';
 import { createMonitor } from './monitor.js';
-import { maskNotifyForClient, testDipNotify } from './notify.js';
+import { maskNotifyForClient } from './notify.js';
 import { marketStatus } from './market-hours.js';
 import { evaluate } from './playbook.js';
 import { createDocService } from './docs.js';
@@ -174,22 +174,11 @@ app.put('/api/settings', (req, res) => {
 });
 
 app.put('/api/notify', (req, res) => {
-  const notify = store.setNotify(req.body || {});
-  res.json({ ok: true, notify: maskNotifyForClient(notify) });
+  res.status(410).json({ ok: false, error: '提醒配置已迁移至通知管理页面' });
 });
 
 app.post('/api/notify/test', async (_req, res) => {
-  try {
-    const result = await testDipNotify(store.getNotify());
-    store.addAction({
-      type: 'notify',
-      source: 'user',
-      message: `测试通知成功：${result.targets.join('，')}`
-    });
-    res.json({ ok: true, ...result });
-  } catch (e) {
-    res.status(400).json({ ok: false, error: e.message });
-  }
+  res.status(410).json({ ok: false, error: '请在通知管理页面测试提醒' });
 });
 
 app.post('/api/monitor/start', (_req, res) => {
