@@ -57,3 +57,22 @@ test('Slack webhook changes are validated before saving', function() {
     assert.equal(updated.channels.slack.enabled, true);
     assert.deepEqual(updated.monitors.tiboReset.channels, ['qq', 'slack']);
 });
+
+test('channel and Tibo configuration can be saved independently', function() {
+    var current = normalizeConfig({
+        napcat: { baseUrl: 'http://127.0.0.1:3000' },
+        monitors: { tiboReset: { enabled: true, intervalMinutes: 5, channels: ['qq'] } }
+    });
+    var channelsSaved = applyPublicConfig(current, {
+        channels: { email: { enabled: true } }
+    });
+    assert.equal(channelsSaved.channels.email.enabled, true);
+    assert.deepEqual(channelsSaved.monitors.tiboReset, current.monitors.tiboReset);
+
+    var monitorSaved = applyPublicConfig(channelsSaved, {
+        monitors: { tiboReset: { intervalMinutes: 10, channels: ['qq', 'email'] } }
+    });
+    assert.equal(monitorSaved.channels.email.enabled, true);
+    assert.equal(monitorSaved.monitors.tiboReset.intervalMinutes, 10);
+    assert.deepEqual(monitorSaved.monitors.tiboReset.channels, ['qq', 'email']);
+});

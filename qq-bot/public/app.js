@@ -61,6 +61,7 @@ function applyAccess() {
         element.disabled = !access.canEdit;
     });
     byId('save').disabled = !access.canEdit;
+    byId('monitor-save').disabled = !access.canEdit;
     byId('monitor-check').disabled = !access.canEdit;
     document.querySelectorAll('[data-test]').forEach(function(button) {
         button.disabled = button.dataset.test === 'slack' ? !access.canTestSlack : !access.canEdit;
@@ -113,7 +114,7 @@ function renderStatus(channels) {
     });
 }
 
-function payload() {
+function channelPayload() {
     return {
         napcat: { baseUrl: byId('qq-base-url').value, accessToken: byId('qq-token').value },
         defaultTarget: {
@@ -140,8 +141,12 @@ function payload() {
                 enabled: byId('slack-enabled').checked,
                 webhookUrl: byId('slack-webhook-url').value
             }
-        },
-        monitors: { tiboReset: {
+        }
+    };
+}
+
+function monitorPayload() {
+    return { monitors: { tiboReset: {
             enabled: byId('monitor-enabled').checked,
             intervalMinutes: Number(byId('monitor-interval').value),
             channels: ['qq', 'email', 'slack'].filter(function(channel) {
@@ -152,8 +157,11 @@ function payload() {
 }
 
 byId('qq-type').addEventListener('change', updateTargetFields);
-document.querySelectorAll('input,select').forEach(function(input) {
-    input.addEventListener('input', function() { byId('save-state').textContent = '有尚未保存的修改'; });
+document.querySelectorAll('.monitor-card input, .monitor-card select, .channel-grid input, .channel-grid select').forEach(function(input) {
+    var status = input.closest('.monitor-card') ? 'monitor-save-state' : 'save-state';
+    ['input', 'change'].forEach(function(eventName) {
+        input.addEventListener(eventName, function() { byId(status).textContent = '有尚未保存的修改'; });
+    });
 });
 
 byId('save').addEventListener('click', async function() {
@@ -161,14 +169,28 @@ byId('save').addEventListener('click', async function() {
     var button = byId('save');
     button.disabled = true;
     try {
-        var data = await api('api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload()) });
+        var data = await api('api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(channelPayload()) });
         byId('qq-token').value = '';
         byId('smtp-pass').value = '';
         byId('slack-webhook-url').value = '';
-        fill(data);
-        await loadMonitor();
-        byId('save-state').textContent = '配置已保存';
+        currentConfig = data.config;
+        renderStatus(data.channels || []);
+        byId('save-state').textContent = '渠道配置已保存';
         toast('通知渠道配置已保存');
+    } catch (err) { toast(err.message, true); }
+    finally { button.disabled = false; }
+});
+
+byId('monitor-save').addEventListener('click', async function() {
+    if (!access.canEdit) return;
+    var button = byId('monitor-save');
+    button.disabled = true;
+    try {
+        var data = await api('api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(monitorPayload()) });
+        currentConfig = data.config;
+        await loadMonitor();
+        byId('monitor-save-state').textContent = '监听配置已保存';
+        toast('Tibo 监听配置已保存');
     } catch (err) { toast(err.message, true); }
     finally { button.disabled = false; }
 });

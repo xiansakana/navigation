@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>通知管理</title>
-    <link rel="stylesheet" href="style.css?v=business-slack2">
+    <link rel="stylesheet" href="style.css?v=layout3">
     <link rel="stylesheet" href="integrations.css?v=2">
 </head>
 <body>
@@ -43,6 +43,8 @@
                     <select id="monitor-interval"><option value="3">3 分钟</option><option value="5">5 分钟</option><option value="10">10 分钟</option><option value="15">15 分钟</option></select>
                 </label>
                 <button id="monitor-check" class="test-btn compact" type="button">立即检查</button>
+                <button id="monitor-save" class="save-btn" type="button">保存监听配置</button>
+                <span id="monitor-save-state" class="save-state" aria-live="polite">监听配置已加载</span>
             </div>
         </section>
 
@@ -105,9 +107,9 @@
             <textarea id="test-message" rows="3" placeholder="留空时发送默认测试消息"></textarea>
         </section>
 
-        <div class="action-bar">
+        <div class="config-actions">
             <span id="save-state">修改配置后请保存</span>
-            <button id="save" type="button">保存配置</button>
+            <button id="save" class="save-btn" type="button">保存渠道配置</button>
         </div>
     </main>
     <div class="toast" id="toast" hidden></div>

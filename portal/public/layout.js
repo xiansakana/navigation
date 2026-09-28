@@ -19,11 +19,11 @@
   }
 
   function apply(on) {
-    var app = document.querySelector('[data-layout-container]') || document.querySelector('.sm-app');
-    if (app) {
+    document.body.classList.toggle('portal-layout--full', on);
+    document.querySelectorAll('[data-layout-container], .sm-app, .notify-app, body.toolbox-proxied .app').forEach(function (app) {
       app.classList.toggle('sm-app--full', on);
       app.classList.toggle('portal-layout--full', on);
-    }
+    });
     updateButtons(on);
   }
 
@@ -38,8 +38,7 @@
   }
 
   function boot() {
-    if (!document.body.classList.contains('stock-proxied')
-        && !document.body.classList.contains('portal-layout-enabled')) return;
+    if (!document.body.classList.contains('portal-layout-enabled')) return;
     apply(load());
     document.addEventListener('click', function (e) {
       if (e.target.closest('.navbar-layout-btn')) {
