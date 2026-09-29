@@ -5,11 +5,14 @@ import { formatApplicationSummary } from './utils.js';
 import { normalizeCompanyWatchers } from './watchers.js';
 
 export class CompanyMonitor extends EventEmitter {
-    constructor(getConfig) {
+    constructor(getConfig, dependencies = {}) {
         super();
         this.getConfig = getConfig;
+        this.fetchApplications = dependencies.fetchApplications || fetchCompanyApplications;
+        this.publishEvent = dependencies.publishEvent || publishBusinessEvent;
         this.timer = null;
         this.running = false;
+        this.checking = false;
         this.checks = 0;
         this.apps = 0;
         this.applications = [];
@@ -21,6 +24,7 @@ export class CompanyMonitor extends EventEmitter {
     ensureWatcherState(id) {
         if (!this.watcherStates.has(id)) {
             this.watcherStates.set(id, {
+                initialized: false,
                 seen: new Set(),
                 checks: 0,
                 apps: 0,
@@ -90,79 +94,90 @@ export class CompanyMonitor extends EventEmitter {
     }
 
     async runOnce() {
+        if (this.checking) return;
+
         var config = this.getConfig();
         var watchers = this.getWatchers();
         if (!watchers.length) {
             throw new Error('请至少添加一个监听账号并填写 API Key');
         }
 
-        this.checks++;
-        this.statusMessage = '正在检查公司申请...';
-        this.emit('state', this.getState());
+        this.checking = true;
+        try {
+            this.checks++;
+            this.statusMessage = '正在检查公司申请...';
+            this.emit('state', this.getState());
 
-        var allNewApps = [];
-        for (var i = 0; i < watchers.length; i++) {
-            var watcher = watchers[i];
-            var state = this.ensureWatcherState(watcher.id);
-            state.checks++;
-            try {
-                var applications = await fetchCompanyApplications(watcher.apiKey);
-                var newApps = [];
-                var seedExisting = state.seen.size === 0;
-                Object.keys(applications).forEach(function(id) {
-                    if (seedExisting) {
-                        state.seen.add(id);
-                        return;
-                    }
-                    if (!state.seen.has(id)) {
-                        state.seen.add(id);
-                        state.apps++;
-                        this.apps++;
-                        var app = applications[id];
-                        newApps.push({
-                            id: id,
-                            name: app.name || '未知',
-                            userId: app.userID || app.user_id,
-                            level: app.level,
-                            status: app.status,
-                            expires: app.expires,
-                            message: app.message || '无消息',
-                            stats: app.stats || {},
-                            detectedAt: Math.floor(Date.now() / 1000),
-                            watcherId: watcher.id,
-                            watcherLabel: watcher.label
+            var allNewApps = [];
+            for (var i = 0; i < watchers.length; i++) {
+                var watcher = watchers[i];
+                var state = this.ensureWatcherState(watcher.id);
+                state.checks++;
+                try {
+                    var applications = await this.fetchApplications(watcher.apiKey);
+                    var newApps = [];
+                    var applicationIds = Object.keys(applications || {});
+                    if (!state.initialized) {
+                        applicationIds.forEach(function(id) {
+                            state.seen.add(id);
+                        });
+                        state.initialized = true;
+                    } else {
+                        applicationIds.forEach(function(id) {
+                            if (state.seen.has(id)) return;
+                            var app = applications[id];
+                            newApps.push({
+                                id: id,
+                                name: app.name || '未知',
+                                userId: app.userID || app.user_id,
+                                level: app.level,
+                                status: app.status,
+                                expires: app.expires,
+                                message: app.message || '无消息',
+                                stats: app.stats || {},
+                                detectedAt: Math.floor(Date.now() / 1000),
+                                watcherId: watcher.id,
+                                watcherLabel: watcher.label
+                            });
                         });
                     }
-                }.bind(this));
 
-                if (newApps.length) {
-                    allNewApps = allNewApps.concat(newApps);
-                    await publishBusinessEvent(config.notify, {
-                        source: 'company', watcherId: watcher.id, eventKey: 'application',
-                        message: '[' + watcher.label + '] 发现 ' + newApps.length + ' 个新申请：'
-                            + newApps.map(formatApplicationSummary).join('；')
-                    });
+                    if (newApps.length) {
+                        await this.publishEvent(config.notify, {
+                            source: 'company', watcherId: watcher.id, eventKey: 'application',
+                            message: '[' + watcher.label + '] 发现 ' + newApps.length + ' 个新申请：'
+                                + newApps.map(formatApplicationSummary).join('；')
+                        });
+                        newApps.forEach(function(app) {
+                            state.seen.add(app.id);
+                            state.apps++;
+                            this.apps++;
+                        }.bind(this));
+                        allNewApps = allNewApps.concat(newApps);
+                    }
+                    state.lastError = '';
+                } catch (err) {
+                    state.lastError = err.message;
+                    this.emit('error', watcher.label + ': ' + err.message);
                 }
-                state.lastError = '';
-            } catch (err) {
-                state.lastError = err.message;
-                this.emit('error', watcher.label + ': ' + err.message);
             }
-        }
 
-        if (allNewApps.length) {
-            this.applications = allNewApps.concat(this.applications).slice(0, 50);
-        }
+            if (allNewApps.length) {
+                this.applications = allNewApps.concat(this.applications).slice(0, 50);
+            }
 
-        this.statusMessage = allNewApps.length
-            ? '发现 ' + allNewApps.length + ' 个新申请'
-            : '暂无新申请';
-        this.emit('applications', this.applications);
-        this.emit('state', this.getState());
+            this.statusMessage = allNewApps.length
+                ? '发现 ' + allNewApps.length + ' 个新申请'
+                : '暂无新申请';
+            this.emit('applications', this.applications);
+            this.emit('state', this.getState());
 
-        if (this.running) {
-            var interval = Math.max(10, Number(config.company?.intervalSeconds) || 30);
-            this.scheduleNext(interval);
+            if (this.running) {
+                var interval = Math.max(10, Number(config.company?.intervalSeconds) || 30);
+                this.scheduleNext(interval);
+            }
+        } finally {
+            this.checking = false;
         }
     }
 }
