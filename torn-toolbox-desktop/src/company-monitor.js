@@ -3,6 +3,7 @@ import { fetchCompanyApplications } from './torn-api.js';
 import { publishBusinessEvent } from '../../shared/business-events.js';
 import { formatApplicationSummary } from './utils.js';
 import { normalizeCompanyWatchers } from './watchers.js';
+import { DEFAULT_STATE_FILE, fingerprint, loadCompanyMonitorSnapshot, saveCompanyMonitorSnapshot } from './company-monitor-store.js';
 
 export class CompanyMonitor extends EventEmitter {
     constructor(getConfig, dependencies = {}) {
@@ -10,6 +11,8 @@ export class CompanyMonitor extends EventEmitter {
         this.getConfig = getConfig;
         this.fetchApplications = dependencies.fetchApplications || fetchCompanyApplications;
         this.publishEvent = dependencies.publishEvent || publishBusinessEvent;
+        this.stateFile = dependencies.stateFile === undefined ? DEFAULT_STATE_FILE : dependencies.stateFile;
+        this.persistedWatchers = this.stateFile ? loadCompanyMonitorSnapshot(this.stateFile) : {};
         this.timer = null;
         this.running = false;
         this.checking = false;
@@ -21,17 +24,38 @@ export class CompanyMonitor extends EventEmitter {
         this.watcherStates = new Map();
     }
 
-    ensureWatcherState(id) {
-        if (!this.watcherStates.has(id)) {
-            this.watcherStates.set(id, {
-                initialized: false,
-                seen: new Set(),
+    ensureWatcherState(watcher) {
+        if (!this.watcherStates.has(watcher.id)) {
+            var saved = this.persistedWatchers[fingerprint(watcher.id)];
+            var apiKeyFingerprint = fingerprint(watcher.apiKey);
+            var isCompatible = saved && saved.apiKeyFingerprint === apiKeyFingerprint;
+            this.watcherStates.set(watcher.id, {
+                initialized: !!(isCompatible && saved.initialized),
+                seen: new Set(isCompatible ? saved.seenApplicationFingerprints || [] : []),
+                apiKeyFingerprint: apiKeyFingerprint,
+                dirty: false,
                 checks: 0,
                 apps: 0,
                 lastError: ''
             });
         }
-        return this.watcherStates.get(id);
+        return this.watcherStates.get(watcher.id);
+    }
+
+    persistState(watchers) {
+        if (!this.stateFile) return;
+        var snapshot = {};
+        watchers.forEach(function(watcher) {
+            var state = this.watcherStates.get(watcher.id);
+            if (!state || !state.initialized) return;
+            snapshot[fingerprint(watcher.id)] = {
+                apiKeyFingerprint: state.apiKeyFingerprint,
+                initialized: true,
+                seenApplicationFingerprints: Array.from(state.seen)
+            };
+        }.bind(this));
+        saveCompanyMonitorSnapshot(snapshot, this.stateFile);
+        this.persistedWatchers = snapshot;
     }
 
     getWatchers() {
@@ -111,7 +135,7 @@ export class CompanyMonitor extends EventEmitter {
             var allNewApps = [];
             for (var i = 0; i < watchers.length; i++) {
                 var watcher = watchers[i];
-                var state = this.ensureWatcherState(watcher.id);
+                var state = this.ensureWatcherState(watcher);
                 state.checks++;
                 try {
                     var applications = await this.fetchApplications(watcher.apiKey);
@@ -119,12 +143,13 @@ export class CompanyMonitor extends EventEmitter {
                     var applicationIds = Object.keys(applications || {});
                     if (!state.initialized) {
                         applicationIds.forEach(function(id) {
-                            state.seen.add(id);
+                            state.seen.add(fingerprint(id));
                         });
                         state.initialized = true;
+                        state.dirty = true;
                     } else {
                         applicationIds.forEach(function(id) {
-                            if (state.seen.has(id)) return;
+                            if (state.seen.has(fingerprint(id))) return;
                             var app = applications[id];
                             newApps.push({
                                 id: id,
@@ -149,11 +174,16 @@ export class CompanyMonitor extends EventEmitter {
                                 + newApps.map(formatApplicationSummary).join('；')
                         });
                         newApps.forEach(function(app) {
-                            state.seen.add(app.id);
+                            state.seen.add(fingerprint(app.id));
                             state.apps++;
                             this.apps++;
                         }.bind(this));
+                        state.dirty = true;
                         allNewApps = allNewApps.concat(newApps);
+                    }
+                    if (state.dirty) {
+                        this.persistState(watchers);
+                        state.dirty = false;
                     }
                     state.lastError = '';
                 } catch (err) {
