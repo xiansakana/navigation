@@ -14,15 +14,20 @@
       var current = ++generation;
       status.textContent = '正在自动获取位置…';
       pending = new Promise(function(resolve) {
-        if (!navigator.geolocation) { status.textContent = '浏览器不支持定位'; resolve(); return; }
+        var timer = setTimeout(function() {
+          if (current === generation) { generation++; status.textContent = '自动定位超时，将不附带位置'; }
+          resolve();
+        }, 10000);
+        function finish() { clearTimeout(timer); resolve(); }
+        if (!navigator.geolocation) { status.textContent = '浏览器不支持定位'; finish(); return; }
         navigator.geolocation.getCurrentPosition(function(position) {
           if (current === generation) {
             location = { label: '', latitude: position.coords.latitude, longitude: position.coords.longitude }; render();
           }
-          resolve();
+          finish();
         }, function(error) {
           if (current === generation) status.textContent = error.code === 1 ? '未获定位授权，将不附带位置' : '自动定位失败，将不附带位置';
-          resolve();
+          finish();
         }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
       });
       return pending;
