@@ -460,6 +460,7 @@ async function init() {
   $('#capture-body').addEventListener('click', (event) => {
     const row = event.target.closest('[data-capture-id]');
     if (!row) return;
+    $('#option-chain-card').open = true;
     $('#option-chain-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   window.addEventListener('resize', () => { renderChain(); state.optionChart?.chart?.resize(); });

@@ -6,7 +6,7 @@
   <title>梭哈 · QQQ 1DTE</title>
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="../quant/style.css">
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=20261003-card-layout1">
 </head>
 <body>
   <main class="sm-app quant-app yolo-app">
@@ -77,13 +77,18 @@
       <article class="quant-stat"><span>⌄</span><div><small>最大回撤</small><strong id="bt-drawdown">—</strong></div></article>
     </section>
 
-    <section class="quant-card">
-      <div class="quant-card-head"><div><h2>最近采集</h2><p>每次快照仅保存QQQ附近及有效Delta范围内的下一到期合约。</p></div></div>
-      <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>时间</th><th>类型</th><th>市场日</th><th>到期日</th><th class="align-right">QQQ</th><th class="align-right">合约数</th><th>来源</th></tr></thead><tbody id="capture-body"><tr><td colspan="7" class="quant-empty">尚无数据</td></tr></tbody></table></div>
+    <section class="quant-card" id="backtest-trades-card">
+      <div class="quant-card-head"><div><h2>回测交易</h2><p>入场付ask、退出收bid，止损穿价按实际观察到的bid结算。</p></div></div>
+      <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>日期</th><th>方向 / 合约</th><th class="align-right">入场 / 退出</th><th class="align-right">Delta</th><th class="align-right">收益</th><th>退出原因</th></tr></thead><tbody id="trade-body"><tr><td colspan="6" class="quant-empty">尚未运行回测</td></tr></tbody></table></div>
     </section>
 
-    <section class="quant-card" id="option-chain-card">
-      <div class="quant-card-head"><div><h2>期权链</h2><p>按到期日浏览本站累计采集的最近一份真实链数据，点击到期日展开 Call / Put 明细。</p></div></div>
+    <details class="quant-card yolo-collapsible-card" id="recent-captures-card" open>
+      <summary class="quant-card-head"><div><h2>最近采集</h2><p>展示最近采集的多个到期日期权链记录。</p></div><span class="yolo-card-toggle" aria-hidden="true"><span class="yolo-card-collapse-label">收起</span><span class="yolo-card-expand-label">展开</span><span class="yolo-card-chevron">⌄</span></span></summary>
+      <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>时间</th><th>类型</th><th>市场日</th><th>到期日</th><th class="align-right">QQQ</th><th class="align-right">合约数</th><th>来源</th></tr></thead><tbody id="capture-body"><tr><td colspan="7" class="quant-empty">尚无数据</td></tr></tbody></table></div>
+    </details>
+
+    <details class="quant-card yolo-collapsible-card" id="option-chain-card" open>
+      <summary class="quant-card-head"><div><h2>期权链</h2><p>按到期日浏览本站累计采集的最近一份真实链数据，点击到期日展开 Call / Put 明细。</p></div><span class="yolo-card-toggle" aria-hidden="true"><span class="yolo-card-collapse-label">收起</span><span class="yolo-card-expand-label">展开</span><span class="yolo-card-chevron">⌄</span></span></summary>
       <div class="yolo-chain-controls">
         <label><span>显示列</span><select id="chain-mode"><option value="price">简洁报价</option><option value="greeks">报价 + Greeks</option><option value="all">全部数据</option></select></label>
         <label><span>价内/价外</span><select id="chain-moneyness"><option value="all">全部</option><option value="otm">仅价外</option><option value="itm">仅价内</option></select></label>
@@ -98,14 +103,9 @@
         <thead id="chain-head"></thead>
         <tbody id="chain-body"><tr><td colspan="13" class="quant-empty">尚未选择快照</td></tr></tbody>
       </table></div>
-    </section>
-
-    <section class="quant-card">
-      <div class="quant-card-head"><div><h2>回测交易</h2><p>入场付ask、退出收bid，止损穿价按实际观察到的bid结算。</p></div></div>
-      <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>日期</th><th>方向 / 合约</th><th class="align-right">入场 / 退出</th><th class="align-right">Delta</th><th class="align-right">收益</th><th>退出原因</th></tr></thead><tbody id="trade-body"><tr><td colspan="6" class="quant-empty">尚未运行回测</td></tr></tbody></table></div>
-    </section>
+    </details>
   </main>
   <script src="../vendor/echarts.min.js"></script>
-  <script type="module" src="./app.js?v=20261003-backtest-progress2"></script>
+  <script type="module" src="./app.js?v=20261003-card-layout1"></script>
 </body>
 </html>
