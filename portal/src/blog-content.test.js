@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeContent, normalizeTags } from './blog-content.js';
+import { normalizeContent, normalizeTags, normalizeLocation, renderMarkdown } from './blog-content.js';
 import { initSchema } from '../../shared/db/schema.js';
 import { createPost, changePost, listPosts } from './blog.js';
 
@@ -31,6 +31,37 @@ test('tags are normalized, deduplicated and bounded', () => {
   assert.throws(() => normalizeTags(['字'.repeat(31)]), /30/);
   assert.throws(() => normalizeTags(['换\n行']), /换行/);
   assert.throws(() => normalizeTags(Array.from({ length: 21 }, (_, i) => String(i))), /20/);
+});
+
+test('Markdown preserves source while rendering safe headings, tables, code and images', () => {
+  const source = '# 标题\n\n**加粗**\n\n- 项目\n\n```js\nconst x = 1;\n```\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n![图片](https://example.test/x.jpg)\n<script>alert(1)</script>';
+  assert.equal(normalizeContent(source, 'markdown'), source);
+  const html = renderMarkdown(source);
+  for (const tag of ['h1', 'strong', 'li', 'pre', 'table', 'img']) assert.ok(html.includes('<' + tag));
+  assert.ok(!html.includes('<script'));
+  assert.ok(!renderMarkdown('[危险](javascript:alert(1))').includes('javascript:'));
+  assert.throws(() => normalizeContent('x'.repeat(10001), 'markdown'), /最多/);
+  assert.match(renderMarkdown('![图](https://example.test/x.jpg)'), /<img/);
+});
+
+test('locations validate coordinates and persist, preserve and remove with article permissions', async t => {
+  assert.deepEqual(normalizeLocation({ label: ' 上海 ', latitude: 31.12345678, longitude: 121.5 }), { label: '上海', latitude: 31.123457, longitude: 121.5 });
+  for (const location of [{ latitude: 91, longitude: 0 }, { latitude: NaN, longitude: 1 }, { latitude: 1 }, { label: 'x'.repeat(121) }, []]) assert.throws(() => normalizeLocation(location));
+  const sqlite = await import('node:sqlite').catch(() => null);
+  if (!sqlite) return t.skip('node:sqlite requires Node 22 or newer');
+  const db = new sqlite.DatabaseSync(':memory:');
+  try {
+    initSchema(db);
+    const author = { userId: 'author', username: '作者', permissions: ['blog:post:edit'] };
+    const id = createPost(db, author, '# 原文', false, { contentFormat: 'markdown', location: { label: '上海' } });
+    assert.equal(listPosts(db)[0].location.label, '上海');
+    assert.match(listPosts(db)[0].contentHtml, /<h1>原文/);
+    assert.equal(changePost(db, id, { userId: 'other', permissions: ['blog:post:edit'] }, '篡改', false, { location: null }).status, 403);
+    changePost(db, id, author, '保持位置');
+    assert.equal(listPosts(db)[0].location.label, '上海');
+    changePost(db, id, author, '移除位置', false, { location: null });
+    assert.equal(listPosts(db)[0].location, null);
+  } finally { db.close(); }
 });
 
 test('legacy migration, rich persistence, tag pagination and author permissions', async t => {

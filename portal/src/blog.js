@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
 import { deleteStoredMedia, uploadImage, uploadVideo } from './blog-media-storage.js';
-import { normalizeContent, normalizeTags } from './blog-content.js';
+import { normalizeContent, normalizeTags, normalizeLocation, renderMarkdown } from './blog-content.js';
 
 const MAX_REQUEST_BYTES = 128 * 1024;
 
@@ -41,7 +41,7 @@ export function listPosts(db, before, limit = 20, tag = '') {
         params.push(tag);
     }
     const rows = db.prepare(`SELECT id, author_id AS authorId, author_name AS authorName,
-        content, content_format AS contentFormat, created_at AS createdAt, updated_at AS updatedAt FROM blog_posts
+        content, content_format AS contentFormat, location_json AS locationJson, created_at AS createdAt, updated_at AS updatedAt FROM blog_posts
         ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''} ORDER BY created_at DESC, id DESC LIMIT ?`).all(...params, limit);
     const tags = db.prepare('SELECT tag FROM blog_post_tags WHERE post_id = ? ORDER BY rowid');
     const legacy = db.prepare('SELECT id FROM blog_images WHERE post_id = ? ORDER BY position, id');
@@ -49,7 +49,8 @@ export function listPosts(db, before, limit = 20, tag = '') {
     return rows.map(row => {
         const items = media.all(row.id);
         const oldImages = legacy.all(row.id).map(image => ({ id: image.id, kind: 'image', url: '/api/blog/images/' + image.id }));
-        return { ...row, content: normalizeContent(row.content, row.contentFormat, true), tags: tags.all(row.id).map(item => item.tag), images: [...oldImages, ...items.filter(item => item.kind === 'image')],
+        const { locationJson, ...post } = row;
+        return { ...post, location: locationJson ? JSON.parse(locationJson) : null, contentHtml: row.contentFormat === 'markdown' ? renderMarkdown(row.content) : null, content: normalizeContent(row.content, row.contentFormat, true), tags: tags.all(row.id).map(item => item.tag), images: [...oldImages, ...items.filter(item => item.kind === 'image')],
             videos: items.filter(item => item.kind === 'video') };
     });
 }
@@ -58,11 +59,12 @@ export function createPost(db, session, content, hasMedia = false, options = {})
     const format = options.contentFormat ?? 'text';
     const text = normalizeContent(content, format, hasMedia === true);
     const tags = normalizeTags(options.tags);
+    const location = normalizeLocation(options.location);
     const id = crypto.randomUUID().replaceAll('-', '');
     const now = new Date().toISOString();
     transaction(db, () => {
-        db.prepare('INSERT INTO blog_posts (id, author_id, author_name, content, content_format, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-            .run(id, session.userId, session.username, text, format, now, now);
+        db.prepare('INSERT INTO blog_posts (id, author_id, author_name, content, content_format, location_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(id, session.userId, session.username, text, format, location ? JSON.stringify(location) : null, now, now);
         for (const tag of tags) db.prepare('INSERT INTO blog_post_tags (post_id, tag) VALUES (?, ?)').run(id, tag);
     });
     return id;
@@ -111,6 +113,8 @@ export function changePost(db, id, session, content, remove = false, options = {
         || keepIds.some(mediaId => !existing.includes(mediaId))) throw new Error('文章媒体参数无效');
     const format = options.contentFormat ?? 'text';
     const text = normalizeContent(content, format, keepIds.length > 0);
+    const previous = db.prepare('SELECT location_json FROM blog_posts WHERE id = ?').get(id);
+    const location = options.location === undefined ? previous.location_json : JSON.stringify(normalizeLocation(options.location));
     const tags = options.tags === undefined ? null : normalizeTags(options.tags);
     const removedMedia = db.prepare('SELECT id, storage_key AS storageKey FROM blog_media WHERE post_id = ?').all(id)
         .filter(item => !keepIds.includes(item.id));
@@ -124,8 +128,8 @@ export function changePost(db, id, session, content, remove = false, options = {
             db.prepare('DELETE FROM blog_post_tags WHERE post_id = ?').run(id);
             for (const tag of tags) db.prepare('INSERT INTO blog_post_tags (post_id, tag) VALUES (?, ?)').run(id, tag);
         }
-        db.prepare('UPDATE blog_posts SET content = ?, content_format = ?, updated_at = ? WHERE id = ?')
-            .run(text, format, new Date().toISOString(), id);
+        db.prepare('UPDATE blog_posts SET content = ?, content_format = ?, location_json = ?, updated_at = ? WHERE id = ?')
+            .run(text, format, location, new Date().toISOString(), id);
     });
     return { status: 200, removedMedia };
 }
@@ -191,10 +195,10 @@ export async function handleBlogApi(req, res, url, session, json, config) {
     try {
         const body = await readJson(req);
         if (req.method === 'POST') {
-            const postId = createPost(db, session, body.content, body.hasMedia, { contentFormat: body.contentFormat, tags: body.tags });
+            const postId = createPost(db, session, body.content, body.hasMedia, { contentFormat: body.contentFormat, tags: body.tags, location: body.location });
             return json(res, 201, { ok: true, id: postId });
         }
-        const result = changePost(db, id, session, body.content, false, { keepMediaIds: body.keepMediaIds, contentFormat: body.contentFormat, tags: body.tags });
+        const result = changePost(db, id, session, body.content, false, { keepMediaIds: body.keepMediaIds, contentFormat: body.contentFormat, tags: body.tags, location: body.location });
         if (result.removedMedia?.length) {
             try { await deleteStoredMedia(result.removedMedia); }
             catch (error) { console.error('博客媒体清理失败:', error); }

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>服务导航</title>
     <script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
-    <link rel="stylesheet" href="/portal.css?v=blog-rich-tags-1">
+    <link rel="stylesheet" href="/portal.css?v=blog-markdown-location-1">
 </head>
 <body class="has-navbar portal-layout-enabled dashboard-page">
     <header class="navbar">
@@ -40,6 +40,7 @@
             <label for="blog-content">写点什么</label>
             <div id="blog-content"></div>
             <div id="blog-tags"></div>
+            <div id="blog-location"></div>
             <div class="blog-image-preview" id="blog-preview"></div>
             <div class="blog-upload-row">
                 <label class="btn ghost blog-upload-label" for="blog-images">📷 添加图片</label>
@@ -62,7 +63,11 @@
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
     <script src="/dashboard.js"></script>
-    <script src="/blog-editor.js?v=blog-rich-tags-1"></script>
-    <script src="/blog.js?v=blog-rich-tags-1"></script>
+    <script src="/vendor/marked.js"></script>
+    <script src="/vendor/purify.js"></script>
+    <script src="/vendor/turndown.js"></script>
+    <script src="/blog-widgets.js?v=blog-markdown-location-1"></script>
+    <script src="/blog-editor.js?v=blog-markdown-location-1"></script>
+    <script src="/blog.js?v=blog-markdown-location-1"></script>
 </body>
 </html>

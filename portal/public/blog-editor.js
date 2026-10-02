@@ -40,12 +40,52 @@
       toolbar.appendChild(button);
     });
     editor.before(toolbar);
+    var mode = document.createElement('select');
+    mode.setAttribute('aria-label', '编辑格式');
+    [['html', '富文本'], ['markdown', 'Markdown']].forEach(function(item) {
+      var option = document.createElement('option'); option.value = item[0]; option.textContent = item[1]; mode.appendChild(option);
+    });
+    toolbar.before(mode);
+    var markdown = document.createElement('textarea');
+    markdown.className = 'blog-markdown-source'; markdown.maxLength = 10000; markdown.rows = 8;
+    markdown.setAttribute('aria-label', 'Markdown 内容');
+    markdown.placeholder = '# 标题\n\n支持 **加粗**、列表、链接、代码块和表格';
+    var rendered = document.createElement('div');
+    rendered.className = 'blog-markdown-preview blog-rich-content';
+    rendered.setAttribute('aria-label', 'Markdown 预览');
+    rendered.setAttribute('role', 'region');
+    editor.after(markdown, rendered);
+    function renderMarkdown() {
+      rendered.innerHTML = DOMPurify.sanitize(marked.parse(markdown.value, { gfm: true, breaks: true }));
+      editor.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    function updateMode() {
+      var isMarkdown = mode.value === 'markdown';
+      editor.hidden = isMarkdown; toolbar.hidden = isMarkdown;
+      markdown.hidden = !isMarkdown; rendered.hidden = !isMarkdown;
+      if (isMarkdown) renderMarkdown();
+    }
+    mode.addEventListener('change', function() {
+      if (mode.value === 'markdown') markdown.value = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' }).turndown(editor.innerHTML);
+      else editor.innerHTML = DOMPurify.sanitize(marked.parse(markdown.value, { gfm: true, breaks: true }));
+      updateMode();
+    });
+    markdown.addEventListener('input', renderMarkdown);
+    if (post?.contentFormat === 'markdown') { mode.value = 'markdown'; markdown.value = post.content; }
+    updateMode();
     editor.addEventListener('paste', function(event) {
       event.preventDefault();
       document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
     });
     editor.addEventListener('drop', function(event) { event.preventDefault(); });
-    return { content: function() { return editor.innerHTML; }, clear: function() { editor.replaceChildren(); } };
+    return {
+      content: function() { return mode.value === 'markdown' ? markdown.value : editor.innerHTML; },
+      format: function() { return mode.value; },
+      focus: function() { (mode.value === 'markdown' ? markdown : editor).focus(); },
+      length: function() { return mode.value === 'markdown' ? markdown.value.length : editor.textContent.length; },
+      isEmpty: function() { return !(mode.value === 'markdown' ? markdown.value : editor.textContent).trim(); },
+      clear: function() { editor.replaceChildren(); markdown.value = ''; rendered.replaceChildren(); }
+    };
   };
 
   window.createBlogTags = function(root, initial, suggestions) {

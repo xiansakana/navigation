@@ -1,16 +1,18 @@
 import createDOMPurify from 'dompurify';
 import { JSDOM } from 'jsdom';
+import { marked } from 'marked';
 
 const window = new JSDOM('').window;
 const purifier = createDOMPurify(window);
 const richOptions = {
-  ALLOWED_TAGS: ['p', 'div', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'h2', 'h3', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'a'],
-  ALLOWED_ATTR: ['href'],
+  ALLOWED_TAGS: ['p', 'div', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'a', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img'],
+  ALLOWED_ATTR: ['href', 'src', 'alt', 'title'],
   ALLOW_DATA_ATTR: false,
   ALLOW_ARIA_ATTR: false,
   RETURN_DOM_FRAGMENT: true
 };
 purifier.addHook('afterSanitizeAttributes', node => {
+  if (node.nodeName === 'IMG' && !/^(https?:\/\/|\/api\/blog\/images\/)/i.test(node.getAttribute('src') || '')) { node.remove(); return; }
   if (node.nodeName !== 'A') { node.removeAttribute('href'); return; }
   if (!/^(https?:\/\/|mailto:)/i.test(node.getAttribute('href') || '')) node.removeAttribute('href');
   node.setAttribute('target', '_blank');
@@ -18,7 +20,7 @@ purifier.addHook('afterSanitizeAttributes', node => {
 });
 
 export function normalizeContent(value, format = 'text', allowEmpty = false) {
-  if (format !== 'text' && format !== 'html') throw new Error('博客内容格式无效');
+  if (!['text', 'html', 'markdown'].includes(format)) throw new Error('博客内容格式无效');
   if (typeof value !== 'string') throw new Error('请输入博客内容');
   if (format === 'text') {
     const content = value.trim();
@@ -26,14 +28,39 @@ export function normalizeContent(value, format = 'text', allowEmpty = false) {
     if (content.length > 10000) throw new Error('博客内容最多 10000 字');
     return content;
   }
+  if (format === 'markdown') {
+    const content = value.trim();
+    if (content.length > 10000) throw new Error('博客内容最多 10000 字');
+    if (!content && !allowEmpty) throw new Error('请输入博客内容或添加媒体');
+    if (content) normalizeContent(marked.parse(content, { gfm: true, breaks: true }), 'html', allowEmpty);
+    return content;
+  }
   if (value.length > 80000) throw new Error('博客富文本内容过大');
   const fragment = purifier.sanitize(value, richOptions);
   const plain = fragment.textContent;
-  if (!plain.trim() && !allowEmpty) throw new Error('请输入博客内容或添加媒体');
+  const hasContent = plain.trim() || fragment.querySelector('img[src]');
+  if (!hasContent && !allowEmpty) throw new Error('请输入博客内容或添加媒体');
   if (plain.length > 10000) throw new Error('博客内容最多 10000 字');
   const container = window.document.createElement('div');
   container.appendChild(fragment);
-  return plain.trim() ? container.innerHTML.trim() : '';
+  return hasContent ? container.innerHTML.trim() : '';
+}
+
+export function renderMarkdown(content) {
+  return normalizeContent(marked.parse(content, { gfm: true, breaks: true }), 'html', true);
+}
+
+export function normalizeLocation(value) {
+  if (value == null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('定位参数无效');
+  const label = typeof value.label === 'string' ? value.label.trim() : '';
+  if (label.length > 120 || /[\u0000-\u001f\u007f]/.test(label)) throw new Error('位置名称最多 120 字');
+  const hasCoordinates = value.latitude != null || value.longitude != null;
+  if (hasCoordinates && (typeof value.latitude !== 'number' || typeof value.longitude !== 'number'
+      || !Number.isFinite(value.latitude) || !Number.isFinite(value.longitude)
+      || Math.abs(value.latitude) > 90 || Math.abs(value.longitude) > 180)) throw new Error('定位坐标无效');
+  if (!label && !hasCoordinates) return null;
+  return { label, ...(hasCoordinates ? { latitude: Number(value.latitude.toFixed(6)), longitude: Number(value.longitude.toFixed(6)) } : {}) };
 }
 
 export function normalizeTags(value = []) {

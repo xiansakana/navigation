@@ -5,6 +5,7 @@
     var input = document.getElementById('blog-content');
     var richEditor = window.createBlogEditor(input);
     var tagEditor = window.createBlogTags(document.getElementById('blog-tags'));
+    var locationEditor = window.createBlogLocation(document.getElementById('blog-location'));
     var tagFilter = document.getElementById('blog-tag-filter');
     var imageInput = document.getElementById('blog-images');
     var videoInput = document.getElementById('blog-videos');
@@ -75,7 +76,10 @@
         media.src = src;
         if (kind === 'video') { media.controls = true; media.preload = 'metadata'; }
         else { media.alt = '博客图片'; media.loading = 'lazy'; }
-        tile.appendChild(media);
+        if (kind === 'image') {
+            var open = document.createElement('button'); open.type = 'button'; open.className = 'blog-image-open';
+            open.dataset.blogImage = src; open.setAttribute('aria-label', '预览图片'); open.appendChild(media); tile.appendChild(open);
+        } else tile.appendChild(media);
         if (removeAction) {
             var button = document.createElement('button');
             button.type = 'button';
@@ -135,9 +139,19 @@
         }
         var body = document.createElement('div');
         body.className = 'blog-post-content';
-        if (post.contentFormat === 'html') { body.classList.add('blog-rich-content'); body.innerHTML = post.content; }
+        if (post.contentFormat === 'html' || post.contentFormat === 'markdown') { body.classList.add('blog-rich-content'); body.innerHTML = post.contentFormat === 'markdown' ? post.contentHtml : post.content; }
         else body.textContent = post.content;
         main.append(meta, body);
+        if (post.location) {
+            var location = document.createElement(post.location.latitude != null ? 'a' : 'span');
+            location.className = 'blog-post-location';
+            location.textContent = '📍 ' + (post.location.label || post.location.latitude.toFixed(5) + ', ' + post.location.longitude.toFixed(5));
+            if (post.location.latitude != null) {
+                location.href = 'https://www.openstreetmap.org/?mlat=' + post.location.latitude + '&mlon=' + post.location.longitude + '#map=15/' + post.location.latitude + '/' + post.location.longitude;
+                location.target = '_blank'; location.rel = 'noopener noreferrer';
+            }
+            main.appendChild(location);
+        }
         var postTags = document.createElement('div');
         postTags.className = 'blog-post-tags';
         (post.tags || []).forEach(function(tag) {
@@ -152,12 +166,7 @@
             gallery.className = 'blog-post-images';
             items.forEach(function(item) {
                 if (item.kind === 'video') { gallery.appendChild(mediaTile(item.url, 'video')); return; }
-                var link = document.createElement('a');
-                link.href = item.url;
-                link.target = '_blank';
-                link.rel = 'noopener noreferrer';
-                link.appendChild(mediaTile(item.url, 'image'));
-                gallery.appendChild(link);
+                gallery.appendChild(mediaTile(item.url, 'image'));
             });
             main.appendChild(gallery);
         }
@@ -224,7 +233,7 @@
         return uploaded;
     }
 
-    input.addEventListener('input', function() { document.getElementById('blog-count').textContent = (input.innerText || '').length + ' / 10000'; });
+    input.addEventListener('input', function() { document.getElementById('blog-count').textContent = richEditor.length() + ' / 10000'; });
     imageInput.addEventListener('change', async function() {
         try { await addFiles(Array.from(imageInput.files), 'image', state.pending, renderComposerPreview); }
         catch (error) { window.portalToast?.error(error.message); }
@@ -243,17 +252,17 @@
     });
     composer.addEventListener('submit', async function(event) {
         event.preventDefault();
-        if (!input.textContent.trim() && !state.pending.length) { window.portalToast?.error('请输入博客内容或添加媒体'); return; }
+        if (richEditor.isEmpty() && !state.pending.length) { window.portalToast?.error('请输入博客内容或添加媒体'); return; }
         var button = document.getElementById('blog-submit');
         button.disabled = true;
         var created;
         try {
             created = await request('posts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: richEditor.content(), contentFormat: 'html', tags: tagEditor.value(), hasMedia: state.pending.length > 0 }) });
+                body: JSON.stringify({ content: richEditor.content(), contentFormat: richEditor.format(), location: locationEditor.value(), tags: tagEditor.value(), hasMedia: state.pending.length > 0 }) });
             await uploadAll(created.id, state.pending);
             release(state.pending);
             state.pending = [];
-            richEditor.clear(); tagEditor.clear();
+            richEditor.clear(); tagEditor.clear(); locationEditor.clear();
             input.dispatchEvent(new Event('input'));
             renderComposerPreview();
             await load(true);
@@ -263,7 +272,7 @@
                 await request('posts/' + created.id, { method: 'DELETE' }).catch(function() {});
                 window.portalToast?.error('上传失败，内容已保留在编辑框：' + error.message);
             } else if (created) {
-                release(state.pending); state.pending = []; richEditor.clear(); tagEditor.clear();
+                release(state.pending); state.pending = []; richEditor.clear(); tagEditor.clear(); locationEditor.clear();
                 input.dispatchEvent(new Event('input')); renderComposerPreview();
                 await load(true);
                 window.portalToast?.error('媒体上传中断，已发布的内容可在编辑中继续补充：' + error.message);
@@ -305,6 +314,9 @@
         body.replaceWith(editor);
         state.editing.editor = window.createBlogEditor(editor, post);
         article.querySelector('.blog-post-tags')?.remove();
+        article.querySelector('.blog-post-location')?.remove();
+        var editLocation = document.createElement('div'); editor.after(editLocation);
+        state.editing.location = window.createBlogLocation(editLocation, post.location);
         var editTags = document.createElement('div');
         editor.after(editTags);
         state.editing.tags = window.createBlogTags(editTags, post.tags, state.tags);
@@ -328,7 +340,7 @@
         actions.before(tools);
         actions.replaceChildren(actionButton('保存', 'save', post.id), actionButton('取消', 'cancel', post.id));
         renderEditPreview(article);
-        editor.focus();
+        state.editing.editor.focus();
     });
 
     feed.addEventListener('click', async function(event) {
@@ -341,12 +353,12 @@
         try {
             var editing = state.editing;
             var tags = editing.tags.value();
-            if (button.closest('.blog-post').querySelector('.blog-rich-editor').textContent.length > 10000) throw new Error('博客内容最多 10000 字');
+            if (editing.editor.length() > 10000) throw new Error('博客内容最多 10000 字');
             var uploaded = await uploadAll(editing.id, editing.pending);
             editing.keepMediaIds.push.apply(editing.keepMediaIds, uploaded.map(function(item) { return item.id; }));
             release(editing.pending); editing.pending = [];
             await request('posts/' + editing.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: editing.editor.content(), contentFormat: 'html', tags: tags,
+                body: JSON.stringify({ content: editing.editor.content(), contentFormat: editing.editor.format(), location: editing.location.value(), tags: tags,
                     keepMediaIds: editing.keepMediaIds }) });
             release(editing.pending); state.editing = null;
             await load(true);
@@ -393,7 +405,7 @@
     tagFilter.addEventListener('click', selectTag);
     feed.addEventListener('click', selectTag);
     more.addEventListener('click', function() { load(false); });
-    shortcut.addEventListener('click', function() { if (state.canPost) setTimeout(function() { input.focus(); }, 0); });
+    shortcut.addEventListener('click', function() { if (state.canPost) setTimeout(function() { richEditor.focus(); }, 0); });
     async function initialize() {
         try {
             var response = await fetch('/api/me');

@@ -146,6 +146,7 @@ export function initSchema(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_blog_post_tags_tag ON blog_post_tags (tag, post_id);
   `);
+  ensureColumn('blog_posts', 'location_json', 'TEXT');
   ensureColumn('blog_posts', 'content_format', "TEXT NOT NULL DEFAULT 'text'");
   ensureColumn('yolo_captures', 'capture_kind', "TEXT NOT NULL DEFAULT 'intraday'");
   ensureColumn('yolo_option_quotes', 'last_trade_at', 'TEXT');
