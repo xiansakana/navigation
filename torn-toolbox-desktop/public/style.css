@@ -95,10 +95,12 @@ input[type="text"], input[type="password"], input[type="number"], select {
 .item p { margin: 3px 0; font-size: 13px; color: var(--text-soft); }
 .select-wrap { position: relative; }
 .select-display {
+    display: block; width: 100%; text-align: left; font: inherit;
     padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border);
     background: var(--elevated); color: var(--text); cursor: pointer;
 }
 .select-display:hover { border-color: var(--accent); }
+.select-display:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .select-drop {
     display: none; position: absolute; top: 100%; left: 0; right: 0; z-index: 30;
     background: var(--elevated); border: 1px solid var(--border); border-radius: 0 0 8px 8px;

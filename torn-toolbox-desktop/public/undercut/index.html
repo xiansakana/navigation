@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>压价助手</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=item-select-live-1">
 </head>
 <body>
     <div class="app">
@@ -39,7 +39,7 @@
                 <h2 style="margin:0">监听账号</h2>
                 <button type="button" class="btn small" id="uc-add-watcher">+ 添加账号</button>
             </div>
-            <p class="hint">每个 Torn API Key 独立配置监听范围、指定物品与 QQ 通知方式。留空物品列表则监听该账号全部在售货物。</p>
+            <p class="hint">每个 Torn API Key 独立配置监听范围、指定物品与 QQ 通知方式。留空物品列表则监听该账号全部在售货物。监听中也可修改物品，保存后从下一次扫描生效。</p>
             <div id="uc-watchers" class="watcher-list"></div>
             <div class="btn-row">
                 <button type="button" class="btn primary" id="uc-save-config">保存压价配置</button>
@@ -62,6 +62,6 @@
         </section>
     </div>
     <script src="shared/watcher-ui.js"></script>
-    <script src="app.js"></script>
+    <script src="app.js?v=item-select-live-1"></script>
 </body>
 </html>

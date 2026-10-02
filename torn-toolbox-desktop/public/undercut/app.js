@@ -64,9 +64,6 @@ function updateUndercutState(state) {
     var running = state.running;
     $('uc-start').hidden = running;
     $('uc-stop').hidden = !running;
-    document.querySelectorAll('.uc-select-wrap').forEach(function(wrap) {
-        wrap.classList.toggle('disabled', running);
-    });
     $('uc-status-text').textContent = running ? '● 监听中' : '已停止';
     $('uc-status').classList.toggle('stopped', !running);
     $('uc-checks').textContent = state.checks || 0;
@@ -134,7 +131,7 @@ function renderUndercutWatchers() {
             + '<div class="field full">'
             + '<label>指定物品（可选）</label>'
             + '<div class="select-wrap uc-select-wrap" data-watcher-id="' + watcher.id + '">'
-            + '<div class="select-display uc-select-display">-- 全部物品 --</div>'
+            + '<button type="button" class="select-display uc-select-display">-- 全部物品 --</button>'
             + '<div class="select-drop uc-select-drop">'
             + '<input class="select-search uc-select-search" placeholder="搜索..." />'
             + '<div class="select-list uc-select-list"></div>'
