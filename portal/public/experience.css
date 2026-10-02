@@ -152,6 +152,7 @@ body.portal-experience .blog-post-images { grid-template-columns: repeat(4, minm
 body.portal-experience .blog-upload-row > span { flex-basis: 100%; line-height: 1.7; }
 body.portal-experience .blog-post-actions button { min-height: 36px; padding: 5px 10px; border-radius: 8px; background: var(--elevated); }
 body.portal-experience .blog-location-editor { padding: 10px 0; }
+body.portal-experience .blog-location-source { margin-left: 8px; color: var(--muted); font-size: 11px; text-decoration: none; }
 body.portal-experience .login-card { padding: 36px; border-radius: 24px; box-shadow: 0 24px 80px #00000018; width: min(460px, calc(100vw - 32px)); }
 body.portal-experience .login-card h1 { font-size: 30px; }
 body.portal-experience .login-card .subtitle { font-size: 14px; line-height: 1.8; }

@@ -3,6 +3,7 @@ import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
 import { deleteStoredMedia, uploadImage, uploadVideo } from './blog-media-storage.js';
 import { normalizeContent, normalizeTags, normalizeLocation, renderMarkdown } from './blog-content.js';
+import { parseCoordinates, resolveAddress } from './blog-address.js';
 
 const MAX_REQUEST_BYTES = 128 * 1024;
 
@@ -148,6 +149,15 @@ async function readJson(req) {
 export async function handleBlogApi(req, res, url, session, json, config) {
     const access = blogAccess(session);
     if (!access.canView) return json(res, 403, { ok: false, error: '无权查看博客' });
+    if (req.method === 'GET' && url.pathname === '/api/blog/location') {
+        let coordinates;
+        try { coordinates = parseCoordinates(url.searchParams); }
+        catch (error) { return json(res, 400, { ok: false, error: error.message }); }
+        try {
+            const label = await resolveAddress(coordinates);
+            return json(res, 200, { ok: true, label });
+        } catch { return json(res, 503, { ok: false, error: '地址暂不可用，请稍后重新定位' }); }
+    }
     const db = getDatabase();
     if (req.method === 'GET' && url.pathname.startsWith('/api/blog/images/')) {
         const image = getImage(db, url.pathname.split('/').at(-1));

@@ -145,12 +145,20 @@
         if (post.location) {
             var location = document.createElement(post.location.latitude != null ? 'a' : 'span');
             location.className = 'blog-post-location';
-            location.textContent = '📍 ' + (post.location.label || post.location.latitude.toFixed(5) + ', ' + post.location.longitude.toFixed(5));
+            location.textContent = '📍 ' + (post.location.label || '正在解析位置地址…');
             if (post.location.latitude != null) {
                 location.href = 'https://www.openstreetmap.org/?mlat=' + post.location.latitude + '&mlon=' + post.location.longitude + '#map=15/' + post.location.latitude + '/' + post.location.longitude;
                 location.target = '_blank'; location.rel = 'noopener noreferrer';
             }
             main.appendChild(location);
+            if (post.location.latitude != null) {
+                main.appendChild(window.createBlogLocationSource());
+                if (!post.location.label) window.resolveBlogAddress(post.location).then(function(label) {
+                    if (!location.isConnected) return;
+                    location.textContent = '📍 ' + (label || '地址暂不可用');
+                    if (label) post.location.label = label;
+                });
+            }
         }
         var postTags = document.createElement('div');
         postTags.className = 'blog-post-tags';
