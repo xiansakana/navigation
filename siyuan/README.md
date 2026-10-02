@@ -57,6 +57,10 @@ ECS 上每天凌晨 3 点自动备份 workspace（停容器 → tar → 启动�
 
 - 备份目录：`/opt/backups/siyuan/`
 - 日志：`/var/log/siyuan-backup.log`
+- 备份互斥执行，归档通过 gzip/tar 校验后才发布；失败时尝试恢复原先运行的思源容器，保留旧备份。
+- 按文件名时间戳保留最近 7 份；新归档和环境文件仅所有者可读写。
+- 成功时间：备份目录中的 `last-success.txt`；失败时写入 `last-failure.txt` 并记录 `siyuan-backup` 系统错误日志。此告警为本机记录，未配置外部消息投递。
+- `SIGKILL`、主机断电无法触发脚本清理；需结合容器重启策略及独立健康检查。
 
 ## 分享（Siyuan Share 自建）
 
