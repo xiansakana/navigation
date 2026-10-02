@@ -42,6 +42,18 @@ export function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_blog_posts_created
       ON blog_posts (created_at DESC, id DESC);
 
+    CREATE TABLE IF NOT EXISTS blog_images (
+      id TEXT PRIMARY KEY,
+      post_id TEXT NOT NULL,
+      author_id TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      image_data BLOB NOT NULL,
+      position INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_blog_images_post
+      ON blog_images (post_id, position);
+
     CREATE TABLE IF NOT EXISTS quant_backtest_results (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
