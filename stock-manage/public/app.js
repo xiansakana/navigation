@@ -72,10 +72,10 @@ function datetimeLocalToIso(value) {
   ).toISOString();
 }
 
-const toastErr = (msg) => window.portalToast?.error(msg) ?? window.alert(msg);
-const toastWarn = (msg) => window.portalToast?.warn(msg) ?? window.alert(msg);
-const toastOk = (msg) => window.portalToast?.success(msg) ?? window.alert(msg);
-const toastInfo = (msg) => window.portalToast?.info(msg) ?? window.alert(msg);
+const toastErr = (msg) => typeof window.portalToast?.error === 'function' ? window.portalToast.error(msg) : window.alert(msg);
+const toastWarn = (msg) => typeof window.portalToast?.warn === 'function' ? window.portalToast.warn(msg) : window.alert(msg);
+const toastOk = (msg) => typeof window.portalToast?.success === 'function' ? window.portalToast.success(msg) : window.alert(msg);
+const toastInfo = (msg) => typeof window.portalToast?.info === 'function' ? window.portalToast.info(msg) : window.alert(msg);
 const toastRefresh = (type, msg) => {
   if (window.portalToast?.show) window.portalToast.show(msg, { type, group: 'quote-refresh' });
   else if (type === 'error') toastErr(msg);
