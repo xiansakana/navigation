@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>服务导航</title>
     <script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
-    <link rel="stylesheet" href="/portal.css?v=blog-1">
+    <link rel="stylesheet" href="/portal.css?v=blog-2">
 </head>
 <body class="has-navbar portal-layout-enabled dashboard-page">
     <header class="navbar">
@@ -29,6 +29,7 @@
     <div class="page-header">
         <h1>我的服务</h1>
         <p>选择一项服务进入管理或访问</p>
+        <a class="btn primary blog-shortcut hidden" id="blog-shortcut" href="#blog-section">写博客</a>
     </div>
     <main class="grid" id="service-grid"></main>
     <section class="blog-section hidden" id="blog-section" aria-label="博客动态">
@@ -48,6 +49,6 @@
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
     <script src="/dashboard.js"></script>
-    <script src="/blog.js"></script>
+    <script src="/blog.js?v=blog-2"></script>
 </body>
 </html>

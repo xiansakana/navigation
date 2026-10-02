@@ -874,7 +874,8 @@ body.login-page .portal-toast-host {
 }
 
 /* Home blog */
-.blog-section { max-width: 1100px; margin: 26px auto 80px; padding: 0 24px; }
+.blog-section { max-width: 1100px; margin: 26px auto 80px; padding: 0 24px; scroll-margin-top: 72px; }
+.blog-shortcut { display: inline-flex; margin-top: 16px; text-decoration: none; }
 .blog-heading { border-top: 1px solid var(--border); padding: 28px 0 20px; }
 .blog-eyebrow { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .18em; }
 .blog-heading h2 { margin: 7px 0 4px; font-size: 25px; }

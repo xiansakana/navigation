@@ -4,6 +4,7 @@
     var composer = document.getElementById('blog-composer');
     var input = document.getElementById('blog-content');
     var more = document.getElementById('blog-more');
+    var shortcut = document.getElementById('blog-shortcut');
     var state = { userId: '', canPost: false, canManage: false, lastId: null, loading: false };
 
     async function request(path, options) {
@@ -65,6 +66,8 @@
             state.canPost = data.canPost;
             state.canManage = data.canManage;
             composer.classList.toggle('hidden', !state.canPost);
+            shortcut.textContent = state.canPost ? '写博客' : '查看动态';
+            shortcut.classList.remove('hidden');
             data.posts.forEach(function(post) { feed.appendChild(renderPost(post)); });
             if (reset && !data.posts.length) {
                 var empty = document.createElement('p');
@@ -135,5 +138,8 @@
         } catch (error) { window.portalToast?.error(error.message); }
     });
     more.addEventListener('click', function() { load(false); });
+    shortcut.addEventListener('click', function() {
+        if (state.canPost) setTimeout(function() { input.focus(); }, 0);
+    });
     load(true);
 })();
