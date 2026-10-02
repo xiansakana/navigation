@@ -1,3 +1,4 @@
+import { formatPrice, priceInputValue } from './js/price-format.js';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js';
@@ -388,12 +389,12 @@ function holdingsCellContent(h, key, ctx) {
     case 'shares':
       return maskCol('shares', h.shares);
     case 'cost':
-      return maskCol('cost', fmtMoney(h.avgCost, cur) + lots);
+      return maskCol('cost', formatPrice(h.avgCost, cur) + lots);
     case 'price': {
       const delayHint = h.delayed
         ? ` <span class="hint" title="期权实时快照未授权，当前为 Polygon 延时日线${h.quoteAsOf ? `（截至 ${h.quoteAsOf}）` : ''}">延时</span>`
         : '';
-      return maskCol('price', `<span>${fmtMoney(h.price, cur)}</span>${delayHint}${can('refresh', 'edit') ? ` <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>` : ''}`);
+      return maskCol('price', `<span>${formatPrice(h.price, cur)}</span>${delayHint}${can('refresh', 'edit') ? ` <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>` : ''}`);
     }
     case 'pnl':
       return maskCol('pnl', h.pnl == null ? '—' : `<span class="${cls(h.pnl)}">${fmtMoneySigned(h.pnl, cur)}</span>`);
@@ -411,7 +412,7 @@ function holdingsCellContent(h, key, ctx) {
     case 'weight':
       return maskCol('weight', fmtPct(h.weight));
     case 'target':
-      return maskCol('target', `<input class="sm-cell-input" data-meta="target" data-symbol="${h.symbol}" type="number" step="any" value="${h.targetPrice ?? ''}" placeholder="—" ${can('meta', 'edit') ? '' : 'readonly'}>`);
+      return maskCol('target', `<input class="sm-cell-input" data-meta="target" data-symbol="${h.symbol}" type="number" step="0.001" value="${priceInputValue(h.targetPrice)}" placeholder="—" ${can('meta', 'edit') ? '' : 'readonly'}>`);
     case 'optinfo':
       return maskCol('optinfo', optStr);
     case 'signal':
@@ -442,7 +443,7 @@ function renderHoldingsRowCells(h, group, i) {
     }
     const tdCls = pnlCellClass(c.key, h);
     const opt = h.optionInfo;
-    const optStr = opt ? `${opt.type} $${opt.strike} · ${opt.expiration}` : '—';
+    const optStr = opt ? `${opt.type} ${formatPrice(opt.strike, 'USD')} · ${opt.expiration}` : '—';
     const lots = h.costLots?.length > 1 ? `<div class="sm-lots-hint">${h.costLots.length} 笔合计</div>` : '';
     const symInner = colVis.symbol !== false && canCol('symbol') ? `
         <span class="sm-symbol-drag" draggable="true" data-drag="${h.symbol}" title="拖动代码到另一行，合并为同一标的">
@@ -661,7 +662,7 @@ function tradeFormFields(trade = {}) {
         <option value="CNY" ${currency === 'CNY' ? 'selected' : ''}>CNY 人民币</option>
       </select></label>
       <label class="field-trade ${type === 'other' ? 'hidden' : ''}">数量<input name="shares" type="number" step="any" value="${trade.shares ?? ''}"></label>
-      <label class="field-trade ${type === 'other' ? 'hidden' : ''}">价格<input name="price" type="number" step="any" value="${trade.price ?? ''}"></label>
+      <label class="field-trade ${type === 'other' ? 'hidden' : ''}">价格<input name="price" type="number" step="0.001" value="${priceInputValue(trade.price)}"></label>
       <label class="field-other-amt ${type !== 'other' ? 'hidden' : ''}">金额<input name="total_amount" type="number" step="any" value="${trade.total_amount ?? ''}"></label>
       <label>手续费<input name="commission" type="number" step="any" value="${trade.commission ?? 0}"></label>
       <label>时间<input name="trade_date" type="datetime-local" value="${dt}"></label>
@@ -734,7 +735,7 @@ function renderImportPreviewSection() {
       <td>${t.symbol}</td>
       <td>${t.name || ''}</td>
       <td>${t.type === 'other' ? '—' : t.shares}</td>
-      <td>${t.type === 'other' ? '—' : fmtUsd(t.price)}</td>
+      <td>${t.type === 'other' ? '—' : formatPrice(t.price, 'USD')}</td>
     </tr>`).join('');
   return `
     <div class="sm-import-preview">
@@ -881,7 +882,7 @@ function renderTradeListTab() {
               <td>${t.name || ''}</td>
               <td>${t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')}</td>
               <td>${t.type === 'other' ? '—' : t.shares}</td>
-              <td>${t.type === 'other' ? '—' : fmtMoney(t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
+              <td>${t.type === 'other' ? '—' : formatPrice(t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
               <td>${fmtMoney(t.total_amount, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
               <td>${fmtCommission(t.commission, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
               <td>${can('trade', 'edit') ? `

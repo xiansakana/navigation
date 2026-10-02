@@ -1,5 +1,5 @@
 import XLSX from 'xlsx';
-import { isOptionSymbol, optionMult, roundMoney } from './trades.js';
+import { isOptionSymbol, optionMult, roundMoney, roundPrice } from './trades.js';
 
 function normalizeCell(v) {
   if (v == null) return '';
@@ -149,7 +149,7 @@ function parseMoomooRows(rows) {
       name: (iName >= 0 ? normalizeCell(cells[iName]) : '') || code,
       type,
       shares,
-      price: roundMoney(price),
+      price: roundPrice(price),
       total_amount: roundMoney(shares * price * mult),
       commission: roundMoney(commission),
       trade_date: iTime >= 0 ? parseTradeDate(cells[iTime]) : now,
@@ -213,7 +213,7 @@ export function parseAppBackupBuffer(buffer) {
         name: normalizeCell(cells[4]) || symbol,
         type,
         shares,
-        price: roundMoney(price),
+        price: roundPrice(price),
         total_amount: roundMoney(shares * price * mult),
         commission: roundMoney(parseMoney(cells[8]) || 0),
         trade_date: parseTradeDate(cells[0]),
@@ -233,7 +233,7 @@ export function parseAppBackupBuffer(buffer) {
         name: normalizeCell(cells[3]) || symbol,
         type,
         shares,
-        price: roundMoney(price),
+        price: roundPrice(price),
         total_amount: roundMoney(shares * price * mult),
         commission: roundMoney(parseMoney(cells[7]) || 0),
         trade_date: parseTradeDate(cells[0]),

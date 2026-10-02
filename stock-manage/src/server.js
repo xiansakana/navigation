@@ -19,6 +19,7 @@ import {
   normalizeTrade,
   recalcCashFromTrades,
   roundMoney,
+  roundPrice,
   applyCashDelta,
   undoCashDelta,
   cashUsdEquivalent,
@@ -212,7 +213,7 @@ app.put('/api/holdings-meta/:symbol', (req, res) => {
   const next = { ...prev };
   if ('targetPrice' in req.body) {
     const v = req.body.targetPrice;
-    next.targetPrice = v === '' || v == null ? '' : roundMoney(Number(v));
+    next.targetPrice = v === '' || v == null ? '' : roundPrice(Number(v));
   }
   if ('signal' in req.body) {
     next.signal = String(req.body.signal || '');
@@ -351,7 +352,12 @@ app.get('/api/trades/export', (req, res) => {
     手续费: t.commission
   }));
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), '交易记录');
+  const sheet = XLSX.utils.json_to_sheet(rows);
+  rows.forEach((_, index) => {
+    const cell = sheet[XLSX.utils.encode_cell({ r: index + 1, c: 7 })];
+    if (cell?.t === 'n') cell.z = '0.000';
+  });
+  XLSX.utils.book_append_sheet(wb, sheet, '交易记录');
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename=trades.xlsx');

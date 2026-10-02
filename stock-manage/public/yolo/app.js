@@ -1,3 +1,4 @@
+import { formatPrice } from '../js/price-format.js';
 import { loadPortalContext, can, canDip } from '../js/portal-auth.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -59,7 +60,7 @@ function renderStatus(data) {
   $('#first-capture').textContent = dateTime(stats.firstCaptureAt);
   const latest = recent[0];
   $('#latest-expiration').textContent = latest?.expiration || '—';
-  $('#latest-spot').textContent = money(latest?.underlying_price);
+  $('#latest-spot').textContent = formatPrice(latest?.underlying_price, 'USD');
   $('#latest-source').textContent = latest?.source || '—';
   $('#collector-message').textContent = settings.lastError
     ? `最近错误：${settings.lastError}`
@@ -67,7 +68,7 @@ function renderStatus(data) {
       ? `自动记录已开启，每 ${settings.intervalSeconds} 秒检查一次；休市期间不请求。`
       : '自动记录已暂停。';
   $('#collector-message').className = `yolo-message${settings.lastError ? ' error' : ''}`;
-  $('#capture-body').innerHTML = recent.length ? recent.map((item) => `<tr class="yolo-capture-row" data-capture-id="${item.id}"><td>${dateTime(item.captured_at)}</td><td>${item.capture_kind === 'daily-summary' ? '收盘摘要' : '日内快照'}</td><td>${escapeHtml(item.market_date)}</td><td>${escapeHtml(item.expiration)}</td><td class="align-right">${money(item.underlying_price)}</td><td class="align-right">${Number(item.contract_count).toLocaleString()}</td><td>${escapeHtml(item.source || '—')}</td></tr>`).join('') : '<tr><td colspan="7" class="quant-empty">尚无数据；可先回填昨日收盘，开盘后自动积累分钟快照。</td></tr>';
+  $('#capture-body').innerHTML = recent.length ? recent.map((item) => `<tr class="yolo-capture-row" data-capture-id="${item.id}"><td>${dateTime(item.captured_at)}</td><td>${item.capture_kind === 'daily-summary' ? '收盘摘要' : '日内快照'}</td><td>${escapeHtml(item.market_date)}</td><td>${escapeHtml(item.expiration)}</td><td class="align-right">${formatPrice(item.underlying_price, 'USD')}</td><td class="align-right">${Number(item.contract_count).toLocaleString()}</td><td>${escapeHtml(item.source || '—')}</td></tr>`).join('') : '<tr><td colspan="7" class="quant-empty">尚无数据；可先回填昨日收盘，开盘后自动积累分钟快照。</td></tr>';
   if (!state.chain) loadOptionChain();
 }
 
@@ -80,9 +81,7 @@ function moneyness(quote, spot) {
 }
 
 function optionPrice(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return '—';
-  return number >= 1 ? number.toFixed(2) : number.toFixed(3);
+  return formatPrice(value);
 }
 
 function sum(rows, key) { return rows.reduce((total, row) => total + (Number(row?.[key]) || 0), 0); }
@@ -97,7 +96,7 @@ function renderChainMetrics(payload, spot) {
   const ivs = payload.quotes.map((quote) => Number(quote.iv)).filter(Number.isFinite);
   const averageIv = ivs.length ? ivs.reduce((total, value) => total + value, 0) / ivs.length : null;
   const items = [
-    ['QQQ', money(spot)],
+    ['QQQ', formatPrice(spot, 'USD')],
     ['到期日', payload.capture.expiration],
     ['Call 成交量', callVolume.toLocaleString()],
     ['Put 成交量', putVolume.toLocaleString()],
@@ -275,7 +274,7 @@ function optionChartOption(payload) {
       return `${labels[index]}<br/>开 ${candle[0].toFixed(3)}　高 ${candle[3].toFixed(3)}<br/>低 ${candle[2].toFixed(3)}　收 ${candle[1].toFixed(3)}<br/><span style="color:${change >= 0 ? '#fb7185' : '#34d399'}">涨跌 ${signed(change, 3)} (${signed(pct, 2)}%)</span>`;
     } },
     xAxis: { type: 'category', data: labels, boundaryGap: true, axisLabel: { color: '#94a3b8', hideOverlap: true } },
-    yAxis: { scale: true, axisLabel: { color: '#94a3b8', formatter: (value) => `$${Number(value).toFixed(2)}` }, splitLine: { lineStyle: { color: 'rgba(100,116,139,.18)' } } },
+    yAxis: { scale: true, axisLabel: { color: '#94a3b8', formatter: (value) => formatPrice(value, 'USD') }, splitLine: { lineStyle: { color: 'rgba(100,116,139,.18)' } } },
     dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 8 }],
     series: [{ type: 'candlestick', name: '权利金', data: values, itemStyle: { color: '#fb7185', color0: '#34d399', borderColor: '#fb7185', borderColor0: '#34d399' } }]
   };
@@ -377,7 +376,7 @@ function renderBacktest(result) {
   $('#backtest-message').textContent = result.trades.length
     ? `使用 ${result.trades.length} 笔真实NBBO交易；结果只覆盖本站开始采集后的日期。`
     : '当前数据不足以形成交易：需要完整覆盖09:30、09:45及退出时段。';
-  $('#trade-body').innerHTML = result.trades.length ? result.trades.map((trade) => `<tr><td>${escapeHtml(trade.marketDate)}</td><td><strong>${escapeHtml(trade.direction)}</strong><span class="quant-sub">${escapeHtml(trade.optionSymbol)}</span></td><td class="align-right">${money(trade.entryAsk)} → ${money(trade.exitBid)}<span class="quant-sub">${trade.contracts} 张</span></td><td class="align-right">${Number(trade.entryDelta).toFixed(3)}</td><td class="align-right ${trade.netPnl >= 0 ? 'pos' : 'neg'}">${percent(trade.optionReturn)}<span class="quant-sub">${money(trade.netPnl)}</span></td><td>${escapeHtml(trade.reason)}</td></tr>`).join('') : '<tr><td colspan="6" class="quant-empty">暂无满足条件的交易。</td></tr>';
+  $('#trade-body').innerHTML = result.trades.length ? result.trades.map((trade) => `<tr><td>${escapeHtml(trade.marketDate)}</td><td><strong>${escapeHtml(trade.direction)}</strong><span class="quant-sub">${escapeHtml(trade.optionSymbol)}</span></td><td class="align-right">${formatPrice(trade.entryAsk, 'USD')} → ${formatPrice(trade.exitBid, 'USD')}<span class="quant-sub">${trade.contracts} 张</span></td><td class="align-right">${Number(trade.entryDelta).toFixed(3)}</td><td class="align-right ${trade.netPnl >= 0 ? 'pos' : 'neg'}">${percent(trade.optionReturn)}<span class="quant-sub">${money(trade.netPnl)}</span></td><td>${escapeHtml(trade.reason)}</td></tr>`).join('') : '<tr><td colspan="6" class="quant-empty">暂无满足条件的交易。</td></tr>';
 }
 
 async function runBacktest(event) {

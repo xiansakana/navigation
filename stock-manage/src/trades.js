@@ -18,6 +18,10 @@ export function roundMoney(n) {
   return Math.round(Number(n) * 100) / 100;
 }
 
+export function roundPrice(n) {
+  return Math.round(Number(n) * 1000) / 1000;
+}
+
 export function tradeCurrency(trade) {
   return inferCurrency(trade?.symbol, trade?.currency);
 }
@@ -610,7 +614,7 @@ export function normalizeTrade(input) {
     };
   }
   const shares = Number(input.shares);
-  const price = Number(input.price);
+  const price = roundPrice(input.price);
   if (!symbol || !(shares > 0) || !(price > 0)) throw new Error('买卖需填写代码、数量与价格');
   const mult = optionMult(symbol);
   const total = roundMoney(shares * price * mult);
@@ -621,7 +625,7 @@ export function normalizeTrade(input) {
     type: type === 'sell' ? 'sell' : 'buy',
     currency,
     shares,
-    price: roundMoney(price),
+    price,
     total_amount: total,
     commission: roundMoney(Number(input.commission) || 0),
     trade_date: input.trade_date || new Date().toISOString(),
