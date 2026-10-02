@@ -63,12 +63,12 @@
   });
   dialog.addEventListener('close', function() { image.removeAttribute('src'); items = []; });
   document.addEventListener('click', function(event) {
-    var target = event.target.closest('[data-blog-image], .blog-post-content img, .blog-markdown-preview img');
+    var target = event.target.closest('[data-blog-image], .blog-post-content img, .blog-rich-editor img');
     if (!target) return;
     var source = target.dataset.blogImage || target.getAttribute('src');
     if (!source) return;
     event.preventDefault();
-    var group = target.closest('.blog-image-preview, .blog-post-images, .blog-post-content, .blog-markdown-preview');
+    var group = target.closest('.blog-image-preview, .blog-post-images, .blog-post-content, .blog-rich-editor');
     items = group ? Array.from(group.querySelectorAll('[data-blog-image], img')).filter(function(item) { return item.dataset.blogImage || !item.closest('[data-blog-image]'); }).map(function(item) { return item.dataset.blogImage || item.getAttribute('src'); }).filter(Boolean) : [source];
     index = Math.max(0, items.indexOf(source)); show(index); dialog.showModal();
   });
