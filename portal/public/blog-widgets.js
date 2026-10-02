@@ -1,31 +1,40 @@
 (function() {
   window.createBlogLocation = function(root, initial) {
-    var coordinates = initial?.latitude != null ? { latitude: initial.latitude, longitude: initial.longitude } : null;
-    var field = document.createElement('input');
-    field.type = 'text'; field.maxLength = 120; field.value = initial?.label || '';
-    field.placeholder = '位置名称（可手动填写）'; field.setAttribute('aria-label', '位置名称');
-    var locate = document.createElement('button'); locate.type = 'button'; locate.textContent = '获取当前位置';
-    var clear = document.createElement('button'); clear.type = 'button'; clear.textContent = '移除定位';
+    var location = initial || null;
     var status = document.createElement('span'); status.setAttribute('role', 'status');
-    root.className = 'blog-location-editor'; root.append(field, locate, clear, status);
-    var generation = 0;
-    function render() { status.textContent = coordinates ? '📍 ' + coordinates.latitude.toFixed(5) + ', ' + coordinates.longitude.toFixed(5) : ''; }
-    locate.addEventListener('click', function() {
-      if (!navigator.geolocation) { status.textContent = '浏览器不支持定位，可手动填写位置'; return; }
-      var current = ++generation; locate.disabled = true; status.textContent = '正在获取位置…';
-      navigator.geolocation.getCurrentPosition(function(position) {
-        if (current !== generation) return;
-        coordinates = { latitude: position.coords.latitude, longitude: position.coords.longitude };
-        locate.disabled = false; render();
-      }, function(error) {
-        if (current !== generation) return;
-        locate.disabled = false;
-        status.textContent = error.code === 1 ? '未获定位授权，可手动填写位置' : '无法获取位置，可手动填写位置';
-      }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 });
-    });
-    function reset() { generation++; coordinates = null; field.value = ''; locate.disabled = false; render(); }
-    clear.addEventListener('click', reset); render();
-    return { value: function() { return field.value.trim() || coordinates ? Object.assign({ label: field.value.trim() }, coordinates || {}) : null; }, clear: reset };
+    var clear = document.createElement('button'); clear.type = 'button'; clear.textContent = '移除定位';
+    var retry = document.createElement('button'); retry.type = 'button'; retry.textContent = '重新定位';
+    root.className = 'blog-location-editor'; root.append(status, retry, clear);
+    var generation = 0, pending = null, started = false;
+    function render() { status.textContent = location ? '📍 ' + (location.label || location.latitude.toFixed(5) + ', ' + location.longitude.toFixed(5)) : '未附带位置信息'; }
+    function start(force) {
+      if (started && !force) return pending;
+      started = true;
+      if (location && !force) { render(); return Promise.resolve(); }
+      var current = ++generation;
+      status.textContent = '正在自动获取位置…';
+      pending = new Promise(function(resolve) {
+        if (!navigator.geolocation) { status.textContent = '浏览器不支持定位'; resolve(); return; }
+        navigator.geolocation.getCurrentPosition(function(position) {
+          if (current === generation) {
+            location = { label: '', latitude: position.coords.latitude, longitude: position.coords.longitude }; render();
+          }
+          resolve();
+        }, function(error) {
+          if (current === generation) status.textContent = error.code === 1 ? '未获定位授权，将不附带位置' : '自动定位失败，将不附带位置';
+          resolve();
+        }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
+      });
+      return pending;
+    }
+    retry.addEventListener('click', function() { start(true); });
+    clear.addEventListener('click', function() { generation++; location = null; pending = null; render(); });
+    render();
+    return {
+      start: start,
+      value: async function() { await pending; return location; },
+      clear: function() { generation++; location = null; started = false; pending = null; start(); }
+    };
   };
 
   var dialog = document.createElement('dialog'); dialog.className = 'blog-lightbox'; dialog.setAttribute('aria-label', '图片预览');

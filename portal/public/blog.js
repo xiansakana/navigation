@@ -199,6 +199,7 @@
             state.canPost = data.canPost;
             state.canManage = data.canManage;
             composer.classList.toggle('hidden', !(state.canPost || state.canManage));
+            if (state.canPost || state.canManage) locationEditor.start();
             shortcut.textContent = state.canPost ? '写博客' : '查看动态';
             shortcut.classList.remove('hidden');
             data.posts.forEach(function(post) { state.posts.set(post.id, post); feed.appendChild(renderPost(post)); });
@@ -258,7 +259,7 @@
         var created;
         try {
             created = await request('posts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: richEditor.content(), contentFormat: richEditor.format(), location: locationEditor.value(), tags: tagEditor.value(), hasMedia: state.pending.length > 0 }) });
+                body: JSON.stringify({ content: richEditor.content(), contentFormat: richEditor.format(), location: await locationEditor.value(), tags: tagEditor.value(), hasMedia: state.pending.length > 0 }) });
             await uploadAll(created.id, state.pending);
             release(state.pending);
             state.pending = [];
@@ -301,7 +302,7 @@
         var article = button.closest('.blog-post');
         if (button.dataset.action === 'delete') {
             if (!confirm('确定删除这篇动态吗？')) return;
-            try { await request('posts/' + button.dataset.id, { method: 'DELETE' }); state.editing = null; await load(true); }
+            try { await request('posts/' + button.dataset.id, { method: 'DELETE' }); state.editing?.editor.destroy(); state.editing = null; await load(true); }
             catch (error) { window.portalToast?.error(error.message); }
             return;
         }
@@ -310,13 +311,14 @@
         state.editing = { id: post.id, keepMediaIds: editItems(post).map(function(item) { return item.id; }), pending: [] };
         var body = article.querySelector('.blog-post-content');
         var editor = document.createElement('div');
-        editor.className = 'blog-edit';
+        editor.className = 'blog-edit-host';
         body.replaceWith(editor);
         state.editing.editor = window.createBlogEditor(editor, post);
         article.querySelector('.blog-post-tags')?.remove();
         article.querySelector('.blog-post-location')?.remove();
         var editLocation = document.createElement('div'); editor.after(editLocation);
         state.editing.location = window.createBlogLocation(editLocation, post.location);
+        state.editing.location.start();
         var editTags = document.createElement('div');
         editor.after(editTags);
         state.editing.tags = window.createBlogTags(editTags, post.tags, state.tags);
@@ -347,7 +349,7 @@
         var button = event.target.closest('button[data-action="save"], button[data-action="cancel"]');
         if (!button) return;
         if (button.dataset.action === 'cancel') {
-            release(state.editing.pending); state.editing = null; return load(true);
+            release(state.editing.pending); state.editing.editor.destroy(); state.editing = null; return load(true);
         }
         button.disabled = true;
         try {
@@ -358,13 +360,13 @@
             editing.keepMediaIds.push.apply(editing.keepMediaIds, uploaded.map(function(item) { return item.id; }));
             release(editing.pending); editing.pending = [];
             await request('posts/' + editing.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: editing.editor.content(), contentFormat: editing.editor.format(), location: editing.location.value(), tags: tags,
+                body: JSON.stringify({ content: editing.editor.content(), contentFormat: editing.editor.format(), location: await editing.location.value(), tags: tags,
                     keepMediaIds: editing.keepMediaIds }) });
-            release(editing.pending); state.editing = null;
+            release(editing.pending); editing.editor.destroy(); state.editing = null;
             await load(true);
         } catch (error) {
             if (error.uploaded?.length) {
-                release(state.editing.pending); state.editing = null; await load(true);
+                release(state.editing.pending); state.editing?.editor.destroy(); state.editing = null; await load(true);
                 window.portalToast?.error('部分媒体已上传，请重新编辑文章：' + error.message);
             } else window.portalToast?.error(error.message);
         }
