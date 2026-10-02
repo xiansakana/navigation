@@ -94,3 +94,47 @@ test('stores QQQ option captures per user and exposes backtest dataset', (contex
   assert.equal(daily.last_trade_at, '2026-09-21T19:59:00.000Z');
   db.close();
 });
+
+test('request audits distinguish new and duplicate data, isolate users and recover interrupted requests', (context) => {
+  const db = testDatabase(context);
+  if (!db) return;
+  try {
+    initSchema(db);
+    const store = createYoloStore({}, db);
+    const snapshot = { capturedAt: '2026-09-22T13:45:00Z', marketDate: 'WRONG', expiration: '2026-09-23',
+      requestedAt: '2026-09-22T14:00:00Z', receivedAt: '2026-09-22T14:00:01Z', timestampOrigin: 'provider',
+      providerTimestampRaw: '2026-09-22 13:45:00', contracts: [] };
+    let id = store.beginAttempt('a', 'manual', snapshot.requestedAt);
+    store.commitCaptureAttempt('a', id, snapshot, { durationMs: 1000, lagMs: 901000 });
+    assert.equal(store.collectionHealth('a').latest.status, 'success');
+    id = store.beginAttempt('a', 'scheduled');
+    store.commitCaptureAttempt('a', id, snapshot, {});
+    assert.equal(store.collectionHealth('a').latest.status, 'duplicate');
+    assert.equal(store.collectionHealth('a').latest.duplicate_captures, 1);
+    assert.equal(store.collectionHealth('b').attempts.length, 0);
+    store.beginAttempt('a', 'scheduled');
+    assert.equal(store.recoverAttempts(), 1);
+    assert.equal(store.collectionHealth('a').latest.status, 'interrupted');
+    const row = db.prepare('SELECT * FROM yolo_captures').get();
+    assert.equal(row.market_date, '2026-09-22');
+    assert.equal(row.received_at, snapshot.receivedAt);
+    assert.equal(row.timestamp_origin, 'provider');
+  } finally { db.close(); }
+});
+
+test('legacy UTC-date repair preserves previous labels without changing quote data', (context) => {
+  const db = testDatabase(context);
+  if (!db) return;
+  try {
+    initSchema(db);
+    db.prepare(`INSERT INTO yolo_captures(user_id,captured_at,market_date,expiration,capture_kind)
+      VALUES ('a','2026-09-23T03:56:14Z','2026-09-23','2026-09-24','intraday')`).run();
+    const store = createYoloStore({}, db);
+    const row = db.prepare('SELECT * FROM yolo_captures').get();
+    assert.equal(row.market_date, '2026-09-22');
+    assert.equal(row.original_market_date, '2026-09-23');
+    assert.equal(store.collectionHealth('a').repairedDates, 1);
+    createYoloStore({}, db);
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM yolo_captures').get().n, 1);
+  } finally { db.close(); }
+});

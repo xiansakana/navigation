@@ -800,7 +800,8 @@ app.post('/api/yolo/capture', async (req, res) => {
   if (!requireQuantPermission(req, res, 'yolo-control', 'edit')) return;
   try {
     const snapshot = await yoloCollector.captureNow(quantUserId(req));
-    res.json({ ok: true, capturedAt: snapshot?.capturedAt || null, contracts: snapshot?.contracts?.length || 0,
+    res.json({ ok: true, capturedAt: snapshot?.capturedAt || null, contracts: snapshot?.savedContracts || 0,
+      collectionStatus: snapshot?.collectionStatus || null,
       status: yoloStore.status(quantUserId(req)) });
   } catch (error) {
     res.status(502).json({ error: error.message || '期权链采集失败', status: yoloStore.status(quantUserId(req)) });

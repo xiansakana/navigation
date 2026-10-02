@@ -132,6 +132,24 @@ export function initSchema(db) {
       ON yolo_captures (user_id, captured_at);
     CREATE INDEX IF NOT EXISTS idx_yolo_quotes_user_symbol
       ON yolo_option_quotes (user_id, option_symbol, capture_id);
+
+    CREATE TABLE IF NOT EXISTS yolo_collection_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      requested_at TEXT NOT NULL,
+      finished_at TEXT,
+      trigger_kind TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running',
+      provider_at TEXT,
+      source TEXT,
+      duration_ms INTEGER,
+      lag_ms INTEGER,
+      new_captures INTEGER NOT NULL DEFAULT 0,
+      duplicate_captures INTEGER NOT NULL DEFAULT 0,
+      contract_count INTEGER NOT NULL DEFAULT 0,
+      error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_yolo_attempts_user_time ON yolo_collection_attempts (user_id, id DESC);
   `);
 
   const ensureColumn = (table, column, definition) => {
@@ -149,6 +167,11 @@ export function initSchema(db) {
   ensureColumn('blog_posts', 'location_json', 'TEXT');
   ensureColumn('blog_posts', 'content_format', "TEXT NOT NULL DEFAULT 'text'");
   ensureColumn('yolo_captures', 'capture_kind', "TEXT NOT NULL DEFAULT 'intraday'");
+  ensureColumn('yolo_captures', 'requested_at', 'TEXT');
+  ensureColumn('yolo_captures', 'received_at', 'TEXT');
+  ensureColumn('yolo_captures', 'timestamp_origin', 'TEXT');
+  ensureColumn('yolo_captures', 'provider_timestamp_raw', 'TEXT');
+  ensureColumn('yolo_captures', 'original_market_date', 'TEXT');
   ensureColumn('yolo_option_quotes', 'last_trade_at', 'TEXT');
   ensureColumn('yolo_option_quotes', 'open_price', 'REAL');
   ensureColumn('yolo_option_quotes', 'high_price', 'REAL');
@@ -157,8 +180,8 @@ export function initSchema(db) {
 
   const row = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get();
   if (!row) {
-    db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '5')").run();
-  } else if (Number(row.value) < 5) {
-    db.prepare("UPDATE meta SET value = '5' WHERE key = 'schema_version'").run();
+    db.prepare("INSERT INTO meta (key, value) VALUES ('schema_version', '6')").run();
+  } else if (Number(row.value) < 6) {
+    db.prepare("UPDATE meta SET value = '6' WHERE key = 'schema_version'").run();
   }
 }

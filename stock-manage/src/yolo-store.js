@@ -1,5 +1,6 @@
 import { getDatabase } from '../../shared/db/index.js';
 import { backtestYoloDataset, summarizeYoloTrades } from './yolo-backtest.js';
+import { yoloMarketDate } from './yolo-time.js';
 
 function safeUserId(userId) {
   const value = String(userId || 'local').trim();
@@ -8,6 +9,19 @@ function safeUserId(userId) {
 
 export function createYoloStore(config, databaseOverride = null) {
   const db = databaseOverride || getDatabase({ dbPath: config.dbPath });
+  // Preserve the previous date on repaired legacy rows. No quotes are fabricated or deleted.
+  const dateRepairKey = 'yolo_market_date_et_v1';
+  if (!db.prepare('SELECT value FROM meta WHERE key = ?').get(dateRepairKey)) {
+    db.transaction(() => {
+      const update = db.prepare('UPDATE yolo_captures SET original_market_date = COALESCE(original_market_date, market_date), market_date = ? WHERE id = ?');
+      for (const row of db.prepare("SELECT id, captured_at, market_date FROM yolo_captures WHERE capture_kind = 'intraday'").all()) {
+        if (!Number.isFinite(Date.parse(row.captured_at))) continue;
+        const date = yoloMarketDate(row.captured_at);
+        if (date !== row.market_date) update.run(date, row.id);
+      }
+      db.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run(dateRepairKey, new Date().toISOString());
+    })();
+  }
   const getSettings = db.prepare('SELECT * FROM yolo_settings WHERE user_id = ?');
   const putSettings = db.prepare(`
     INSERT INTO yolo_settings (user_id, enabled, interval_seconds, last_attempt_at, last_capture_at, last_error, updated_at)
@@ -17,8 +31,9 @@ export function createYoloStore(config, databaseOverride = null) {
       last_error=excluded.last_error, updated_at=excluded.updated_at
   `);
   const insertCapture = db.prepare(`
-    INSERT INTO yolo_captures (user_id, captured_at, market_date, expiration, underlying_price, source, capture_kind, contract_count)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO yolo_captures (user_id, captured_at, market_date, expiration, underlying_price, source, capture_kind, contract_count,
+      requested_at, received_at, timestamp_origin, provider_timestamp_raw)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const findCapture = db.prepare('SELECT id FROM yolo_captures WHERE user_id = ? AND captured_at = ? AND expiration = ?');
   const getCapture = db.prepare(`
@@ -88,7 +103,12 @@ export function createYoloStore(config, databaseOverride = null) {
       lastError: current.last_error,
       updatedAt: new Date().toISOString()
     };
-    putSettings.run(next);
+    db.transaction(() => {
+      putSettings.run(next);
+      const attemptId = beginAttempt(id, 'settings');
+      finishAttempt(id, attemptId, { status: next.enabled ? 'enabled' : 'paused', durationMs: 0,
+        error: `自动采集${next.enabled ? '开启' : '暂停'}；间隔 ${next.intervalSeconds} 秒` });
+    })();
     return settings(id);
   }
 
@@ -97,25 +117,32 @@ export function createYoloStore(config, databaseOverride = null) {
     const current = ensure(id);
     putSettings.run({
       userId: id, enabled: current.enabled, intervalSeconds: current.interval_seconds,
-      lastAttemptAt: new Date().toISOString(), lastCaptureAt: capturedAt || current.last_capture_at,
+      lastAttemptAt: new Date().toISOString(), lastCaptureAt: capturedAt && (!current.last_capture_at || capturedAt > current.last_capture_at) ? capturedAt : current.last_capture_at,
       lastError: error ? String(error).slice(0, 500) : null, updatedAt: new Date().toISOString()
     });
   }
 
-  const saveCapture = db.transaction((userId, snapshot) => {
+  const saveCaptureDetailed = db.transaction((userId, snapshot) => {
     const id = safeUserId(userId);
     const groups = Array.isArray(snapshot.chains) && snapshot.chains.length
       ? snapshot.chains
       : [snapshot];
     let lastId = null;
+    let newCaptures = 0;
+    let duplicateCaptures = 0;
+    let contractCount = 0;
+    const marketDate = snapshot.captureKind === 'daily-summary' ? snapshot.marketDate : yoloMarketDate(snapshot.capturedAt);
     for (const chain of groups) {
       const expiration = chain.expiration || chain.contracts?.[0]?.expiration || snapshot.expiration || '';
       const existing = findCapture.get(id, snapshot.capturedAt, expiration);
-      if (existing) { lastId = Number(existing.id); continue; }
+      if (existing) { lastId = Number(existing.id); duplicateCaptures += 1; continue; }
       const contracts = Array.isArray(chain.contracts) ? chain.contracts : [];
-      const info = insertCapture.run(id, snapshot.capturedAt, snapshot.marketDate, expiration,
-        chain.underlyingPrice ?? snapshot.underlyingPrice ?? null, snapshot.source || '', snapshot.captureKind || 'intraday', contracts.length);
+      const info = insertCapture.run(id, snapshot.capturedAt, marketDate, expiration,
+        chain.underlyingPrice ?? snapshot.underlyingPrice ?? null, snapshot.source || '', snapshot.captureKind || 'intraday', contracts.length,
+        snapshot.requestedAt || null, snapshot.receivedAt || null, snapshot.timestampOrigin || null, snapshot.providerTimestampRaw || null);
       lastId = Number(info.lastInsertRowid);
+      newCaptures += 1;
+      contractCount += contracts.length;
       for (const quote of contracts) {
         insertQuote.run(info.lastInsertRowid, id, quote.optionSymbol, quote.right, quote.strike, quote.expiration,
           quote.bid, quote.ask, quote.bidSize ?? null, quote.askSize ?? null, quote.last ?? null,
@@ -125,8 +152,49 @@ export function createYoloStore(config, databaseOverride = null) {
       }
     }
     markAttempt(id, null, snapshot.capturedAt);
-    return lastId;
+    return { lastId, newCaptures, duplicateCaptures, contractCount };
   });
+
+  function saveCapture(userId, snapshot) { return saveCaptureDetailed(userId, snapshot).lastId; }
+
+  function beginAttempt(userId, triggerKind, requestedAt = new Date().toISOString()) {
+    return Number(db.prepare('INSERT INTO yolo_collection_attempts (user_id, requested_at, trigger_kind) VALUES (?, ?, ?)')
+      .run(safeUserId(userId), requestedAt, triggerKind).lastInsertRowid);
+  }
+
+  function finishAttempt(userId, attemptId, detail) {
+    const finishedAt = detail.finishedAt || new Date().toISOString();
+    db.prepare(`UPDATE yolo_collection_attempts SET finished_at = @finishedAt, status = @status,
+      provider_at = @providerAt, source = @source, duration_ms = @durationMs, lag_ms = @lagMs,
+      new_captures = @newCaptures, duplicate_captures = @duplicateCaptures, contract_count = @contractCount, error = @error
+      WHERE id = @id AND user_id = @userId AND status = 'running'`).run({
+      id: attemptId, userId: safeUserId(userId), finishedAt, status: detail.status,
+      providerAt: detail.providerAt || null, source: detail.source || null,
+      durationMs: detail.durationMs ?? null, lagMs: detail.lagMs ?? null,
+      newCaptures: detail.newCaptures || 0, duplicateCaptures: detail.duplicateCaptures || 0,
+      contractCount: detail.contractCount || 0, error: detail.error ? String(detail.error).slice(0, 500) : null
+    });
+  }
+
+  const commitCaptureAttempt = db.transaction((userId, attemptId, snapshot, detail) => {
+    const saved = saveCaptureDetailed(userId, snapshot);
+    finishAttempt(userId, attemptId, { ...detail, ...saved, status: saved.newCaptures ? 'success' : 'duplicate' });
+    return saved;
+  });
+
+  function recoverAttempts() {
+    return db.prepare(`UPDATE yolo_collection_attempts SET status = 'interrupted', finished_at = ?,
+      error = '服务重启前采集未完成；无法判断当时的具体失败原因'
+      WHERE status = 'running'`).run(new Date().toISOString()).changes;
+  }
+
+  function collectionHealth(userId) {
+    const id = safeUserId(userId);
+    const attempts = db.prepare('SELECT * FROM yolo_collection_attempts WHERE user_id = ? ORDER BY id DESC LIMIT 20').all(id);
+    const latest = attempts[0] || null;
+    return { attempts, latest, auditSince: db.prepare('SELECT MIN(requested_at) first FROM yolo_collection_attempts WHERE user_id = ?').get(id).first,
+      repairedDates: db.prepare('SELECT COUNT(*) n FROM yolo_captures WHERE user_id = ? AND original_market_date IS NOT NULL').get(id).n };
+  }
 
   function enabledUsers() {
     return db.prepare('SELECT * FROM yolo_settings WHERE enabled = 1').all().map((row) => ({
@@ -150,7 +218,7 @@ export function createYoloStore(config, databaseOverride = null) {
     `).all(id);
     return { settings: cfg, stats: { captures: stats.captures, days: stats.days, quoteRows: stats.quote_rows,
       intradayCaptures: stats.intraday_captures, summaryCaptures: stats.summary_captures,
-      firstCaptureAt: stats.first_capture_at, latestCaptureAt: stats.latest_capture_at }, recent };
+      firstCaptureAt: stats.first_capture_at, latestCaptureAt: stats.latest_capture_at }, recent, collectionHealth: collectionHealth(id) };
   }
 
   function dataset(userId) {
@@ -286,5 +354,6 @@ export function createYoloStore(config, databaseOverride = null) {
         priceBasis: 'Cboe延时采样买卖报价，不是逐笔成交或实时NBBO；回撤为已平仓权益回撤。' } };
   }
 
-  return { ensure, settings, updateSettings, markAttempt, saveCapture, enabledUsers, status, captureDetails, optionChain, optionHistory, dataset, backtest, backtestAsync };
+  return { ensure, settings, updateSettings, markAttempt, saveCapture, saveCaptureDetailed, beginAttempt, finishAttempt,
+    commitCaptureAttempt, recoverAttempts, collectionHealth, enabledUsers, status, captureDetails, optionChain, optionHistory, dataset, backtest, backtestAsync };
 }

@@ -4,6 +4,7 @@ import {
   ashareExchange,
   normalizeSymbol
 } from './markets.js';
+import { yoloMarketDate } from './yolo-time.js';
 
 const FETCH_TIMEOUT_MS = 12000;
 const FETCH_RETRIES = 2;
@@ -908,7 +909,7 @@ export function createQuoteService(config) {
   async function getCboeDelayedQqq1dteChain() {
     const data = await fetchJson('https://cdn.cboe.com/api/global/delayed_quotes/options/QQQ.json');
     const providerTimestamp = cboeUtcTimestampToIso(data?.timestamp);
-    const etDate = String(data?.timestamp || '').slice(0, 10) || qqqChainDate();
+    const etDate = providerTimestamp ? yoloMarketDate(providerTimestamp) : qqqChainDate();
     const parsed = (data?.data?.options || []).map((item) => parseCboeOption(item, etDate)).filter(Boolean);
     const expiration = parsed.map((row) => row.expiration).sort()[0];
     if (!expiration) throw new Error('Cboe 延时链未找到 QQQ 下一到期合约');
@@ -917,6 +918,7 @@ export function createQuoteService(config) {
     if (!contracts.length) throw new Error('Cboe 延时链没有可记录的有效 QQQ NBBO');
     return {
       capturedAt: providerTimestamp || new Date().toISOString(), marketDate: etDate, expiration,
+      timestampOrigin: providerTimestamp ? 'provider' : 'received-fallback', providerTimestampRaw: data?.timestamp || null,
       underlyingPrice, source: 'cboe-delayed', captureKind: 'intraday', contracts
     };
   }
@@ -924,7 +926,7 @@ export function createQuoteService(config) {
   async function getCboeDelayedQqqChains() {
     const data = await fetchJson('https://cdn.cboe.com/api/global/delayed_quotes/options/QQQ.json');
     const providerTimestamp = cboeUtcTimestampToIso(data?.timestamp);
-    const etDate = String(data?.timestamp || '').slice(0, 10) || qqqChainDate();
+    const etDate = providerTimestamp ? yoloMarketDate(providerTimestamp) : qqqChainDate();
     const parsed = (data?.data?.options || []).map((item) => parseCboeOption(item, etDate)).filter(Boolean);
     const underlyingPrice = Number(data?.data?.current_price) || 0;
     const byExpiration = new Map();
@@ -940,6 +942,7 @@ export function createQuoteService(config) {
     if (!chains.length) throw new Error('Cboe 延时链没有可记录的有效 QQQ 到期日');
     return {
       capturedAt: providerTimestamp || new Date().toISOString(), marketDate: etDate,
+      timestampOrigin: providerTimestamp ? 'provider' : 'received-fallback', providerTimestampRaw: data?.timestamp || null,
       source: 'cboe-delayed', captureKind: 'intraday', chains
     };
   }

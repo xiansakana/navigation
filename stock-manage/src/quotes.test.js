@@ -131,6 +131,19 @@ test('QQQ option chain collector preserves multiple Cboe expirations', async (co
   assert.equal(result.chains[1].contracts[0].right, 'P');
 });
 
+test('Cboe chain uses New York date across UTC midnight and preserves timestamp provenance', async (context) => {
+  const originalFetch = global.fetch;
+  context.after(() => { global.fetch = originalFetch; });
+  global.fetch = async () => response({ timestamp: '2026-09-23 03:56:14', data: { current_price: 600, options: [
+    { option: 'QQQ260923C00600000', bid: 1.2, ask: 1.3, delta: 0.45, iv: 0.25 }
+  ] } });
+  const result = await createQuoteService({}).getQqqOptionChains();
+  assert.equal(result.marketDate, '2026-09-22');
+  assert.equal(result.capturedAt, '2026-09-23T03:56:14.000Z');
+  assert.equal(result.timestampOrigin, 'provider');
+  assert.equal(result.providerTimestampRaw, '2026-09-23 03:56:14');
+});
+
 test('QQQ previous-session summary preserves daily OHLC and uses the 16:00 ET close', async (context) => {
   const originalFetch = global.fetch;
   context.after(() => { global.fetch = originalFetch; });

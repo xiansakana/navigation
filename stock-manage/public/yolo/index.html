@@ -6,7 +6,7 @@
   <title>梭哈 · QQQ 1DTE</title>
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="../quant/style.css">
-  <link rel="stylesheet" href="./style.css?v=20261003-card-layout1">
+  <link rel="stylesheet" href="./style.css?v=20261003-collection-audit1">
 </head>
 <body>
   <main class="sm-app quant-app yolo-app">
@@ -47,7 +47,7 @@
 
       <section class="quant-card">
         <div class="quant-card-head"><div><h2>数据质量</h2><p>真实回测至少需要多个完整交易日。</p></div></div>
-        <dl class="yolo-quality"><div><dt>首条数据</dt><dd id="first-capture">—</dd></div><div><dt>最新到期日</dt><dd id="latest-expiration">—</dd></div><div><dt>最新 QQQ</dt><dd id="latest-spot">—</dd></div><div><dt>行情源</dt><dd id="latest-source">—</dd></div></dl>
+        <dl class="yolo-quality"><div><dt>首条数据</dt><dd id="first-capture">—</dd></div><div><dt>最新到期日</dt><dd id="latest-expiration">—</dd></div><div><dt>最新 QQQ</dt><dd id="latest-spot">—</dd></div><div><dt>行情源</dt><dd id="latest-source">—</dd></div><div><dt>最近请求耗时</dt><dd id="latest-request-duration">—</dd></div><div><dt>整链时间差（非逐笔延迟）</dt><dd id="latest-provider-lag">—</dd></div></dl>
       </section>
     </section>
 
@@ -85,6 +85,8 @@
     <details class="quant-card yolo-collapsible-card" id="recent-captures-card" open>
       <summary class="quant-card-head"><div><h2>最近采集</h2><p>展示最近采集的多个到期日期权链记录。</p></div><span class="yolo-card-toggle" aria-hidden="true"><span class="yolo-card-collapse-label">收起</span><span class="yolo-card-expand-label">展开</span><span class="yolo-card-chevron">⌄</span></span></summary>
       <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>时间</th><th>类型</th><th>市场日</th><th>到期日</th><th class="align-right">QQQ</th><th class="align-right">合约数</th><th>来源</th></tr></thead><tbody id="capture-body"><tr><td colspan="7" class="quant-empty">尚无数据</td></tr></tbody></table></div>
+      <div class="quant-card-head"><div><h2>采集请求审计</h2><p id="collection-audit-message">从本次升级开始记录每次请求；过去的失败原因不会补造。</p></div></div>
+      <div class="quant-table-wrap"><table class="quant-table"><thead><tr><th>请求 / 完成时间（北京时间）</th><th>触发 / 状态</th><th>行情时间（北京时间）</th><th>耗时 / 整链时间差</th><th>新增 / 重复到期链</th><th>说明</th></tr></thead><tbody id="collection-attempt-body"><tr><td colspan="6" class="quant-empty">尚无请求审计；休市期间自动采集不会发起请求。</td></tr></tbody></table></div>
     </details>
 
     <details class="quant-card yolo-collapsible-card" id="option-chain-card" open>
@@ -106,6 +108,6 @@
     </details>
   </main>
   <script src="../vendor/echarts.min.js"></script>
-  <script type="module" src="./app.js?v=20261003-card-layout1"></script>
+  <script type="module" src="./app.js?v=20261003-collection-audit1"></script>
 </body>
 </html>

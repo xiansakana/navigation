@@ -62,6 +62,16 @@ function renderStatus(data) {
   $('#latest-expiration').textContent = latest?.expiration || '—';
   $('#latest-spot').textContent = formatPrice(latest?.underlying_price, 'USD');
   $('#latest-source').textContent = latest?.source || '—';
+  const health = data.collectionHealth || {};
+  const duration = (value) => value == null ? '—' : `${(Number(value) / 1000).toFixed(1)}秒`;
+  const lag = (value) => value == null ? '—' : `${(Number(value) / 60000).toFixed(1)}分钟`;
+  const statuses = { running: '请求中', success: '已写入', duplicate: '重复行情', error: '请求/写入失败',
+    interrupted: '重启中断', stale: '行情过期', 'off-session': '非盘中行情', 'invalid-time': '行情时间无效', 'future-time': '行情时间超前', enabled: '已开启', paused: '已暂停' };
+  const triggers = { scheduled: '自动', manual: '手动', summary: '收盘摘要', settings: '设置修改' };
+  $('#latest-request-duration').textContent = duration(health.latest?.duration_ms);
+  $('#latest-provider-lag').textContent = health.latest?.trigger_kind === 'summary' ? '收盘摘要（不适用）' : lag(health.latest?.lag_ms);
+  $('#collection-audit-message').textContent = `${health.auditSince ? `审计始于 ${dateTime(health.auditSince)}，展示最近20次请求。` : '从本次升级开始记录每次请求，过去的失败原因不会补造。'} 已修正 ${health.repairedDates || 0} 条历史记录的美东日期（原日期保留）。`;
+  $('#collection-attempt-body').innerHTML = (health.attempts || []).length ? health.attempts.map((attempt) => `<tr><td>${dateTime(attempt.requested_at)}<span class="quant-sub">${dateTime(attempt.finished_at)}</span></td><td>${escapeHtml(triggers[attempt.trigger_kind] || attempt.trigger_kind)} · ${escapeHtml(statuses[attempt.status] || attempt.status)}</td><td>${dateTime(attempt.provider_at)}</td><td>${duration(attempt.duration_ms)} / ${attempt.trigger_kind === 'summary' ? '摘要' : lag(attempt.lag_ms)}</td><td>${Number(attempt.new_captures)} / ${Number(attempt.duplicate_captures)}</td><td>${escapeHtml(attempt.error || attempt.source || '—')}</td></tr>`).join('') : '<tr><td colspan="6" class="quant-empty">尚无请求审计；休市期间自动采集不会发起请求。</td></tr>';
   $('#collector-message').textContent = settings.lastError
     ? `最近错误：${settings.lastError}`
     : settings.enabled
@@ -346,7 +356,9 @@ async function captureNow() {
   try {
     const result = await api('/yolo/capture', { method: 'POST', body: '{}' });
     renderStatus({ ...result.status, marketOpen: state.status?.marketOpen, collectorRunning: false });
-    $('#collector-message').textContent = `已写入 ${result.contracts} 个真实期权报价。`;
+    $('#collector-message').textContent = result.collectionStatus === 'success' ? `已写入 ${result.contracts} 个期权报价。`
+      : result.collectionStatus === 'duplicate' ? '行情时间戳未更新；记录为重复请求，不重复写入报价。'
+      : `本次未写入分钟库：${result.status?.collectionHealth?.latest?.error || result.collectionStatus || '无有效数据'}。可在最近采集查看审计。`;
   } catch (error) { $('#collector-message').textContent = error.message; $('#collector-message').className = 'yolo-message error'; await loadStatus(true); }
   finally { button.disabled = false; button.textContent = '立即采集'; }
 }
