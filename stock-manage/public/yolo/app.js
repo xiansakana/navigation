@@ -374,23 +374,55 @@ function renderBacktest(result) {
   $('#bt-winrate').textContent = `${(Number(result.winRate) * 100).toFixed(1)}% / ${result.trades.length}`;
   $('#bt-drawdown').textContent = percent(result.maxDrawdown);
   $('#backtest-message').textContent = result.trades.length
-    ? `使用 ${result.trades.length} 笔真实NBBO交易；结果只覆盖本站开始采集后的日期。`
-    : '当前数据不足以形成交易：需要完整覆盖09:30、09:45及退出时段。';
+    ? `${result.trades.length} 笔完成交易 · 检查 ${result.diagnostics?.length || 0} 个交易日 · Cboe延时采样报价（非逐笔成交）；最大回撤仅按已平仓权益计算。`
+    : '回测已完成，没有满足条件的完整交易。请查看下方逐日原因。';
   $('#trade-body').innerHTML = result.trades.length ? result.trades.map((trade) => `<tr><td>${escapeHtml(trade.marketDate)}</td><td><strong>${escapeHtml(trade.direction)}</strong><span class="quant-sub">${escapeHtml(trade.optionSymbol)}</span></td><td class="align-right">${formatPrice(trade.entryAsk, 'USD')} → ${formatPrice(trade.exitBid, 'USD')}<span class="quant-sub">${trade.contracts} 张</span></td><td class="align-right">${Number(trade.entryDelta).toFixed(3)}</td><td class="align-right ${trade.netPnl >= 0 ? 'pos' : 'neg'}">${percent(trade.optionReturn)}<span class="quant-sub">${money(trade.netPnl)}</span></td><td>${escapeHtml(trade.reason)}</td></tr>`).join('') : '<tr><td colspan="6" class="quant-empty">暂无满足条件的交易。</td></tr>';
+}
+
+function renderBacktestProgress(job) {
+  const progress = job.progress || {};
+  const total = Number(progress.totalDays) || 0;
+  const completed = Number(progress.completedDays) || 0;
+  const elapsed = ((Date.now() - job.startedAt) / 1000).toFixed(1);
+  $('#backtest-progress').hidden = false;
+  $('#backtest-progress-bar').value = job.status === 'completed' ? 100 : (total ? completed / total * 100 : 0);
+  $('#backtest-progress-label').textContent = `${progress.stage || '准备中'} · ${completed}/${total} 天 · 已读 ${Number(progress.quoteRows || 0).toLocaleString()} 条报价 · ${elapsed}秒${progress.marketDate ? ` · ${progress.marketDate} → ${progress.expiration || '无可用到期日'}` : ''}${progress.totalCaptures ? ` · ${progress.loadedCaptures || 0}/${progress.totalCaptures} 次采集` : ''}`;
+  $('#backtest-day-log').innerHTML = (progress.diagnostics || []).map((day) => `<li><strong>${escapeHtml(day.marketDate)}</strong> → ${escapeHtml(day.expiration || '—')} · ${day.status === 'traded' ? '成交' : day.status === 'incomplete' ? '数据中断' : '跳过'} · ${escapeHtml(day.reason)}${Number.isFinite(day.underlyingMove) ? ` · QQQ ${percent(day.underlyingMove)}` : ''}${Number.isFinite(day.netPnl) ? ` · ${money(day.netPnl)}` : ''}</li>`).join('');
 }
 
 async function runBacktest(event) {
   event.preventDefault();
   const button = $('#run-yolo-backtest');
   button.disabled = true; button.textContent = '回测中…';
+  $('#backtest-message').className = 'yolo-message';
+  $('#backtest-message').textContent = '正在创建回测任务…';
+  ['#bt-return', '#bt-pf', '#bt-winrate', '#bt-drawdown'].forEach((selector) => { $(selector).textContent = '—'; });
+  $('#trade-body').innerHTML = '<tr><td colspan="6" class="quant-empty">回测中，完成后显示本次交易。</td></tr>';
+  $('#backtest-day-log').innerHTML = '';
   try {
     const payload = {
       targetDelta: Number($('#bt-delta').value), minMovePct: Number($('#bt-move').value) / 100,
       stopLoss: Number($('#bt-stop').value) / 100, profitTarget: Number($('#bt-target').value) / 100,
       initialCapital: Number($('#bt-capital').value)
     };
-    renderBacktest(await api('/yolo/backtest', { method: 'POST', body: JSON.stringify(payload) }));
-  } catch (error) { $('#backtest-message').textContent = error.message; }
+    let job = await api('/yolo/backtest', { method: 'POST', body: JSON.stringify(payload), signal: AbortSignal.timeout(20000) });
+    let failures = 0;
+    while (true) {
+      renderBacktestProgress(job);
+      if (job.status === 'failed') throw new Error(job.error || '回测任务失败');
+      if (job.status === 'completed') { renderBacktest(job.result); break; }
+      $('#backtest-message').textContent = '任务在后台运行；下方显示真实处理进度和逐日判断，不是模拟进度。';
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      try {
+        job = await api(`/yolo/backtest/${encodeURIComponent(job.id)}`, { signal: AbortSignal.timeout(20000) });
+        failures = 0;
+      } catch (error) {
+        if (++failures >= 3) throw new Error(`进度查询失败：${error.message}。可再次点击运行以连接仍在运行的任务。`);
+        $('#backtest-progress-label').textContent = `进度查询暂时中断，正在重试（${failures}/3）…`;
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+    }
+  } catch (error) { $('#backtest-message').textContent = error.message; $('#backtest-message').className = 'yolo-message error'; }
   finally { button.disabled = false; button.textContent = '运行回测'; }
 }
 

@@ -97,3 +97,6 @@
   .yolo-chain-sides th:first-child { padding-right: 10px; }
   .yolo-chain-sides th:last-child { padding-left: 10px; }
 }
+.yolo-backtest-progress progress { width: 100%; height: 14px; accent-color: #38bdf8; }
+.yolo-backtest-progress p { font-size: 13px; color: #94a3b8; }
+.yolo-backtest-progress ul { max-height: 260px; overflow: auto; padding-left: 20px; font-size: 13px; line-height: 1.9; }

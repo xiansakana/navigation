@@ -52,7 +52,7 @@
     </section>
 
     <section class="quant-card">
-      <div class="quant-card-head"><div><h2>真实报价回测</h2><p>09:45按QQQ开盘15分钟方向入场；目标Delta选择真实上市合约。</p></div></div>
+      <div class="quant-card-head"><div><h2>真实报价回测</h2><p>09:45按QQQ开盘方向入场；只选本站已采集的最近未来到期日，排除0DTE。周五可选择下周一；缺失更近到期日时不保证严格1DTE。</p></div></div>
       <form class="yolo-backtest-form" id="yolo-backtest-form">
         <label><span>目标 |Delta|</span><input id="bt-delta" type="number" min="0.1" max="0.8" step="0.05" value="0.45"></label>
         <label><span>最小15分钟涨跌</span><input id="bt-move" type="number" min="0" max="2" step="0.05" value="0.15"><em>%</em></label>
@@ -62,6 +62,12 @@
         <button class="btn primary" id="run-yolo-backtest" type="submit">运行回测</button>
       </form>
       <p class="yolo-message" id="backtest-message">数据积累后即可运行。</p>
+      <div id="backtest-progress" class="yolo-backtest-progress" hidden aria-live="polite">
+        <progress id="backtest-progress-bar" max="100" value="0" aria-label="回测日期处理进度"></progress>
+        <p id="backtest-progress-label"></p>
+        <ul id="backtest-day-log"></ul>
+      </div>
+      <p class="quant-disclaimer">按采样ask买、bid卖并计手续费。数据中断且未触发退出的交易不纳入收益。延时离散报价无法保证真实成交、止损成交或盘中最大回撤；样本少时不代表策略有效。</p>
     </section>
 
     <section class="quant-summary">
@@ -100,6 +106,6 @@
     </section>
   </main>
   <script src="../vendor/echarts.min.js"></script>
-  <script type="module" src="./app.js?v=20261003-price3"></script>
+  <script type="module" src="./app.js?v=20261003-backtest-progress1"></script>
 </body>
 </html>

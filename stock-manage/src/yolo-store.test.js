@@ -4,6 +4,31 @@ import Database from 'better-sqlite3';
 import { initSchema } from '../../shared/db/schema.js';
 import { createYoloStore } from './yolo-store.js';
 
+test('async backtest loads only nearest future expiry, reports daily reasons and isolates users', async (context) => {
+  let db;
+  try { db = new Database(':memory:'); }
+  catch { context.skip('better-sqlite3 native binding is unavailable for this Node runtime'); return; }
+  try {
+    initSchema(db);
+    const store = createYoloStore({}, db);
+    for (const [time, spot, bid] of [['09:30', 600, 0.95], ['09:45', 602, 0.95], ['10:00', 603, 1.6]]) {
+      for (const expiration of ['2026-09-22', '2026-09-23', '2026-10-02']) {
+        store.saveCapture('a', { capturedAt: `2026-09-22T${time}:00-04:00`, marketDate: '2026-09-22',
+          expiration, underlyingPrice: spot, source: 'test', contracts: [{ optionSymbol: `${expiration}-C`,
+            right: 'C', strike: 600, expiration, bid, ask: bid + 0.05, delta: 0.45 }] });
+      }
+    }
+    const progress = [];
+    const result = await store.backtestAsync('a', {}, (item) => progress.push(item));
+    assert.equal(result.trades.length, 1);
+    assert.equal(result.trades[0].expiration, '2026-09-23');
+    assert.equal(result.dataQuality.quoteRows, 3);
+    assert.equal(progress.at(-1).completedDays, 1);
+    assert.equal(progress.at(-1).diagnostics[0].status, 'traded');
+    assert.equal((await store.backtestAsync('b', {})).trades.length, 0);
+  } finally { db.close(); }
+});
+
 test('stores QQQ option captures per user and exposes backtest dataset', (context) => {
   let db;
   try { db = new Database(':memory:'); }

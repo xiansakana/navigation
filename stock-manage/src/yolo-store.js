@@ -1,5 +1,5 @@
 import { getDatabase } from '../../shared/db/index.js';
-import { backtestYoloDataset } from './yolo-backtest.js';
+import { backtestYoloDataset, summarizeYoloTrades } from './yolo-backtest.js';
 
 function safeUserId(userId) {
   const value = String(userId || 'local').trim();
@@ -228,5 +228,63 @@ export function createYoloStore(config, databaseOverride = null) {
 
   function backtest(userId, options) { return backtestYoloDataset(dataset(userId), options); }
 
-  return { ensure, settings, updateSettings, markAttempt, saveCapture, enabledUsers, status, captureDetails, optionChain, optionHistory, dataset, backtest };
+  async function backtestAsync(userId, options, onProgress = () => {}) {
+    const id = safeUserId(userId);
+    const yieldToRequests = () => new Promise((resolve) => setImmediate(resolve));
+    onProgress({ stage: '读取日期和到期日', completedDays: 0, totalDays: 0, quoteRows: 0, diagnostics: [] });
+    await yieldToRequests();
+    // Freeze capture IDs for this run. New collector writes belong to a later run.
+    const rows = db.prepare(`SELECT id, captured_at, market_date, expiration, underlying_price
+      FROM yolo_captures WHERE user_id = ? AND capture_kind = 'intraday' ORDER BY market_date, captured_at`).all(id);
+    const days = new Map();
+    for (const row of rows) {
+      if (!days.has(row.market_date)) days.set(row.market_date, []);
+      days.get(row.market_date).push(row);
+    }
+    // Use the capture_id primary-key prefix, not a multi-million-row quote scan.
+    const selectQuotes = db.prepare(`SELECT option_symbol, right_type, strike, expiration, bid, ask, delta
+      FROM yolo_option_quotes WHERE capture_id = ? AND user_id = ? AND expiration = ?`);
+    const diagnostics = [];
+    const trades = [];
+    let quoteRows = 0;
+    let completedDays = 0;
+    const resultConfig = backtestYoloDataset([], options).config;
+    for (const [marketDate, dayRows] of days) {
+      const expiration = dayRows.map((row) => row.expiration).filter((value) => value > marketDate).sort()[0];
+      const selected = dayRows.filter((row) => row.expiration === expiration);
+      const captures = [];
+      for (let offset = 0; offset < selected.length; offset += 20) {
+        onProgress({ stage: '读取下一到期日报价', marketDate, expiration, completedDays, totalDays: days.size,
+          loadedCaptures: offset, totalCaptures: selected.length, quoteRows, diagnostics: [...diagnostics] });
+        await yieldToRequests();
+        for (const row of selected.slice(offset, offset + 20)) {
+          const quotes = selectQuotes.all(row.id, id, expiration).map((q) => ({
+            optionSymbol: q.option_symbol, right: q.right_type, strike: q.strike, expiration: q.expiration,
+            bid: q.bid, ask: q.ask, delta: q.delta
+          }));
+          quoteRows += quotes.length;
+          captures.push({ id: row.id, capturedAt: row.captured_at, marketDate, expiration,
+            underlyingPrice: row.underlying_price, quotes });
+        }
+      }
+      onProgress({ stage: '计算入场与退出', marketDate, expiration, completedDays, totalDays: days.size,
+        loadedCaptures: selected.length, totalCaptures: selected.length, quoteRows, diagnostics: [...diagnostics] });
+      await yieldToRequests();
+      const result = backtestYoloDataset(captures, options);
+      trades.push(...result.trades);
+      diagnostics.push(...(result.diagnostics.length ? result.diagnostics : [{ marketDate, expiration: null,
+        status: 'skipped', reason: '没有下一到期日的日内报价（排除0DTE）', captures: 0 }]));
+      completedDays += 1;
+      onProgress({ stage: '日期处理完成', marketDate, expiration, completedDays, totalDays: days.size,
+        quoteRows, diagnostics: [...diagnostics] });
+      await yieldToRequests();
+    }
+    onProgress({ stage: '汇总结果', completedDays, totalDays: days.size, quoteRows, diagnostics: [...diagnostics] });
+    return { config: resultConfig, ...summarizeYoloTrades(trades, resultConfig.initialCapital), trades, diagnostics,
+      dataQuality: { days: days.size, quoteRows, incompleteDays: diagnostics.filter((d) => d.status === 'incomplete').length,
+        expirationRule: '每个交易日选择本站已采集的最近未来到期日；不是按自然日+1，缺失更近到期日时不能证明严格1DTE。',
+        priceBasis: 'Cboe延时采样买卖报价，不是逐笔成交或实时NBBO；回撤为已平仓权益回撤。' } };
+  }
+
+  return { ensure, settings, updateSettings, markAttempt, saveCapture, enabledUsers, status, captureDetails, optionChain, optionHistory, dataset, backtest, backtestAsync };
 }

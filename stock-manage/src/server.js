@@ -6,6 +6,7 @@ import { loadConfig, createStore } from './storage.js';
 import { createQuantStore, resetPaper } from './quant-store.js';
 import { createQuantBacktestStore } from './quant-backtest-store.js';
 import { createYoloStore } from './yolo-store.js';
+import { createYoloBacktestJobs } from './yolo-backtest-jobs.js';
 import { createYoloCollector, isUsOptionMarketOpen } from './yolo-collector.js';
 import { createQuoteService } from './quotes.js';
 import { parseImportBuffer } from './import-moomoo.js';
@@ -47,6 +48,7 @@ const quantStore = createQuantStore(config);
 const quantBacktestStore = createQuantBacktestStore(config);
 const quotes = createQuoteService(config);
 const yoloStore = createYoloStore(config);
+const yoloBacktestJobs = createYoloBacktestJobs(yoloStore);
 const yoloCollector = createYoloCollector({ store: yoloStore, quotes });
 const app = express();
 
@@ -825,10 +827,17 @@ app.post('/api/yolo/backfill-previous-close', async (req, res) => {
 app.post('/api/yolo/backtest', (req, res) => {
   if (!requireQuantPermission(req, res, 'yolo-backtest-run', 'edit')) return;
   try {
-    res.json(yoloStore.backtest(quantUserId(req), req.body || {}));
+    res.status(202).json(yoloBacktestJobs.start(quantUserId(req), req.body || {}));
   } catch (error) {
-    res.status(500).json({ error: error.message || '梭哈回测失败' });
+    res.status(error.status || 500).json({ error: error.message || '梭哈回测失败' });
   }
+});
+
+app.get('/api/yolo/backtest/:jobId', (req, res) => {
+  if (!requireQuantPermission(req, res, 'yolo-backtest-run', 'edit')) return;
+  const job = yoloBacktestJobs.get(quantUserId(req), req.params.jobId);
+  if (!job) return res.status(404).json({ error: '回测任务不存在、已过期或服务已重启，请重新运行。' });
+  res.set('Cache-Control', 'no-store').json(job);
 });
 
 app.post('/api/quotes/refresh', async (req, res) => {

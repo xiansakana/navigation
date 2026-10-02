@@ -38,4 +38,34 @@ test('backtest skips days without a sufficient opening move', () => {
     capture('09:30', 600, 0.9, 1.0), capture('09:45', 600.2, 0.95, 1.0)
   ], { minMovePct: 0.0015 });
   assert.equal(result.trades.length, 0);
+  assert.match(result.diagnostics[0].reason, /阈值/);
+});
+
+test('excludes same-day and later expirations even when 0DTE has closer delta', () => {
+  const next = [capture('09:30', 600, 0.9, 1), capture('09:45', 602, 0.95, 1), capture('10:00', 603, 1.6)];
+  const zero = next.map((item) => ({ ...item, expiration: '2026-09-22', quotes: item.quotes.map((q) => ({ ...q,
+    optionSymbol: 'O:QQQ260922C00600000', expiration: '2026-09-22' })) }));
+  const later = next.map((item) => ({ ...item, expiration: '2026-09-24', quotes: item.quotes.map((q) => ({ ...q,
+    optionSymbol: 'O:QQQ260924C00600000', expiration: '2026-09-24' })) }));
+  const result = backtestYoloDataset([...zero, ...later, ...next]);
+  assert.equal(result.trades.length, 1);
+  assert.equal(result.trades[0].expiration, '2026-09-23');
+});
+
+test('Friday selects Monday expiry and skips missing exit coverage', () => {
+  const day = [capture('09:30', 600, 0.9, 1), capture('09:45', 602, 0.95, 1)].map((item) => ({
+    ...item, marketDate: '2026-09-25', capturedAt: item.capturedAt.replace('2026-09-22', '2026-09-25'),
+    expiration: '2026-09-28', quotes: item.quotes.map((q) => ({ ...q, expiration: '2026-09-28' }))
+  }));
+  const result = backtestYoloDataset(day);
+  assert.equal(result.trades.length, 0);
+  assert.equal(result.diagnostics[0].expiration, '2026-09-28');
+  assert.equal(result.diagnostics[0].status, 'incomplete');
+});
+
+test('zero thresholds and commissions are honored; missing opening quotes are explained', () => {
+  const result = backtestYoloDataset([capture('09:45', 602, 0.95, 1)], { minMovePct: 0, commission: 0 });
+  assert.equal(result.config.minMovePct, 0);
+  assert.equal(result.config.commission, 0);
+  assert.match(result.diagnostics[0].reason, /开盘/);
 });
