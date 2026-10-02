@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>服务导航</title>
     <script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
-    <link rel="stylesheet" href="/portal.css?v=blog-images-1">
+    <link rel="stylesheet" href="/portal.css?v=blog-media-1">
 </head>
 <body class="has-navbar portal-layout-enabled dashboard-page">
     <header class="navbar">
@@ -42,8 +42,10 @@
             <div class="blog-image-preview" id="blog-preview"></div>
             <div class="blog-upload-row">
                 <label class="btn ghost blog-upload-label" for="blog-images">📷 添加图片</label>
-                <input id="blog-images" type="file" accept="image/*" multiple hidden>
-                <span>最多 4 张，每张 5MB；支持 JPG、PNG、WebP、GIF，其他手机照片会尝试转换</span>
+                <input id="blog-images" type="file" accept="image/*,.heic,.heif" multiple hidden>
+                <label class="btn ghost blog-upload-label" for="blog-videos">🎬 添加视频</label>
+                <input id="blog-videos" type="file" accept="video/mp4,video/webm,video/quicktime,.mov" multiple hidden>
+                <span>图片统一转为 JPG 存入 B2；视频支持 MP4、WebM、MOV（50MB 内）。媒体链接可被持有链接的人访问。</span>
             </div>
             <div class="blog-composer-footer"><span id="blog-count">0 / 10000</span><button class="btn primary" type="submit" id="blog-submit">发布动态</button></div>
         </form>
@@ -55,6 +57,6 @@
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
     <script src="/dashboard.js"></script>
-    <script src="/blog.js?v=blog-images-1"></script>
+    <script src="/blog.js?v=blog-media-1"></script>
 </body>
 </html>

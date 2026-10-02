@@ -158,7 +158,7 @@ function publicServices(userCtx, userAgent) {
 
 async function handleApi(req, res, url, session) {
     if (url.pathname.startsWith('/api/blog/')) {
-        return handleBlogApi(req, res, url, session, json);
+        return handleBlogApi(req, res, url, session, json, config);
     }
     if (req.method === 'GET' && url.pathname === '/api/me') {
         var rbac = loadRbac(config);

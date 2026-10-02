@@ -164,6 +164,7 @@ export function isPortalApi(pathname, method) {
     if (pathname === '/api/piclist/restart' && method === 'POST') return true;
     if (pathname === '/api/blog/posts' && (method === 'GET' || method === 'POST')) return true;
     if (/^\/api\/blog\/posts\/[a-f0-9]{32}$/.test(pathname) && (method === 'PUT' || method === 'DELETE')) return true;
+    if (/^\/api\/blog\/posts\/[a-f0-9]{32}\/media$/.test(pathname) && method === 'POST') return true;
     if (/^\/api\/blog\/images\/[a-f0-9]{32}$/.test(pathname) && method === 'GET') return true;
     if (pathname.startsWith('/api/admin/')) return true;
     return false;

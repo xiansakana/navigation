@@ -5,12 +5,14 @@
   "description": "ECS 服务导航门户（登录 + 多服务卡片）",
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "start": "node src/server.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1145.0",
+    "@aws-sdk/lib-storage": "^3.1145.0",
     "better-sqlite3": "^11.10.0"
   }
 }

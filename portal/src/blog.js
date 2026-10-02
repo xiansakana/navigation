@@ -1,75 +1,30 @@
 import crypto from 'node:crypto';
 import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
+import { deleteStoredMedia, uploadImage, uploadVideo } from './blog-media-storage.js';
 
 const MAX_CONTENT_LENGTH = 10000;
-const MAX_IMAGES = 4;
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const MAX_REQUEST_BYTES = 30 * 1024 * 1024;
-const IMAGE_SIGNATURES = {
-    'image/jpeg': function(bytes) { return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff; },
-    'image/png': function(bytes) { return bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])); },
-    'image/gif': function(bytes) { return bytes.length >= 6 && ['GIF87a', 'GIF89a'].includes(bytes.toString('ascii', 0, 6)); },
-    'image/webp': function(bytes) { return bytes.length >= 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP'; }
-};
+const MAX_REQUEST_BYTES = 128 * 1024;
 
 export function blogAccess(session) {
     const permissions = session.permissions || [];
     const canPost = !session.isGuest && hasPermission(permissions, 'blog:post:edit');
     const canManage = !session.isGuest && hasPermission(permissions, 'blog:manage:edit');
-    return {
-        canView: hasPermission(permissions, 'blog:feed:view') || canPost || canManage,
-        canPost,
-        canManage
-    };
+    return { canView: hasPermission(permissions, 'blog:feed:view') || canPost || canManage, canPost, canManage };
 }
 
 export function validateContent(value, allowEmpty = false) {
     if (typeof value !== 'string') throw new Error('请输入博客内容');
     const content = value.trim();
-    if (!content && !allowEmpty) throw new Error('请输入博客内容或添加图片');
+    if (!content && !allowEmpty) throw new Error('请输入博客内容或添加媒体');
     if (content.length > MAX_CONTENT_LENGTH) throw new Error('博客内容最多 10000 字');
     return content;
 }
 
-export function decodeImages(images) {
-    if (images == null) return [];
-    if (!Array.isArray(images) || images.length > MAX_IMAGES) throw new Error('最多上传 4 张图片');
-    return images.map(function(image) {
-        const mime = image?.mime;
-        const data = image?.data;
-        if (!Object.hasOwn(IMAGE_SIGNATURES, mime) || typeof data !== 'string'
-            || data.length > Math.ceil(MAX_IMAGE_BYTES * 4 / 3) + 4
-            || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) {
-            throw new Error('图片格式无效，仅支持 JPG、PNG、WebP、GIF');
-        }
-        const bytes = Buffer.from(data, 'base64');
-        if (!bytes.length || bytes.length > MAX_IMAGE_BYTES || bytes.toString('base64') !== data
-            || !IMAGE_SIGNATURES[mime](bytes)) {
-            throw new Error('图片无效或超过每张 5MB 限制');
-        }
-        return { mime, bytes };
-    });
-}
-
 function transaction(db, operation) {
     db.exec('BEGIN');
-    try {
-        const result = operation();
-        db.exec('COMMIT');
-        return result;
-    } catch (error) {
-        db.exec('ROLLBACK');
-        throw error;
-    }
-}
-
-function insertImages(db, postId, authorId, images, startPosition) {
-    const insert = db.prepare('INSERT INTO blog_images (id, post_id, author_id, mime_type, image_data, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    images.forEach(function(image, index) {
-        insert.run(crypto.randomUUID().replaceAll('-', ''), postId, authorId, image.mime,
-            image.bytes, startPosition + index, new Date().toISOString());
-    });
+    try { const result = operation(); db.exec('COMMIT'); return result; }
+    catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
 export function getImage(db, id) {
@@ -85,64 +40,92 @@ export function listPosts(db, before, limit = 20) {
         ? db.prepare(sql + ' WHERE created_at < ? OR (created_at = ? AND id < ?) ORDER BY created_at DESC, id DESC LIMIT ?')
             .all(cursor.created_at, cursor.created_at, cursor.id, limit)
         : db.prepare(sql + ' ORDER BY created_at DESC, id DESC LIMIT ?').all(limit);
-    const findImages = db.prepare('SELECT id FROM blog_images WHERE post_id = ? ORDER BY position, id');
-    return rows.map(function(row) {
-        return { ...row, images: findImages.all(row.id).map(function(image) { return { id: image.id, url: '/api/blog/images/' + image.id }; }) };
+    const legacy = db.prepare('SELECT id FROM blog_images WHERE post_id = ? ORDER BY position, id');
+    const media = db.prepare('SELECT id, kind, url, mime_type AS mimeType FROM blog_media WHERE post_id = ? ORDER BY position, id');
+    return rows.map(row => {
+        const items = media.all(row.id);
+        const oldImages = legacy.all(row.id).map(image => ({ id: image.id, kind: 'image', url: '/api/blog/images/' + image.id }));
+        return { ...row, images: [...oldImages, ...items.filter(item => item.kind === 'image')],
+            videos: items.filter(item => item.kind === 'video') };
     });
 }
 
-export function createPost(db, session, content, images = []) {
-    const decoded = decodeImages(images);
-    const text = validateContent(content, decoded.length > 0);
+export function createPost(db, session, content, hasMedia = false) {
+    const text = validateContent(content, hasMedia === true);
     const id = crypto.randomUUID().replaceAll('-', '');
     const now = new Date().toISOString();
-    transaction(db, function() {
-        db.prepare('INSERT INTO blog_posts (id, author_id, author_name, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-            .run(id, session.userId, session.username, text, now, now);
-        insertImages(db, id, session.userId, decoded, 0);
-    });
+    db.prepare('INSERT INTO blog_posts (id, author_id, author_name, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(id, session.userId, session.username, text, now, now);
     return id;
 }
 
-export function changePost(db, id, session, content, remove = false, options = {}) {
+export function canChangePost(db, id, session) {
     const row = db.prepare('SELECT author_id FROM blog_posts WHERE id = ?').get(id);
     if (!row) return { status: 404, error: '文章不存在' };
     const access = blogAccess(session);
     if (!access.canManage && !(access.canPost && row.author_id === session.userId)) {
         return { status: 403, error: '无权修改这篇文章' };
     }
-    if (remove) {
-        transaction(db, function() {
-            db.prepare('DELETE FROM blog_images WHERE post_id = ?').run(id);
-            db.prepare('DELETE FROM blog_posts WHERE id = ?').run(id);
-        });
-        return { status: 200 };
-    }
-    const existing = db.prepare('SELECT id FROM blog_images WHERE post_id = ? ORDER BY position, id').all(id).map(function(image) { return image.id; });
-    const keepIds = options.keepImageIds == null ? existing : options.keepImageIds;
-    if (!Array.isArray(keepIds) || new Set(keepIds).size !== keepIds.length
-        || keepIds.some(function(imageId) { return !existing.includes(imageId); })) {
-        throw new Error('文章图片参数无效');
-    }
-    const decoded = decodeImages(options.images);
-    if (keepIds.length + decoded.length > MAX_IMAGES) throw new Error('每篇最多 4 张图片');
-    const text = validateContent(content, keepIds.length + decoded.length > 0);
-    transaction(db, function() {
-        const removeImage = db.prepare('DELETE FROM blog_images WHERE post_id = ? AND id = ?');
-        existing.filter(function(imageId) { return !keepIds.includes(imageId); })
-            .forEach(function(imageId) { removeImage.run(id, imageId); });
-        const setPosition = db.prepare('UPDATE blog_images SET position = ? WHERE post_id = ? AND id = ?');
-        keepIds.forEach(function(imageId, position) {
-            setPosition.run(position, id, imageId);
-        });
-        insertImages(db, id, session.userId, decoded, keepIds.length);
-        db.prepare('UPDATE blog_posts SET content = ?, updated_at = ? WHERE id = ?')
-            .run(text, new Date().toISOString(), id);
-    });
     return { status: 200 };
 }
 
-export async function handleBlogApi(req, res, url, session, json) {
+export function addMedia(db, postId, session, item) {
+    const access = canChangePost(db, postId, session);
+    if (access.status !== 200) return access;
+    const id = crypto.randomUUID().replaceAll('-', '');
+    const last = db.prepare('SELECT MAX(position) AS position FROM blog_media WHERE post_id = ?').get(postId);
+    db.prepare('INSERT INTO blog_media (id, post_id, author_id, kind, mime_type, url, storage_key, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(id, postId, session.userId, item.kind, item.mimeType, item.url, item.storageKey,
+            (last.position ?? -1) + 1, new Date().toISOString());
+    return { status: 201, id, url: item.url };
+}
+
+export function changePost(db, id, session, content, remove = false, options = {}) {
+    const access = canChangePost(db, id, session);
+    if (access.status !== 200) return access;
+    if (remove) {
+        const removedMedia = db.prepare('SELECT storage_key AS storageKey FROM blog_media WHERE post_id = ?').all(id);
+        transaction(db, () => {
+            db.prepare('DELETE FROM blog_media WHERE post_id = ?').run(id);
+            db.prepare('DELETE FROM blog_images WHERE post_id = ?').run(id);
+            db.prepare('DELETE FROM blog_posts WHERE id = ?').run(id);
+        });
+        return { status: 200, removedMedia };
+    }
+    const existing = [
+        ...db.prepare('SELECT id FROM blog_images WHERE post_id = ?').all(id),
+        ...db.prepare('SELECT id FROM blog_media WHERE post_id = ?').all(id)
+    ].map(row => row.id);
+    const keepIds = options.keepMediaIds == null ? existing : options.keepMediaIds;
+    if (!Array.isArray(keepIds) || new Set(keepIds).size !== keepIds.length
+        || keepIds.some(mediaId => !existing.includes(mediaId))) throw new Error('文章媒体参数无效');
+    const text = validateContent(content, keepIds.length > 0);
+    const removedMedia = db.prepare('SELECT id, storage_key AS storageKey FROM blog_media WHERE post_id = ?').all(id)
+        .filter(item => !keepIds.includes(item.id));
+    transaction(db, () => {
+        for (const mediaId of existing) {
+            if (keepIds.includes(mediaId)) continue;
+            db.prepare('DELETE FROM blog_images WHERE post_id = ? AND id = ?').run(id, mediaId);
+            db.prepare('DELETE FROM blog_media WHERE post_id = ? AND id = ?').run(id, mediaId);
+        }
+        db.prepare('UPDATE blog_posts SET content = ?, updated_at = ? WHERE id = ?')
+            .run(text, new Date().toISOString(), id);
+    });
+    return { status: 200, removedMedia };
+}
+
+async function readJson(req) {
+    let size = 0;
+    const parts = [];
+    for await (const part of req) {
+        size += part.length;
+        if (size > MAX_REQUEST_BYTES) throw new Error('请求内容过大');
+        parts.push(part);
+    }
+    return JSON.parse(Buffer.concat(parts).toString('utf8'));
+}
+
+export async function handleBlogApi(req, res, url, session, json, config) {
     const access = blogAccess(session);
     if (!access.canView) return json(res, 403, { ok: false, error: '无权查看博客' });
     const db = getDatabase();
@@ -150,49 +133,53 @@ export async function handleBlogApi(req, res, url, session, json) {
         const image = getImage(db, url.pathname.split('/').at(-1));
         if (!image) return json(res, 404, { ok: false, error: '图片不存在' });
         const bytes = Buffer.from(image.imageData);
-        res.writeHead(200, {
-            'Content-Type': image.mimeType,
-            'Content-Length': bytes.length,
-            'X-Content-Type-Options': 'nosniff',
-            'Cache-Control': 'private, no-store'
-        });
+        res.writeHead(200, { 'Content-Type': image.mimeType, 'Content-Length': bytes.length,
+            'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' });
         return res.end(bytes);
     }
-    if (req.method === 'GET') {
+    if (req.method === 'GET' && url.pathname === '/api/blog/posts') {
         const before = url.searchParams.get('before');
-        if (before && !/^[a-f0-9]{32}$/.test(before)) {
-            return json(res, 400, { ok: false, error: '分页参数无效' });
-        }
+        if (before && !/^[a-f0-9]{32}$/.test(before)) return json(res, 400, { ok: false, error: '分页参数无效' });
         return json(res, 200, { ok: true, posts: listPosts(db, before), ...access, userId: session.userId });
     }
-    if (req.method === 'POST' && !access.canPost) {
-        return json(res, 403, { ok: false, error: '无权发布博客' });
-    }
-    const id = url.pathname.split('/').at(-1);
+    if (req.method === 'POST' && !access.canPost && !access.canManage) return json(res, 403, { ok: false, error: '无权发布博客' });
+    const match = url.pathname.match(/^\/api\/blog\/posts\/([a-f0-9]{32})(?:\/media)?$/);
+    const id = match?.[1];
     if (req.method === 'DELETE') {
         const result = changePost(db, id, session, null, true);
+        if (result.removedMedia?.length) {
+            try { await deleteStoredMedia(result.removedMedia); }
+            catch (error) { console.error('博客媒体清理失败:', error); }
+        }
         return json(res, result.status, { ok: result.status === 200, error: result.error });
+    }
+    if (req.method === 'POST' && url.pathname.endsWith('/media')) {
+        const allowed = canChangePost(db, id, session);
+        if (allowed.status !== 200) return json(res, allowed.status, { ok: false, error: allowed.error });
+        try {
+            const kind = url.searchParams.get('kind');
+            const item = kind === 'image'
+                ? await uploadImage(req, (config.services || []).find(service => service.id === 'piclist'))
+                : kind === 'video' ? await uploadVideo(req) : null;
+            if (!item) throw new Error('媒体类型无效');
+            const result = addMedia(db, id, session, item);
+            return json(res, result.status, { ok: result.status === 201, id: result.id, url: result.url, error: result.error });
+        } catch (error) { return json(res, 400, { ok: false, error: error.message }); }
     }
     if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') {
         return json(res, 415, { ok: false, error: '请使用 JSON 请求' });
     }
     try {
-        let size = 0;
-        const chunks = [];
-        for await (const chunk of req) {
-            size += chunk.length;
-            if (size > MAX_REQUEST_BYTES) return json(res, 413, { ok: false, error: '图片或内容过大' });
-            chunks.push(chunk);
-        }
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        const body = await readJson(req);
         if (req.method === 'POST') {
-            const postId = createPost(db, session, body.content, body.images);
+            const postId = createPost(db, session, body.content, body.hasMedia);
             return json(res, 201, { ok: true, id: postId });
         }
-        const result = changePost(db, id, session, body.content, false,
-            { keepImageIds: body.keepImageIds, images: body.images });
+        const result = changePost(db, id, session, body.content, false, { keepMediaIds: body.keepMediaIds });
+        if (result.removedMedia?.length) {
+            try { await deleteStoredMedia(result.removedMedia); }
+            catch (error) { console.error('博客媒体清理失败:', error); }
+        }
         return json(res, result.status, { ok: result.status === 200, error: result.error });
-    } catch (error) {
-        return json(res, 400, { ok: false, error: error.message });
-    }
+    } catch (error) { return json(res, 400, { ok: false, error: error.message }); }
 }

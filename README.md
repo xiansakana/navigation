@@ -16,7 +16,7 @@ ECS 服务导航与自托管应用（portal 统一入口 :80）。
 
 ## 首页博客
 
-首页博客以时间线展示文字和图片动态。管理员在「权限管理 → 角色」给角色分配「首页博客」下的查看、发布或管理权限；发布权限可编辑和删除自己的文章，管理权限可编辑和删除全部文章。游客默认没有博客权限，可以按需单独授予查看权限。文章和图片保存在共享 SQLite 的 `blog_posts`、`blog_images` 表中，按 Portal 用户 ID 记录作者；单篇最多 10000 字和 4 张图片，每张图片最多 5MB。支持 JPG、PNG、WebP、GIF；浏览器会尝试把其他可解码的手机照片转换为 JPG。
+首页博客以时间线展示文字、图片和视频动态。管理员在「权限管理 → 角色」给角色分配「首页博客」下的查看、发布或管理权限；发布权限可编辑和删除自己的文章，管理权限可编辑和删除全部文章。游客默认没有博客权限，可以按需单独授予查看权限。文章及媒体 URL 和归属信息保存在共享 SQLite 的 `blog_posts`、`blog_media` 表中，按 Portal 用户 ID 记录作者。图片在浏览器统一转换为 JPG，通过 Portal 服务端调用 PicList 上传到 B2，不再限制 4 张或原文件 5MB；视频通过 Portal 服务端使用 PicList 的 B2 配置直接上传，支持 MP4、WebM、MOV，单个 50MB 以内。现有 `blog_images` 中的旧图片仍可读取。B2 媒体 URL 为公开链接，获得链接的人可直接访问。
 
 Torn 浏览器用户脚本在独立仓库 [xiansakana-torn-scripts](https://github.com/xiansakana/xiansakana-torn-scripts)。
 
