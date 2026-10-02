@@ -1,15 +1,21 @@
-import sanitizeHtml from 'sanitize-html';
-import { decodeHTML } from 'entities';
+import createDOMPurify from 'dompurify';
+import { JSDOM } from 'jsdom';
 
+const window = new JSDOM('').window;
+const purifier = createDOMPurify(window);
 const richOptions = {
-  allowedTags: ['p', 'div', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'h2', 'h3', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'a'],
-  allowedAttributes: { a: ['href', 'rel', 'target'] },
-  allowedSchemes: ['https', 'http', 'mailto'],
-  allowProtocolRelative: false,
-  transformTags: {
-    a: (tagName, attributes) => ({ tagName, attribs: { href: attributes.href || '', target: '_blank', rel: 'noopener noreferrer' } })
-  }
+  ALLOWED_TAGS: ['p', 'div', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'h2', 'h3', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'a'],
+  ALLOWED_ATTR: ['href'],
+  ALLOW_DATA_ATTR: false,
+  ALLOW_ARIA_ATTR: false,
+  RETURN_DOM_FRAGMENT: true
 };
+purifier.addHook('afterSanitizeAttributes', node => {
+  if (node.nodeName !== 'A') { node.removeAttribute('href'); return; }
+  if (!/^(https?:\/\/|mailto:)/i.test(node.getAttribute('href') || '')) node.removeAttribute('href');
+  node.setAttribute('target', '_blank');
+  node.setAttribute('rel', 'noopener noreferrer');
+});
 
 export function normalizeContent(value, format = 'text', allowEmpty = false) {
   if (format !== 'text' && format !== 'html') throw new Error('博客内容格式无效');
@@ -21,13 +27,13 @@ export function normalizeContent(value, format = 'text', allowEmpty = false) {
     return content;
   }
   if (value.length > 80000) throw new Error('博客富文本内容过大');
-  const content = sanitizeHtml(value, richOptions).trim();
-  let text = '';
-  sanitizeHtml(content, { allowedTags: [], allowedAttributes: {}, textFilter: part => { text += part; return part; } });
-  const plain = decodeHTML(text);
+  const fragment = purifier.sanitize(value, richOptions);
+  const plain = fragment.textContent;
   if (!plain.trim() && !allowEmpty) throw new Error('请输入博客内容或添加媒体');
   if (plain.length > 10000) throw new Error('博客内容最多 10000 字');
-  return plain.trim() ? content : '';
+  const container = window.document.createElement('div');
+  container.appendChild(fragment);
+  return plain.trim() ? container.innerHTML.trim() : '';
 }
 
 export function normalizeTags(value = []) {

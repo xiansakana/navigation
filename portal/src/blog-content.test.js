@@ -14,6 +14,8 @@ test('rich text keeps supported formatting and removes executable HTML and unsaf
   assert.match(clean, /href="https:\/\/example.test" target="_blank" rel="noopener noreferrer"/);
   assert.ok(!normalizeContent('<a href="//evil.test">x</a>', 'html').includes('href='));
   assert.ok(!normalizeContent('<a href="data:text/html,test">x</a>', 'html').includes('href='));
+  const mutation = normalizeContent('<textarea></textarea/><img src=x onerror=alert(1)><p>安全正文</p>', 'html');
+  assert.ok(!/<img|onerror=|<textarea/.test(mutation));
   assert.equal(normalizeContent('<b>literal</b>\nplain', 'text'), '<b>literal</b>\nplain');
   assert.throws(() => normalizeContent('<p>&nbsp;<br></p>', 'html'), /请输入/);
   assert.throws(() => normalizeContent('<script>x</script>', 'html'), /请输入/);
