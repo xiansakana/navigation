@@ -28,11 +28,11 @@ export function createYoloStore(config, databaseOverride = null) {
   const getLatestExpirationCaptures = db.prepare(`
     SELECT c.id, c.captured_at, c.market_date, c.expiration, c.underlying_price, c.source, c.capture_kind, c.contract_count
     FROM yolo_captures c
-    WHERE c.user_id = ? AND c.id = (
-      SELECT c2.id FROM yolo_captures c2
-      WHERE c2.user_id = c.user_id AND c2.expiration = c.expiration
-      ORDER BY c2.captured_at DESC LIMIT 1
-    )
+    JOIN (
+      SELECT expiration, MAX(captured_at) AS latest_at FROM yolo_captures
+      WHERE user_id = ? GROUP BY expiration
+    ) latest ON c.expiration = latest.expiration AND c.captured_at = latest.latest_at
+    WHERE c.user_id = ?
     ORDER BY c.expiration
   `);
   const getCaptureQuotes = db.prepare(`
@@ -185,7 +185,7 @@ export function createYoloStore(config, databaseOverride = null) {
 
   function optionChain(userId) {
     const id = safeUserId(userId);
-    const groups = getLatestExpirationCaptures.all(id).map((capture) => ({
+    const groups = getLatestExpirationCaptures.all(id, id).map((capture) => ({
       capture,
       quotes: getCaptureQuotes.all(capture.id, id)
     }));

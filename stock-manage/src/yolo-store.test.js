@@ -32,6 +32,10 @@ test('async backtest loads only nearest future expiry, reports daily reasons and
     assert.equal(result.trades.length, 1);
     assert.equal(result.trades[0].expiration, '2026-09-23');
     assert.equal(result.dataQuality.quoteRows, 3);
+    const chain = store.optionChain('a');
+    assert.equal(chain.groups.length, 3);
+    assert.ok(chain.groups.every((group) => group.capture.captured_at.includes('10:00')));
+    assert.equal(store.optionChain('b').groups.length, 0);
     assert.equal(progress.at(-1).completedDays, 1);
     assert.equal(progress.at(-1).diagnostics[0].status, 'traded');
     assert.equal((await store.backtestAsync('b', {})).trades.length, 0);
