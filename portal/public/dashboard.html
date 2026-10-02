@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>服务导航</title>
     <script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
-    <link rel="stylesheet" href="/portal.css?v=0615296">
+    <link rel="stylesheet" href="/portal.css?v=blog-1">
 </head>
 <body class="has-navbar portal-layout-enabled dashboard-page">
     <header class="navbar">
@@ -31,10 +31,23 @@
         <p>选择一项服务进入管理或访问</p>
     </div>
     <main class="grid" id="service-grid"></main>
+    <section class="blog-section hidden" id="blog-section" aria-label="博客动态">
+        <div class="blog-heading">
+            <div><span class="blog-eyebrow">BLOG / MOMENTS</span><h2>博客动态</h2><p>记录想法、进展与生活片段</p></div>
+        </div>
+        <form class="blog-composer hidden" id="blog-composer">
+            <label for="blog-content">写点什么</label>
+            <textarea id="blog-content" maxlength="10000" rows="4" placeholder="分享此刻的想法……" required></textarea>
+            <div class="blog-composer-footer"><span id="blog-count">0 / 10000</span><button class="btn primary" type="submit" id="blog-submit">发布动态</button></div>
+        </form>
+        <div class="blog-feed" id="blog-feed" aria-live="polite"></div>
+        <button type="button" class="btn ghost blog-more hidden" id="blog-more">加载更多</button>
+    </section>
     <script src="/theme.js"></script>
     <script src="/layout.js?v=0615296"></script>
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
     <script src="/dashboard.js"></script>
+    <script src="/blog.js"></script>
 </body>
 </html>

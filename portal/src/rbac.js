@@ -156,6 +156,9 @@ function buildNotificationPermissions() {
 }
 
 var SYSTEM_PERMISSIONS = [
+    { id: 'blog:feed:view', name: '查看博客动态', group: '博客', serviceId: 'blog', feature: 'feed', action: 'view', permissionPath: ['首页', '博客'] },
+    { id: 'blog:post:edit', name: '发布和编辑自己的博客', group: '博客', serviceId: 'blog', feature: 'post', action: 'edit', permissionPath: ['首页', '博客', '我的文章'] },
+    { id: 'blog:manage:edit', name: '管理所有博客', group: '博客', serviceId: 'blog', feature: 'manage', action: 'edit', permissionPath: ['首页', '博客', '所有文章'] },
     { id: 'admin:access:view', name: '查看管理后台', group: '系统', action: 'view', resource: 'admin:access' },
     { id: 'admin:access:edit', name: '编辑管理后台', group: '系统', action: 'edit', resource: 'admin:access' },
     { id: 'admin:users:view', name: '查看用户', group: '系统', action: 'view', resource: 'admin:users' },

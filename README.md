@@ -14,6 +14,10 @@ ECS 服务导航与自托管应用（portal 统一入口 :80）。
 | `alist/` | AList 网盘聚合（本机 :5244 → Portal `/alist/`） |
 | `scripts/` | ECS 部署与运维脚本 |
 
+## 首页博客
+
+首页博客以时间线展示动态。管理员在「权限管理 → 角色」给角色分配「首页博客」下的查看、发布或管理权限；发布权限可编辑和删除自己的文章，管理权限可编辑和删除全部文章。游客默认没有博客权限，可以按需单独授予查看权限。文章保存在共享 SQLite 的 `blog_posts` 表中，按 Portal 用户 ID 记录作者；单篇最多 10000 字。
+
 Torn 浏览器用户脚本在独立仓库 [xiansakana-torn-scripts](https://github.com/xiansakana/xiansakana-torn-scripts)。
 
 ## 部署

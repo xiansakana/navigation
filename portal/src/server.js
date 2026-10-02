@@ -38,6 +38,7 @@ import { handleAdminApi } from './admin-api.js';
 import { wantsJsonResponse, renderErrorPage, sendHtml } from './error-page.js';
 import { handleOAuthStart, handleOAuthCallback, listOAuthProviders } from './oauth.js';
 import { getPiclistStatus, savePiclistConfig, restartPiclist } from './piclist-admin.js';
+import { handleBlogApi } from './blog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -156,6 +157,9 @@ function publicServices(userCtx, userAgent) {
 }
 
 async function handleApi(req, res, url, session) {
+    if (url.pathname.startsWith('/api/blog/')) {
+        return handleBlogApi(req, res, url, session, json);
+    }
     if (req.method === 'GET' && url.pathname === '/api/me') {
         var rbac = loadRbac(config);
         var stockManagePrefs = getStockManagePrefs(rbac, session.userId);

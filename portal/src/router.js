@@ -27,7 +27,7 @@ export function siyuanEntryPath(userAgent) {
 
 /** Portal 保留命名空间：即使未在 isPortalApi 注册，也不进入反代 */
 export var PORTAL_API_NAMESPACES = new Set([
-    'oauth', 'login', 'me', 'services', 'menus', 'logout', 'admin', 'piclist'
+    'oauth', 'login', 'me', 'services', 'menus', 'logout', 'admin', 'piclist', 'blog'
 ]);
 
 /** 思源 /api/{ns} 命名空间（与 kernel/api/router.go 同步） */
@@ -162,6 +162,8 @@ export function isPortalApi(pathname, method) {
     if (pathname === '/api/piclist/status' && method === 'GET') return true;
     if (pathname === '/api/piclist/config' && method === 'PUT') return true;
     if (pathname === '/api/piclist/restart' && method === 'POST') return true;
+    if (pathname === '/api/blog/posts' && (method === 'GET' || method === 'POST')) return true;
+    if (/^\/api\/blog\/posts\/[a-f0-9]{32}$/.test(pathname) && (method === 'PUT' || method === 'DELETE')) return true;
     if (pathname.startsWith('/api/admin/')) return true;
     return false;
 }
