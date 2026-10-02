@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { appendMarketSnapshot, maskNotifyForClient } from './notify.js';
 
 test('monitor adds market context but does not decide delivery', () => {
-  assert.match(appendMarketSnapshot('触发', { price: 500, H: 510, changePercent: -1, drawdownLive: -2 }, 'QQQ'), /QQQ 现价 500.00/);
+  assert.match(appendMarketSnapshot('触发', { price: 500, H: 510, changePercent: -1, drawdownLive: -2 }, 'QQQ'), /QQQ 现价 500\.000/);
   assert.match(appendMarketSnapshot('触发', null), /现价 —/);
 });
 

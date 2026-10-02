@@ -32,15 +32,15 @@ test('tier trigger text matches 手册 §D 触发列', () => {
 
 test('T1–T4 trigger prices from 2025-02-19 high', () => {
   const t = triggerPrices(H);
-  assert.equal(t.T1, 497.55);
-  assert.equal(t.T2, 475.91);
-  assert.equal(t.T3, 443.46);
-  assert.equal(t.T4, 421.83);
-  assert.equal(t.T4_intraday, 405.61);
-  assert.equal(t.T5, 378.57);
-  assert.equal(t.T6, 324.49);
-  assert.equal(t.T7, 270.4);
-  assert.equal(t.reset, 529.99);
+  assert.equal(t.T1, 497.545);
+  assert.equal(t.T2, 475.913);
+  assert.equal(t.T3, 443.464);
+  assert.equal(t.T4, 421.832);
+  assert.equal(t.T4_intraday, 405.608);
+  assert.equal(t.T5, 378.567);
+  assert.equal(t.T6, 324.486);
+  assert.equal(t.T7, 270.405);
+  assert.equal(t.reset, 529.994);
 });
 
 test('drawdown from H', () => {

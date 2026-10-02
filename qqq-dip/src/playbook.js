@@ -32,6 +32,11 @@ export const DEFAULT_EVENTS = Object.fromEntries(
   EVENT_KEYS.map((k) => [k, k !== 'openSummary'])
 );
 
+export function roundPrice(n) {
+  const value = Number(n);
+  return Math.round((value + Number.EPSILON * Math.abs(value)) * 1000) / 1000;
+}
+
 export function roundMoney(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
@@ -64,15 +69,15 @@ export function maxClose(values, n) {
 export function triggerPrices(H) {
   if (!Number.isFinite(H) || H <= 0) return null;
   return {
-    T1: roundMoney(H * 0.92),
-    T2: roundMoney(H * 0.88),
-    T3: roundMoney(H * 0.82),
-    T4: roundMoney(H * 0.78),
-    T4_intraday: roundMoney(H * 0.75),
-    T5: roundMoney(H * 0.7),
-    T6: roundMoney(H * 0.6),
-    T7: roundMoney(H * 0.5),
-    reset: roundMoney(H * 0.98)
+    T1: roundPrice(H * 0.92),
+    T2: roundPrice(H * 0.88),
+    T3: roundPrice(H * 0.82),
+    T4: roundPrice(H * 0.78),
+    T4_intraday: roundPrice(H * 0.75),
+    T5: roundPrice(H * 0.7),
+    T6: roundPrice(H * 0.6),
+    T7: roundPrice(H * 0.5),
+    reset: roundPrice(H * 0.98)
   };
 }
 
@@ -370,8 +375,8 @@ export function evaluateSleeves(tqqq, soxl, B, soxlEnabled) {
       H: tqqq.H,
       price: tqqq.price,
       drawdown: dd,
-      trigger35: roundMoney(t35),
-      trigger50: roundMoney(t50),
+      trigger35: roundPrice(t35),
+      trigger50: roundPrice(t50),
       status,
       event: status === 'confirmed' ? (dd <= -50 ? 'sleeveTqqq' : 'sleeveTqqq') : null,
       recommendation: rec
@@ -395,8 +400,8 @@ export function evaluateSleeves(tqqq, soxl, B, soxlEnabled) {
       H: soxl.H,
       price: soxl.price,
       drawdown: dd,
-      trigger50: roundMoney(soxl.H * 0.5),
-      trigger70: roundMoney(soxl.H * 0.3),
+      trigger50: roundPrice(soxl.H * 0.5),
+      trigger70: roundPrice(soxl.H * 0.3),
       status,
       event: status === 'confirmed' ? 'sleeveSoxl' : null,
       recommendation: rec,
@@ -538,7 +543,7 @@ export function evaluate(input) {
       key: 'reset',
       event: 'reset',
       symbol: 'QQQ',
-      message: `QQQ 收盘/现价回到 0.98H 或创新高（H=${qqq.H?.toFixed(2)}）。未触发档作废，已买仓位留下。停止加仓。`
+      message: `QQQ 收盘/现价回到 0.98H 或创新高（H=${qqq.H?.toFixed(3)}）。未触发档作废，已买仓位留下。停止加仓。`
     });
   }
 
@@ -556,7 +561,7 @@ export function evaluate(input) {
       key: 'fakeRight',
       event: 'fakeRight',
       symbol: 'QQQ',
-      message: `假右侧：跌破 R1 前低 ${Number(round.r1SwingLow).toFixed(2)}（1% 容差）。清 R1 期权，正股留，R2 冻结，转等 T5 或新低后的新 R1。`
+      message: `假右侧：跌破 R1 前低 ${Number(round.r1SwingLow).toFixed(3)}（1% 容差）。清 R1 期权，正股留，R2 冻结，转等 T5 或新低后的新 R1。`
     });
   }
 
@@ -690,7 +695,7 @@ export function evaluate(input) {
       primary = {
         title: '观察区',
         body: next
-          ? `尚未到 T1。QQQ H=${qqq.H?.toFixed(2)}，T1 触发价 ${next}（−8%）。右侧袋锁定。`
+          ? `尚未到 T1。QQQ H=${qqq.H?.toFixed(3)}，T1 触发价 ${next?.toFixed(3)}（−8%）。右侧袋锁定。`
           : '等待行情与 60 日高点。',
         prohibitions: globalProhibitions(null, round)
       };
@@ -1105,7 +1110,7 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
       ]);
     }
     if (tier.intradayPrice) {
-      notes.push(`盘中限价参考 0.75H ≈ ${tier.intradayPrice}。T4 不是打满全部 B。`);
+      notes.push(`盘中限价参考 0.75H ≈ ${tier.intradayPrice.toFixed(3)}。T4 不是打满全部 B。`);
     }
   } else if (id === 'T5' || id === 'R2') {
     finishEquityThenCalls([{ usd: totalUsd, pct: 100, note: '只加正股' }]);
@@ -1158,7 +1163,7 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
 
   const cashPlan = summarizeCashPlan(legs, startWallet);
   const checklist = [
-    `H = ${ev.qqq?.H != null ? ev.qqq.H.toFixed(2) : '—'}，${id} 触发价 ${tier.triggerPrice ?? '—'}${tier.intradayPrice ? ` / 盘中 ${tier.intradayPrice}` : ''}`,
+    `H = ${ev.qqq?.H != null ? ev.qqq.H.toFixed(3) : '—'}，${id} 触发价 ${tier.triggerPrice != null ? tier.triggerPrice.toFixed(3) : '—'}${tier.intradayPrice ? ` / 盘中 ${tier.intradayPrice.toFixed(3)}` : ''}`,
     `弹药 B = $${Number(ev.B || 0).toFixed(2)}，本档预算 $${totalUsd.toFixed(2)}（${formatPctB(tier.pctB)}%B）`,
     `币种：拟用 USD $${cashPlan.useUsd.toFixed(2)} / CNY ¥${cashPlan.useCny.toFixed(2)}（汇率 ${cashPlan.rate || '—'}）`,
     `袋内剩余：左 $${ev.remaining?.left ?? 0} / 危机 $${ev.remaining?.crisis ?? 0} / 右 $${ev.remaining?.right ?? 0}`,

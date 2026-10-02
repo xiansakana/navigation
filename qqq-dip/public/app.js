@@ -58,6 +58,10 @@ function fmtUsd(n) {
   return Number(n).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 }
 
+function fmtPrice(value) {
+  return value != null && Number.isFinite(Number(value)) ? Number(value).toFixed(3) : '—';
+}
+
 function fmtPctB(pctB) {
   const pct = (Number(pctB) || 0) * 100;
   const rounded = Math.round(pct * 10) / 10;
@@ -432,7 +436,7 @@ function renderPrimary() {
   }
   const prohib = (p.prohibitions || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const previewHint = preview?.available && canViewLotMoney()
-    ? `<p class="hint">本档预算 ${fmtUsd(preview.totalUsd)}；拟用 ${fmtUsd(preview.cashPlan?.useUsd ?? preview.totalUsd)} + ${fmtCny(preview.cashPlan?.useCny || 0)}（正股优先 159509）。QQQ ${preview.spot?.toFixed(2) ?? '—'} · 159509 ${preview.proxyPrice != null ? preview.proxyPrice.toFixed(3) : '—'}。点「预览买入」查看拆单。</p>`
+    ? `<p class="hint">本档预算 ${fmtUsd(preview.totalUsd)}；拟用 ${fmtUsd(preview.cashPlan?.useUsd ?? preview.totalUsd)} + ${fmtCny(preview.cashPlan?.useCny || 0)}（正股优先 159509）。QQQ ${preview.spot?.toFixed(3) ?? '—'} · 159509 ${preview.proxyPrice != null ? preview.proxyPrice.toFixed(3) : '—'}。点「预览买入」查看拆单。</p>`
     : (preview?.reason ? `<p class="hint">${escapeHtml(preview.reason)}</p>` : '');
   $('#primary-rec').innerHTML = `
     <h3>${escapeHtml(p.title)}</h3>
@@ -448,7 +452,7 @@ function legRow(leg) {
     const budget = isCny
       ? `${fmtCny(leg.cny)}（≈${fmtUsd(leg.usd)}）`
       : fmtUsd(leg.usd);
-    const qty = `${leg.shares} 股 @ ${leg.price != null ? leg.price.toFixed(isCny ? 3 : 2) : '—'}`;
+    const qty = `${leg.shares} 股 @ ${leg.price != null ? leg.price.toFixed(3) : '—'}`;
     const ref = isCny
       ? (leg.estCny != null ? `≈ ${fmtCny(leg.estCny)}` : '—')
       : `≈ ${fmtUsd(leg.estUsd)}`;
@@ -469,7 +473,7 @@ function legRow(leg) {
     <td>买入</td>
     <td>${leg.pct}%</td>
     <td>${fmtUsd(leg.usd)}</td>
-    <td>${leg.strike} / ${escapeHtml(leg.expiry || '—')}</td>
+    <td>${fmtPrice(leg.strike)} / ${escapeHtml(leg.expiry || '—')}</td>
     <td>${leg.otmPct != null ? leg.otmPct.toFixed(1) + '% 虚值' : '—'}</td>
     <td>${escapeHtml(leg.note || '')}</td>
   </tr>`;
@@ -494,7 +498,7 @@ function openBuyPreview() {
     preview.title,
     `预算 ${fmtUsd(preview.totalUsd)}`,
     `USD ${fmtUsd(preview.cashPlan?.useUsd ?? 0)} / CNY ${fmtCny(preview.cashPlan?.useCny || 0)}`,
-    `QQQ ${preview.spot?.toFixed(2) ?? '—'}`,
+    `QQQ ${preview.spot?.toFixed(3) ?? '—'}`,
     preview.pendingClose ? '待收盘确认' : null
   ].filter(Boolean).join(' · ');
 
@@ -533,9 +537,9 @@ function openBuyPreview() {
           if (leg.currency === 'CNY') {
             return `${leg.symbol} 正股·CNY 买入 ${leg.shares}股 预算${fmtCny(leg.cny)}≈${fmtUsd(leg.usd)} @${leg.price?.toFixed(3)}`;
           }
-          return `${leg.symbol} 正股·USD 买入 ${leg.shares}股 预算${fmtUsd(leg.usd)} @${leg.price?.toFixed(2)}`;
+          return `${leg.symbol} 正股·USD 买入 ${leg.shares}股 预算${fmtUsd(leg.usd)} @${leg.price?.toFixed(3)}`;
         }
-        return `${leg.occSymbol || leg.symbol} Call·USD 买入 预算${fmtUsd(leg.usd)} K${leg.strike} 到期${leg.expiry}`;
+        return `${leg.occSymbol || leg.symbol} Call·USD 买入 预算${fmtUsd(leg.usd)} K${fmtPrice(leg.strike)} 到期${leg.expiry}`;
       }),
       '',
       '核对:',
@@ -610,45 +614,45 @@ function nextLevelHint(label, stats) {
   }
   if (!stats?.H) return '—';
   const H = stats.H;
-  const hTxt = `H ${H.toFixed(2)}`;
+  const hTxt = `H ${H.toFixed(3)}`;
   if (label === 'QQQ') {
     const next = stats.triggers?.T1;
-    return `${hTxt} · T1(−8%) ${next != null ? next : '—'}`;
+    return `${hTxt} · T1(−8%) ${fmtPrice(next)}`;
   }
   if (label === 'SPY') {
     return `${hTxt} · 非独立梯子（最多可作 QQQ T1 的 20% 降波）`;
   }
   if (label === 'TQQQ') {
     const sleeve = sleeveBySymbol('TQQQ');
-    const t35 = sleeve?.trigger35 ?? roundMoneyClient(H * 0.65);
-    const t50 = sleeve?.trigger50 ?? roundMoneyClient(H * 0.5);
+    const t35 = sleeve?.trigger35 ?? roundPriceClient(H * 0.65);
+    const t50 = sleeve?.trigger50 ?? roundPriceClient(H * 0.5);
     const dd = stats.drawdownLive;
-    if (dd != null && dd <= -50) return `${hTxt} · 袖仓已到 −50%（上限档 ${t50}）`;
-    if (dd != null && dd <= -35) return `${hTxt} · 下一袖仓 −50% ${t50}`;
-    return `${hTxt} · 下一袖仓 −35% ${t35}`;
+    if (dd != null && dd <= -50) return `${hTxt} · 袖仓已到 −50%（上限档 ${fmtPrice(t50)}）`;
+    if (dd != null && dd <= -35) return `${hTxt} · 下一袖仓 −50% ${fmtPrice(t50)}`;
+    return `${hTxt} · 下一袖仓 −35% ${fmtPrice(t35)}`;
   }
   if (label === 'SOXL') {
     const sleeve = sleeveBySymbol('SOXL');
-    const t50 = sleeve?.trigger50 ?? roundMoneyClient(H * 0.5);
-    const t70 = sleeve?.trigger70 ?? roundMoneyClient(H * 0.3);
+    const t50 = sleeve?.trigger50 ?? roundPriceClient(H * 0.5);
+    const t70 = sleeve?.trigger70 ?? roundPriceClient(H * 0.3);
     const dd = stats.drawdownLive;
     if (!state.settings?.soxlEnabled) return `${hTxt} · 芯片观点未开`;
-    if (dd != null && dd <= -70) return `${hTxt} · 袖仓已近 −70% 上限（${t70}）`;
-    if (dd != null && dd <= -50) return `${hTxt} · 下一袖仓 −70% ${t70}`;
-    return `${hTxt} · 下一袖仓 −50% ${t50}`;
+    if (dd != null && dd <= -70) return `${hTxt} · 袖仓已近 −70% 上限（${fmtPrice(t70)}）`;
+    if (dd != null && dd <= -50) return `${hTxt} · 下一袖仓 −70% ${fmtPrice(t70)}`;
+    return `${hTxt} · 下一袖仓 −50% ${fmtPrice(t50)}`;
   }
   return hTxt;
 }
 
-function roundMoneyClient(n) {
-  return Math.round((Number(n) || 0) * 100) / 100;
+function roundPriceClient(n) {
+  return Math.round((Number(n) || 0) * 1000) / 1000;
 }
 
 function symbolRow(label, stats) {
   if (!stats) return '';
   return `<tr>
     <td>${label}</td>
-    <td>${stats.price != null ? stats.price.toFixed(2) : '—'}</td>
+    <td>${stats.price != null ? stats.price.toFixed(3) : '—'}</td>
     <td class="${pctClass(stats.changePercent)}">${fmtPct(stats.changePercent)}</td>
     <td class="${pctClass(stats.drawdownLive)}">${fmtPct(stats.drawdownLive)}</td>
     <td>${nextLevelHint(label, stats)}</td>
@@ -665,9 +669,9 @@ function renderSymbols() {
   $('#symbol-table tbody').innerHTML = rows.join('');
   const leaps = ev.leaps;
   const contracts = (ev.suggestedContracts || []).slice(0, 6)
-    .map((c) => `${c.expiry} ${c.strike}C`).join(' · ');
+    .map((c) => `${c.expiry} ${fmtPrice(c.strike)}C`).join(' · ');
   $('#leap-hint').textContent = leaps?.medium
-    ? `中虚值行权价约 ${leaps.medium.low}–${leaps.medium.high}；1 月 LEAP：${(leaps.expiries || []).map((x) => x.expiry).join(' / ') || '—'}。${contracts ? `链上有量参考：${contracts}` : ''}`
+    ? `中虚值行权价约 ${fmtPrice(leaps.medium.low)}–${fmtPrice(leaps.medium.high)}；1 月 LEAP：${(leaps.expiries || []).map((x) => x.expiry).join(' / ') || '—'}。${contracts ? `链上有量参考：${contracts}` : ''}`
     : '';
 }
 
@@ -685,7 +689,7 @@ function renderTiers() {
       <td><strong>${escapeHtml(t.id)}</strong></td>
       <td>${escapeHtml(bagLabel(t.bag))}</td>
       <td class="tier-cond" title="${escapeHtml(cond)}">${escapeHtml(cond)}</td>
-      <td>${t.triggerPrice ?? '—'}${t.intradayPrice ? ` / 盘中 ${t.intradayPrice}` : ''}</td>
+      <td>${fmtPrice(t.triggerPrice)}${t.intradayPrice ? ` / 盘中 ${fmtPrice(t.intradayPrice)}` : ''}</td>
       <td>${fmtPctB(t.pctB)}%</td>
       <td>${maskMoney(fmtUsd(t.usd))}</td>
       <td class="st-${t.status}">${statusLabel(t.status)}</td>
@@ -702,8 +706,8 @@ function renderLots() {
     <tr>
       <td>${escapeHtml(lot.symbol || '')}</td>
       <td>${lot.type === 'call' ? 'Call' : '正股'}</td>
-      <td>${maskMoney(fmtUsd(lot.cost))}</td>
-      <td>${lot.mark != null ? maskMoney(fmtUsd(lot.mark)) : '—'}</td>
+      <td>${maskMoney('$' + fmtPrice(lot.cost))}</td>
+      <td>${lot.mark != null ? maskMoney('$' + fmtPrice(lot.mark)) : '—'}</td>
       <td>${lot.multiple != null ? lot.multiple.toFixed(2) + '×' : '—'}</td>
       <td>${(lot.alerts || []).map((a) => a.action).join('；') || '—'}</td>
       <td>${can('lots-edit', 'edit') ? `<button class="btn link danger" data-del-lot="${lot.id}">删除</button>` : ''}</td>
@@ -1091,7 +1095,7 @@ function bind() {
       <div id="sell-fields" class="sm-grid" hidden>
         <label class="field">代码<input id="sell-sym" placeholder="QQQ / 159509 / OCC"></label>
         <label class="field">数量<input id="sell-shares" type="number" step="1"></label>
-        <label class="field">价格<input id="sell-price" type="number" step="0.01"></label>
+        <label class="field">价格<input id="sell-price" type="number" step="0.001"></label>
         <label class="field">币种<select id="sell-cur"><option value="USD">USD</option><option value="CNY">CNY</option></select></label>
       </div>
       <div class="sm-modal-actions">
@@ -1117,7 +1121,7 @@ function bind() {
           if (!body.symbol || !(body.shares > 0) || !(body.price > 0)) {
             throw new Error('卖出需填写代码、数量与价格');
           }
-          body.message = body.message || `卖出 ${body.symbol} × ${body.shares} @ ${body.price}`;
+          body.message = body.message || `卖出 ${body.symbol} × ${body.shares} @ ${fmtPrice(body.price)}`;
         }
         const data = await api('/actions', { method: 'POST', body });
         $('#modal-root').innerHTML = '';
@@ -1134,7 +1138,7 @@ function bind() {
       <div class="sm-grid">
         <label class="field">代码<input id="lot-sym" placeholder="QQQ 或 QQQ270115C00700000"></label>
         <label class="field">类型<select id="lot-type"><option value="equity">正股</option><option value="call">Call</option></select></label>
-        <label class="field">成本<input id="lot-cost" type="number" step="0.01"></label>
+        <label class="field">成本<input id="lot-cost" type="number" step="0.001"></label>
         <label class="field">数量<input id="lot-qty" type="number" step="1" value="1"></label>
         <label class="field">档位<input id="lot-tier" placeholder="T2"></label>
         <label class="field">虚值分类<select id="lot-otm">
@@ -1143,7 +1147,7 @@ function bind() {
           <option value="deep">深虚值</option>
           <option value="shallow">浅虚值</option>
         </select></label>
-        <label class="field">行权价<input id="lot-strike" type="number" step="0.5"></label>
+        <label class="field">行权价<input id="lot-strike" type="number" step="0.001"></label>
         <label class="field">到期<input id="lot-exp" type="date"></label>
       </div>
       <div class="sm-modal-actions">

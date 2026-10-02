@@ -7,8 +7,8 @@ function formatPct(value) {
 
 // The monitor owns market context only. The notification hub owns rules and delivery.
 export function appendMarketSnapshot(text, stats, symbol = 'QQQ') {
-  const price = Number.isFinite(stats?.price) ? stats.price.toFixed(2) : '—';
-  const h = Number.isFinite(stats?.H) ? stats.H.toFixed(2) : '—';
+  const price = Number.isFinite(stats?.price) ? stats.price.toFixed(3) : '—';
+  const h = Number.isFinite(stats?.H) ? stats.H.toFixed(3) : '—';
   return `${text}\n行情：${symbol} 现价 ${price}｜当日涨跌幅 ${formatPct(stats?.changePercent)}｜相对 H 回撤 ${formatPct(stats?.drawdownLive)}（H ${h}）`;
 }
 

@@ -19,7 +19,8 @@ export function roundMoney(n) {
 }
 
 export function roundPrice(n) {
-  return Math.round(Number(n) * 1000) / 1000;
+  const value = Number(n);
+  return Math.round((value + Number.EPSILON * Math.abs(value)) * 1000) / 1000;
 }
 
 export function tradeCurrency(trade) {
