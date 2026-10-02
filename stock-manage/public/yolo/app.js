@@ -396,6 +396,7 @@ async function runBacktest(event) {
   button.disabled = true; button.textContent = '回测中…';
   $('#backtest-message').className = 'yolo-message';
   $('#backtest-message').textContent = '正在创建回测任务…';
+  renderBacktestProgress({ startedAt: Date.now(), status: 'running', progress: { stage: '正在创建后台任务' } });
   ['#bt-return', '#bt-pf', '#bt-winrate', '#bt-drawdown'].forEach((selector) => { $(selector).textContent = '—'; });
   $('#trade-body').innerHTML = '<tr><td colspan="6" class="quant-empty">回测中，完成后显示本次交易。</td></tr>';
   $('#backtest-day-log').innerHTML = '';

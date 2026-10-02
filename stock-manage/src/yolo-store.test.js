@@ -1,13 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
+import { createRequire } from 'node:module';
 import { initSchema } from '../../shared/db/schema.js';
 import { createYoloStore } from './yolo-store.js';
 
+function testDatabase(context) {
+  const require = createRequire(import.meta.url);
+  for (const load of [() => Database, () => require('../../portal/node_modules/better-sqlite3')]) {
+    try { return new (load())(':memory:'); } catch { /* Match shared database native-module fallback. */ }
+  }
+  context.skip('better-sqlite3 native binding is unavailable for this Node runtime');
+  return null;
+}
+
 test('async backtest loads only nearest future expiry, reports daily reasons and isolates users', async (context) => {
-  let db;
-  try { db = new Database(':memory:'); }
-  catch { context.skip('better-sqlite3 native binding is unavailable for this Node runtime'); return; }
+  const db = testDatabase(context);
+  if (!db) return;
   try {
     initSchema(db);
     const store = createYoloStore({}, db);
@@ -30,9 +39,8 @@ test('async backtest loads only nearest future expiry, reports daily reasons and
 });
 
 test('stores QQQ option captures per user and exposes backtest dataset', (context) => {
-  let db;
-  try { db = new Database(':memory:'); }
-  catch { context.skip('better-sqlite3 native binding is unavailable for this Node runtime'); return; }
+  const db = testDatabase(context);
+  if (!db) return;
   initSchema(db);
   const store = createYoloStore({}, db);
   const snapshot = {

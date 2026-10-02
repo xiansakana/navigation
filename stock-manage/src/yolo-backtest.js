@@ -1,7 +1,9 @@
+const etClock = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit'
+});
+
 function etMinute(iso) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit'
-  }).formatToParts(new Date(iso));
+  const parts = etClock.formatToParts(new Date(iso));
   const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return Number(value.hour) * 60 + Number(value.minute);
 }
