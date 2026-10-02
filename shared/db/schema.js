@@ -138,6 +138,15 @@ export function initSchema(db) {
     const columns = db.prepare(`PRAGMA table_info(${table})`).all();
     if (!columns.some((item) => item.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   };
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS blog_post_tags (
+      post_id TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      PRIMARY KEY (post_id, tag)
+    );
+    CREATE INDEX IF NOT EXISTS idx_blog_post_tags_tag ON blog_post_tags (tag, post_id);
+  `);
+  ensureColumn('blog_posts', 'content_format', "TEXT NOT NULL DEFAULT 'text'");
   ensureColumn('yolo_captures', 'capture_kind', "TEXT NOT NULL DEFAULT 'intraday'");
   ensureColumn('yolo_option_quotes', 'last_trade_at', 'TEXT');
   ensureColumn('yolo_option_quotes', 'open_price', 'REAL');

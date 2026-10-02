@@ -3,6 +3,9 @@
     var feed = document.getElementById('blog-feed');
     var composer = document.getElementById('blog-composer');
     var input = document.getElementById('blog-content');
+    var richEditor = window.createBlogEditor(input);
+    var tagEditor = window.createBlogTags(document.getElementById('blog-tags'));
+    var tagFilter = document.getElementById('blog-tag-filter');
     var imageInput = document.getElementById('blog-images');
     var videoInput = document.getElementById('blog-videos');
     var preview = document.getElementById('blog-preview');
@@ -10,7 +13,7 @@
     var loading = document.getElementById('blog-loading');
     var shortcut = document.getElementById('blog-shortcut');
     var state = { userId: '', canPost: false, canManage: false, lastId: null, loading: false,
-        pending: [], posts: new Map(), editing: null };
+        pending: [], posts: new Map(), editing: null, tag: '', tags: [] };
 
     async function request(path, options) {
         var response = await fetch('/api/blog/' + path, options || {});
@@ -130,10 +133,18 @@
             editedTime.textContent = '最后编辑于 ' + new Date(post.updatedAt).toLocaleString('zh-CN');
             meta.appendChild(editedTime);
         }
-        var body = document.createElement('p');
+        var body = document.createElement('div');
         body.className = 'blog-post-content';
-        body.textContent = post.content;
+        if (post.contentFormat === 'html') { body.classList.add('blog-rich-content'); body.innerHTML = post.content; }
+        else body.textContent = post.content;
         main.append(meta, body);
+        var postTags = document.createElement('div');
+        postTags.className = 'blog-post-tags';
+        (post.tags || []).forEach(function(tag) {
+            var tagButton = document.createElement('button'); tagButton.type = 'button'; tagButton.className = 'blog-tag';
+            tagButton.textContent = '#' + tag; tagButton.dataset.tag = tag; postTags.appendChild(tagButton);
+        });
+        main.appendChild(postTags);
         var items = (post.images || []).map(function(item) { return Object.assign({ kind: 'image' }, item); })
             .concat((post.videos || []).map(function(item) { return Object.assign({ kind: 'video' }, item); }));
         if (items.length) {
@@ -167,19 +178,25 @@
         loading.classList.remove('hidden');
         feed.setAttribute('aria-busy', 'true');
         try {
-            var data = await request('posts' + (!reset && state.lastId ? '?before=' + state.lastId : ''));
+            var params = new URLSearchParams();
+            if (!reset && state.lastId) params.set('before', state.lastId);
+            if (state.tag) params.set('tag', state.tag);
+            var data = await request('posts?' + params.toString());
+            state.tags = data.tags || [];
+            tagEditor.suggestions(state.tags);
+            renderTagFilter();
             if (reset) { feed.replaceChildren(); state.posts.clear(); }
             state.userId = data.userId;
             state.canPost = data.canPost;
             state.canManage = data.canManage;
-            composer.classList.toggle('hidden', !state.canPost);
+            composer.classList.toggle('hidden', !(state.canPost || state.canManage));
             shortcut.textContent = state.canPost ? '写博客' : '查看动态';
             shortcut.classList.remove('hidden');
             data.posts.forEach(function(post) { state.posts.set(post.id, post); feed.appendChild(renderPost(post)); });
             if (reset && !data.posts.length) {
                 var empty = document.createElement('p');
                 empty.className = 'blog-empty';
-                empty.textContent = '还没有动态，写下第一篇吧。';
+                empty.textContent = state.tag ? '这个标签下还没有动态。' : '还没有动态，写下第一篇吧。';
                 feed.appendChild(empty);
             }
             state.lastId = data.posts.length ? data.posts.at(-1).id : null;
@@ -207,7 +224,7 @@
         return uploaded;
     }
 
-    input.addEventListener('input', function() { document.getElementById('blog-count').textContent = input.value.length + ' / 10000'; });
+    input.addEventListener('input', function() { document.getElementById('blog-count').textContent = (input.innerText || '').length + ' / 10000'; });
     imageInput.addEventListener('change', async function() {
         try { await addFiles(Array.from(imageInput.files), 'image', state.pending, renderComposerPreview); }
         catch (error) { window.portalToast?.error(error.message); }
@@ -226,17 +243,17 @@
     });
     composer.addEventListener('submit', async function(event) {
         event.preventDefault();
-        if (!input.value.trim() && !state.pending.length) { window.portalToast?.error('请输入博客内容或添加媒体'); return; }
+        if (!input.textContent.trim() && !state.pending.length) { window.portalToast?.error('请输入博客内容或添加媒体'); return; }
         var button = document.getElementById('blog-submit');
         button.disabled = true;
         var created;
         try {
             created = await request('posts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: input.value, hasMedia: state.pending.length > 0 }) });
+                body: JSON.stringify({ content: richEditor.content(), contentFormat: 'html', tags: tagEditor.value(), hasMedia: state.pending.length > 0 }) });
             await uploadAll(created.id, state.pending);
             release(state.pending);
             state.pending = [];
-            input.value = '';
+            richEditor.clear(); tagEditor.clear();
             input.dispatchEvent(new Event('input'));
             renderComposerPreview();
             await load(true);
@@ -246,7 +263,7 @@
                 await request('posts/' + created.id, { method: 'DELETE' }).catch(function() {});
                 window.portalToast?.error('上传失败，内容已保留在编辑框：' + error.message);
             } else if (created) {
-                release(state.pending); state.pending = []; input.value = '';
+                release(state.pending); state.pending = []; richEditor.clear(); tagEditor.clear();
                 input.dispatchEvent(new Event('input')); renderComposerPreview();
                 await load(true);
                 window.portalToast?.error('媒体上传中断，已发布的内容可在编辑中继续补充：' + error.message);
@@ -283,12 +300,14 @@
         var post = state.posts.get(button.dataset.id);
         state.editing = { id: post.id, keepMediaIds: editItems(post).map(function(item) { return item.id; }), pending: [] };
         var body = article.querySelector('.blog-post-content');
-        var editor = document.createElement('textarea');
+        var editor = document.createElement('div');
         editor.className = 'blog-edit';
-        editor.maxLength = 10000;
-        editor.rows = 5;
-        editor.value = body.textContent;
         body.replaceWith(editor);
+        state.editing.editor = window.createBlogEditor(editor, post);
+        article.querySelector('.blog-post-tags')?.remove();
+        var editTags = document.createElement('div');
+        editor.after(editTags);
+        state.editing.tags = window.createBlogTags(editTags, post.tags, state.tags);
         article.querySelector('.blog-post-images')?.remove();
         var tools = document.createElement('div');
         tools.className = 'blog-edit-tools';
@@ -321,10 +340,14 @@
         button.disabled = true;
         try {
             var editing = state.editing;
+            var tags = editing.tags.value();
+            if (button.closest('.blog-post').querySelector('.blog-rich-editor').textContent.length > 10000) throw new Error('博客内容最多 10000 字');
             var uploaded = await uploadAll(editing.id, editing.pending);
+            editing.keepMediaIds.push.apply(editing.keepMediaIds, uploaded.map(function(item) { return item.id; }));
+            release(editing.pending); editing.pending = [];
             await request('posts/' + editing.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: button.closest('.blog-post').querySelector('textarea').value,
-                    keepMediaIds: editing.keepMediaIds.concat(uploaded.map(function(item) { return item.id; })) }) });
+                body: JSON.stringify({ content: editing.editor.content(), contentFormat: 'html', tags: tags,
+                    keepMediaIds: editing.keepMediaIds }) });
             release(editing.pending); state.editing = null;
             await load(true);
         } catch (error) {
@@ -351,6 +374,24 @@
         } else release(state.editing.pending.splice(Number(button.dataset.index), 1));
         renderEditPreview(button.closest('.blog-post'));
     });
+    function renderTagFilter() {
+        tagFilter.replaceChildren();
+        [{ tag: '', count: null }].concat(state.tags).forEach(function(item) {
+            var button = document.createElement('button'); button.type = 'button'; button.className = 'blog-tag';
+            button.dataset.tag = item.tag;
+            button.textContent = item.tag ? '#' + item.tag + ' (' + item.count + ')' : '全部动态';
+            button.setAttribute('aria-pressed', String(state.tag === item.tag));
+            tagFilter.appendChild(button);
+        });
+    }
+    async function selectTag(event) {
+        var button = event.target.closest('button[data-tag]');
+        if (!button || state.loading) return;
+        if (state.editing) { window.portalToast?.warn('请先完成当前编辑'); return; }
+        state.tag = button.dataset.tag; await load(true);
+    }
+    tagFilter.addEventListener('click', selectTag);
+    feed.addEventListener('click', selectTag);
     more.addEventListener('click', function() { load(false); });
     shortcut.addEventListener('click', function() { if (state.canPost) setTimeout(function() { input.focus(); }, 0); });
     async function initialize() {

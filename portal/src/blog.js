@@ -2,8 +2,8 @@ import crypto from 'node:crypto';
 import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
 import { deleteStoredMedia, uploadImage, uploadVideo } from './blog-media-storage.js';
+import { normalizeContent, normalizeTags } from './blog-content.js';
 
-const MAX_CONTENT_LENGTH = 10000;
 const MAX_REQUEST_BYTES = 128 * 1024;
 
 export function blogAccess(session) {
@@ -14,11 +14,7 @@ export function blogAccess(session) {
 }
 
 export function validateContent(value, allowEmpty = false) {
-    if (typeof value !== 'string') throw new Error('请输入博客内容');
-    const content = value.trim();
-    if (!content && !allowEmpty) throw new Error('请输入博客内容或添加媒体');
-    if (content.length > MAX_CONTENT_LENGTH) throw new Error('博客内容最多 10000 字');
-    return content;
+    return normalizeContent(value, 'text', allowEmpty);
 }
 
 function transaction(db, operation) {
@@ -31,31 +27,44 @@ export function getImage(db, id) {
     return db.prepare('SELECT i.mime_type AS mimeType, i.image_data AS imageData FROM blog_images i JOIN blog_posts p ON p.id = i.post_id WHERE i.id = ?').get(id);
 }
 
-export function listPosts(db, before, limit = 20) {
+export function listPosts(db, before, limit = 20, tag = '') {
     const cursor = before ? db.prepare('SELECT created_at, id FROM blog_posts WHERE id = ?').get(before) : null;
     if (before && !cursor) return [];
-    const sql = `SELECT id, author_id AS authorId, author_name AS authorName,
-        content, created_at AS createdAt, updated_at AS updatedAt FROM blog_posts`;
-    const rows = cursor
-        ? db.prepare(sql + ' WHERE created_at < ? OR (created_at = ? AND id < ?) ORDER BY created_at DESC, id DESC LIMIT ?')
-            .all(cursor.created_at, cursor.created_at, cursor.id, limit)
-        : db.prepare(sql + ' ORDER BY created_at DESC, id DESC LIMIT ?').all(limit);
+    const conditions = [];
+    const params = [];
+    if (cursor) {
+        conditions.push('(created_at < ? OR (created_at = ? AND id < ?))');
+        params.push(cursor.created_at, cursor.created_at, cursor.id);
+    }
+    if (tag) {
+        conditions.push('EXISTS (SELECT 1 FROM blog_post_tags t WHERE t.post_id = blog_posts.id AND t.tag = ?)');
+        params.push(tag);
+    }
+    const rows = db.prepare(`SELECT id, author_id AS authorId, author_name AS authorName,
+        content, content_format AS contentFormat, created_at AS createdAt, updated_at AS updatedAt FROM blog_posts
+        ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''} ORDER BY created_at DESC, id DESC LIMIT ?`).all(...params, limit);
+    const tags = db.prepare('SELECT tag FROM blog_post_tags WHERE post_id = ? ORDER BY rowid');
     const legacy = db.prepare('SELECT id FROM blog_images WHERE post_id = ? ORDER BY position, id');
     const media = db.prepare('SELECT id, kind, url, mime_type AS mimeType FROM blog_media WHERE post_id = ? ORDER BY position, id');
     return rows.map(row => {
         const items = media.all(row.id);
         const oldImages = legacy.all(row.id).map(image => ({ id: image.id, kind: 'image', url: '/api/blog/images/' + image.id }));
-        return { ...row, images: [...oldImages, ...items.filter(item => item.kind === 'image')],
+        return { ...row, content: normalizeContent(row.content, row.contentFormat, true), tags: tags.all(row.id).map(item => item.tag), images: [...oldImages, ...items.filter(item => item.kind === 'image')],
             videos: items.filter(item => item.kind === 'video') };
     });
 }
 
-export function createPost(db, session, content, hasMedia = false) {
-    const text = validateContent(content, hasMedia === true);
+export function createPost(db, session, content, hasMedia = false, options = {}) {
+    const format = options.contentFormat ?? 'text';
+    const text = normalizeContent(content, format, hasMedia === true);
+    const tags = normalizeTags(options.tags);
     const id = crypto.randomUUID().replaceAll('-', '');
     const now = new Date().toISOString();
-    db.prepare('INSERT INTO blog_posts (id, author_id, author_name, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(id, session.userId, session.username, text, now, now);
+    transaction(db, () => {
+        db.prepare('INSERT INTO blog_posts (id, author_id, author_name, content, content_format, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            .run(id, session.userId, session.username, text, format, now, now);
+        for (const tag of tags) db.prepare('INSERT INTO blog_post_tags (post_id, tag) VALUES (?, ?)').run(id, tag);
+    });
     return id;
 }
 
@@ -88,6 +97,7 @@ export function changePost(db, id, session, content, remove = false, options = {
         transaction(db, () => {
             db.prepare('DELETE FROM blog_media WHERE post_id = ?').run(id);
             db.prepare('DELETE FROM blog_images WHERE post_id = ?').run(id);
+            db.prepare('DELETE FROM blog_post_tags WHERE post_id = ?').run(id);
             db.prepare('DELETE FROM blog_posts WHERE id = ?').run(id);
         });
         return { status: 200, removedMedia };
@@ -99,7 +109,9 @@ export function changePost(db, id, session, content, remove = false, options = {
     const keepIds = options.keepMediaIds == null ? existing : options.keepMediaIds;
     if (!Array.isArray(keepIds) || new Set(keepIds).size !== keepIds.length
         || keepIds.some(mediaId => !existing.includes(mediaId))) throw new Error('文章媒体参数无效');
-    const text = validateContent(content, keepIds.length > 0);
+    const format = options.contentFormat ?? 'text';
+    const text = normalizeContent(content, format, keepIds.length > 0);
+    const tags = options.tags === undefined ? null : normalizeTags(options.tags);
     const removedMedia = db.prepare('SELECT id, storage_key AS storageKey FROM blog_media WHERE post_id = ?').all(id)
         .filter(item => !keepIds.includes(item.id));
     transaction(db, () => {
@@ -108,8 +120,12 @@ export function changePost(db, id, session, content, remove = false, options = {
             db.prepare('DELETE FROM blog_images WHERE post_id = ? AND id = ?').run(id, mediaId);
             db.prepare('DELETE FROM blog_media WHERE post_id = ? AND id = ?').run(id, mediaId);
         }
-        db.prepare('UPDATE blog_posts SET content = ?, updated_at = ? WHERE id = ?')
-            .run(text, new Date().toISOString(), id);
+        if (tags) {
+            db.prepare('DELETE FROM blog_post_tags WHERE post_id = ?').run(id);
+            for (const tag of tags) db.prepare('INSERT INTO blog_post_tags (post_id, tag) VALUES (?, ?)').run(id, tag);
+        }
+        db.prepare('UPDATE blog_posts SET content = ?, content_format = ?, updated_at = ? WHERE id = ?')
+            .run(text, format, new Date().toISOString(), id);
     });
     return { status: 200, removedMedia };
 }
@@ -140,7 +156,10 @@ export async function handleBlogApi(req, res, url, session, json, config) {
     if (req.method === 'GET' && url.pathname === '/api/blog/posts') {
         const before = url.searchParams.get('before');
         if (before && !/^[a-f0-9]{32}$/.test(before)) return json(res, 400, { ok: false, error: '分页参数无效' });
-        return json(res, 200, { ok: true, posts: listPosts(db, before), ...access, userId: session.userId });
+        const tag = url.searchParams.get('tag') || '';
+        try { normalizeTags([tag]); } catch (error) { return json(res, 400, { ok: false, error: error.message }); }
+        const tags = db.prepare('SELECT t.tag, COUNT(*) AS count FROM blog_post_tags t JOIN blog_posts p ON p.id = t.post_id GROUP BY t.tag ORDER BY count DESC, t.tag').all();
+        return json(res, 200, { ok: true, posts: listPosts(db, before, 20, tag), tags, ...access, userId: session.userId });
     }
     if (req.method === 'POST' && !access.canPost && !access.canManage) return json(res, 403, { ok: false, error: '无权发布博客' });
     const match = url.pathname.match(/^\/api\/blog\/posts\/([a-f0-9]{32})(?:\/media)?$/);
@@ -172,10 +191,10 @@ export async function handleBlogApi(req, res, url, session, json, config) {
     try {
         const body = await readJson(req);
         if (req.method === 'POST') {
-            const postId = createPost(db, session, body.content, body.hasMedia);
+            const postId = createPost(db, session, body.content, body.hasMedia, { contentFormat: body.contentFormat, tags: body.tags });
             return json(res, 201, { ok: true, id: postId });
         }
-        const result = changePost(db, id, session, body.content, false, { keepMediaIds: body.keepMediaIds });
+        const result = changePost(db, id, session, body.content, false, { keepMediaIds: body.keepMediaIds, contentFormat: body.contentFormat, tags: body.tags });
         if (result.removedMedia?.length) {
             try { await deleteStoredMedia(result.removedMedia); }
             catch (error) { console.error('博客媒体清理失败:', error); }
