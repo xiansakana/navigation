@@ -6,8 +6,9 @@
     <title>服务导航</title>
     <script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
     <link rel="stylesheet" href="/portal.css?v=blog-unified-1">
+    <link rel="stylesheet" href="/experience.css?v=20261003">
 </head>
-<body class="has-navbar portal-layout-enabled dashboard-page">
+<body class="portal-experience has-navbar portal-layout-enabled dashboard-page">
     <header class="navbar">
         <div class="navbar-inner">
             <a class="navbar-brand" href="/">
@@ -28,8 +29,12 @@
     </header>
     <div class="page-header">
         <h1>我的服务</h1>
-        <p>选择一项服务进入管理或访问</p>
+        <p>你的工作、工具与生活记录，都在这里。</p>
         <a class="btn primary blog-shortcut hidden" id="blog-shortcut" href="#blog-section">写博客</a>
+        <div class="service-search">
+            <label for="service-search">快速查找<input id="service-search" type="search" placeholder="搜索服务名称或功能…" autocomplete="off" aria-controls="service-grid"></label>
+            <span class="service-search-status" id="service-search-status" role="status">正在加载服务…</span>
+        </div>
     </div>
     <main class="grid" id="service-grid"></main>
     <section class="blog-section hidden" id="blog-section" aria-label="博客动态">

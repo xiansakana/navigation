@@ -342,12 +342,15 @@ function injectPortalShell(html, service) {
         + '<div class="navbar-actions">' + layoutBtn + themeBtn + '</div>'
         + '</div></header>';
     var bodyClass = 'has-navbar portal-layout-enabled';
+    var useExperience = isToolbox || ['stock-manage', 'qqq-dip', 'notifications'].includes(service.id);
+    if (useExperience) bodyClass += ' portal-experience';
     if (isToolbox) bodyClass += ' toolbox-proxied';
     if (service.id === 'stock-manage' || service.id === 'qqq-dip') bodyClass += ' stock-proxied';
     if (service.id === 'notes') bodyClass += ' notes-proxied';
     if (service.id === 'notifications') bodyClass += ' notifications-proxied';
     return html
         .replace('<head>', '<head>' + themeBoot + baseTag + portalCss + themeJs + toastJs + dialogJs + layoutJs)
+        .replace(/<\/head>/i, (useExperience ? '<link rel="stylesheet" href="/experience.css?v=20261003">' : '') + '</head>')
         .replace(/<body([^>]*)>/, function(match, attrs) {
             var cls = bodyClass;
             if (/class="([^"]*)"/.test(attrs)) {

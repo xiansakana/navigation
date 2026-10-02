@@ -9,6 +9,8 @@ async function api(path, options) {
     return data;
 }
 
+var visibleServices = [];
+
 function renderServices(services) {
     var grid = document.getElementById('service-grid');
     grid.innerHTML = '';
@@ -27,7 +29,21 @@ function renderServices(services) {
             + '<span class="tag">' + (service.type === 'proxy' || service.type === 'hub' ? '内置' : '外链') + '</span>';
         grid.appendChild(card);
     });
+    document.getElementById('service-search-status').textContent = '显示 ' + services.length + ' 项服务';
+    if (!services.length) {
+        var empty = document.createElement('p');
+        empty.className = 'service-empty';
+        empty.textContent = visibleServices.length ? '没有找到匹配的服务，请尝试其他关键词。' : '当前账号暂无可访问的服务。';
+        grid.appendChild(empty);
+    }
 }
+
+document.getElementById('service-search').addEventListener('input', function(event) {
+    var keyword = event.target.value.trim().toLocaleLowerCase();
+    renderServices(visibleServices.filter(function(service) {
+        return (service.title + ' ' + (service.description || '')).toLocaleLowerCase().includes(keyword);
+    }));
+});
 
 document.getElementById('logout').addEventListener('click', function() {
     var btn = document.getElementById('logout');
@@ -57,8 +73,10 @@ api('me').then(function(data) {
     }
     return api('services');
 }).then(function(data) {
-    renderServices(data.services || []);
+    visibleServices = data.services || [];
+    document.getElementById('service-search').dispatchEvent(new Event('input'));
 }).catch(function(err) {
     document.getElementById('welcome').textContent = '加载失败';
+    document.getElementById('service-search-status').textContent = '服务加载失败，请刷新重试';
     window.portalToast?.error(err.message);
 });
