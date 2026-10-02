@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>服务导航</title>
     <script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
-    <link rel="stylesheet" href="/portal.css?v=blog-media-1">
+    <link rel="stylesheet" href="/portal.css?v=blog-times-loading-1">
 </head>
 <body class="has-navbar portal-layout-enabled dashboard-page">
     <header class="navbar">
@@ -50,6 +50,9 @@
             <div class="blog-composer-footer"><span id="blog-count">0 / 10000</span><button class="btn primary" type="submit" id="blog-submit">发布动态</button></div>
         </form>
         <div class="blog-feed" id="blog-feed" aria-live="polite"></div>
+        <div class="blog-loading hidden" id="blog-loading" role="status">
+            <span class="blog-spinner" aria-hidden="true"></span><span>正在加载博客…</span>
+        </div>
         <button type="button" class="btn ghost blog-more hidden" id="blog-more">加载更多</button>
     </section>
     <script src="/theme.js"></script>
@@ -57,6 +60,6 @@
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
     <script src="/dashboard.js"></script>
-    <script src="/blog.js?v=blog-media-1"></script>
+    <script src="/blog.js?v=blog-times-loading-1"></script>
 </body>
 </html>

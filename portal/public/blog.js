@@ -7,6 +7,7 @@
     var videoInput = document.getElementById('blog-videos');
     var preview = document.getElementById('blog-preview');
     var more = document.getElementById('blog-more');
+    var loading = document.getElementById('blog-loading');
     var shortcut = document.getElementById('blog-shortcut');
     var state = { userId: '', canPost: false, canManage: false, lastId: null, loading: false,
         pending: [], posts: new Map(), editing: null };
@@ -119,8 +120,16 @@
         author.textContent = post.authorName;
         var time = document.createElement('time');
         time.dateTime = post.createdAt;
-        time.textContent = new Date(post.createdAt).toLocaleString('zh-CN');
+        time.className = 'blog-published-time';
+        time.textContent = '发布于 ' + new Date(post.createdAt).toLocaleString('zh-CN');
         meta.append(author, time);
+        if (new Date(post.updatedAt).getTime() > new Date(post.createdAt).getTime()) {
+            var editedTime = document.createElement('time');
+            editedTime.className = 'blog-edited-time';
+            editedTime.dateTime = post.updatedAt;
+            editedTime.textContent = '最后编辑于 ' + new Date(post.updatedAt).toLocaleString('zh-CN');
+            meta.appendChild(editedTime);
+        }
         var body = document.createElement('p');
         body.className = 'blog-post-content';
         body.textContent = post.content;
@@ -155,6 +164,8 @@
         if (state.loading) return;
         state.loading = true;
         more.disabled = true;
+        loading.classList.remove('hidden');
+        feed.setAttribute('aria-busy', 'true');
         try {
             var data = await request('posts' + (!reset && state.lastId ? '?before=' + state.lastId : ''));
             if (reset) { feed.replaceChildren(); state.posts.clear(); }
@@ -176,7 +187,12 @@
             section.classList.remove('hidden');
         } catch (error) {
             if (error.message !== '无权查看博客') window.portalToast?.error('博客加载失败：' + error.message);
-        } finally { state.loading = false; more.disabled = false; }
+        } finally {
+            state.loading = false;
+            more.disabled = false;
+            loading.classList.add('hidden');
+            feed.setAttribute('aria-busy', 'false');
+        }
     }
 
     async function uploadAll(id, items) {
@@ -337,5 +353,18 @@
     });
     more.addEventListener('click', function() { load(false); });
     shortcut.addEventListener('click', function() { if (state.canPost) setTimeout(function() { input.focus(); }, 0); });
-    load(true);
+    async function initialize() {
+        try {
+            var response = await fetch('/api/me');
+            var user = await response.json();
+            if (!response.ok || !user.ok) throw new Error(user.error || '无法获取博客权限');
+            var permissions = user.permissions || [];
+            var canView = permissions.includes('blog:feed:view') || (!user.isGuest
+                && (permissions.includes('blog:post:edit') || permissions.includes('blog:manage:edit')));
+            if (!canView) return;
+            section.classList.remove('hidden');
+            await load(true);
+        } catch (error) { window.portalToast?.error('博客加载失败：' + error.message); }
+    }
+    initialize();
 })();

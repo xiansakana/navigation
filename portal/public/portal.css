@@ -900,6 +900,9 @@ body.login-page .portal-toast-host {
 .blog-composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
 .blog-composer-footer span { font-size: 12px; color: var(--muted); }
 .blog-feed { display: grid; gap: 14px; }
+.blog-loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 28px 16px; color: var(--muted); font-size: 13px; }
+.blog-spinner { width: 22px; height: 22px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: portal-loading-spin .8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .blog-spinner { animation-duration: 2s; } }
 .blog-post { display: flex; gap: 14px; padding: 20px; }
 .blog-avatar { display: grid; place-items: center; flex: 0 0 38px; height: 38px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 18%, var(--card)); color: var(--accent); font-weight: 700; }
 .blog-post-main { min-width: 0; flex: 1; }
