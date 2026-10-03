@@ -160,7 +160,7 @@ var SYSTEM_PERMISSIONS = [
     { id: 'blog:post:edit', name: '发布和编辑自己的博客（含可见范围、标签与富文本）', group: '博客', serviceId: 'blog', feature: 'post', action: 'edit', permissionPath: ['首页', '博客', '我的文章'] },
     { id: 'blog:manage:edit', name: '管理所有博客', group: '博客', serviceId: 'blog', feature: 'manage', action: 'edit', permissionPath: ['首页', '博客', '所有文章'] },
     { id: 'blog:comment:view', name: '查看评论', group: '博客', serviceId: 'blog', feature: 'comment', action: 'view', permissionPath: ['首页', '博客', '评论'] },
-    { id: 'blog:comment:edit', name: '发表评论、删除自己的评论及管理自己博客的评论', group: '博客', serviceId: 'blog', feature: 'comment', action: 'edit', permissionPath: ['首页', '博客', '评论'] },
+    { id: 'blog:comment:edit', name: '发表评论及管理自己博客的评论（登录用户默认拥有）', group: '博客', serviceId: 'blog', feature: 'comment', action: 'edit', permissionPath: ['首页', '博客', '评论'] },
     { id: 'blog:comment-manage:edit', name: '管理可见博客的评论', group: '博客', serviceId: 'blog', feature: 'comment-manage', action: 'edit', permissionPath: ['首页', '博客', '评论管理'] },
     { id: 'admin:access:view', name: '查看管理后台', group: '系统', action: 'view', resource: 'admin:access' },
     { id: 'admin:access:edit', name: '编辑管理后台', group: '系统', action: 'edit', resource: 'admin:access' },

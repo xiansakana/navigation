@@ -214,6 +214,7 @@ export function initSchema(db) {
     author_name TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_blog_comments_post ON blog_comments(post_id, created_at, id);`);
+  ensureColumn('blog_comments', 'content_format', "TEXT NOT NULL DEFAULT 'text'");
 
   const row = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get();
   if (!row) {

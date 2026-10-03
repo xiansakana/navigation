@@ -389,7 +389,10 @@
                         catch (error) { window.portalToast?.error(error.message); remove.disabled = false; }
                     }); meta.appendChild(remove);
                 }
-                var text = document.createElement('p'); text.textContent = comment.content; row.append(meta, text); panel.appendChild(row);
+                var text = document.createElement('div'); text.className = 'blog-comment-body';
+                if (comment.contentFormat === 'markdown' && comment.contentHtml != null) { text.classList.add('blog-rich-content'); text.innerHTML = window.DOMPurify.sanitize(comment.contentHtml); }
+                else text.textContent = comment.content;
+                row.append(meta, text); panel.appendChild(row);
             });
             if (data.next) {
                 var moreComments = document.createElement('button'); moreComments.type = 'button'; moreComments.className = 'blog-action'; moreComments.textContent = '加载更早的评论'; moreComments.dataset.commentMore = 'true';
@@ -398,7 +401,7 @@
             if (!panel.querySelector('.blog-comment')) { var empty = document.createElement('p'); empty.textContent = '还没有评论，聊聊你的想法。'; panel.appendChild(empty); }
             if (state.canComment && !panel.querySelector('form')) {
                 var form = document.createElement('form'); form.className = 'blog-comment-form';
-                var input = document.createElement('textarea'); input.maxLength = 2000; input.rows = 3; input.placeholder = '写下评论…'; input.setAttribute('aria-label', '评论内容'); input.value = commentDrafts.get(id) || '';
+                var input = document.createElement('textarea'); input.maxLength = 2000; input.rows = 3; input.placeholder = '写下评论，支持 Markdown（加粗、列表、链接、代码等）…'; input.setAttribute('aria-label', '评论内容'); input.value = commentDrafts.get(id) || '';
                 input.addEventListener('input', function() { commentDrafts.set(id, input.value); });
                 var submit = document.createElement('button'); submit.type = 'submit'; submit.className = 'btn primary'; submit.textContent = '发表评论';
                 form.append(input, submit); panel.appendChild(form);

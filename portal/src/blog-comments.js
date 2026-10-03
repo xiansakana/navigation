@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
 import { hasPermission } from './rbac.js';
 import { canViewPost } from './blog-visibility.js';
+import { renderMarkdown } from './blog-content.js';
 
 export function commentAccess(session) {
   const permissions = session.permissions || [];
   const canManageComments = !session.isGuest && hasPermission(permissions, 'blog:comment-manage:edit');
-  const canComment = !session.isGuest && hasPermission(permissions, 'blog:comment:edit');
+  const canComment = Boolean(session.userId) && !session.isGuest;
   return { canViewComments: hasPermission(permissions, 'blog:comment:view') || canComment || canManageComments, canComment, canManageComments };
 }
 export function listComments(db, postId, session, before) {
@@ -15,23 +16,25 @@ export function listComments(db, postId, session, before) {
     cursor = db.prepare('SELECT created_at, id FROM blog_comments WHERE id = ? AND post_id = ?').get(before, postId);
     if (!cursor) return { status: 400, error: '评论分页无效' };
   }
-  const items = db.prepare(`SELECT id, author_id AS authorId, author_name AS authorName, content, created_at AS createdAt FROM blog_comments
+  const items = db.prepare(`SELECT id, author_id AS authorId, author_name AS authorName, content, content_format AS contentFormat, created_at AS createdAt FROM blog_comments
     WHERE post_id = ? ${cursor ? 'AND (created_at < ? OR (created_at = ? AND id < ?))' : ''} ORDER BY created_at DESC, id DESC LIMIT 21`)
     .all(postId, ...(cursor ? [cursor.created_at, cursor.created_at, cursor.id] : []));
   const more = items.length > 20; if (more) items.pop();
   const author = db.prepare('SELECT author_id FROM blog_posts WHERE id = ?').get(postId);
   const access = commentAccess(session);
-  return { status: 200, comments: items.map(item => ({ ...item, canDelete: !session.isGuest && (access.canManageComments || (access.canComment && (item.authorId === session.userId || author.author_id === session.userId))) })), next: more ? items.at(-1).id : null };
+  return { status: 200, comments: items.map(item => ({ ...item, contentHtml: item.contentFormat === 'markdown' ? renderMarkdown(item.content) : null, canDelete: !session.isGuest && (access.canManageComments || (access.canComment && (item.authorId === session.userId || author.author_id === session.userId))) })), next: more ? items.at(-1).id : null };
 }
 export function createComment(db, postId, session, value) {
   if (!commentAccess(session).canComment) return { status: 403, error: '无权发表评论' };
   if (!canViewPost(db, postId, session)) return { status: 404, error: '博客不存在或不可见' };
-  const content = String(value ?? '').trim().normalize('NFC');
+  if (typeof value !== 'string') return { status: 400, error: '请输入评论内容' };
+  const content = value.trim().normalize('NFC');
   if (!content || content.length > 2000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(content)) return { status: 400, error: '评论请输入 1–2000 字' };
+  if (!renderMarkdown(content)) return { status: 400, error: '请输入有效的评论内容' };
   const last = db.prepare('SELECT created_at FROM blog_comments WHERE author_id = ? ORDER BY created_at DESC LIMIT 1').get(session.userId);
   if (last && Date.now() - Date.parse(last.created_at) < 2000) return { status: 429, error: '评论太快，请稍后再试' };
   const id = crypto.randomUUID().replaceAll('-', '');
-  db.prepare('INSERT INTO blog_comments VALUES (?, ?, ?, ?, ?, ?)').run(id, postId, session.userId, session.username, content, new Date().toISOString());
+  db.prepare("INSERT INTO blog_comments (id,post_id,author_id,author_name,content,created_at,content_format) VALUES (?, ?, ?, ?, ?, ?, 'markdown')").run(id, postId, session.userId, session.username, content, new Date().toISOString());
   return { status: 201, id };
 }
 export function deleteComment(db, id, session) {

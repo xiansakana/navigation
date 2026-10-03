@@ -20,6 +20,10 @@ body.portal-experience .blog-image-preview {
 .blog-comment-meta { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: 12px; }
 .blog-comment-meta time { color: var(--text-muted); }
 .blog-comment p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 7px 0 0; }
+.blog-comment-body { margin-top: 7px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.blog-comment-body.blog-rich-content { white-space: normal; }
+.blog-comment-body pre { overflow-x: auto; padding: 10px; border-radius: 8px; background: var(--input-bg); }
+.blog-comment-body img { max-width: 100%; max-height: 240px; object-fit: contain; }
 .blog-comment-form { display: flex; flex-direction: column; align-items: flex-end; gap: 9px; margin-top: 14px; }
 .blog-comment-form textarea { width: 100%; box-sizing: border-box; resize: vertical; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--input-bg); color: var(--text); font: inherit; }
 .blog-comment-status { color: var(--text-muted); }
