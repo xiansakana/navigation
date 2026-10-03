@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { DeleteObjectCommand, ListObjectVersionsCommand, AbortMultipartUploadCommand, S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { readPiclistConfig } from './piclist-admin.js';
+import { makeThumbnail, withMediaProcessor, uploadDirectory, removeUploadFiles, compressVideo } from './blog-media-process.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../piclist');
 const envPath = process.env.PICLIST_ENV_PATH || path.join(process.env.PICLIST_ROOT || root, '.env');
@@ -95,47 +96,46 @@ export async function uploadImage(req, service) {
     const url = result.result[0];
     const base = new URL(profile().urlPrefix.replace(/\/$/, '') + '/');
     if (!url.startsWith(base.href)) throw new Error('PicList 返回了意外的图片地址');
-    return { kind: 'image', mimeType: 'image/jpeg', url, storageKey: decodeURIComponent(url.slice(base.href.length)) };
+    const thumbnailData = await withMediaProcessor(async () => {
+        const id = crypto.randomUUID().replaceAll('-', ''), directory = uploadDirectory(id);
+        try {
+            await fs.promises.mkdir(directory, { recursive: true });
+            const input = path.join(directory, 'source.jpg');
+            await fs.promises.writeFile(input, bytes);
+            return await makeThumbnail(input, path.join(directory, 'thumbnail.jpg'));
+        } catch { return null; }
+        finally { await removeUploadFiles(id); }
+    });
+    return { kind: 'image', mimeType: 'image/jpeg', url, storageKey: decodeURIComponent(url.slice(base.href.length)), thumbnailData };
+}
+
+export async function uploadCompressedVideo(file, progress = () => {}, existingKey) {
+    const storage = videoStorage('video/mp4', existingKey);
+    try {
+        const upload = new Upload({ client: storage.client, params: { Bucket: storage.bucket, Key: storage.key,
+            Body: fs.createReadStream(file), ContentType: 'video/mp4' }, queueSize: 2, partSize: 8 * 1024 * 1024, leavePartsOnError: false });
+        upload.on('httpUploadProgress', event => progress(event.total ? Math.round(event.loaded / event.total * 100) : 0));
+        await upload.done();
+        return { kind: 'video', mimeType: 'video/mp4', url: storage.url, storageKey: storage.key };
+    } finally { storage.release(); }
 }
 
 export async function uploadVideo(req) {
     const mimeType = req.headers['content-type']?.split(';')[0];
-    const extension = VIDEO_TYPES.get(mimeType);
-    if (!extension) throw new Error('仅支持 MP4、WebM、MOV 视频');
-    const size = Number(req.headers['content-length']);
-    if (!Number.isSafeInteger(size) || size < 12) throw new Error('视频文件大小无效');
-    const first = await new Promise((resolve, reject) => {
-        req.once('data', resolve);
-        req.once('end', () => reject(new Error('视频文件为空')));
-        req.once('error', reject);
-    });
-    req.pause();
-    const head = first.subarray(0, 12);
-    const valid = mimeType === 'video/webm'
-        ? head.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))
-        : head.toString('ascii', 4, 8) === 'ftyp';
-    if (!valid) throw new Error('视频内容与格式不符');
-    const { PassThrough } = await import('node:stream');
-    const stream = new PassThrough();
-    req.once('aborted', () => stream.destroy(new Error('上传已中断')));
-    req.once('error', error => stream.destroy(error));
-    stream.write(first);
-    req.pipe(stream);
-    req.resume();
-    const setting = profile();
-    if (!setting.accessKeyID || !setting.secretAccessKey) throw new Error('B2 凭据未配置');
-    const key = `blog/video/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}${extension}`;
-    const connection = acquireStorageConnection(setting);
-    const client = connection.client;
+    if (!VIDEO_TYPES.has(mimeType)) throw new Error('仅支持 MP4、WebM、MOV 视频');
+    const id = crypto.randomUUID().replaceAll('-', ''), directory = uploadDirectory(id);
+    const { pipeline } = await import('node:stream/promises');
     try {
-        const upload = new Upload({ client, params: {
-            Bucket: setting.bucketName, Key: key, Body: stream, ContentType: mimeType
-        }, queueSize: 2, partSize: 10 * 1024 * 1024, leavePartsOnError: false });
-        await upload.done();
-    } finally {
-        connection.release();
-    }
-    return { kind: 'video', mimeType, url: setting.urlPrefix.replace(/\/$/, '') + '/' + key, storageKey: key };
+        await fs.promises.mkdir(directory, { recursive: true });
+        const input = path.join(directory, 'source');
+        await pipeline(req, fs.createWriteStream(input));
+        return await withMediaProcessor(async () => {
+            const output = path.join(directory, 'compressed.mp4');
+            await compressVideo(input, output);
+            const thumbnailData = await makeThumbnail(output, path.join(directory, 'thumbnail.jpg'));
+            return { ...await uploadCompressedVideo(output), thumbnailData };
+        });
+    } finally { await removeUploadFiles(id); }
 }
 
 export async function deleteMediaVersions(client, bucket, key, canDelete = () => true) {

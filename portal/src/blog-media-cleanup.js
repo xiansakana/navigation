@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { deleteStoredMedia, abortStoredUpload } from './blog-media-storage.js';
+import { removeUploadFiles } from './blog-media-process.js';
 
 export function enqueueMediaCleanup(db, items, userId, kind = 'object') {
   const now = new Date().toISOString();
@@ -26,7 +27,8 @@ export async function drainMediaCleanup(db, operations = {}, now = new Date()) {
         const job = jobs[cursor++];
         const canDelete = () => !db.prepare('SELECT 1 FROM blog_media WHERE storage_key = ? LIMIT 1').get(job.storage_key);
         try {
-          if (job.kind === 'multipart') await abort({ storageKey: job.storage_key, multipartId: job.multipart_id });
+          if (job.kind === 'local') await removeUploadFiles(job.multipart_id);
+          else if (job.kind === 'multipart') await abort({ storageKey: job.storage_key, multipartId: job.multipart_id });
           else if (canDelete()) await remove([{ storageKey: job.storage_key }], { canDelete });
           db.prepare('DELETE FROM blog_media_cleanup WHERE id = ?').run(job.id);
         } catch (error) {

@@ -203,6 +203,17 @@ export function initSchema(db) {
   ensureColumn('yolo_option_quotes', 'prev_close', 'REAL');
 
   ensureColumn('blog_video_uploads', 'position', 'INTEGER');
+  ensureColumn('blog_video_uploads', 'state', "TEXT NOT NULL DEFAULT 'uploading'");
+  ensureColumn('blog_video_uploads', 'progress', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('blog_video_uploads', 'error', 'TEXT');
+  ensureColumn('blog_video_uploads', 'media_id', 'TEXT');
+  ensureColumn('blog_media', 'thumbnail_data', 'BLOB');
+  ensureColumn('blog_media', 'thumbnail_attempts', 'INTEGER NOT NULL DEFAULT 0');
+  db.exec(`CREATE TABLE IF NOT EXISTS blog_comments (
+    id TEXT PRIMARY KEY, post_id TEXT NOT NULL, author_id TEXT NOT NULL,
+    author_name TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_blog_comments_post ON blog_comments(post_id, created_at, id);`);
 
   const row = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get();
   if (!row) {

@@ -5,10 +5,12 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { normalizeVisibility, visibilityFilter, canViewPost } from './blog-visibility.js';
 import { getDatabase } from '../../shared/db/index.js';
-import { hasPermission } from './rbac.js';
+import { hasPermission, loadRbac, findUserById, resolveUserPermissions } from './rbac.js';
 import { uploadImage, uploadVideo, normalizeMediaPosition } from './blog-media-storage.js';
 import { normalizeContent, normalizeTags, normalizeLocation, renderMarkdown, contentSearchText, normalizeSearch } from './blog-content.js';
 import { parseCoordinates, resolveAddress } from './blog-address.js';
+import { commentAccess, listComments, createComment, deleteComment } from './blog-comments.js';
+import { removeUploadFiles } from './blog-media-process.js';
 
 const MAX_REQUEST_BYTES = 128 * 1024;
 
@@ -67,12 +69,13 @@ export function listPosts(db, before, limit = 20, tag = '', query = '', session 
         ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''} ORDER BY created_at DESC, id DESC LIMIT ?`).all(...params, limit);
     const tags = db.prepare('SELECT tag FROM blog_post_tags WHERE post_id = ? ORDER BY rowid');
     const legacy = db.prepare('SELECT id, position FROM blog_images WHERE post_id = ? ORDER BY position, id');
-    const media = db.prepare('SELECT id, kind, url, position, mime_type AS mimeType FROM blog_media WHERE post_id = ? ORDER BY position, id');
+    const media = db.prepare('SELECT id, kind, url, position, mime_type AS mimeType, thumbnail_data IS NOT NULL AS thumbnailReady FROM blog_media WHERE post_id = ? ORDER BY position, id');
     return rows.map(row => {
-        const items = media.all(row.id).map(item => ({ ...item, url: '/api/blog/media/' + item.id }));
+        const items = media.all(row.id).map(item => ({ ...item, url: '/api/blog/media/' + item.id, thumbnailUrl: '/api/blog/media/' + item.id + '?thumbnail=1' }));
         const oldImages = legacy.all(row.id).map(image => ({ id: image.id, kind: 'image', position: image.position, url: '/api/blog/images/' + image.id }));
         const { locationJson, audience, period, startsAt, endsAt, ...post } = row;
-        return { ...post, visibility: { audience, period, startsAt, endsAt }, location: locationJson ? JSON.parse(locationJson) : null, contentHtml: row.contentFormat === 'markdown' ? renderMarkdown(row.content) : null, content: normalizeContent(row.content, row.contentFormat, true), tags: tags.all(row.id).map(item => item.tag), images: [...oldImages, ...items.filter(item => item.kind === 'image')],
+        const commentCount = commentAccess(session).canViewComments ? db.prepare('SELECT COUNT(*) AS count FROM blog_comments WHERE post_id = ?').get(row.id).count : 0;
+        return { ...post, commentCount, visibility: { audience, period, startsAt, endsAt }, location: locationJson ? JSON.parse(locationJson) : null, contentHtml: row.contentFormat === 'markdown' ? renderMarkdown(row.content) : null, content: normalizeContent(row.content, row.contentFormat, true), tags: tags.all(row.id).map(item => item.tag), images: [...oldImages, ...items.filter(item => item.kind === 'image')],
             videos: items.filter(item => item.kind === 'video') };
     });
 }
@@ -84,9 +87,9 @@ export function listVisibleTags(db, session, now) {
         WHERE ${filter.sql} GROUP BY t.tag ORDER BY count DESC, t.tag`).all(...filter.params);
 }
 
-export function getVisibleMedia(db, id, session, now) {
+export function getVisibleMedia(db, id, session, now, thumbnail = false) {
     const filter = visibilityFilter(session, 'p', now);
-    return db.prepare(`SELECT m.url, m.mime_type AS mimeType FROM blog_media m JOIN blog_posts p ON p.id = m.post_id
+    return db.prepare(`SELECT m.url, m.mime_type AS mimeType ${thumbnail ? ', m.thumbnail_data AS thumbnailData' : ''} FROM blog_media m JOIN blog_posts p ON p.id = m.post_id
         WHERE m.id = ? AND ${filter.sql}`).get(id, ...filter.params);
 }
 
@@ -122,9 +125,9 @@ export function addMedia(db, postId, session, item, position = null) {
     if (access.status !== 200) return access;
     const id = crypto.randomUUID().replaceAll('-', '');
     const last = db.prepare('SELECT MAX(position) AS position FROM blog_media WHERE post_id = ?').get(postId);
-    db.prepare('INSERT INTO blog_media (id, post_id, author_id, kind, mime_type, url, storage_key, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    db.prepare('INSERT INTO blog_media (id, post_id, author_id, kind, mime_type, url, storage_key, position, created_at, thumbnail_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(id, postId, session.userId, item.kind, item.mimeType, item.url, item.storageKey,
-            position ?? (last.position ?? -1) + 1, new Date().toISOString());
+            position ?? (last.position ?? -1) + 1, new Date().toISOString(), item.thumbnailData || null);
     return { status: 201, id, url: '/api/blog/media/' + id };
 }
 
@@ -136,12 +139,13 @@ export function changePost(db, id, session, content, remove = false, options = {
         transaction(db, () => {
             enqueueMediaCleanup(db, removedMedia, session.userId);
             for (const upload of db.prepare('SELECT * FROM blog_video_uploads WHERE post_id = ?').all(id)) {
-                enqueueMediaCleanup(db, [{ storageKey: upload.storage_key, multipartId: upload.multipart_id }], session.userId, 'multipart');
+                enqueueMediaCleanup(db, [{ storageKey: upload.storage_key, multipartId: upload.multipart_id === 'local' ? upload.id : upload.multipart_id }], session.userId, upload.multipart_id === 'local' ? 'local' : 'multipart');
                 forgetVideoUpload(db, upload.id);
             }
             db.prepare('DELETE FROM blog_media WHERE post_id = ?').run(id);
             db.prepare('DELETE FROM blog_images WHERE post_id = ?').run(id);
             db.prepare('DELETE FROM blog_post_tags WHERE post_id = ?').run(id);
+            db.prepare('DELETE FROM blog_comments WHERE post_id = ?').run(id);
             db.prepare('DELETE FROM blog_posts WHERE id = ?').run(id);
         });
         return { status: 200, removedMedia };
@@ -199,6 +203,46 @@ async function readJson(req) {
     return JSON.parse(Buffer.concat(parts).toString('utf8'));
 }
 
+const processing = new Set();
+export function processVideoJob(db, upload, session, config) {
+    if (processing.has(upload.id)) return;
+    processing.add(upload.id);
+    db.prepare("UPDATE blog_video_uploads SET state = 'queued', error = NULL WHERE id = ?").run(upload.id);
+    setImmediate(async () => {
+        try {
+            const existing = upload.multipart_id === 'local' ? db.prepare('SELECT id FROM blog_media WHERE post_id = ? AND storage_key = ?').get(upload.post_id, upload.storage_key) : null;
+            if (existing) {
+                db.prepare("UPDATE blog_video_uploads SET state = 'done', progress = 100, media_id = ? WHERE id = ?").run(existing.id, upload.id);
+                return;
+            }
+            const item = await finishVideoUpload(db, upload);
+            if (config) {
+                const rbac = loadRbac(config), user = findUserById(rbac, upload.user_id);
+                session = { userId: upload.user_id, permissions: user?.enabled ? resolveUserPermissions(rbac, user) : [], isGuest: false };
+            }
+            const current = db.prepare('SELECT 1 FROM blog_video_uploads WHERE id = ?').get(upload.id);
+            const result = current ? addMedia(db, upload.post_id, session, item, upload.position) : { status: 404 };
+            if (upload.multipart_id !== 'local') enqueueMediaCleanup(db, [{ storageKey: upload.storage_key }], session.userId);
+            if (result.status !== 201) {
+                enqueueMediaCleanup(db, [item], session.userId);
+                throw new Error('博客已删除或上传已取消');
+            }
+            db.prepare("UPDATE blog_video_uploads SET state = 'done', progress = 100, media_id = ? WHERE id = ?").run(result.id, upload.id);
+        } catch (error) {
+            if (upload.multipart_id === 'local') enqueueMediaCleanup(db, [{ storageKey: upload.storage_key }], upload.user_id);
+            db.prepare("UPDATE blog_video_uploads SET state = 'failed', error = ? WHERE id = ?").run(error.message.slice(0, 500), upload.id);
+        } finally {
+            await removeUploadFiles(upload.id).catch(() => {});
+            processing.delete(upload.id); kickMediaCleanup(db);
+        }
+    });
+}
+export function resumeVideoJobs(db, config) {
+    for (const upload of db.prepare("SELECT * FROM blog_video_uploads WHERE state IN ('queued', 'compressing', 'storing')").all()) {
+        processVideoJob(db, upload, { userId: upload.user_id, permissions: [], isGuest: false }, config);
+    }
+}
+
 export async function handleBlogApi(req, res, url, session, json, config) {
     res.setHeader?.('Cache-Control', 'private, no-store');
     const access = blogAccess(session);
@@ -213,6 +257,19 @@ export async function handleBlogApi(req, res, url, session, json, config) {
         } catch { return json(res, 503, { ok: false, error: '地址暂不可用，请稍后重新定位' }); }
     }
     const db = getDatabase();
+    const commentsMatch = url.pathname.match(/^\/api\/blog\/posts\/([a-f0-9]{32})\/comments$/);
+    const commentMatch = url.pathname.match(/^\/api\/blog\/comments\/([a-f0-9]{32})$/);
+    if (commentsMatch || commentMatch) {
+        try {
+            if (req.method === 'POST' && req.headers['content-type']?.split(';')[0].trim() !== 'application/json') return json(res, 415, { ok: false, error: '请使用 JSON 请求' });
+            let result;
+            if (commentsMatch && req.method === 'GET') result = listComments(db, commentsMatch[1], session, url.searchParams.get('before'));
+            else if (commentsMatch && req.method === 'POST') result = createComment(db, commentsMatch[1], session, (await readJson(req)).content);
+            else if (commentMatch && req.method === 'DELETE') result = deleteComment(db, commentMatch[1], session);
+            else result = { status: 405, error: '请求方法无效' };
+            return json(res, result.status, { ...result, ok: result.status < 400 });
+        } catch (error) { return json(res, 400, { ok: false, error: error.message }); }
+    }
     if (req.method === 'GET' && url.pathname.startsWith('/api/blog/images/')) {
         const image = getImage(db, url.pathname.split('/').at(-1), session);
         if (!image) return json(res, 404, { ok: false, error: '图片不存在' });
@@ -222,8 +279,15 @@ export async function handleBlogApi(req, res, url, session, json, config) {
         return res.end(bytes);
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/blog/media/')) {
-        const media = getVisibleMedia(db, url.pathname.split('/').at(-1), session);
+        const thumbnail = url.searchParams.get('thumbnail') === '1';
+        const media = getVisibleMedia(db, url.pathname.split('/').at(-1), session, undefined, thumbnail);
         if (!media) return json(res, 404, { ok: false, error: '媒体不存在' });
+        if (thumbnail) {
+            const placeholder = '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320"><rect width="320" height="320" fill="#263247"/><text x="160" y="164" text-anchor="middle" fill="#b6c2d5" font-size="18">缩略图生成中</text></svg>';
+            const bytes = media.thumbnailData ? Buffer.from(media.thumbnailData) : Buffer.from(placeholder);
+            res.writeHead(200, { 'Content-Type': media.thumbnailData ? 'image/jpeg' : 'image/svg+xml', 'Content-Length': bytes.length, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
+            return res.end(bytes);
+        }
         try {
             const headers = req.headers.range ? { Range: req.headers.range } : {};
             const upstream = await fetch(media.url, { headers, signal: AbortSignal.timeout(120000), redirect: 'error' });
@@ -248,7 +312,7 @@ export async function handleBlogApi(req, res, url, session, json, config) {
         const query = url.searchParams.get('q') || '';
         try { normalizeTags([tag]); normalizeSearch(query); } catch (error) { return json(res, 400, { ok: false, error: error.message }); }
         const tags = listVisibleTags(db, session);
-        return json(res, 200, { ok: true, posts: listPosts(db, before, 20, tag, query, session), tags, ...access, userId: session.userId, isGuest: Boolean(session.isGuest) });
+        return json(res, 200, { ok: true, posts: listPosts(db, before, 20, tag, query, session), tags, ...access, ...commentAccess(session), userId: session.userId, isGuest: Boolean(session.isGuest) });
     }
     if (req.method === 'POST' && !access.canPost && !access.canManage) return json(res, 403, { ok: false, error: '无权发布博客' });
     const uploadMatch = url.pathname.match(/^\/api\/blog\/video-uploads\/([a-f0-9]{32})(?:\/parts\/([1-9]\d{0,4}))?$/);
@@ -258,6 +322,7 @@ export async function handleBlogApi(req, res, url, session, json, config) {
         const allowed = canChangePost(db, upload.post_id, session);
         if (allowed.status !== 200) return json(res, allowed.status, { ok: false, error: allowed.error });
         try {
+            if (req.method === 'GET' && !uploadMatch[2]) return json(res, 200, { ok: true, state: upload.state, progress: upload.progress, error: upload.error, id: upload.media_id, url: upload.media_id ? '/api/blog/media/' + upload.media_id : null });
             if (req.method === 'PUT' && uploadMatch[2]) {
                 await writeVideoPart(db, upload, Number(uploadMatch[2]), req);
                 return json(res, 200, { ok: true });
@@ -267,16 +332,12 @@ export async function handleBlogApi(req, res, url, session, json, config) {
                 return json(res, 200, { ok: true });
             }
             if (req.method === 'POST' && !uploadMatch[2]) {
-                const item = await finishVideoUpload(db, upload);
-                const result = addMedia(db, upload.post_id, session, item, upload.position);
-                if (result.status !== 201) {
-                    enqueueMediaCleanup(db, [item], session.userId);
-                    kickMediaCleanup(db);
-                    forgetVideoUpload(db, upload.id);
-                    return json(res, result.status, { ok: false, error: result.error });
+                if (upload.state === 'uploading') {
+                    const { completedVideoParts } = await import('./blog-video-upload.js');
+                    completedVideoParts(db, upload);
+                    processVideoJob(db, upload, session, config);
                 }
-                forgetVideoUpload(db, upload.id);
-                return json(res, 201, { ok: true, id: result.id, url: result.url });
+                return json(res, 202, { ok: true, state: upload.state, processing: true });
             }
         } catch (error) { return json(res, 400, { ok: false, error: error.message }); }
         return json(res, 405, { ok: false, error: '请求方法无效' });

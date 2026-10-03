@@ -1,6 +1,10 @@
 import crypto from 'node:crypto';
-import { CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } from '@aws-sdk/client-s3';
-import { videoStorage, normalizeMediaPosition } from './blog-media-storage.js';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+import { uploadDirectory, removeUploadFiles, joinVideoParts, compressVideo, makeThumbnail, withMediaProcessor } from './blog-media-process.js';
+import { CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { videoStorage, normalizeMediaPosition, uploadCompressedVideo } from './blog-media-storage.js';
 
 export const VIDEO_CHUNK_BYTES = 8 * 1024 * 1024;
 
@@ -12,20 +16,15 @@ export function validateVideoUpload(size, mimeType) {
 export async function startVideoUpload(db, postId, userId, size, mimeType, position = null) {
   position = normalizeMediaPosition(position);
   validateVideoUpload(size, mimeType);
-  const storage = videoStorage(mimeType);
-  let uploadId;
+  const id = crypto.randomUUID().replaceAll('-', '');
+  await fsp.mkdir(uploadDirectory(id), { recursive: true });
   try {
-    const result = await storage.client.send(new CreateMultipartUploadCommand({ Bucket: storage.bucket, Key: storage.key, ContentType: mimeType }));
-    uploadId = result.UploadId;
-    if (!uploadId) throw new Error('无法创建视频上传');
-    const id = crypto.randomUUID().replaceAll('-', '');
+    const disk = await fsp.statfs(uploadDirectory(id));
+    if (disk.bavail * disk.bsize < size * 2 + 512 * 1024 * 1024) throw new Error('服务器临时空间不足，请稍后上传');
     db.prepare('INSERT INTO blog_video_uploads (id, post_id, user_id, mime_type, byte_size, storage_key, multipart_id, created_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, postId, userId, mimeType, size, storage.key, uploadId, new Date().toISOString(), position);
+      .run(id, postId, userId, mimeType, size, `blog/video/${new Date().toISOString().slice(0, 10)}/${id}.mp4`, 'local', new Date().toISOString(), position);
     return { id, chunkBytes: VIDEO_CHUNK_BYTES };
-  } catch (error) {
-    if (uploadId) await storage.client.send(new AbortMultipartUploadCommand({ Bucket: storage.bucket, Key: storage.key, UploadId: uploadId })).catch(() => {});
-    throw error;
-  } finally { storage.release(); }
+  } catch (error) { await removeUploadFiles(id); throw error; }
 }
 
 export function findVideoUpload(db, id, session) {
@@ -54,6 +53,18 @@ export async function writeVideoPart(db, upload, number, req) {
   }
   const bytes = Buffer.concat(parts);
   validateVideoPart(upload, number, bytes);
+  if (upload.state !== 'uploading') throw new Error('视频已经开始处理');
+  if (upload.multipart_id === 'local') {
+    const directory = uploadDirectory(upload.id);
+    await fsp.mkdir(directory, { recursive: true });
+    const temporary = path.join(directory, `${number}-${crypto.randomUUID()}.tmp`);
+    await fsp.writeFile(temporary, bytes);
+    await fsp.rename(temporary, path.join(directory, String(number)));
+    if (!db.prepare('SELECT 1 FROM blog_video_uploads WHERE id = ?').get(upload.id)) { await removeUploadFiles(upload.id); throw new Error('视频上传已取消'); }
+    db.prepare('INSERT INTO blog_video_parts (upload_id, part_number, etag, byte_size) VALUES (?, ?, ?, ?) ON CONFLICT(upload_id, part_number) DO UPDATE SET etag = excluded.etag, byte_size = excluded.byte_size')
+      .run(upload.id, number, crypto.createHash('sha256').update(bytes).digest('hex'), size);
+    return;
+  }
   const storage = videoStorage(upload.mime_type, upload.storage_key);
   try {
     const result = await storage.client.send(new UploadPartCommand({ Bucket: storage.bucket, Key: storage.key, UploadId: upload.multipart_id,
@@ -74,11 +85,33 @@ export function completedVideoParts(db, upload) {
 
 export async function finishVideoUpload(db, upload) {
   const parts = completedVideoParts(db, upload);
-  const storage = videoStorage(upload.mime_type, upload.storage_key);
-  try {
-    await storage.client.send(new CompleteMultipartUploadCommand({ Bucket: storage.bucket, Key: storage.key, UploadId: upload.multipart_id, MultipartUpload: { Parts: parts } }));
-    return { kind: 'video', mimeType: upload.mime_type, url: storage.url, storageKey: storage.key };
-  } finally { storage.release(); }
+  return withMediaProcessor(async () => {
+    const update = (state, progress) => db.prepare('UPDATE blog_video_uploads SET state = ?, progress = ? WHERE id = ?').run(state, progress, upload.id);
+    if (!db.prepare('SELECT 1 FROM blog_video_uploads WHERE id = ?').get(upload.id)) throw new Error('视频上传已取消');
+    const directory = uploadDirectory(upload.id);
+    let input;
+    if (upload.multipart_id === 'local') input = await joinVideoParts(upload, parts);
+    else {
+      const { pipeline } = await import('node:stream/promises');
+      const storage = videoStorage(upload.mime_type, upload.storage_key);
+      try {
+        await storage.client.send(new CompleteMultipartUploadCommand({ Bucket: storage.bucket, Key: storage.key, UploadId: upload.multipart_id, MultipartUpload: { Parts: parts } }));
+        await fsp.mkdir(directory, { recursive: true });
+        input = path.join(directory, 'source');
+        const response = await storage.client.send(new GetObjectCommand({ Bucket: storage.bucket, Key: storage.key }));
+        await pipeline(response.Body, fs.createWriteStream(input));
+      } finally { storage.release(); }
+    }
+    update('compressing', 0);
+    const output = path.join(directory, 'compressed.mp4');
+    await compressVideo(input, output, percent => update('compressing', percent));
+    const thumbnailData = await makeThumbnail(output, path.join(directory, 'thumbnail.jpg'));
+    if (!db.prepare('SELECT 1 FROM blog_video_uploads WHERE id = ?').get(upload.id)) throw new Error('视频上传已取消');
+    update('storing', 0);
+    const key = upload.multipart_id === 'local' ? upload.storage_key : undefined;
+    const item = await uploadCompressedVideo(output, percent => update('storing', percent), key);
+    return { ...item, thumbnailData };
+  });
 }
 
 export function forgetVideoUpload(db, id) {
@@ -87,6 +120,9 @@ export function forgetVideoUpload(db, id) {
 }
 
 export async function abortVideoUpload(db, upload) {
+  if (upload.multipart_id === 'local' || upload.state === 'done') {
+    forgetVideoUpload(db, upload.id); await removeUploadFiles(upload.id); return;
+  }
   const storage = videoStorage(upload.mime_type, upload.storage_key);
   try {
     await storage.client.send(new AbortMultipartUploadCommand({ Bucket: storage.bucket, Key: storage.key, UploadId: upload.multipart_id }));

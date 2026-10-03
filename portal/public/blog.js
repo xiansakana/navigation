@@ -73,33 +73,10 @@
         } catch (error) { release(added); throw error; }
     }
 
-    function mediaTile(src, kind, removeAction) {
-        var tile = document.createElement('div');
-        tile.className = 'blog-image-tile';
-        var media = document.createElement(kind === 'video' ? 'video' : 'img');
-        media.src = src;
-        if (kind === 'video') { media.controls = true; media.preload = 'metadata'; }
-        else { media.alt = '博客图片'; media.loading = 'lazy'; }
-        if (kind === 'image') {
-            var open = document.createElement('button'); open.type = 'button'; open.className = 'blog-image-open';
-            open.dataset.blogImage = src; open.setAttribute('aria-label', '预览图片'); open.appendChild(media); tile.appendChild(open);
-        } else tile.appendChild(media);
-        if (removeAction) {
-            var button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'blog-image-remove';
-            button.textContent = '×';
-            button.setAttribute('aria-label', '移除媒体');
-            Object.keys(removeAction).forEach(function(key) { button.dataset[key] = removeAction[key]; });
-            tile.appendChild(button);
-        }
-        return tile;
-    }
-
     function renderPreview(root, existing, pending, existingAction, pendingAction) {
-        root.replaceChildren();
-        existing.forEach(function(item) { root.appendChild(mediaTile(item.url, item.kind, existingAction(item))); });
-        pending.forEach(function(item, index) { root.appendChild(mediaTile(item.preview, item.kind, pendingAction(index))); });
+        var list = existing.map(function(item) { return Object.assign({}, item, { removeAction: existingAction(item) }); });
+        pending.forEach(function(item, index) { list.push({ url: item.preview, kind: item.kind, removeAction: pendingAction(index) }); });
+        window.renderBlogGallery(root, list);
     }
 
     function renderComposerPreview() {
@@ -179,16 +156,17 @@
             tagButton.textContent = '#' + tag; tagButton.dataset.tag = tag; postTags.appendChild(tagButton);
         });
         main.appendChild(postTags);
-        var items = (post.images || []).map(function(item) { return Object.assign({ kind: 'image' }, item); })
-            .concat((post.videos || []).map(function(item) { return Object.assign({ kind: 'video' }, item); }));
+        var items = editItems(post);
         if (items.length) {
-            var gallery = document.createElement('div');
-            gallery.className = 'blog-post-images';
-            items.forEach(function(item) {
-                if (item.kind === 'video') { gallery.appendChild(mediaTile(item.url, 'video')); return; }
-                gallery.appendChild(mediaTile(item.url, 'image'));
-            });
-            main.appendChild(gallery);
+            var gallery = document.createElement('div'); gallery.className = 'blog-post-images';
+            window.renderBlogGallery(gallery, items); main.appendChild(gallery);
+        }
+        if (state.canViewComments) {
+            var comments = document.createElement('div'); comments.className = 'blog-comments';
+            var toggle = actionButton('评论 (' + (post.commentCount || 0) + ')', 'comments', post.id);
+            toggle.setAttribute('aria-expanded', 'false');
+            var content = document.createElement('div'); content.className = 'blog-comments-content'; content.hidden = true;
+            comments.append(toggle, content); main.appendChild(comments);
         }
         if (state.canManage || (state.canPost && post.authorId === state.userId)) {
             var actions = document.createElement('div');
@@ -224,6 +202,7 @@
             state.isGuest = data.isGuest;
             state.canPost = data.canPost;
             state.canManage = data.canManage;
+            state.canViewComments = data.canViewComments; state.canComment = data.canComment;
             composer.classList.toggle('hidden', !(state.canPost || state.canManage));
             if (state.canPost || state.canManage) locationEditor.start();
             shortcut.textContent = state.canPost ? '写博客' : '查看动态';
@@ -260,43 +239,59 @@
         searchTimer = setTimeout(function() { load(true); }, 300);
     });
 
-    async function uploadLargeVideo(id, item, position) {
+    async function uploadLargeVideo(id, item, position, progress) {
         var upload;
         try {
-            document.getElementById('blog-upload-status').textContent = '正在上传视频：0%';
+            progress('transfer', 0);
             upload = await request('posts/' + id + '/video-uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ size: item.file.size, mimeType: item.file.type, position: position }) });
             var count = Math.ceil(item.file.size / upload.chunkBytes);
-            var completed = 0;
+            var loaded = new Array(count).fill(0);
             await window.runBlogUploads(Array.from({ length: count }, function(_, index) { return index + 1; }), async function(part) {
                 var chunk = item.file.slice((part - 1) * upload.chunkBytes, part * upload.chunkBytes);
                 for (var attempt = 0; ; attempt++) {
                     try {
-                        await request('video-uploads/' + upload.id + '/parts/' + part, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: chunk });
+                        await window.uploadBlogBytes('video-uploads/' + upload.id + '/parts/' + part, chunk, 'application/octet-stream', function(bytes) { loaded[part - 1] = bytes; progress('transfer', loaded.reduce(function(sum, value) { return sum + value; }, 0) / item.file.size * 100); });
                         break;
                     } catch (error) { if (attempt >= 2) throw error; }
                 }
-                completed++;
-                document.getElementById('blog-upload-status').textContent = '正在上传视频：' + Math.round(completed / count * 100) + '%';
+
                 return part;
             }, 2);
-            return await request('video-uploads/' + upload.id, { method: 'POST' });
+            await request('video-uploads/' + upload.id, { method: 'POST' });
+            var errors = 0;
+            for (;;) {
+                var result;
+                try { result = await request('video-uploads/' + upload.id); errors = 0; }
+                catch (error) { if (++errors > 3) throw error; await new Promise(function(resolve) { setTimeout(resolve, 2000); }); continue; }
+                if (result.state === 'failed') throw new Error(result.error || '视频处理失败');
+                if (result.state === 'done') {
+                    await request('video-uploads/' + upload.id, { method: 'DELETE' }).catch(function() {});
+                    return result;
+                }
+                progress(result.state === 'queued' ? 'waiting' : result.state, result.progress);
+                await new Promise(function(resolve) { setTimeout(resolve, 1200); });
+            }
         } catch (error) {
             if (upload) await request('video-uploads/' + upload.id, { method: 'DELETE' }).catch(function() {});
             throw error;
         } finally { document.getElementById('blog-upload-status').textContent = ''; }
     }
 
-    async function uploadAll(id, items) {
+    async function uploadAll(id, items, root) {
         var existing = state.posts.has(id) ? editItems(state.posts.get(id)) : [];
         var base = existing.reduce(function(max, item, index) { return Math.max(max, item.position == null ? index : item.position); }, -1) + 1;
-        return window.runBlogUploads(items.slice(), async function(item, index) {
+        var panel = window.createBlogUploadProgress(root, items);
+        var result = await window.runBlogUploads(items.slice(), async function(item, index) {
             var position = base + index;
-            return item.kind === 'video' && item.file.size > 16 * 1024 * 1024
-                ? uploadLargeVideo(id, item, position)
-                : request('posts/' + id + '/media?kind=' + item.kind + '&position=' + position,
-                    { method: 'POST', headers: { 'Content-Type': item.file.type }, body: item.file });
+            var progress = function(phase, percent) { panel.update(index, phase, percent); };
+            var uploaded = item.kind === 'video'
+                ? await uploadLargeVideo(id, item, position, progress)
+                : await window.uploadBlogBytes('posts/' + id + '/media?kind=image&position=' + position, item.file, item.file.type,
+                    function(bytes) { progress('transfer', bytes / item.file.size * 100); });
+            progress('done', 100); return uploaded;
         }, 2);
+        panel.clear(); return result;
     }
 
     function lockEditor(root) {
@@ -331,14 +326,16 @@
     });
     composer.addEventListener('submit', async function(event) {
         event.preventDefault();
+        if (state.saving || state.editing) { window.portalToast?.warn('请先完成当前编辑或上传'); return; }
         if (richEditor.isEmpty() && !state.pending.length) { window.portalToast?.error('请输入博客内容或添加媒体'); return; }
+        state.saving = true;
         var button = document.getElementById('blog-submit');
         var unlock = lockEditor(composer);
         var created;
         try {
             created = await request('posts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content: richEditor.content(), contentFormat: richEditor.format(), visibility: visibilityEditor.value(), location: await locationEditor.value({ wait: false }), tags: tagEditor.value(), hasMedia: state.pending.length > 0 }) });
-            await uploadAll(created.id, state.pending);
+            await uploadAll(created.id, state.pending, composer);
             release(state.pending);
             state.pending = [];
             richEditor.clear(); tagEditor.clear(); locationEditor.clear(); visibilityEditor.clear();
@@ -357,13 +354,69 @@
                 window.portalToast?.error('媒体上传中断，已发布的内容可在编辑中继续补充：' + error.message);
             }
             else window.portalToast?.error(error.message);
-        } finally { unlock(); }
+        } finally { unlock(); state.saving = false; }
     });
 
     function editItems(post) {
         return (post.images || []).map(function(item) { return Object.assign({ kind: 'image' }, item); })
-            .concat((post.videos || []).map(function(item) { return Object.assign({ kind: 'video' }, item); }));
+            .concat((post.videos || []).map(function(item) { return Object.assign({ kind: 'video' }, item); }))
+            .sort(function(a, b) { return (a.position || 0) - (b.position || 0); });
     }
+
+    var commentDrafts = new Map();
+    async function renderComments(article, before) {
+        var id = article.dataset.id, panel = article.querySelector('.blog-comments-content');
+        var toggle = article.querySelector('[data-action="comments"]');
+        panel.hidden = false; toggle.setAttribute('aria-expanded', 'true'); toggle.disabled = true;
+        var indicator = document.createElement('p'); indicator.className = 'blog-comment-status'; indicator.textContent = '正在加载评论…'; indicator.setAttribute('role', 'status'); panel.appendChild(indicator);
+        try {
+            var data = await request('posts/' + id + '/comments' + (before ? '?before=' + before : ''));
+            if (!before) panel.replaceChildren(); else panel.querySelector('[data-comment-more]')?.remove();
+            data.comments.forEach(function(comment) {
+                var row = document.createElement('div'); row.className = 'blog-comment'; row.dataset.commentId = comment.id;
+                var meta = document.createElement('div'); meta.className = 'blog-comment-meta';
+                var author = document.createElement('strong'); author.textContent = comment.authorName;
+                var time = document.createElement('time'); time.dateTime = comment.createdAt; time.textContent = new Date(comment.createdAt).toLocaleString('zh-CN');
+                meta.append(author, time);
+                if (comment.canDelete) {
+                    var remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '删除评论'; remove.className = 'blog-action';
+                    remove.addEventListener('click', async function() {
+                        if (!confirm('确定删除这条评论吗？')) return;
+                        remove.disabled = true;
+                        try { await request('comments/' + comment.id, { method: 'DELETE' }); await renderComments(article); }
+                        catch (error) { window.portalToast?.error(error.message); remove.disabled = false; }
+                    }); meta.appendChild(remove);
+                }
+                var text = document.createElement('p'); text.textContent = comment.content; row.append(meta, text); panel.appendChild(row);
+            });
+            if (data.next) {
+                var moreComments = document.createElement('button'); moreComments.type = 'button'; moreComments.className = 'blog-action'; moreComments.textContent = '加载更早的评论'; moreComments.dataset.commentMore = 'true';
+                moreComments.addEventListener('click', function() { moreComments.disabled = true; renderComments(article, data.next); }); panel.appendChild(moreComments);
+            }
+            if (!panel.querySelector('.blog-comment')) { var empty = document.createElement('p'); empty.textContent = '还没有评论，聊聊你的想法。'; panel.appendChild(empty); }
+            if (state.canComment && !panel.querySelector('form')) {
+                var form = document.createElement('form'); form.className = 'blog-comment-form';
+                var input = document.createElement('textarea'); input.maxLength = 2000; input.rows = 3; input.placeholder = '写下评论…'; input.setAttribute('aria-label', '评论内容'); input.value = commentDrafts.get(id) || '';
+                input.addEventListener('input', function() { commentDrafts.set(id, input.value); });
+                var submit = document.createElement('button'); submit.type = 'submit'; submit.className = 'btn primary'; submit.textContent = '发表评论';
+                form.append(input, submit); panel.appendChild(form);
+                form.addEventListener('submit', async function(event) {
+                    event.preventDefault(); if (!input.value.trim()) return;
+                    input.disabled = submit.disabled = true;
+                    try { await request('posts/' + id + '/comments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: input.value }) }); commentDrafts.delete(id); await renderComments(article); }
+                    catch (error) { window.portalToast?.error(error.message); input.disabled = submit.disabled = false; }
+                });
+            }
+            toggle.textContent = '评论 (' + panel.querySelectorAll('.blog-comment').length + (data.next ? '+' : '') + ')';
+        } catch (error) { indicator.textContent = '评论加载失败：' + error.message; window.portalToast?.error(error.message); }
+        finally { if (indicator.textContent === '正在加载评论…') indicator.remove(); toggle.disabled = false; }
+    }
+    feed.addEventListener('click', function(event) {
+        var toggle = event.target.closest('[data-action="comments"]'); if (!toggle) return;
+        var article = toggle.closest('.blog-post'), panel = article.querySelector('.blog-comments-content');
+        if (!panel.hidden) { panel.hidden = true; toggle.setAttribute('aria-expanded', 'false'); }
+        else renderComments(article);
+    });
 
     function renderEditPreview(article) {
         var editing = state.editing;
@@ -377,6 +430,7 @@
     feed.addEventListener('click', async function(event) {
         var button = event.target.closest('button[data-action="edit"], button[data-action="delete"]');
         if (!button) return;
+        if (state.saving) { window.portalToast?.warn('请等待当前上传完成'); return; }
         var article = button.closest('.blog-post');
         if (button.dataset.action === 'delete') {
             if (!confirm('确定删除这篇动态吗？')) return;
@@ -431,13 +485,15 @@
         if (button.dataset.action === 'cancel') {
             release(state.editing.pending); state.editing.editor.destroy(); state.editing = null; return load(true);
         }
+        if (state.saving) return;
+        state.saving = true;
         var unlock = lockEditor(button.closest('.blog-post'));
         try {
             var editing = state.editing;
             var tags = editing.tags.value();
             var visibility = editing.visibility.value();
             if (editing.editor.length() > 10000) throw new Error('博客内容最多 10000 字');
-            var uploaded = await uploadAll(editing.id, editing.pending);
+            var uploaded = await uploadAll(editing.id, editing.pending, button.closest('.blog-post'));
             editing.keepMediaIds.push.apply(editing.keepMediaIds, uploaded.map(function(item) { return item.id; }));
             release(editing.pending); editing.pending = [];
             var saved = await request('posts/' + editing.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -452,7 +508,7 @@
                 window.portalToast?.error('部分媒体已上传，请重新编辑文章：' + error.message);
             } else window.portalToast?.error(error.message);
         }
-        finally { unlock(); }
+        finally { unlock(); state.saving = false; }
     });
     feed.addEventListener('change', async function(event) {
         var chooser = event.target.closest('input[data-edit-kind]');
@@ -512,11 +568,11 @@
             }
         });
         if (expired) {
-            document.querySelector('dialog[aria-label="图片预览"]')?.close();
+            document.querySelector('dialog[aria-label="媒体预览"]')?.close();
             load(true);
         }
     }, 1000);
-    setInterval(function() { if (!document.hidden && !state.editing && section.classList.contains('hidden') === false) load(true); }, 60000);
-    document.addEventListener('visibilitychange', function() { if (!document.hidden && !state.editing && !section.classList.contains('hidden')) load(true); });
+    setInterval(function() { if (!document.hidden && !state.editing && !feed.querySelector('.blog-comments-content:not([hidden])') && section.classList.contains('hidden') === false) load(true); }, 60000);
+    document.addEventListener('visibilitychange', function() { if (!document.hidden && !state.editing && !state.saving && !feed.querySelector('.blog-comments-content:not([hidden])') && !section.classList.contains('hidden')) load(true); });
     initialize();
 })();

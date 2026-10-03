@@ -40,7 +40,8 @@ import { handleAdminApi } from './admin-api.js';
 import { wantsJsonResponse, renderErrorPage, sendHtml } from './error-page.js';
 import { handleOAuthStart, handleOAuthCallback, listOAuthProviders } from './oauth.js';
 import { getPiclistStatus, savePiclistConfig, restartPiclist } from './piclist-admin.js';
-import { handleBlogApi } from './blog.js';
+import { handleBlogApi, resumeVideoJobs } from './blog.js';
+import { startThumbnailWorker } from './blog-media-process.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -632,6 +633,8 @@ var port = config.server?.port || 8080;
 
 server.listen(port, host, function() {
     startMediaCleanup(getDatabase());
+    resumeVideoJobs(getDatabase(), config);
+    startThumbnailWorker(getDatabase());
     console.log('服务导航门户已启动: http://' + (host === '0.0.0.0' ? '127.0.0.1' : host) + ':' + port);
     if (host === '0.0.0.0' && port === 80) {
         console.log('外网访问: http://<公网IP>/');

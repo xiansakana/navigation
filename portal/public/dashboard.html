@@ -6,7 +6,8 @@
     <title>服务导航</title>
     <script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
     <link rel="stylesheet" href="/portal.css?v=blog-unified-1">
-    <link rel="stylesheet" href="/experience.css?v=blog-visibility-1">
+    <link rel="stylesheet" href="/experience.css?v=blog-media-2">
+    <link rel="stylesheet" href="/blog-media.css?v=blog-media-2">
 </head>
 <body class="portal-experience has-navbar portal-layout-enabled dashboard-page">
     <header class="navbar">
@@ -55,6 +56,7 @@
                 <input id="blog-videos" type="file" accept="video/mp4,video/webm,video/quicktime,.mov" multiple hidden>
                 <span>图片统一转为 JPG 存入 B2；视频支持 MP4、WebM、MOV，不设 50MB 大小限制。媒体链接可被持有链接的人访问。</span>
             </div>
+            <p class="blog-upload-hint">视频将自动压缩为 MP4，发布和编辑均显示上传与压缩进度。</p>
             <div class="blog-composer-footer"><span id="blog-upload-status" role="status"></span><span id="blog-count">0 / 10000</span><button class="btn primary" type="submit" id="blog-submit">发布动态</button></div>
         </form>
         <div class="blog-search-bar">
@@ -76,10 +78,12 @@
     <script src="/vendor/marked.js"></script>
     <script src="/vendor/purify.js"></script>
     <script src="/blog-rich-editor.js?v=blog-unified-1"></script>
-    <script src="/blog-widgets.js?v=blog-performance-1"></script>
+    <script src="/blog-widgets.js?v=blog-media-2"></script>
+    <script src="/blog-gallery.js?v=blog-media-2"></script>
+    <script src="/blog-progress.js?v=blog-media-2"></script>
     <script src="/blog-editor.js?v=blog-unified-1"></script>
     <script src="/blog-visibility.js?v=blog-visibility-1"></script>
     <script src="/blog-upload.js?v=blog-performance-1"></script>
-    <script src="/blog.js?v=blog-performance-1"></script>
+    <script src="/blog.js?v=blog-media-2"></script>
 </body>
 </html>

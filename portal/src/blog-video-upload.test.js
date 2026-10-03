@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { initSchema } from '../../shared/db/schema.js';
-import { VIDEO_CHUNK_BYTES, validateVideoUpload, validateVideoPart, findVideoUpload, completedVideoParts, forgetVideoUpload } from './blog-video-upload.js';
+import { VIDEO_CHUNK_BYTES, validateVideoUpload, validateVideoPart, findVideoUpload, completedVideoParts, forgetVideoUpload, startVideoUpload, writeVideoPart, abortVideoUpload } from './blog-video-upload.js';
+import { Readable } from 'node:stream';
+import fsp from 'node:fs/promises';
+import { joinVideoParts, uploadDirectory } from './blog-media-process.js';
 import { isPortalApi } from './router.js';
 
 test('multipart videos accept over 50MB and enforce actual part lengths, file signature and complete ordered parts', () => {
@@ -39,4 +42,27 @@ test('multipart videos accept over 50MB and enforce actual part lengths, file si
     assert.equal(findVideoUpload(db, id, { userId: 'owner' }), null);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM blog_video_parts').get().count, 0);
   } finally { db.close(); }
+});
+
+test('video staging keeps original data off B2, joins parallel parts in order and removes cancelled files', async () => {
+  const db = new DatabaseSync(':memory:');
+  let upload;
+  try {
+    initSchema(db);
+    const size = VIDEO_CHUNK_BYTES + 20;
+    const result = await startVideoUpload(db, 'post', 'owner', size, 'video/webm', 7);
+    upload = findVideoUpload(db, result.id, { userId: 'owner' });
+    assert.equal(upload.multipart_id, 'local'); assert.equal(upload.position, 7); assert.match(upload.storage_key, /\.mp4$/);
+    const first = Buffer.alloc(VIDEO_CHUNK_BYTES, 1); first.set([0x1a, 0x45, 0xdf, 0xa3]);
+    const last = Buffer.alloc(20, 2);
+    await Promise.all([writeVideoPart(db, upload, 2, Readable.from([last])), writeVideoPart(db, upload, 1, Readable.from([first]))]);
+    const input = await joinVideoParts(upload, completedVideoParts(db, upload));
+    const bytes = await fsp.readFile(input);
+    assert.equal(bytes.length, size); assert.ok(bytes.subarray(0, first.length).equals(first)); assert.ok(bytes.subarray(first.length).equals(last));
+    await assert.rejects(writeVideoPart(db, { ...upload, state: 'compressing' }, 2, Readable.from([last])), /已经开始/);
+    await abortVideoUpload(db, upload);
+    assert.equal(findVideoUpload(db, upload.id, { userId: 'owner' }), null);
+    await assert.rejects(fsp.stat(uploadDirectory(upload.id)), { code: 'ENOENT' });
+    assert.equal(isPortalApi('/api/blog/video-uploads/' + result.id, 'GET'), true);
+  } finally { if (upload) await abortVideoUpload(db, upload); db.close(); }
 });
