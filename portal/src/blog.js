@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
+import { enqueueMediaCleanup, kickMediaCleanup } from './blog-media-cleanup.js';
 import { startVideoUpload, findVideoUpload, writeVideoPart, finishVideoUpload, forgetVideoUpload, abortVideoUpload } from './blog-video-upload.js';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { normalizeVisibility, visibilityFilter, canViewPost } from './blog-visibility.js';
 import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
-import { deleteStoredMedia, uploadImage, uploadVideo } from './blog-media-storage.js';
+import { uploadImage, uploadVideo, normalizeMediaPosition } from './blog-media-storage.js';
 import { normalizeContent, normalizeTags, normalizeLocation, renderMarkdown, contentSearchText, normalizeSearch } from './blog-content.js';
 import { parseCoordinates, resolveAddress } from './blog-address.js';
 
@@ -65,11 +66,11 @@ export function listPosts(db, before, limit = 20, tag = '', query = '', session 
         content, content_format AS contentFormat, location_json AS locationJson, audience, visibility_period AS period, visible_from AS startsAt, visible_until AS endsAt, created_at AS createdAt, updated_at AS updatedAt FROM blog_posts
         ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''} ORDER BY created_at DESC, id DESC LIMIT ?`).all(...params, limit);
     const tags = db.prepare('SELECT tag FROM blog_post_tags WHERE post_id = ? ORDER BY rowid');
-    const legacy = db.prepare('SELECT id FROM blog_images WHERE post_id = ? ORDER BY position, id');
-    const media = db.prepare('SELECT id, kind, url, mime_type AS mimeType FROM blog_media WHERE post_id = ? ORDER BY position, id');
+    const legacy = db.prepare('SELECT id, position FROM blog_images WHERE post_id = ? ORDER BY position, id');
+    const media = db.prepare('SELECT id, kind, url, position, mime_type AS mimeType FROM blog_media WHERE post_id = ? ORDER BY position, id');
     return rows.map(row => {
         const items = media.all(row.id).map(item => ({ ...item, url: '/api/blog/media/' + item.id }));
-        const oldImages = legacy.all(row.id).map(image => ({ id: image.id, kind: 'image', url: '/api/blog/images/' + image.id }));
+        const oldImages = legacy.all(row.id).map(image => ({ id: image.id, kind: 'image', position: image.position, url: '/api/blog/images/' + image.id }));
         const { locationJson, audience, period, startsAt, endsAt, ...post } = row;
         return { ...post, visibility: { audience, period, startsAt, endsAt }, location: locationJson ? JSON.parse(locationJson) : null, contentHtml: row.contentFormat === 'markdown' ? renderMarkdown(row.content) : null, content: normalizeContent(row.content, row.contentFormat, true), tags: tags.all(row.id).map(item => item.tag), images: [...oldImages, ...items.filter(item => item.kind === 'image')],
             videos: items.filter(item => item.kind === 'video') };
@@ -115,14 +116,15 @@ export function canChangePost(db, id, session) {
     return { status: 200 };
 }
 
-export function addMedia(db, postId, session, item) {
+export function addMedia(db, postId, session, item, position = null) {
+    position = normalizeMediaPosition(position);
     const access = canChangePost(db, postId, session);
     if (access.status !== 200) return access;
     const id = crypto.randomUUID().replaceAll('-', '');
     const last = db.prepare('SELECT MAX(position) AS position FROM blog_media WHERE post_id = ?').get(postId);
     db.prepare('INSERT INTO blog_media (id, post_id, author_id, kind, mime_type, url, storage_key, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(id, postId, session.userId, item.kind, item.mimeType, item.url, item.storageKey,
-            (last.position ?? -1) + 1, new Date().toISOString());
+            position ?? (last.position ?? -1) + 1, new Date().toISOString());
     return { status: 201, id, url: '/api/blog/media/' + id };
 }
 
@@ -132,6 +134,11 @@ export function changePost(db, id, session, content, remove = false, options = {
     if (remove) {
         const removedMedia = db.prepare('SELECT storage_key AS storageKey FROM blog_media WHERE post_id = ?').all(id);
         transaction(db, () => {
+            enqueueMediaCleanup(db, removedMedia, session.userId);
+            for (const upload of db.prepare('SELECT * FROM blog_video_uploads WHERE post_id = ?').all(id)) {
+                enqueueMediaCleanup(db, [{ storageKey: upload.storage_key, multipartId: upload.multipart_id }], session.userId, 'multipart');
+                forgetVideoUpload(db, upload.id);
+            }
             db.prepare('DELETE FROM blog_media WHERE post_id = ?').run(id);
             db.prepare('DELETE FROM blog_images WHERE post_id = ?').run(id);
             db.prepare('DELETE FROM blog_post_tags WHERE post_id = ?').run(id);
@@ -155,6 +162,7 @@ export function changePost(db, id, session, content, remove = false, options = {
     const removedMedia = db.prepare('SELECT id, storage_key AS storageKey FROM blog_media WHERE post_id = ?').all(id)
         .filter(item => !keepIds.includes(item.id));
     transaction(db, () => {
+        enqueueMediaCleanup(db, removedMedia, session.userId);
         for (const mediaId of existing) {
             if (keepIds.includes(mediaId)) continue;
             db.prepare('DELETE FROM blog_images WHERE post_id = ? AND id = ?').run(id, mediaId);
@@ -168,6 +176,16 @@ export function changePost(db, id, session, content, remove = false, options = {
             .run(text, format, contentSearchText(text, format), location, visibility.audience, visibility.period, visibility.startsAt, visibility.endsAt, new Date().toISOString(), id);
     });
     return { status: 200, removedMedia };
+}
+
+function enrichLocation(db, id) {
+    const row = db.prepare('SELECT location_json FROM blog_posts WHERE id = ?').get(id);
+    const location = row?.location_json ? JSON.parse(row.location_json) : null;
+    if (!location || location.label || location.latitude == null) return;
+    setImmediate(() => resolveAddress(location).then(label => {
+        if (label) db.prepare('UPDATE blog_posts SET location_json = ? WHERE id = ? AND location_json = ?')
+            .run(JSON.stringify({ ...location, label }), id, row.location_json);
+    }).catch(() => {})).unref();
 }
 
 async function readJson(req) {
@@ -250,9 +268,10 @@ export async function handleBlogApi(req, res, url, session, json, config) {
             }
             if (req.method === 'POST' && !uploadMatch[2]) {
                 const item = await finishVideoUpload(db, upload);
-                const result = addMedia(db, upload.post_id, session, item);
+                const result = addMedia(db, upload.post_id, session, item, upload.position);
                 if (result.status !== 201) {
-                    await deleteStoredMedia([item]);
+                    enqueueMediaCleanup(db, [item], session.userId);
+                    kickMediaCleanup(db);
                     forgetVideoUpload(db, upload.id);
                     return json(res, result.status, { ok: false, error: result.error });
                 }
@@ -270,7 +289,7 @@ export async function handleBlogApi(req, res, url, session, json, config) {
             const body = await readJson(req);
             const stale = db.prepare('SELECT * FROM blog_video_uploads WHERE user_id = ? AND created_at < ?').all(session.userId, new Date(Date.now() - 86400000).toISOString());
             for (const upload of stale) await abortVideoUpload(db, upload);
-            const result = await startVideoUpload(db, startMatch[1], session.userId, body.size, body.mimeType);
+            const result = await startVideoUpload(db, startMatch[1], session.userId, body.size, body.mimeType, body.position);
             return json(res, 201, { ok: true, ...result });
         } catch (error) { return json(res, 400, { ok: false, error: error.message }); }
     }
@@ -279,26 +298,22 @@ export async function handleBlogApi(req, res, url, session, json, config) {
     if (req.method === 'DELETE') {
         const allowed = canChangePost(db, id, session);
         if (allowed.status !== 200) return json(res, allowed.status, { ok: false, error: allowed.error });
-        try {
-            for (const upload of db.prepare('SELECT * FROM blog_video_uploads WHERE post_id = ?').all(id)) await abortVideoUpload(db, upload);
-        } catch { return json(res, 503, { ok: false, error: '视频上传清理失败，请重试删除' }); }
         const result = changePost(db, id, session, null, true);
-        if (result.removedMedia?.length) {
-            try { await deleteStoredMedia(result.removedMedia); }
-            catch (error) { console.error('博客媒体清理失败:', error); }
-        }
-        return json(res, result.status, { ok: result.status === 200, error: result.error });
+        kickMediaCleanup(db);
+        return json(res, result.status, { ok: result.status === 200, cleanupPending: Boolean(result.removedMedia?.length), error: result.error });
     }
     if (req.method === 'POST' && url.pathname.endsWith('/media')) {
         const allowed = canChangePost(db, id, session);
         if (allowed.status !== 200) return json(res, allowed.status, { ok: false, error: allowed.error });
         try {
             const kind = url.searchParams.get('kind');
+            const position = normalizeMediaPosition(url.searchParams.has('position') ? Number(url.searchParams.get('position')) : null);
             const item = kind === 'image'
                 ? await uploadImage(req, (config.services || []).find(service => service.id === 'piclist'))
                 : kind === 'video' ? await uploadVideo(req) : null;
             if (!item) throw new Error('媒体类型无效');
-            const result = addMedia(db, id, session, item);
+            const result = addMedia(db, id, session, item, position);
+            if (result.status !== 201) { enqueueMediaCleanup(db, [item], session.userId); kickMediaCleanup(db); }
             return json(res, result.status, { ok: result.status === 201, id: result.id, url: result.url, error: result.error });
         } catch (error) { return json(res, 400, { ok: false, error: error.message }); }
     }
@@ -309,13 +324,12 @@ export async function handleBlogApi(req, res, url, session, json, config) {
         const body = await readJson(req);
         if (req.method === 'POST') {
             const postId = createPost(db, session, body.content, body.hasMedia, { contentFormat: body.contentFormat, tags: body.tags, location: body.location, visibility: body.visibility });
+            enrichLocation(db, postId);
             return json(res, 201, { ok: true, id: postId });
         }
         const result = changePost(db, id, session, body.content, false, { keepMediaIds: body.keepMediaIds, contentFormat: body.contentFormat, tags: body.tags, location: body.location, visibility: body.visibility });
-        if (result.removedMedia?.length) {
-            try { await deleteStoredMedia(result.removedMedia); }
-            catch (error) { console.error('博客媒体清理失败:', error); }
-        }
-        return json(res, result.status, { ok: result.status === 200, error: result.error });
+        if (result.status === 200) enrichLocation(db, id);
+        kickMediaCleanup(db);
+        return json(res, result.status, { ok: result.status === 200, cleanupPending: Boolean(result.removedMedia?.length), error: result.error });
     } catch (error) { return json(res, 400, { ok: false, error: error.message }); }
 }

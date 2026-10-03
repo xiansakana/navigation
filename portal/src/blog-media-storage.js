@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { DeleteObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, ListObjectVersionsCommand, AbortMultipartUploadCommand, S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { readPiclistConfig } from './piclist-admin.js';
 
@@ -10,6 +10,30 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../p
 const envPath = process.env.PICLIST_ENV_PATH || path.join(process.env.PICLIST_ROOT || root, '.env');
 const MAX_IMAGE_BYTES = 80 * 1024 * 1024;
 const VIDEO_TYPES = new Map([['video/mp4', '.mp4'], ['video/webm', '.webm'], ['video/quicktime', '.mov']]);
+let sharedConnection;
+
+function acquireStorageConnection(setting) {
+    const options = { region: setting.region, endpoint: setting.endpoint,
+        forcePathStyle: setting.pathStyleAccess !== false,
+        credentials: { accessKeyId: setting.accessKeyID, secretAccessKey: setting.secretAccessKey } };
+    const signature = crypto.createHash('sha256').update(JSON.stringify(options)).digest('hex');
+    if (!sharedConnection || sharedConnection.signature !== signature) {
+        if (sharedConnection) {
+            sharedConnection.retired = true;
+            if (!sharedConnection.users) sharedConnection.client.destroy();
+        }
+        sharedConnection = { signature, client: new S3Client(options), users: 0, retired: false };
+    }
+    const connection = sharedConnection;
+    connection.users++;
+    let released = false;
+    return { client: connection.client, release() {
+        if (released) return;
+        released = true;
+        connection.users--;
+        if (connection.retired && !connection.users) connection.client.destroy();
+    } };
+}
 
 function profile() {
     const doc = readPiclistConfig();
@@ -19,16 +43,19 @@ function profile() {
     return value;
 }
 
+export function normalizeMediaPosition(value) {
+    if (value == null) return null;
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error('媒体顺序参数无效');
+    return value;
+}
+
 export function videoStorage(mimeType, existingKey) {
     const extension = VIDEO_TYPES.get(mimeType);
     if (!extension) throw new Error('仅支持 MP4、WebM、MOV 视频');
     const setting = profile();
     if (!setting.accessKeyID || !setting.secretAccessKey) throw new Error('B2 凭据未配置');
     const key = existingKey || `blog/video/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}${extension}`;
-    const client = new S3Client({ region: setting.region, endpoint: setting.endpoint,
-        forcePathStyle: setting.pathStyleAccess !== false,
-        credentials: { accessKeyId: setting.accessKeyID, secretAccessKey: setting.secretAccessKey } });
-    return { client, bucket: setting.bucketName, key, mimeType, url: setting.urlPrefix.replace(/\/$/, '') + '/' + key };
+    return { ...acquireStorageConnection(setting), bucket: setting.bucketName, key, mimeType, url: setting.urlPrefix.replace(/\/$/, '') + '/' + key };
 }
 
 function readServerKey() {
@@ -98,36 +125,52 @@ export async function uploadVideo(req) {
     const setting = profile();
     if (!setting.accessKeyID || !setting.secretAccessKey) throw new Error('B2 凭据未配置');
     const key = `blog/video/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}${extension}`;
-    const client = new S3Client({
-        region: setting.region,
-        endpoint: setting.endpoint,
-        forcePathStyle: setting.pathStyleAccess !== false,
-        credentials: { accessKeyId: setting.accessKeyID, secretAccessKey: setting.secretAccessKey }
-    });
+    const connection = acquireStorageConnection(setting);
+    const client = connection.client;
     try {
         const upload = new Upload({ client, params: {
             Bucket: setting.bucketName, Key: key, Body: stream, ContentType: mimeType
         }, queueSize: 2, partSize: 10 * 1024 * 1024, leavePartsOnError: false });
         await upload.done();
     } finally {
-        client.destroy();
+        connection.release();
     }
     return { kind: 'video', mimeType, url: setting.urlPrefix.replace(/\/$/, '') + '/' + key, storageKey: key };
 }
 
-export async function deleteStoredMedia(items) {
+export async function deleteMediaVersions(client, bucket, key, canDelete = () => true) {
+    if (!key || key.startsWith('/') || key.split('/').includes('..')) throw new Error('媒体存储路径无效');
+    const versions = [], markers = [];
+    let keyMarker, versionIdMarker;
+    do {
+        if (!canDelete(key)) return;
+        const page = await client.send(new ListObjectVersionsCommand({ Bucket: bucket, Prefix: key, KeyMarker: keyMarker, VersionIdMarker: versionIdMarker }));
+        versions.push(...(page.Versions || []).filter(item => item.Key === key));
+        markers.push(...(page.DeleteMarkers || []).filter(item => item.Key === key));
+        if (!page.IsTruncated) break;
+        if (!page.NextKeyMarker || (page.NextKeyMarker === keyMarker && page.NextVersionIdMarker === versionIdMarker)) throw new Error('媒体版本分页无效');
+        keyMarker = page.NextKeyMarker; versionIdMarker = page.NextVersionIdMarker;
+    } while (true);
+    // Delete data versions before hide markers; never delete objects sharing a prefix.
+    for (const item of [...versions, ...markers]) {
+        if (!canDelete(key)) return;
+        if (!item.VersionId) throw new Error('媒体版本编号缺失');
+        await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key, VersionId: item.VersionId }));
+    }
+}
+
+export async function deleteStoredMedia(items, options = {}) {
     if (!items.length) return;
-    const setting = profile();
-    const client = new S3Client({
-        region: setting.region,
-        endpoint: setting.endpoint,
-        forcePathStyle: setting.pathStyleAccess !== false,
-        credentials: { accessKeyId: setting.accessKeyID, secretAccessKey: setting.secretAccessKey }
-    });
+    const storage = videoStorage('video/webm', items[0].storageKey);
     try {
-        for (const item of items) {
-            if (!item.storageKey || item.storageKey.includes('..') || item.storageKey.startsWith('/')) continue;
-            await client.send(new DeleteObjectCommand({ Bucket: setting.bucketName, Key: item.storageKey }));
-        }
-    } finally { client.destroy(); }
+        for (const item of items) await deleteMediaVersions(storage.client, storage.bucket, item.storageKey, options.canDelete);
+    } finally { storage.release(); }
+}
+
+export async function abortStoredUpload(item) {
+    const storage = videoStorage('video/webm', item.storageKey);
+    try {
+        await storage.client.send(new AbortMultipartUploadCommand({ Bucket: storage.bucket, Key: item.storageKey, UploadId: item.multipartId }));
+    } catch (error) { if (error.name !== 'NoSuchUpload') throw error; }
+    finally { storage.release(); }
 }

@@ -172,6 +172,13 @@ export function initSchema(db) {
   ensureColumn('blog_posts', 'visible_from', 'TEXT');
   ensureColumn('blog_posts', 'visible_until', 'TEXT');
   db.exec(`
+    CREATE TABLE IF NOT EXISTS blog_media_cleanup (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL,
+      storage_key TEXT NOT NULL, multipart_id TEXT NOT NULL DEFAULT '',
+      attempts INTEGER NOT NULL DEFAULT 0, next_at TEXT NOT NULL,
+      last_error TEXT, created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_blog_media_cleanup_due ON blog_media_cleanup (next_at);
     CREATE TABLE IF NOT EXISTS blog_video_uploads (
       id TEXT PRIMARY KEY, post_id TEXT NOT NULL, user_id TEXT NOT NULL, mime_type TEXT NOT NULL,
       byte_size INTEGER NOT NULL, storage_key TEXT NOT NULL, multipart_id TEXT NOT NULL, created_at TEXT NOT NULL
@@ -194,6 +201,8 @@ export function initSchema(db) {
   ensureColumn('yolo_option_quotes', 'high_price', 'REAL');
   ensureColumn('yolo_option_quotes', 'low_price', 'REAL');
   ensureColumn('yolo_option_quotes', 'prev_close', 'REAL');
+
+  ensureColumn('blog_video_uploads', 'position', 'INTEGER');
 
   const row = db.prepare("SELECT value FROM meta WHERE key = 'schema_version'").get();
   if (!row) {

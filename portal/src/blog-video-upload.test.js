@@ -13,7 +13,7 @@ test('multipart videos accept over 50MB and enforce actual part lengths, file si
     validateVideoUpload(size, 'video/webm');
     assert.throws(() => validateVideoUpload(size, 'image/jpeg'));
     const id = 'a'.repeat(32);
-    db.prepare('INSERT INTO blog_video_uploads VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, 'post', 'owner', 'video/webm', size, 'key', 'multipart', new Date().toISOString());
+    db.prepare('INSERT INTO blog_video_uploads (id, post_id, user_id, mime_type, byte_size, storage_key, multipart_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(id, 'post', 'owner', 'video/webm', size, 'key', 'multipart', new Date().toISOString());
     const upload = findVideoUpload(db, id, { userId: 'owner' });
     assert.ok(upload);
     assert.equal(findVideoUpload(db, id, { userId: 'other' }), null);

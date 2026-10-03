@@ -31,7 +31,7 @@
     function render() { status.textContent = location ? '📍 ' + (location.label || '地址暂不可用，可重新定位') : '未附带位置信息'; }
     function address(current, force) {
       var captured = location;
-      status.textContent = '正在解析位置地址…';
+      status.textContent = '正在解析位置地址（不影响保存）…';
       return window.resolveBlogAddress(captured, force).then(function(label) {
         if (current !== generation) return;
         location = Object.assign({}, captured, { label: label }); render();
@@ -45,7 +45,7 @@
         pending = address(++generation, false); return pending;
       }
       var current = ++generation;
-      status.textContent = '正在自动获取位置…';
+      status.textContent = '正在自动获取位置（不影响保存）…';
       pending = new Promise(function(resolve) {
         var timer = setTimeout(function() {
           if (current === generation) { generation++; status.textContent = '自动定位超时，将不附带位置'; }
@@ -73,7 +73,7 @@
     render();
     return {
       start: start,
-      value: async function() { await pending; return location; },
+      value: async function(options) { if (!options || options.wait !== false) await pending; return location ? Object.assign({}, location) : null; },
       clear: function() { generation++; location = null; started = false; pending = null; start(); }
     };
   };

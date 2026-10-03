@@ -16,6 +16,7 @@ test('automatic location starts only on permission-gated activation, waits and i
     location.start(); location.start();
     assert.equal(calls.length, 1);
     const result = location.value();
+    assert.equal(await location.value({ wait: false }), null);
     calls[0].ok({ coords: { latitude: 31.2, longitude: 121.5 } });
     assert.equal((await result).latitude, 31.2);
     assert.match(root.textContent, /世纪大道/);

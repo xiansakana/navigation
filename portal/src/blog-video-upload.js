@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } from '@aws-sdk/client-s3';
-import { videoStorage } from './blog-media-storage.js';
+import { videoStorage, normalizeMediaPosition } from './blog-media-storage.js';
 
 export const VIDEO_CHUNK_BYTES = 8 * 1024 * 1024;
 
@@ -9,7 +9,8 @@ export function validateVideoUpload(size, mimeType) {
   if (!['video/mp4', 'video/webm', 'video/quicktime'].includes(mimeType)) throw new Error('仅支持 MP4、WebM、MOV 视频');
 }
 
-export async function startVideoUpload(db, postId, userId, size, mimeType) {
+export async function startVideoUpload(db, postId, userId, size, mimeType, position = null) {
+  position = normalizeMediaPosition(position);
   validateVideoUpload(size, mimeType);
   const storage = videoStorage(mimeType);
   let uploadId;
@@ -18,13 +19,13 @@ export async function startVideoUpload(db, postId, userId, size, mimeType) {
     uploadId = result.UploadId;
     if (!uploadId) throw new Error('无法创建视频上传');
     const id = crypto.randomUUID().replaceAll('-', '');
-    db.prepare('INSERT INTO blog_video_uploads (id, post_id, user_id, mime_type, byte_size, storage_key, multipart_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, postId, userId, mimeType, size, storage.key, uploadId, new Date().toISOString());
+    db.prepare('INSERT INTO blog_video_uploads (id, post_id, user_id, mime_type, byte_size, storage_key, multipart_id, created_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, postId, userId, mimeType, size, storage.key, uploadId, new Date().toISOString(), position);
     return { id, chunkBytes: VIDEO_CHUNK_BYTES };
   } catch (error) {
     if (uploadId) await storage.client.send(new AbortMultipartUploadCommand({ Bucket: storage.bucket, Key: storage.key, UploadId: uploadId })).catch(() => {});
     throw error;
-  } finally { storage.client.destroy(); }
+  } finally { storage.release(); }
 }
 
 export function findVideoUpload(db, id, session) {
@@ -58,9 +59,10 @@ export async function writeVideoPart(db, upload, number, req) {
     const result = await storage.client.send(new UploadPartCommand({ Bucket: storage.bucket, Key: storage.key, UploadId: upload.multipart_id,
       PartNumber: number, Body: bytes, ContentLength: bytes.length }));
     if (!result.ETag) throw new Error('视频分段上传失败');
+    if (!db.prepare('SELECT 1 FROM blog_video_uploads WHERE id = ?').get(upload.id)) throw new Error('视频上传已取消');
     db.prepare('INSERT INTO blog_video_parts (upload_id, part_number, etag, byte_size) VALUES (?, ?, ?, ?) ON CONFLICT(upload_id, part_number) DO UPDATE SET etag = excluded.etag, byte_size = excluded.byte_size')
       .run(upload.id, number, result.ETag, size);
-  } finally { storage.client.destroy(); }
+  } finally { storage.release(); }
 }
 
 export function completedVideoParts(db, upload) {
@@ -76,7 +78,7 @@ export async function finishVideoUpload(db, upload) {
   try {
     await storage.client.send(new CompleteMultipartUploadCommand({ Bucket: storage.bucket, Key: storage.key, UploadId: upload.multipart_id, MultipartUpload: { Parts: parts } }));
     return { kind: 'video', mimeType: upload.mime_type, url: storage.url, storageKey: storage.key };
-  } finally { storage.client.destroy(); }
+  } finally { storage.release(); }
 }
 
 export function forgetVideoUpload(db, id) {
@@ -92,5 +94,5 @@ export async function abortVideoUpload(db, upload) {
   } catch (error) {
     if (error.name === 'NoSuchUpload') forgetVideoUpload(db, upload.id);
     else throw error;
-  } finally { storage.client.destroy(); }
+  } finally { storage.release(); }
 }

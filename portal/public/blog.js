@@ -260,14 +260,15 @@
         searchTimer = setTimeout(function() { load(true); }, 300);
     });
 
-    async function uploadLargeVideo(id, item) {
+    async function uploadLargeVideo(id, item, position) {
         var upload;
         try {
             document.getElementById('blog-upload-status').textContent = '正在上传视频：0%';
             upload = await request('posts/' + id + '/video-uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ size: item.file.size, mimeType: item.file.type }) });
+                body: JSON.stringify({ size: item.file.size, mimeType: item.file.type, position: position }) });
             var count = Math.ceil(item.file.size / upload.chunkBytes);
-            for (var part = 1; part <= count; part++) {
+            var completed = 0;
+            await window.runBlogUploads(Array.from({ length: count }, function(_, index) { return index + 1; }), async function(part) {
                 var chunk = item.file.slice((part - 1) * upload.chunkBytes, part * upload.chunkBytes);
                 for (var attempt = 0; ; attempt++) {
                     try {
@@ -275,9 +276,10 @@
                         break;
                     } catch (error) { if (attempt >= 2) throw error; }
                 }
-                var status = document.getElementById('blog-upload-status');
-                status.textContent = '正在上传视频：' + Math.round(part / count * 100) + '%';
-            }
+                completed++;
+                document.getElementById('blog-upload-status').textContent = '正在上传视频：' + Math.round(completed / count * 100) + '%';
+                return part;
+            }, 2);
             return await request('video-uploads/' + upload.id, { method: 'POST' });
         } catch (error) {
             if (upload) await request('video-uploads/' + upload.id, { method: 'DELETE' }).catch(function() {});
@@ -286,17 +288,28 @@
     }
 
     async function uploadAll(id, items) {
-        var uploaded = [];
-        for (var i = 0; i < items.length; i++) {
-            var item = items[i];
-            try {
-                uploaded.push(item.kind === 'video' && item.file.size > 16 * 1024 * 1024
-                    ? await uploadLargeVideo(id, item)
-                    : await request('posts/' + id + '/media?kind=' + item.kind,
-                        { method: 'POST', headers: { 'Content-Type': item.file.type }, body: item.file }));
-            } catch (error) { error.uploaded = uploaded; throw error; }
-        }
-        return uploaded;
+        var existing = state.posts.has(id) ? editItems(state.posts.get(id)) : [];
+        var base = existing.reduce(function(max, item, index) { return Math.max(max, item.position == null ? index : item.position); }, -1) + 1;
+        return window.runBlogUploads(items.slice(), async function(item, index) {
+            var position = base + index;
+            return item.kind === 'video' && item.file.size > 16 * 1024 * 1024
+                ? uploadLargeVideo(id, item, position)
+                : request('posts/' + id + '/media?kind=' + item.kind + '&position=' + position,
+                    { method: 'POST', headers: { 'Content-Type': item.file.type }, body: item.file });
+        }, 2);
+    }
+
+    function lockEditor(root) {
+        var controls = Array.from(root.querySelectorAll('button, input, select'));
+        var disabled = controls.map(function(control) { return control.disabled; });
+        var editable = Array.from(root.querySelectorAll('[contenteditable]'));
+        var attributes = editable.map(function(control) { return control.getAttribute('contenteditable'); });
+        controls.forEach(function(control) { control.disabled = true; });
+        editable.forEach(function(control) { control.setAttribute('contenteditable', 'false'); });
+        return function() {
+            controls.forEach(function(control, index) { control.disabled = disabled[index]; });
+            editable.forEach(function(control, index) { control.setAttribute('contenteditable', attributes[index]); });
+        };
     }
 
     input.addEventListener('input', function() { document.getElementById('blog-count').textContent = richEditor.length() + ' / 10000'; });
@@ -320,11 +333,11 @@
         event.preventDefault();
         if (richEditor.isEmpty() && !state.pending.length) { window.portalToast?.error('请输入博客内容或添加媒体'); return; }
         var button = document.getElementById('blog-submit');
-        button.disabled = true;
+        var unlock = lockEditor(composer);
         var created;
         try {
             created = await request('posts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: richEditor.content(), contentFormat: richEditor.format(), visibility: visibilityEditor.value(), location: await locationEditor.value(), tags: tagEditor.value(), hasMedia: state.pending.length > 0 }) });
+                body: JSON.stringify({ content: richEditor.content(), contentFormat: richEditor.format(), visibility: visibilityEditor.value(), location: await locationEditor.value({ wait: false }), tags: tagEditor.value(), hasMedia: state.pending.length > 0 }) });
             await uploadAll(created.id, state.pending);
             release(state.pending);
             state.pending = [];
@@ -344,7 +357,7 @@
                 window.portalToast?.error('媒体上传中断，已发布的内容可在编辑中继续补充：' + error.message);
             }
             else window.portalToast?.error(error.message);
-        } finally { button.disabled = false; }
+        } finally { unlock(); }
     });
 
     function editItems(post) {
@@ -367,7 +380,7 @@
         var article = button.closest('.blog-post');
         if (button.dataset.action === 'delete') {
             if (!confirm('确定删除这篇动态吗？')) return;
-            try { await request('posts/' + button.dataset.id, { method: 'DELETE' }); state.editing?.editor.destroy(); state.editing = null; await load(true); }
+            try { var result = await request('posts/' + button.dataset.id, { method: 'DELETE' }); state.editing?.editor.destroy(); state.editing = null; await load(true); window.portalToast?.success(result.cleanupPending ? '已删除，媒体将在后台清理' : '已删除'); }
             catch (error) { window.portalToast?.error(error.message); }
             return;
         }
@@ -418,7 +431,7 @@
         if (button.dataset.action === 'cancel') {
             release(state.editing.pending); state.editing.editor.destroy(); state.editing = null; return load(true);
         }
-        button.disabled = true;
+        var unlock = lockEditor(button.closest('.blog-post'));
         try {
             var editing = state.editing;
             var tags = editing.tags.value();
@@ -427,18 +440,19 @@
             var uploaded = await uploadAll(editing.id, editing.pending);
             editing.keepMediaIds.push.apply(editing.keepMediaIds, uploaded.map(function(item) { return item.id; }));
             release(editing.pending); editing.pending = [];
-            await request('posts/' + editing.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: editing.editor.content(), contentFormat: editing.editor.format(), visibility: visibility, location: await editing.location.value(), tags: tags,
+            var saved = await request('posts/' + editing.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: editing.editor.content(), contentFormat: editing.editor.format(), visibility: visibility, location: await editing.location.value({ wait: false }), tags: tags,
                     keepMediaIds: editing.keepMediaIds }) });
             release(editing.pending); editing.editor.destroy(); state.editing = null;
             await load(true);
+            window.portalToast?.success(saved.cleanupPending ? '保存成功，移除的媒体将在后台清理' : '保存成功');
         } catch (error) {
             if (error.uploaded?.length) {
                 release(state.editing.pending); state.editing?.editor.destroy(); state.editing = null; await load(true);
                 window.portalToast?.error('部分媒体已上传，请重新编辑文章：' + error.message);
             } else window.portalToast?.error(error.message);
         }
-        finally { button.disabled = false; }
+        finally { unlock(); }
     });
     feed.addEventListener('change', async function(event) {
         var chooser = event.target.closest('input[data-edit-kind]');

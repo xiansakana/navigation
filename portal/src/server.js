@@ -1,4 +1,6 @@
 import http from 'node:http';
+import { getDatabase } from '../../shared/db/index.js';
+import { startMediaCleanup } from './blog-media-cleanup.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -629,6 +631,7 @@ var host = config.server?.host || '127.0.0.1';
 var port = config.server?.port || 8080;
 
 server.listen(port, host, function() {
+    startMediaCleanup(getDatabase());
     console.log('服务导航门户已启动: http://' + (host === '0.0.0.0' ? '127.0.0.1' : host) + ':' + port);
     if (host === '0.0.0.0' && port === 80) {
         console.log('外网访问: http://<公网IP>/');
