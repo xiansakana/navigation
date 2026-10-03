@@ -216,3 +216,12 @@ body.portal-experience .yolo-expiry-toggle :is(small, span) { color: var(--muted
   body.portal-experience *, body.portal-experience *::before, body.portal-experience *::after { transition: none !important; scroll-behavior: auto !important; }
   body.portal-experience .service-card:hover { transform: none; }
 }
+
+/* Per-post audience and availability controls. */
+.blog-visibility { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; padding: 14px; border: 1px solid var(--border); border-radius: 14px; }
+.blog-visibility label { display: grid; gap: 6px; flex: 1 1 210px; min-width: 0; font-size: 13px; }
+.blog-visibility select, .blog-visibility input { width: 100%; min-width: 0; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text); font: inherit; }
+.blog-visibility-dates { display: flex; flex-wrap: wrap; gap: 12px; flex-basis: 100%; }
+.blog-visibility-dates[hidden] { display: none; }
+.blog-visibility-hint { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
+.blog-visibility-badge { flex-basis: 100%; font-size: 12px; color: var(--muted); }

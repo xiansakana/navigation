@@ -6,6 +6,7 @@
     var richEditor = window.createBlogEditor(input);
     var tagEditor = window.createBlogTags(document.getElementById('blog-tags'));
     var locationEditor = window.createBlogLocation(document.getElementById('blog-location'));
+    var visibilityEditor = window.createBlogVisibility(document.getElementById('blog-visibility'));
     var tagFilter = document.getElementById('blog-tag-filter');
     var searchInput = document.getElementById('blog-search');
     var searchStatus = document.getElementById('blog-search-status');
@@ -143,6 +144,14 @@
         body.className = 'blog-post-content';
         if (post.contentFormat === 'html' || post.contentFormat === 'markdown') { body.classList.add('blog-rich-content'); body.innerHTML = post.contentFormat === 'markdown' ? post.contentHtml : post.content; }
         else body.textContent = post.content;
+        var visibility = post.visibility || { audience: 'public' };
+        var scope = document.createElement('span'); scope.className = 'blog-visibility-badge';
+        scope.textContent = { public: '公开动态', members: '仅登录用户', self: '仅自己' }[visibility.audience];
+        if (visibility.startsAt) scope.textContent += ' · ' + new Date(visibility.startsAt).toLocaleString('zh-CN') + ' 起可见';
+        if (visibility.endsAt) scope.textContent += ' · ' + new Date(visibility.endsAt).toLocaleString('zh-CN') + ' 到期';
+        if (visibility.startsAt && new Date(visibility.startsAt) > new Date()) scope.textContent += '（尚未开放）';
+        if (visibility.endsAt && new Date(visibility.endsAt) <= new Date()) scope.textContent += '（已到期）';
+        meta.appendChild(scope);
         main.append(meta, body);
         if (post.location) {
             var location = document.createElement(post.location.latitude != null ? 'a' : 'span');
@@ -211,6 +220,7 @@
             renderTagFilter();
             if (reset) { feed.replaceChildren(); state.posts.clear(); }
             state.userId = data.userId;
+            state.isGuest = data.isGuest;
             state.canPost = data.canPost;
             state.canManage = data.canManage;
             composer.classList.toggle('hidden', !(state.canPost || state.canManage));
@@ -286,11 +296,11 @@
         var created;
         try {
             created = await request('posts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: richEditor.content(), contentFormat: richEditor.format(), location: await locationEditor.value(), tags: tagEditor.value(), hasMedia: state.pending.length > 0 }) });
+                body: JSON.stringify({ content: richEditor.content(), contentFormat: richEditor.format(), visibility: visibilityEditor.value(), location: await locationEditor.value(), tags: tagEditor.value(), hasMedia: state.pending.length > 0 }) });
             await uploadAll(created.id, state.pending);
             release(state.pending);
             state.pending = [];
-            richEditor.clear(); tagEditor.clear(); locationEditor.clear();
+            richEditor.clear(); tagEditor.clear(); locationEditor.clear(); visibilityEditor.clear();
             input.dispatchEvent(new Event('input'));
             renderComposerPreview();
             await load(true);
@@ -300,7 +310,7 @@
                 await request('posts/' + created.id, { method: 'DELETE' }).catch(function() {});
                 window.portalToast?.error('上传失败，内容已保留在编辑框：' + error.message);
             } else if (created) {
-                release(state.pending); state.pending = []; richEditor.clear(); tagEditor.clear(); locationEditor.clear();
+                release(state.pending); state.pending = []; richEditor.clear(); tagEditor.clear(); locationEditor.clear(); visibilityEditor.clear();
                 input.dispatchEvent(new Event('input')); renderComposerPreview();
                 await load(true);
                 window.portalToast?.error('媒体上传中断，已发布的内容可在编辑中继续补充：' + error.message);
@@ -341,6 +351,8 @@
         editor.className = 'blog-edit-host';
         body.replaceWith(editor);
         state.editing.editor = window.createBlogEditor(editor, post);
+        var editVisibility = document.createElement('div'); editor.after(editVisibility);
+        state.editing.visibility = window.createBlogVisibility(editVisibility, post.visibility);
         article.querySelector('.blog-post-tags')?.remove();
         article.querySelector('.blog-post-location')?.remove();
         var editLocation = document.createElement('div'); editor.after(editLocation);
@@ -382,12 +394,13 @@
         try {
             var editing = state.editing;
             var tags = editing.tags.value();
+            var visibility = editing.visibility.value();
             if (editing.editor.length() > 10000) throw new Error('博客内容最多 10000 字');
             var uploaded = await uploadAll(editing.id, editing.pending);
             editing.keepMediaIds.push.apply(editing.keepMediaIds, uploaded.map(function(item) { return item.id; }));
             release(editing.pending); editing.pending = [];
             await request('posts/' + editing.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: editing.editor.content(), contentFormat: editing.editor.format(), location: await editing.location.value(), tags: tags,
+                body: JSON.stringify({ content: editing.editor.content(), contentFormat: editing.editor.format(), visibility: visibility, location: await editing.location.value(), tags: tags,
                     keepMediaIds: editing.keepMediaIds }) });
             release(editing.pending); editing.editor.destroy(); state.editing = null;
             await load(true);
@@ -448,5 +461,20 @@
             await load(true);
         } catch (error) { window.portalToast?.error('博客加载失败：' + error.message); }
     }
+    // Remove expired cards even when refreshing fails; authors retain access.
+    setInterval(function() {
+        var now = Date.now(), expired = false;
+        state.posts.forEach(function(post, id) {
+            if ((state.isGuest || post.authorId !== state.userId) && post.visibility?.endsAt && Date.parse(post.visibility.endsAt) <= now) {
+                feed.querySelector('[data-id="' + id + '"]')?.remove(); state.posts.delete(id); expired = true;
+            }
+        });
+        if (expired) {
+            document.querySelector('dialog[aria-label="图片预览"]')?.close();
+            load(true);
+        }
+    }, 1000);
+    setInterval(function() { if (!document.hidden && !state.editing && section.classList.contains('hidden') === false) load(true); }, 60000);
+    document.addEventListener('visibilitychange', function() { if (!document.hidden && !state.editing && !section.classList.contains('hidden')) load(true); });
     initialize();
 })();
