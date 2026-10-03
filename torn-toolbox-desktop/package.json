@@ -12,6 +12,6 @@
     "start:undercut": "node src/server-undercut.js",
     "start:company": "node src/server-company.js",
     "migrate-config": "node scripts/migrate-config.mjs",
-    "test": "node --test src/watchers.test.js src/company-monitor.test.js"
+    "test": "node --test src/watchers.test.js src/company-monitor.test.js src/undercut-monitor.test.js"
   }
 }

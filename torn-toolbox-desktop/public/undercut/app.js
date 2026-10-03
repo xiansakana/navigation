@@ -53,6 +53,7 @@ function renderUndercutAlerts(alerts) {
         div.innerHTML = '<h4>' + WUI.escapeHtml(alert.name) + '（ID ' + alert.itemId + '）</h4>'
             + label
             + '<p>来源：' + alert.source + '</p>'
+            + '<p>你的在售数量：' + (alert.quantity == null ? '未知' : Number(alert.quantity).toLocaleString('en-US') + ' 件') + '</p>'
             + '<p>你的价格：' + formatMoney(alert.myPrice) + ' · ' + lowLabel + '：' + formatMoney(alert.compareLow) + '</p>'
             + seller
             + '<p>检测时间：' + formatTime(alert.detectedAt) + '</p>';

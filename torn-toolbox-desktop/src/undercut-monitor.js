@@ -111,6 +111,8 @@ export class UndercutMonitor extends EventEmitter {
     buildAlertText(alert) {
         var tag = alert.source === 'Bazaar' ? '[Bazaar]' : '[Item Market]';
         var prefix = alert.watcherLabel ? '[' + alert.watcherLabel + '] ' : '';
+        var quantity = alert.quantity == null ? '未知' : Number(alert.quantity).toLocaleString('en-US') + ' 件';
+        prefix += '你的在售数量：' + quantity + ' · ';
         if (alert.source === 'Bazaar' && alert.undercutBy) {
             return prefix + tag + ' ' + alert.name + '：你的 ' + formatMoney(alert.myPrice) + ' 被 '
                 + alert.undercutBy.playerName + '（ID ' + alert.undercutBy.playerId + '）'
@@ -149,6 +151,7 @@ export class UndercutMonitor extends EventEmitter {
                     itemId: itemId,
                     name: item.name || item.title || ('Item #' + (itemId || row.id)),
                     myPrice: Number(row.price) || 0,
+                    quantity: row.amount ?? row.quantity ?? null,
                     source: 'Item Market',
                     kind: 'im'
                 });
@@ -164,6 +167,7 @@ export class UndercutMonitor extends EventEmitter {
                     itemId: itemId,
                     name: row.name || ('Item #' + itemId),
                     myPrice: Number(row.price) || 0,
+                    quantity: row.quantity ?? row.amount ?? null,
                     source: 'Bazaar',
                     kind: 'bazaar'
                 });
@@ -230,6 +234,7 @@ export class UndercutMonitor extends EventEmitter {
                     name: entry.name,
                     source: entry.source,
                     myPrice: entry.myPrice,
+                    quantity: entry.quantity,
                     compareLow: compareLow,
                     undercutBy: undercutBy,
                     detectedAt: Math.floor(Date.now() / 1000),
