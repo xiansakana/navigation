@@ -63,7 +63,6 @@
                     if (videoTypes[extension]) file = new File([file], file.name, { type: videoTypes[extension] });
                 }
                 if (kind === 'video' && !['video/mp4', 'video/webm', 'video/quicktime'].includes(file.type)) throw new Error('视频仅支持 MP4、WebM、MOV');
-                if (kind === 'video' && file.size > 50 * 1024 * 1024) throw new Error('视频需在 50MB 以内');
                 var payload = kind === 'image' ? await convertToJpeg(file) : file;
                 added.push({ kind: kind, file: payload, preview: URL.createObjectURL(payload) });
             }

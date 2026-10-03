@@ -99,6 +99,8 @@ server {
 }
 EOF
 
+python3 "$(dirname "$0")/sync-blog-upload-nginx.py" "$SITE_CONF" --write-only
+
 echo "==> nginx -t"
 nginx -t
 systemctl enable nginx

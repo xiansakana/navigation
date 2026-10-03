@@ -114,6 +114,7 @@ fi
 
 if should_run portal; then
     echo "==> portal"
+    python3 "$ROOT/scripts/sync-blog-upload-nginx.py"
     if [ -f "$ROOT/scripts/patch-portal-config.py" ]; then
         python3 "$ROOT/scripts/patch-portal-config.py" "$ROOT/portal/config.json" || true
     fi

@@ -9,7 +9,6 @@ import { readPiclistConfig } from './piclist-admin.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../piclist');
 const envPath = process.env.PICLIST_ENV_PATH || path.join(process.env.PICLIST_ROOT || root, '.env');
 const MAX_IMAGE_BYTES = 80 * 1024 * 1024;
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const VIDEO_TYPES = new Map([['video/mp4', '.mp4'], ['video/webm', '.webm'], ['video/quicktime', '.mov']]);
 
 function profile() {
@@ -65,7 +64,7 @@ export async function uploadVideo(req) {
     const extension = VIDEO_TYPES.get(mimeType);
     if (!extension) throw new Error('仅支持 MP4、WebM、MOV 视频');
     const size = Number(req.headers['content-length']);
-    if (!Number.isSafeInteger(size) || size < 12 || size > MAX_VIDEO_BYTES) throw new Error('视频大小需在 50MB 以内');
+    if (!Number.isSafeInteger(size) || size < 12) throw new Error('视频文件大小无效');
     const first = await new Promise((resolve, reject) => {
         req.once('data', resolve);
         req.once('end', () => reject(new Error('视频文件为空')));
