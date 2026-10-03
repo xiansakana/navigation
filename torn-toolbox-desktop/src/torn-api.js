@@ -84,6 +84,7 @@ export async function fetchWeav3rBazaarLowest(itemId, myPlayerId, cache) {
         if (!best || price < best.price) {
             best = {
                 price: price,
+                quantity: row.quantity ?? null,
                 playerId: toNumber(row.player_id),
                 playerName: row.player_name || '未知'
             };
@@ -93,7 +94,7 @@ export async function fetchWeav3rBazaarLowest(itemId, myPlayerId, cache) {
     return best;
 }
 
-export async function fetchMarketLowestPrice(apiKey, itemId, cache) {
+export async function fetchMarketLowestListing(apiKey, itemId, cache) {
     if (cache[itemId] !== undefined) return cache[itemId];
     var data = await fetchJsonWithRetry(
         'https://api.torn.com/v2/market/' + itemId + '/itemmarket?key=' + encodeURIComponent(apiKey)
@@ -101,7 +102,7 @@ export async function fetchMarketLowestPrice(apiKey, itemId, cache) {
     var listings = (data.itemmarket && data.itemmarket.listings) || [];
     var lowest = listings.length ? listings.reduce(function(min, row) {
         var price = toNumber(row.price);
-        return min === null || price < min ? price : min;
+        return min === null || price < min.price ? { price: price, quantity: row.amount ?? null } : min;
     }, null) : null;
     cache[itemId] = lowest;
     return lowest;
