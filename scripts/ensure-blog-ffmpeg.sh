@@ -19,7 +19,8 @@ request = urllib.request.Request('https://api.github.com/repos/BtbN/FFmpeg-Build
 with urllib.request.urlopen(request, timeout=30) as response:
     release = json.load(response)
 asset = next(item for item in release['assets'] if item['name'] == name)
-expected = asset.get('digest', '').removeprefix('sha256:')
+expected = asset.get('digest', '')
+expected = expected[7:] if expected.startswith('sha256:') else ''
 if not re.fullmatch('[0-9a-f]{64}', expected):
     raise RuntimeError('FFmpeg release SHA256 is missing')
 request = urllib.request.Request(asset['url'], headers={**headers, 'Accept': 'application/octet-stream'})
