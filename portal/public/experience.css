@@ -142,6 +142,10 @@ body.portal-experience .select-display { min-height: 44px; border-radius: 10px; 
 body.portal-experience .btn-row { flex-wrap: wrap; }
 body.portal-experience .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 4px; }
 body.portal-experience .blog-section { max-width: 1100px; }
+body.portal-experience .blog-search-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 20px; margin: 24px 0 16px; }
+body.portal-experience .blog-search-bar label { display: grid; gap: 6px; flex: 1 1 280px; max-width: 520px; font-size: 13px; color: var(--muted); }
+body.portal-experience .blog-search-bar input { width: 100%; padding: 11px 14px; border: 1px solid var(--border); }
+body.portal-experience #blog-search-status { font-size: 12px; color: var(--muted); padding-bottom: 10px; }
 body.portal-experience .blog-heading { margin-bottom: 8px; }
 body.portal-experience :is(.blog-composer, .blog-post) { padding: 24px; box-shadow: var(--ui-shadow); border-radius: 18px; }
 body.portal-experience .blog-post-content { line-height: 1.85; }

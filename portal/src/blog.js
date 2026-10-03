@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
 import { deleteStoredMedia, uploadImage, uploadVideo } from './blog-media-storage.js';
-import { normalizeContent, normalizeTags, normalizeLocation, renderMarkdown } from './blog-content.js';
+import { normalizeContent, normalizeTags, normalizeLocation, renderMarkdown, contentSearchText, normalizeSearch } from './blog-content.js';
 import { parseCoordinates, resolveAddress } from './blog-address.js';
 
 const MAX_REQUEST_BYTES = 128 * 1024;
@@ -28,7 +28,14 @@ export function getImage(db, id) {
     return db.prepare('SELECT i.mime_type AS mimeType, i.image_data AS imageData FROM blog_images i JOIN blog_posts p ON p.id = i.post_id WHERE i.id = ?').get(id);
 }
 
-export function listPosts(db, before, limit = 20, tag = '') {
+export function listPosts(db, before, limit = 20, tag = '', query = '') {
+    const search = normalizeSearch(query);
+    if (search) {
+        const update = db.prepare('UPDATE blog_posts SET search_text = ? WHERE id = ?');
+        for (const row of db.prepare('SELECT id, content, content_format FROM blog_posts WHERE search_text IS NULL').all()) {
+            update.run(contentSearchText(row.content, row.content_format), row.id);
+        }
+    }
     const cursor = before ? db.prepare('SELECT created_at, id FROM blog_posts WHERE id = ?').get(before) : null;
     if (before && !cursor) return [];
     const conditions = [];
@@ -40,6 +47,12 @@ export function listPosts(db, before, limit = 20, tag = '') {
     if (tag) {
         conditions.push('EXISTS (SELECT 1 FROM blog_post_tags t WHERE t.post_id = blog_posts.id AND t.tag = ?)');
         params.push(tag);
+    }
+    if (search) {
+        conditions.push(`(instr(search_text, ?) > 0 OR instr(lower(author_name), ?) > 0
+            OR EXISTS (SELECT 1 FROM blog_post_tags s WHERE s.post_id = blog_posts.id AND instr(lower(s.tag), ?) > 0)
+            OR instr(lower(COALESCE(json_extract(location_json, '$.label'), '')), ?) > 0)`);
+        params.push(search, search, search, search);
     }
     const rows = db.prepare(`SELECT id, author_id AS authorId, author_name AS authorName,
         content, content_format AS contentFormat, location_json AS locationJson, created_at AS createdAt, updated_at AS updatedAt FROM blog_posts
@@ -64,8 +77,8 @@ export function createPost(db, session, content, hasMedia = false, options = {})
     const id = crypto.randomUUID().replaceAll('-', '');
     const now = new Date().toISOString();
     transaction(db, () => {
-        db.prepare('INSERT INTO blog_posts (id, author_id, author_name, content, content_format, location_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-            .run(id, session.userId, session.username, text, format, location ? JSON.stringify(location) : null, now, now);
+        db.prepare('INSERT INTO blog_posts (id, author_id, author_name, content, content_format, search_text, location_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            .run(id, session.userId, session.username, text, format, contentSearchText(text, format), location ? JSON.stringify(location) : null, now, now);
         for (const tag of tags) db.prepare('INSERT INTO blog_post_tags (post_id, tag) VALUES (?, ?)').run(id, tag);
     });
     return id;
@@ -129,8 +142,8 @@ export function changePost(db, id, session, content, remove = false, options = {
             db.prepare('DELETE FROM blog_post_tags WHERE post_id = ?').run(id);
             for (const tag of tags) db.prepare('INSERT INTO blog_post_tags (post_id, tag) VALUES (?, ?)').run(id, tag);
         }
-        db.prepare('UPDATE blog_posts SET content = ?, content_format = ?, location_json = ?, updated_at = ? WHERE id = ?')
-            .run(text, format, location, new Date().toISOString(), id);
+        db.prepare('UPDATE blog_posts SET content = ?, content_format = ?, search_text = ?, location_json = ?, updated_at = ? WHERE id = ?')
+            .run(text, format, contentSearchText(text, format), location, new Date().toISOString(), id);
     });
     return { status: 200, removedMedia };
 }
@@ -171,9 +184,10 @@ export async function handleBlogApi(req, res, url, session, json, config) {
         const before = url.searchParams.get('before');
         if (before && !/^[a-f0-9]{32}$/.test(before)) return json(res, 400, { ok: false, error: '分页参数无效' });
         const tag = url.searchParams.get('tag') || '';
-        try { normalizeTags([tag]); } catch (error) { return json(res, 400, { ok: false, error: error.message }); }
+        const query = url.searchParams.get('q') || '';
+        try { normalizeTags([tag]); normalizeSearch(query); } catch (error) { return json(res, 400, { ok: false, error: error.message }); }
         const tags = db.prepare('SELECT t.tag, COUNT(*) AS count FROM blog_post_tags t JOIN blog_posts p ON p.id = t.post_id GROUP BY t.tag ORDER BY count DESC, t.tag').all();
-        return json(res, 200, { ok: true, posts: listPosts(db, before, 20, tag), tags, ...access, userId: session.userId });
+        return json(res, 200, { ok: true, posts: listPosts(db, before, 20, tag, query), tags, ...access, userId: session.userId });
     }
     if (req.method === 'POST' && !access.canPost && !access.canManage) return json(res, 403, { ok: false, error: '无权发布博客' });
     const match = url.pathname.match(/^\/api\/blog\/posts\/([a-f0-9]{32})(?:\/media)?$/);

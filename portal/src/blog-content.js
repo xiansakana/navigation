@@ -47,7 +47,19 @@ export function normalizeContent(value, format = 'text', allowEmpty = false) {
 }
 
 export function renderMarkdown(content) {
-  return normalizeContent(marked.parse(content, { gfm: true, breaks: true }), 'html', true);
+    return normalizeContent(marked.parse(content, { gfm: true, breaks: true }), 'html', true);
+}
+
+export function contentSearchText(content, format = 'text') {
+  if (format === 'text') return content.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+  const fragment = purifier.sanitize(format === 'markdown' ? marked.parse(content) : content, richOptions);
+  fragment.querySelectorAll('p, div, br, li, h1, h2, h3, h4, h5, h6, tr, td, th, blockquote, pre').forEach(node => node.appendChild(window.document.createTextNode(' ')));
+  return fragment.textContent.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+export function normalizeSearch(value = '') {
+  if (typeof value !== 'string' || value.length > 200) throw new Error('搜索关键词最多 200 字');
+  return value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 export function normalizeLocation(value) {

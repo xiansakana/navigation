@@ -7,6 +7,8 @@
     var tagEditor = window.createBlogTags(document.getElementById('blog-tags'));
     var locationEditor = window.createBlogLocation(document.getElementById('blog-location'));
     var tagFilter = document.getElementById('blog-tag-filter');
+    var searchInput = document.getElementById('blog-search');
+    var searchStatus = document.getElementById('blog-search-status');
     var imageInput = document.getElementById('blog-images');
     var videoInput = document.getElementById('blog-videos');
     var preview = document.getElementById('blog-preview');
@@ -14,7 +16,7 @@
     var loading = document.getElementById('blog-loading');
     var shortcut = document.getElementById('blog-shortcut');
     var state = { userId: '', canPost: false, canManage: false, lastId: null, loading: false,
-        pending: [], posts: new Map(), editing: null, tag: '', tags: [] };
+        pending: [], posts: new Map(), editing: null, tag: '', tags: [], search: '', refreshPending: false };
 
     async function request(path, options) {
         var response = await fetch('/api/blog/' + path, options || {});
@@ -189,16 +191,21 @@
     }
 
     async function load(reset) {
-        if (state.loading) return;
+        if (state.editing) return;
+        if (state.loading) { if (reset) state.refreshPending = true; return; }
+        var query = state.search, tag = state.tag;
         state.loading = true;
         more.disabled = true;
         loading.classList.remove('hidden');
         feed.setAttribute('aria-busy', 'true');
+        searchStatus.textContent = '正在加载动态…';
         try {
             var params = new URLSearchParams();
             if (!reset && state.lastId) params.set('before', state.lastId);
             if (state.tag) params.set('tag', state.tag);
+            if (query) params.set('q', query);
             var data = await request('posts?' + params.toString());
+            if (query !== state.search || tag !== state.tag) return;
             state.tags = data.tags || [];
             tagEditor.suggestions(state.tags);
             renderTagFilter();
@@ -214,21 +221,33 @@
             if (reset && !data.posts.length) {
                 var empty = document.createElement('p');
                 empty.className = 'blog-empty';
-                empty.textContent = state.tag ? '这个标签下还没有动态。' : '还没有动态，写下第一篇吧。';
+                empty.textContent = state.search ? '没有找到匹配的博客，试试其他关键词或清空搜索。' : state.tag ? '这个标签下还没有动态。' : '还没有动态，写下第一篇吧。';
                 feed.appendChild(empty);
             }
             state.lastId = data.posts.length ? data.posts.at(-1).id : null;
             more.classList.toggle('hidden', data.posts.length < 20);
+            searchStatus.textContent = (state.search || state.tag ? '当前筛选' : '全部动态') + '：已显示 ' + state.posts.size + ' 篇' + (data.posts.length === 20 ? '，可加载更多' : '');
             section.classList.remove('hidden');
         } catch (error) {
+            searchStatus.textContent = '加载失败，请重新输入关键词重试';
             if (error.message !== '无权查看博客') window.portalToast?.error('博客加载失败：' + error.message);
         } finally {
             state.loading = false;
             more.disabled = false;
             loading.classList.add('hidden');
             feed.setAttribute('aria-busy', 'false');
+            if (state.refreshPending) { state.refreshPending = false; load(true); }
         }
     }
+
+    var searchTimer;
+    searchInput.addEventListener('input', function(event) {
+        if (event.isComposing) return;
+        if (state.editing) { searchInput.value = state.search; window.portalToast?.warn('请先完成当前编辑'); return; }
+        state.search = searchInput.value.trim();
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(function() { load(true); }, 300);
+    });
 
     async function uploadAll(id, items) {
         var uploaded = [];

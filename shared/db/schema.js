@@ -166,6 +166,7 @@ export function initSchema(db) {
   `);
   ensureColumn('blog_posts', 'location_json', 'TEXT');
   ensureColumn('blog_posts', 'content_format', "TEXT NOT NULL DEFAULT 'text'");
+  ensureColumn('blog_posts', 'search_text', 'TEXT');
   ensureColumn('yolo_captures', 'capture_kind', "TEXT NOT NULL DEFAULT 'intraday'");
   ensureColumn('yolo_captures', 'requested_at', 'TEXT');
   ensureColumn('yolo_captures', 'received_at', 'TEXT');
