@@ -42,7 +42,7 @@ export function compressionArguments(input, output) {
     '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', '-progress', 'pipe:1', output];
 }
 export async function makeThumbnail(input, output) {
-  await runMediaCommand(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm,jpeg_pipe,png_pipe,mjpeg', '-i', input,
+  await runMediaCommand(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,matroska,webm,jpeg_pipe,png_pipe,mjpeg,image2', '-i', input,
     '-frames:v', '1', '-vf', 'scale=320:320:force_original_aspect_ratio=decrease', '-threads', '1', '-filter_threads', '1', '-q:v', '5', output]);
   const bytes = await fsp.readFile(output);
   if (!bytes.length || bytes.length > 200000) throw new Error('缩略图生成失败');

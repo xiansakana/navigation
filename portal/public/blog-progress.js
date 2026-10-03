@@ -30,8 +30,8 @@
         function update(index, phase, percent) {
             var row = rows[index]; if (!row) return;
             percent = Math.max(0, Math.min(100, Math.round(percent || 0)));
-            var names = { waiting: '等待处理', transfer: '传到服务器', compressing: '压缩 MP4', storing: '上传 B2', done: '已完成' };
-            row.detail.textContent = (names[phase] || phase) + (phase === 'waiting' ? '' : ' ' + percent + '%');
+            var names = { waiting: '等待处理', transfer: '传到服务器', compressing: '压缩 MP4', storing: '上传 B2', done: '已完成', failed: '处理失败，请重试' };
+            row.detail.textContent = (names[phase] || phase) + (phase === 'waiting' || phase === 'failed' ? '' : ' ' + percent + '%');
             row.bar.value = phase === 'done' ? 100 : phase === 'compressing' ? 60 + percent * .25 : phase === 'storing' ? 85 + percent * .15 : phase === 'waiting' ? 60 : percent * (items[index].kind === 'video' ? .6 : 1);
             row.done = phase === 'done';
             summary.textContent = '媒体处理：已完成 ' + rows.filter(function(item) { return item.done; }).length + ' / ' + rows.length;
