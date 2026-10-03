@@ -48,10 +48,10 @@ Portal 对 `/publish/` 会强制 `loadPetals` 使用 `frontend=publish`（只加
 
 ## 定时备份
 
-ECS 上每天凌晨 3 点自动备份 workspace（停容器 → tar → 启动），保留最近 7 份：
+ECS 上每天北京时间 12:00 自动备份 workspace（停容器 → tar → 启动），保留最近 7 份。与夜间美股采集错开，并在 12:30 的阿里云文件备份前预留 30 分钟：
 
 ```bash
-./scripts/install-siyuan-backup-cron.sh   # 首次安装 cron
+bash ./scripts/install-siyuan-backup-cron.sh   # 安装或更新 cron
 ./scripts/backup-siyuan.sh                # 手动立即备份
 ```
 
