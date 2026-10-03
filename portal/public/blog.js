@@ -289,7 +289,7 @@
             try { uploaded = item.kind === 'video'
                 ? await uploadLargeVideo(id, item, position, progress)
                 : await window.uploadBlogBytes('posts/' + id + '/media?kind=image&position=' + position, item.file, item.file.type,
-                    function(bytes) { progress('transfer', bytes / item.file.size * 100); }); }
+                    function(bytes) { progress(bytes >= item.file.size ? 'imageProcessing' : 'transfer', bytes / item.file.size * 100); }); }
             catch (error) { progress('failed', 0); throw error; }
             progress('done', 100); return uploaded;
         }, 2);
