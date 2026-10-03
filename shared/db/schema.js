@@ -171,6 +171,18 @@ export function initSchema(db) {
   ensureColumn('blog_posts', 'visibility_period', "TEXT NOT NULL DEFAULT 'always'");
   ensureColumn('blog_posts', 'visible_from', 'TEXT');
   ensureColumn('blog_posts', 'visible_until', 'TEXT');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS blog_video_uploads (
+      id TEXT PRIMARY KEY, post_id TEXT NOT NULL, user_id TEXT NOT NULL, mime_type TEXT NOT NULL,
+      byte_size INTEGER NOT NULL, storage_key TEXT NOT NULL, multipart_id TEXT NOT NULL, created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_blog_video_uploads_post ON blog_video_uploads (post_id);
+    CREATE TABLE IF NOT EXISTS blog_video_parts (
+      upload_id TEXT NOT NULL, part_number INTEGER NOT NULL, etag TEXT NOT NULL, byte_size INTEGER NOT NULL,
+      PRIMARY KEY (upload_id, part_number)
+    );
+  `);
+
   ensureColumn('yolo_captures', 'capture_kind', "TEXT NOT NULL DEFAULT 'intraday'");
   ensureColumn('yolo_captures', 'requested_at', 'TEXT');
   ensureColumn('yolo_captures', 'received_at', 'TEXT');

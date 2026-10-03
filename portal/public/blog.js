@@ -21,7 +21,9 @@
 
     async function request(path, options) {
         var response = await fetch('/api/blog/' + path, options || {});
-        var data = await response.json();
+        var data;
+        try { data = await response.json(); }
+        catch { throw new Error('请求失败（HTTP ' + response.status + '），请稍后重试'); }
         if (!response.ok || !data.ok) throw new Error(data.error || '请求失败');
         return data;
     }
@@ -258,13 +260,40 @@
         searchTimer = setTimeout(function() { load(true); }, 300);
     });
 
+    async function uploadLargeVideo(id, item) {
+        var upload;
+        try {
+            document.getElementById('blog-upload-status').textContent = '正在上传视频：0%';
+            upload = await request('posts/' + id + '/video-uploads', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ size: item.file.size, mimeType: item.file.type }) });
+            var count = Math.ceil(item.file.size / upload.chunkBytes);
+            for (var part = 1; part <= count; part++) {
+                var chunk = item.file.slice((part - 1) * upload.chunkBytes, part * upload.chunkBytes);
+                for (var attempt = 0; ; attempt++) {
+                    try {
+                        await request('video-uploads/' + upload.id + '/parts/' + part, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: chunk });
+                        break;
+                    } catch (error) { if (attempt >= 2) throw error; }
+                }
+                var status = document.getElementById('blog-upload-status');
+                status.textContent = '正在上传视频：' + Math.round(part / count * 100) + '%';
+            }
+            return await request('video-uploads/' + upload.id, { method: 'POST' });
+        } catch (error) {
+            if (upload) await request('video-uploads/' + upload.id, { method: 'DELETE' }).catch(function() {});
+            throw error;
+        } finally { document.getElementById('blog-upload-status').textContent = ''; }
+    }
+
     async function uploadAll(id, items) {
         var uploaded = [];
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
             try {
-                uploaded.push(await request('posts/' + id + '/media?kind=' + item.kind,
-                    { method: 'POST', headers: { 'Content-Type': item.file.type }, body: item.file }));
+                uploaded.push(item.kind === 'video' && item.file.size > 16 * 1024 * 1024
+                    ? await uploadLargeVideo(id, item)
+                    : await request('posts/' + id + '/media?kind=' + item.kind,
+                        { method: 'POST', headers: { 'Content-Type': item.file.type }, body: item.file }));
             } catch (error) { error.uploaded = uploaded; throw error; }
         }
         return uploaded;

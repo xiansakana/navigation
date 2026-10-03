@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { startVideoUpload, findVideoUpload, writeVideoPart, finishVideoUpload, forgetVideoUpload, abortVideoUpload } from './blog-video-upload.js';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { normalizeVisibility, visibilityFilter, canViewPost } from './blog-visibility.js';
@@ -232,9 +233,55 @@ export async function handleBlogApi(req, res, url, session, json, config) {
         return json(res, 200, { ok: true, posts: listPosts(db, before, 20, tag, query, session), tags, ...access, userId: session.userId, isGuest: Boolean(session.isGuest) });
     }
     if (req.method === 'POST' && !access.canPost && !access.canManage) return json(res, 403, { ok: false, error: '无权发布博客' });
+    const uploadMatch = url.pathname.match(/^\/api\/blog\/video-uploads\/([a-f0-9]{32})(?:\/parts\/([1-9]\d{0,4}))?$/);
+    if (uploadMatch) {
+        const upload = findVideoUpload(db, uploadMatch[1], session);
+        if (!upload) return json(res, 404, { ok: false, error: '视频上传不存在' });
+        const allowed = canChangePost(db, upload.post_id, session);
+        if (allowed.status !== 200) return json(res, allowed.status, { ok: false, error: allowed.error });
+        try {
+            if (req.method === 'PUT' && uploadMatch[2]) {
+                await writeVideoPart(db, upload, Number(uploadMatch[2]), req);
+                return json(res, 200, { ok: true });
+            }
+            if (req.method === 'DELETE' && !uploadMatch[2]) {
+                await abortVideoUpload(db, upload);
+                return json(res, 200, { ok: true });
+            }
+            if (req.method === 'POST' && !uploadMatch[2]) {
+                const item = await finishVideoUpload(db, upload);
+                const result = addMedia(db, upload.post_id, session, item);
+                if (result.status !== 201) {
+                    await deleteStoredMedia([item]);
+                    forgetVideoUpload(db, upload.id);
+                    return json(res, result.status, { ok: false, error: result.error });
+                }
+                forgetVideoUpload(db, upload.id);
+                return json(res, 201, { ok: true, id: result.id, url: result.url });
+            }
+        } catch (error) { return json(res, 400, { ok: false, error: error.message }); }
+        return json(res, 405, { ok: false, error: '请求方法无效' });
+    }
+    const startMatch = url.pathname.match(/^\/api\/blog\/posts\/([a-f0-9]{32})\/video-uploads$/);
+    if (startMatch && req.method === 'POST') {
+        const allowed = canChangePost(db, startMatch[1], session);
+        if (allowed.status !== 200) return json(res, allowed.status, { ok: false, error: allowed.error });
+        try {
+            const body = await readJson(req);
+            const stale = db.prepare('SELECT * FROM blog_video_uploads WHERE user_id = ? AND created_at < ?').all(session.userId, new Date(Date.now() - 86400000).toISOString());
+            for (const upload of stale) await abortVideoUpload(db, upload);
+            const result = await startVideoUpload(db, startMatch[1], session.userId, body.size, body.mimeType);
+            return json(res, 201, { ok: true, ...result });
+        } catch (error) { return json(res, 400, { ok: false, error: error.message }); }
+    }
     const match = url.pathname.match(/^\/api\/blog\/posts\/([a-f0-9]{32})(?:\/media)?$/);
     const id = match?.[1];
     if (req.method === 'DELETE') {
+        const allowed = canChangePost(db, id, session);
+        if (allowed.status !== 200) return json(res, allowed.status, { ok: false, error: allowed.error });
+        try {
+            for (const upload of db.prepare('SELECT * FROM blog_video_uploads WHERE post_id = ?').all(id)) await abortVideoUpload(db, upload);
+        } catch { return json(res, 503, { ok: false, error: '视频上传清理失败，请重试删除' }); }
         const result = changePost(db, id, session, null, true);
         if (result.removedMedia?.length) {
             try { await deleteStoredMedia(result.removedMedia); }

@@ -164,6 +164,9 @@ export function isPortalApi(pathname, method) {
     if (pathname === '/api/piclist/restart' && method === 'POST') return true;
     if (pathname === '/api/blog/posts' && (method === 'GET' || method === 'POST')) return true;
     if (pathname === '/api/blog/location' && method === 'GET') return true;
+    if (/^\/api\/blog\/posts\/[a-f0-9]{32}\/video-uploads$/.test(pathname) && method === 'POST') return true;
+    if (/^\/api\/blog\/video-uploads\/[a-f0-9]{32}$/.test(pathname) && ['POST', 'DELETE'].includes(method)) return true;
+    if (/^\/api\/blog\/video-uploads\/[a-f0-9]{32}\/parts\/[1-9]\d{0,4}$/.test(pathname) && method === 'PUT') return true;
     if (/^\/api\/blog\/media\/[a-f0-9]{32}$/.test(pathname) && method === 'GET') return true;
     if (/^\/api\/blog\/posts\/[a-f0-9]{32}$/.test(pathname) && (method === 'PUT' || method === 'DELETE')) return true;
     if (/^\/api\/blog\/posts\/[a-f0-9]{32}\/media$/.test(pathname) && method === 'POST') return true;

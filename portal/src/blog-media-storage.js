@@ -19,6 +19,18 @@ function profile() {
     return value;
 }
 
+export function videoStorage(mimeType, existingKey) {
+    const extension = VIDEO_TYPES.get(mimeType);
+    if (!extension) throw new Error('仅支持 MP4、WebM、MOV 视频');
+    const setting = profile();
+    if (!setting.accessKeyID || !setting.secretAccessKey) throw new Error('B2 凭据未配置');
+    const key = existingKey || `blog/video/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}${extension}`;
+    const client = new S3Client({ region: setting.region, endpoint: setting.endpoint,
+        forcePathStyle: setting.pathStyleAccess !== false,
+        credentials: { accessKeyId: setting.accessKeyID, secretAccessKey: setting.secretAccessKey } });
+    return { client, bucket: setting.bucketName, key, mimeType, url: setting.urlPrefix.replace(/\/$/, '') + '/' + key };
+}
+
 function readServerKey() {
     const line = fs.readFileSync(envPath, 'utf8').split(/\r?\n/)
         .find(item => item.trim().startsWith('PICLIST_SERVER_KEY='));
@@ -78,6 +90,8 @@ export async function uploadVideo(req) {
     if (!valid) throw new Error('视频内容与格式不符');
     const { PassThrough } = await import('node:stream');
     const stream = new PassThrough();
+    req.once('aborted', () => stream.destroy(new Error('上传已中断')));
+    req.once('error', error => stream.destroy(error));
     stream.write(first);
     req.pipe(stream);
     req.resume();
