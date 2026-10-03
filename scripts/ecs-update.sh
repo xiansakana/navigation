@@ -113,11 +113,7 @@ if should_run company; then
 fi
 
 if should_run portal; then
-    if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
-        echo "==> 安装博客 MP4 压缩及缩略图组件"
-        apt-get update
-        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ffmpeg
-    fi
+    bash "$ROOT/scripts/ensure-blog-ffmpeg.sh"
     echo "==> portal"
     python3 "$ROOT/scripts/sync-blog-upload-nginx.py"
     if [ -f "$ROOT/scripts/patch-portal-config.py" ]; then
