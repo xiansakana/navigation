@@ -3,6 +3,8 @@
   min-height: 320px;
   pointer-events: none;
 }
+[data-skeleton-active][data-skeleton="cards"] { min-height: 480px; }
+[data-skeleton-active][data-skeleton="form"] { min-height: 500px; }
 [data-skeleton-active] > :not(.nav-skeleton) {
   visibility: hidden !important;
 }
@@ -39,8 +41,10 @@
 @keyframes nav-skeleton-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) { .nav-skeleton-line { animation: none; } }
 @media (max-width: 640px) {
+  [data-skeleton-active][data-skeleton="cards"] { min-height: 540px; }
   .nav-skeleton { padding: 16px; }
   .nav-skeleton-grid { grid-template-columns: 1fr; gap: 12px; }
+  .nav-skeleton-grid + .nav-skeleton-grid { display: none; }
   .nav-skeleton-card { padding: 16px; }
   .nav-skeleton-row { gap: 10px; }
 }
