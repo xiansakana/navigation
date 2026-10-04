@@ -114,7 +114,8 @@ const ui = {
   tradePage: 1,
   tradePageSize: 10,
   tradeSummarySort: { key: '', dir: -1 },
-  tradeFilter: { symbol: '', type: 'all', assetType: 'all', otherCategory: '', start: '', end: '' }
+  tradeFilter: { symbol: '', type: 'all', assetType: 'all', otherCategory: '', start: '', end: '' },
+  tradeFilterOpen: false
 };
 
 async function api(path, opts = {}) {
@@ -845,7 +846,11 @@ function filteredTrades() {
 }
 
 function renderTradeFilters(summary = false) {
-  return `<div class="sm-trade-filters">
+  const activeCount = Object.entries(ui.tradeFilter).filter(([key, value]) => key !== 'type' || !summary)
+    .filter(([, value]) => value && value !== 'all').length;
+  return `<div class="sm-trade-filters ${ui.tradeFilterOpen ? 'is-open' : ''}">
+      <button type="button" class="btn ghost sm-btn-sm sm-trade-filter-toggle" data-filter-toggle aria-expanded="${ui.tradeFilterOpen ? 'true' : 'false'}">筛选条件${activeCount ? `（${activeCount}）` : ''}</button>
+      <div class="sm-trade-filter-fields">
       <input placeholder="代码" data-filter="symbol" value="${escapeHtml(ui.tradeFilter.symbol)}">
       ${summary ? '' : `<select data-filter="type" aria-label="交易方向">
         <option value="all">全部方向</option>
@@ -862,6 +867,7 @@ function renderTradeFilters(summary = false) {
       <span class="sm-muted">至</span>
       <input type="date" data-filter="end" value="${ui.tradeFilter.end}">
       <button type="button" class="btn ghost sm-btn-sm" id="filter-reset">重置</button>
+      </div>
     </div>`;
 }
 
@@ -984,6 +990,7 @@ async function renderTradeModalBody() {
 
 async function openTradeHistoryModal(symbol = '') {
   if (symbol) ui.tradeFilter.symbol = symbol;
+  ui.tradeFilterOpen = false;
   ui.tradePage = 1;
   const layer = openModal('交易记录', '<div id="trade-modal-content">加载中…</div>', '<button type="button" class="btn ghost" data-close>关闭</button>', null, { size: 'trade' });
   let refreshRevision = 0;
@@ -1030,6 +1037,12 @@ function bindTradeModalEvents(layer) {
     el.dataset.tradeBound = '1';
     return true;
   });
+  unbound('[data-filter-toggle]').forEach((button) => button.addEventListener('click', () => {
+    ui.tradeFilterOpen = !ui.tradeFilterOpen;
+    const filters = button.closest('.sm-trade-filters');
+    filters?.classList.toggle('is-open', ui.tradeFilterOpen);
+    button.setAttribute('aria-expanded', ui.tradeFilterOpen ? 'true' : 'false');
+  }));
   unbound('[data-summary-sort]').forEach((button) => button.addEventListener('click', async () => {
     const key = button.dataset.summarySort;
     ui.tradeSummarySort = { key, dir: ui.tradeSummarySort.key === key ? -ui.tradeSummarySort.dir : -1 };

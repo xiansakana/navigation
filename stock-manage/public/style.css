@@ -525,6 +525,17 @@ body:has(.sm-modal-backdrop) {
 .sm-trade-filters input,
 .sm-trade-filters select { width: auto; min-width: 100px; }
 
+.sm-trade-filter-fields {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.sm-trade-filter-toggle {
+    display: none;
+}
+
 .sm-table-wrap--modal {
     overflow-x: auto;
     overflow-y: visible;
@@ -1136,6 +1147,23 @@ select:focus {
     .sm-trade-modal-content { padding: 12px 16px 8px; }
     .sm-modal--trade .sm-modal-foot { padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)); }
     .sm-trade-filters { gap: 6px; }
+    .sm-trade-filters {
+        display: block;
+        margin-bottom: 8px;
+    }
+    .sm-trade-filter-toggle {
+        display: inline-flex;
+        min-height: 36px;
+        align-items: center;
+    }
+    .sm-trade-filter-fields {
+        display: none;
+        gap: 6px;
+        margin-top: 8px;
+    }
+    .sm-trade-filters.is-open .sm-trade-filter-fields {
+        display: flex;
+    }
     .sm-trade-filters input,
     .sm-trade-filters select { min-width: 0; flex: 1 1 120px; }
 
