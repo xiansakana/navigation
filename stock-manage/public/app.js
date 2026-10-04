@@ -111,6 +111,7 @@ const ui = {
   tradeTab: 'list',
   tradePage: 1,
   tradePageSize: 10,
+  tradeSummarySort: { key: '', dir: -1 },
   tradeFilter: { symbol: '', type: 'all', otherCategory: '', start: '', end: '' }
 };
 
@@ -910,6 +911,17 @@ async function renderTradeSummaryTab() {
   if (ui.tradeFilter.start) q.set('start', ui.tradeFilter.start);
   if (ui.tradeFilter.end) q.set('end', ui.tradeFilter.end);
   const rows = await api('/trades/summary?' + q.toString());
+  const summarySort = ui.tradeSummarySort;
+  if (summarySort.key) {
+    rows.sort((a, b) => {
+      const av = a[summarySort.key];
+      const bv = b[summarySort.key];
+      const aMissing = av == null || !Number.isFinite(av);
+      const bMissing = bv == null || !Number.isFinite(bv);
+      if (aMissing !== bMissing) return aMissing ? 1 : -1;
+      return (aMissing ? 0 : (av - bv) * summarySort.dir) || a.symbol.localeCompare(b.symbol);
+    });
+  }
   const totals = rows.reduce((a, r) => ({
     buy: a.buy + r.totalBuyAmount, sell: a.sell + r.totalSellAmount,
     fee: a.fee + r.totalCommission, pnl: a.pnl + r.netPnl
@@ -920,7 +932,8 @@ async function renderTradeSummaryTab() {
       <div class="sm-table-wrap sm-table-wrap--modal">
         <table class="sm-table">
           <thead><tr>
-            <th>代码</th><th>总买入</th><th>总卖出</th><th>总费用</th><th>盈亏金额</th><th>盈亏比例</th>
+            <th>代码</th><th>总买入</th><th>总卖出</th><th>总费用</th>
+            ${[['netPnl', '盈亏金额'], ['netPnlRate', '盈亏比例']].map(([key, label]) => `<th aria-sort="${summarySort.key === key ? (summarySort.dir === 1 ? 'ascending' : 'descending') : 'none'}"><button type="button" class="btn link" data-summary-sort="${key}" title="点击切换升序或降序">${label}${sortMark(summarySort, key)}</button></th>`).join('')}
           </tr></thead>
           <tbody>${rows.length ? rows.map((r) => `
             <tr>
@@ -977,6 +990,12 @@ function openTradeHistoryForRange(start, end) {
 function bindTradeModalEvents(layer) {
   const root = $('#trade-modal-content', layer);
   if (!root) return;
+  root.querySelectorAll('[data-summary-sort]').forEach((button) => button.addEventListener('click', async () => {
+    const key = button.dataset.summarySort;
+    ui.tradeSummarySort = { key, dir: ui.tradeSummarySort.key === key ? -ui.tradeSummarySort.dir : -1 };
+    root.innerHTML = await renderTradeModalBody();
+    bindTradeModalEvents(layer);
+  }));
   root.querySelectorAll('[data-tab]').forEach((btn) => btn.addEventListener('click', async () => {
     ui.tradeTab = btn.dataset.tab;
     root.innerHTML = await renderTradeModalBody();
