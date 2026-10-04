@@ -1138,4 +1138,76 @@ select:focus {
     .sm-trade-filters { gap: 6px; }
     .sm-trade-filters input,
     .sm-trade-filters select { min-width: 0; flex: 1 1 120px; }
+
+    /* Tables with eleven transaction columns are unreadable on a phone.
+       Turn each row into a compact two-column card while preserving every
+       field and keeping the modal's own scroll area. */
+    .sm-modal--trade .sm-table-wrap--modal,
+    .sm-modal--trade .sm-table-wrap--modal .sm-table {
+        width: 100%;
+    }
+    .sm-modal--trade .sm-table-wrap--modal .sm-table {
+        display: block;
+    }
+    .sm-modal--trade .sm-table-wrap--modal .sm-table thead {
+        display: none;
+    }
+    .sm-modal--trade .sm-table-wrap--modal .sm-table tbody {
+        display: grid;
+        gap: 8px;
+    }
+    .sm-modal--trade .sm-table-wrap--modal .sm-table tbody tr {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 4px 10px;
+        padding: 8px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: color-mix(in srgb, var(--card) 94%, transparent);
+    }
+    .sm-modal--trade .sm-table-wrap--modal .sm-table tbody td {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        gap: 2px;
+        padding: 4px 0;
+        border: 0;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    .sm-modal--trade .sm-table-wrap--modal .sm-table tbody td::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.2;
+    }
+    .sm-modal--trade .sm-table-wrap--modal .sm-table tbody td.sm-trade-name {
+        width: auto;
+    }
+    .sm-modal--trade .sm-table-wrap--modal .sm-table tbody td[data-label="操作"] {
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+    }
+    .sm-modal--trade .sm-table-wrap--modal .sm-table tbody td[data-label="操作"]::before {
+        align-self: center;
+        margin-right: 2px;
+    }
+    .sm-modal--trade .sm-table-wrap--modal .sm-table tbody tr.sm-total-row {
+        background: rgba(255, 255, 255, 0.05);
+    }
+    .sm-modal--trade .sm-table-wrap--modal .sm-table tbody tr > td.empty {
+        grid-column: 1 / -1;
+        display: block;
+        text-align: center;
+    }
+    .sm-modal--trade .sm-table-wrap--modal .sm-table tbody tr > td.empty::before {
+        content: none;
+    }
+    .sm-modal--trade .sm-pagination {
+        gap: 6px;
+    }
+    .sm-modal--trade .sm-pagination [data-page]:not([data-page="prev"]):not([data-page="next"]) {
+        display: none;
+    }
 }

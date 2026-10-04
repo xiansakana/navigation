@@ -888,17 +888,17 @@ function renderTradeListTab() {
           </tr></thead>
           <tbody>${pageRows.length ? pageRows.map((t) => `
             <tr>
-              <td>${formatLocalDateTime(t.trade_date)}</td>
-              <td>${typeLabel(t)}</td>
-              <td>${TRADE_ASSET_TYPES[tradeAssetType(t)]}</td>
-              <td>${t.symbol}</td>
-              <td>${t.name || ''}</td>
-              <td>${t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')}</td>
-              <td>${t.type === 'other' ? '—' : t.shares}</td>
-              <td>${t.type === 'other' ? '—' : formatPrice(t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
-              <td>${fmtMoney(t.total_amount, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
-              <td>${fmtCommission(t.commission, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
-              <td>${can('trade', 'edit') ? `
+              <td data-label="时间">${formatLocalDateTime(t.trade_date)}</td>
+              <td data-label="交易方向">${typeLabel(t)}</td>
+              <td data-label="类型">${TRADE_ASSET_TYPES[tradeAssetType(t)]}</td>
+              <td data-label="代码">${escapeHtml(t.symbol)}</td>
+              <td data-label="名称" class="sm-trade-name">${escapeHtml(t.name || '')}</td>
+              <td data-label="币种">${escapeHtml(t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
+              <td data-label="股数">${t.type === 'other' ? '—' : t.shares}</td>
+              <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
+              <td data-label="金额">${fmtMoney(t.total_amount, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
+              <td data-label="手续费">${fmtCommission(t.commission, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
+              <td data-label="操作">${can('trade', 'edit') ? `
                 <button type="button" class="btn link" data-edit="${t.id}">编辑</button>
                 <button type="button" class="btn link" data-del="${t.id}">删除</button>` : '—'}
               </td>
@@ -953,13 +953,13 @@ async function renderTradeSummaryTab() {
           </tr></thead>
           <tbody>${rows.length ? rows.map((r) => `
             <tr>
-              <td>${TRADE_ASSET_TYPES[r.assetType || tradeAssetType(r)]}</td><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name || '—')}</td><td>${fmtUsd(r.totalBuyAmount)}</td><td>${fmtUsd(r.totalSellAmount)}</td>
-              <td>${r.assetType === 'other' ? maskPnlValue(fmtUsdSigned(r.otherAmount)) : '—'}</td><td>${fmtCommission(r.totalCommission)}</td><td class="${cls(r.netPnl)}">${maskPnlValue(fmtUsdSigned(r.netPnl))}</td>
-              <td title="${r.assetType === 'other' ? '其它收支没有买入成本，不计算盈亏比例' : r.pnlRateUnavailableReason === 'missing-buy-cost' ? '卖出数量缺少对应买入记录，无法确定完整成本' : r.pnlRateUnavailableReason === 'no-sold-cost' ? '尚无可计算比例的卖出成本' : '净盈亏 ÷ 按 FIFO 匹配的卖出部分买入成本'}">${r.netPnlRate == null ? '—' : maskPnlValue(fmtPct(r.netPnlRate))}</td>
+              <td data-label="类型">${TRADE_ASSET_TYPES[r.assetType || tradeAssetType(r)]}</td><td data-label="代码">${escapeHtml(r.symbol)}</td><td data-label="名称" class="sm-trade-name">${escapeHtml(r.name || '—')}</td><td data-label="总买入">${fmtUsd(r.totalBuyAmount)}</td><td data-label="总卖出">${fmtUsd(r.totalSellAmount)}</td>
+              <td data-label="其它收支">${r.assetType === 'other' ? maskPnlValue(fmtUsdSigned(r.otherAmount)) : '—'}</td><td data-label="总费用">${fmtCommission(r.totalCommission)}</td><td data-label="盈亏金额" class="${cls(r.netPnl)}">${maskPnlValue(fmtUsdSigned(r.netPnl))}</td>
+              <td data-label="盈亏比例" title="${r.assetType === 'other' ? '其它收支没有买入成本，不计算盈亏比例' : r.pnlRateUnavailableReason === 'missing-buy-cost' ? '卖出数量缺少对应买入记录，无法确定完整成本' : r.pnlRateUnavailableReason === 'no-sold-cost' ? '尚无可计算比例的卖出成本' : '净盈亏 ÷ 按 FIFO 匹配的卖出部分买入成本'}">${r.netPnlRate == null ? '—' : maskPnlValue(fmtPct(r.netPnlRate))}</td>
             </tr>`).join('') : `<tr><td colspan="9" class="empty">暂无数据</td></tr>`}
           <tr class="sm-total-row">
-            <td>合计</td><td>—</td><td>—</td><td>${fmtUsd(totals.buy)}</td><td>${fmtUsd(totals.sell)}</td>
-            <td>${maskPnlValue(fmtUsdSigned(totals.other))}</td><td>${fmtCommission(totals.fee)}</td><td class="${cls(totals.pnl)}">${maskPnlValue(fmtUsdSigned(totals.pnl))}</td><td>—</td>
+            <td data-label="汇总">合计</td><td data-label="代码">—</td><td data-label="名称">—</td><td data-label="总买入">${fmtUsd(totals.buy)}</td><td data-label="总卖出">${fmtUsd(totals.sell)}</td>
+            <td data-label="其它收支">${maskPnlValue(fmtUsdSigned(totals.other))}</td><td data-label="总费用">${fmtCommission(totals.fee)}</td><td data-label="盈亏金额" class="${cls(totals.pnl)}">${maskPnlValue(fmtUsdSigned(totals.pnl))}</td><td data-label="盈亏比例">—</td>
           </tr></tbody>
         </table>
       </div>
