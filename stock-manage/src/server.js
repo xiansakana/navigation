@@ -1,3 +1,4 @@
+import { TRADE_ASSET_TYPES, tradeAssetType } from '../public/js/trade-asset-type.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
 import express from 'express';
 import path from 'node:path';
@@ -328,7 +329,9 @@ app.get('/api/trades/summary', (req, res) => {
     startDate: req.query.start || undefined,
     endDate: req.query.end || undefined,
     usdCnyRate: data.usdCnyRate,
-    quotes: data.quotes
+    quotes: data.quotes,
+    assetType: req.query.assetType,
+    symbol: req.query.symbol
   }));
 });
 
@@ -341,12 +344,15 @@ app.get('/api/trades/export', (req, res) => {
   const end = req.query.end;
   if (sym) trades = trades.filter((t) => t.symbol.toUpperCase().includes(sym));
   if (type && type !== 'all') trades = trades.filter((t) => t.type === type);
+  if (req.query.assetType && req.query.assetType !== 'all') trades = trades.filter((t) => tradeAssetType(t) === req.query.assetType);
+  if (req.query.otherCategory) trades = trades.filter((t) => t.type !== 'other' || (t.other_category || '').includes(req.query.otherCategory));
   if (start) trades = trades.filter((t) => (tradeCalendarDate(t.trade_date) || '') >= start);
   if (end) trades = trades.filter((t) => (tradeCalendarDate(t.trade_date) || '') <= end);
 
   const rows = trades.map((t) => ({
     时间: formatZonedDateTime(t.trade_date),
-    类型: t.type === 'buy' ? '买入' : t.type === 'sell' ? '卖出' : '其它',
+    类型: TRADE_ASSET_TYPES[tradeAssetType(t)],
+    交易方向: t.type === 'buy' ? '买入' : t.type === 'sell' ? '卖出' : '其它',
     其它类别: t.other_category || '',
     代码: t.symbol,
     名称: t.name || '',
@@ -359,7 +365,7 @@ app.get('/api/trades/export', (req, res) => {
   const wb = XLSX.utils.book_new();
   const sheet = XLSX.utils.json_to_sheet(rows);
   rows.forEach((_, index) => {
-    const cell = sheet[XLSX.utils.encode_cell({ r: index + 1, c: 7 })];
+    const cell = sheet[XLSX.utils.encode_cell({ r: index + 1, c: 8 })];
     if (cell?.t === 'n') cell.z = '0.000';
   });
   XLSX.utils.book_append_sheet(wb, sheet, '交易记录');

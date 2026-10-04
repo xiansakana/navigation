@@ -178,7 +178,10 @@ export function parseAppBackupBuffer(buffer) {
   const out = [];
   const now = new Date().toISOString();
   for (let r = 1; r < rows.length; r++) {
-    const cells = rows[r];
+    const cells = ext
+      ? ['时间', hdr.includes('交易方向') ? '交易方向' : '类型', '其它类别', '代码', '名称', '股数', '价格', '金额', '手续费']
+        .map((name) => rows[r][hdr.indexOf(name)])
+      : rows[r];
     if (ext) {
       const typeRaw = normalizeCell(cells[1]);
       const otherCat = normalizeCell(cells[2]);

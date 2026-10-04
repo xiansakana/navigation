@@ -1,3 +1,4 @@
+import { TRADE_ASSET_TYPES, tradeAssetType } from './js/trade-asset-type.js';
 import { formatPrice, priceInputValue } from './js/price-format.js';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=20261004-full-history';
@@ -113,7 +114,7 @@ const ui = {
   tradePage: 1,
   tradePageSize: 10,
   tradeSummarySort: { key: '', dir: -1 },
-  tradeFilter: { symbol: '', type: 'all', otherCategory: '', start: '', end: '' }
+  tradeFilter: { symbol: '', type: 'all', assetType: 'all', otherCategory: '', start: '', end: '' }
 };
 
 async function api(path, opts = {}) {
@@ -834,12 +835,34 @@ function filteredTrades() {
   return [...(state.trades || [])].filter((t) => {
     if (f.symbol && !t.symbol.toUpperCase().includes(f.symbol.toUpperCase())) return false;
     if (f.type !== 'all' && t.type !== f.type) return false;
+    if (f.assetType !== 'all' && tradeAssetType(t) !== f.assetType) return false;
     if (f.otherCategory && t.type === 'other' && !(t.other_category || '').includes(f.otherCategory)) return false;
     const d = localDateKey(t.trade_date);
     if (f.start && d < f.start) return false;
     if (f.end && d > f.end) return false;
     return true;
   }).sort((a, b) => new Date(b.trade_date) - new Date(a.trade_date));
+}
+
+function renderTradeFilters(summary = false) {
+  return `<div class="sm-trade-filters">
+      <input placeholder="代码" data-filter="symbol" value="${escapeHtml(ui.tradeFilter.symbol)}">
+      ${summary ? '' : `<select data-filter="type" aria-label="交易方向">
+        <option value="all">全部方向</option>
+        <option value="buy" ${ui.tradeFilter.type === 'buy' ? 'selected' : ''}>买入</option>
+        <option value="sell" ${ui.tradeFilter.type === 'sell' ? 'selected' : ''}>卖出</option>
+        <option value="other" ${ui.tradeFilter.type === 'other' ? 'selected' : ''}>其它</option>
+      </select>`}
+      <select data-filter="assetType" aria-label="证券类型">
+        <option value="all">全部证券类型</option>
+        ${Object.entries(TRADE_ASSET_TYPES).map(([key, label]) => `<option value="${key}" ${ui.tradeFilter.assetType === key ? 'selected' : ''}>${label}</option>`).join('')}
+      </select>
+      ${summary ? '' : `<input placeholder="其它类别" data-filter="otherCategory" value="${escapeHtml(ui.tradeFilter.otherCategory)}">`}
+      <input type="date" data-filter="start" value="${ui.tradeFilter.start}">
+      <span class="sm-muted">至</span>
+      <input type="date" data-filter="end" value="${ui.tradeFilter.end}">
+      <button type="button" class="btn ghost sm-btn-sm" id="filter-reset">重置</button>
+    </div>`;
 }
 
 function renderTradeListTab() {
@@ -856,30 +879,18 @@ function renderTradeListTab() {
   }
 
   return `
-    <div class="sm-trade-filters">
-      <input placeholder="代码" data-filter="symbol" value="${ui.tradeFilter.symbol}">
-      <select data-filter="type">
-        <option value="all">全部类型</option>
-        <option value="buy" ${ui.tradeFilter.type === 'buy' ? 'selected' : ''}>买入</option>
-        <option value="sell" ${ui.tradeFilter.type === 'sell' ? 'selected' : ''}>卖出</option>
-        <option value="other" ${ui.tradeFilter.type === 'other' ? 'selected' : ''}>其它</option>
-      </select>
-      <input placeholder="其它类别" data-filter="otherCategory" value="${ui.tradeFilter.otherCategory}">
-      <input type="date" data-filter="start" value="${ui.tradeFilter.start}">
-      <span class="sm-muted">至</span>
-      <input type="date" data-filter="end" value="${ui.tradeFilter.end}">
-      <button type="button" class="btn ghost sm-btn-sm" id="filter-reset">重置</button>
-    </div>
+    ${renderTradeFilters()}
     <div class="sm-trade-modal-scroll">
       <div class="sm-table-wrap sm-table-wrap--modal">
         <table class="sm-table">
           <thead><tr>
-            <th>时间</th><th>类型</th><th>代码</th><th>名称</th><th>币种</th><th>股数</th><th>价格</th><th>金额</th><th>手续费</th><th>操作</th>
+            <th>时间</th><th>交易方向</th><th>类型</th><th>代码</th><th>名称</th><th>币种</th><th>股数</th><th>价格</th><th>金额</th><th>手续费</th><th>操作</th>
           </tr></thead>
           <tbody>${pageRows.length ? pageRows.map((t) => `
             <tr>
               <td>${formatLocalDateTime(t.trade_date)}</td>
               <td>${typeLabel(t)}</td>
+              <td>${TRADE_ASSET_TYPES[tradeAssetType(t)]}</td>
               <td>${t.symbol}</td>
               <td>${t.name || ''}</td>
               <td>${t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')}</td>
@@ -891,7 +902,7 @@ function renderTradeListTab() {
                 <button type="button" class="btn link" data-edit="${t.id}">编辑</button>
                 <button type="button" class="btn link" data-del="${t.id}">删除</button>` : '—'}
               </td>
-            </tr>`).join('') : `<tr><td colspan="10" class="empty">暂无记录</td></tr>`}
+            </tr>`).join('') : `<tr><td colspan="11" class="empty">暂无记录</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -911,6 +922,8 @@ async function renderTradeSummaryTab() {
   const q = new URLSearchParams();
   if (ui.tradeFilter.start) q.set('start', ui.tradeFilter.start);
   if (ui.tradeFilter.end) q.set('end', ui.tradeFilter.end);
+  if (ui.tradeFilter.assetType !== 'all') q.set('assetType', ui.tradeFilter.assetType);
+  if (ui.tradeFilter.symbol) q.set('symbol', ui.tradeFilter.symbol);
   const rows = await api('/trades/summary?' + q.toString());
   const summarySort = ui.tradeSummarySort;
   if (summarySort.key) {
@@ -929,21 +942,22 @@ async function renderTradeSummaryTab() {
   }), { buy: 0, sell: 0, fee: 0, pnl: 0 });
 
   return `
+    ${renderTradeFilters(true)}
     <div class="sm-trade-modal-scroll">
       <div class="sm-table-wrap sm-table-wrap--modal">
         <table class="sm-table">
           <thead><tr>
-            <th>代码</th><th>名称</th><th>总买入</th><th>总卖出</th><th>总费用</th>
+            <th>类型</th><th>代码</th><th>名称</th><th>总买入</th><th>总卖出</th><th>总费用</th>
             ${[['netPnl', '盈亏金额'], ['netPnlRate', '盈亏比例']].map(([key, label]) => `<th aria-sort="${summarySort.key === key ? (summarySort.dir === 1 ? 'ascending' : 'descending') : 'none'}"><button type="button" class="btn link" data-summary-sort="${key}" title="点击切换升序或降序">${label}${sortMark(summarySort, key)}</button></th>`).join('')}
           </tr></thead>
           <tbody>${rows.length ? rows.map((r) => `
             <tr>
-              <td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name || '—')}</td><td>${fmtUsd(r.totalBuyAmount)}</td><td>${fmtUsd(r.totalSellAmount)}</td>
+              <td>${TRADE_ASSET_TYPES[r.assetType || tradeAssetType(r)]}</td><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name || '—')}</td><td>${fmtUsd(r.totalBuyAmount)}</td><td>${fmtUsd(r.totalSellAmount)}</td>
               <td>${fmtCommission(r.totalCommission)}</td><td class="${cls(r.netPnl)}">${maskPnlValue(fmtUsdSigned(r.netPnl))}</td>
               <td title="${r.pnlRateUnavailableReason === 'missing-buy-cost' ? '卖出数量缺少对应买入记录，无法确定完整成本' : r.pnlRateUnavailableReason === 'no-sold-cost' ? '尚无可计算比例的卖出成本' : '净盈亏 ÷ 按 FIFO 匹配的卖出部分买入成本'}">${r.netPnlRate == null ? '—' : maskPnlValue(fmtPct(r.netPnlRate))}</td>
-            </tr>`).join('') : `<tr><td colspan="7" class="empty">暂无数据</td></tr>`}
+            </tr>`).join('') : `<tr><td colspan="8" class="empty">暂无数据</td></tr>`}
           <tr class="sm-total-row">
-            <td>合计</td><td>—</td><td>${fmtUsd(totals.buy)}</td><td>${fmtUsd(totals.sell)}</td>
+            <td>合计</td><td>—</td><td>—</td><td>${fmtUsd(totals.buy)}</td><td>${fmtUsd(totals.sell)}</td>
             <td>${fmtCommission(totals.fee)}</td><td class="${cls(totals.pnl)}">${maskPnlValue(fmtUsdSigned(totals.pnl))}</td><td>—</td>
           </tr></tbody>
         </table>
@@ -983,7 +997,7 @@ async function openTradeHistoryModal(symbol = '') {
 }
 
 function openTradeHistoryForRange(start, end) {
-  ui.tradeFilter = { symbol: '', type: 'all', otherCategory: '', start, end };
+  ui.tradeFilter = { symbol: '', type: 'all', assetType: 'all', otherCategory: '', start, end };
   ui.tradePage = 1;
   openTradeHistoryModal();
 }
@@ -1020,7 +1034,7 @@ function bindTradeModalEvents(layer) {
     });
   });
   $('#filter-reset', layer)?.addEventListener('click', () => {
-    ui.tradeFilter = { symbol: '', type: 'all', otherCategory: '', start: '', end: '' };
+    ui.tradeFilter = { symbol: '', type: 'all', assetType: 'all', otherCategory: '', start: '', end: '' };
     ui.tradePage = 1;
     window._refreshTradeModal?.();
   });
@@ -1060,6 +1074,7 @@ function bindTradeModalEvents(layer) {
   $('#modal-export', layer)?.addEventListener('click', () => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(ui.tradeFilter)) {
+      if (ui.tradeTab === 'summary' && ['type', 'otherCategory'].includes(k)) continue;
       if (v && v !== 'all') q.set(k, v);
     }
     window.open('./api/trades/export?' + q.toString(), '_blank');

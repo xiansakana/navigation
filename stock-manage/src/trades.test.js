@@ -39,6 +39,24 @@ test('summary keeps real historical names when later trades only contain the sym
   assert.equal(missing.name, '');
 });
 
+test('summary asset filters preserve historical FIFO cost and combine with symbol filters', () => {
+  const trades = ['AAPL', 'QQQ261009C600', '159509'].flatMap((symbol) => [
+    summaryTrade('buy', 2, 10, '01', { symbol }),
+    summaryTrade('sell', 1, 12, '10', { symbol })
+  ]);
+  const options = { startDate: '2026-09-10', endDate: '2026-09-10' };
+  const all = computeSymbolSummaries(trades, options);
+  for (const assetType of ['stock', 'option', 'ashare']) {
+    const filtered = computeSymbolSummaries(trades, { ...options, assetType });
+    assert.deepEqual(filtered, all.filter((row) => row.assetType === assetType));
+    assert.equal(filtered.length, 1);
+    assert.equal(filtered[0].netPnlRate, 20);
+  }
+  assert.deepEqual(computeSymbolSummaries(trades, { ...options, assetType: 'option', symbol: 'aapl' }), []);
+  assert.equal(computeSymbolSummaries(trades, { ...options, assetType: 'option', symbol: 'qqq' }).length, 1);
+  assert.deepEqual(computeSymbolSummaries(trades, { ...options, assetType: 'other' }), []);
+});
+
 test('summary return matches pre-window buys after pre-window sales', () => {
   const trades = [summaryTrade('buy', 10, 100, '01'), summaryTrade('sell', 5, 110, '02'),
     summaryTrade('sell', 5, 120, '10', { commission: 1 })];

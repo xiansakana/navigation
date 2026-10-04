@@ -1,3 +1,4 @@
+import { tradeAssetType } from '../public/js/trade-asset-type.js';
 import {
   normalizeSymbol,
   inferCurrency,
@@ -256,6 +257,8 @@ export function computeSymbolSummaries(trades, options = {}) {
     if (!d) continue;
     if (startDate && d < startDate) continue;
     if (endDate && d > endDate) continue;
+    if (options.assetType && options.assetType !== 'all' && tradeAssetType(t) !== options.assetType) continue;
+    if (options.symbol && !normalizeSymbol(t.symbol).includes(normalizeSymbol(options.symbol))) continue;
     symbolsInWindow.add(normalizeSymbol(t.symbol));
   }
   if (!symbolsInWindow.size) return [];
@@ -318,6 +321,7 @@ export function computeSymbolSummaries(trades, options = {}) {
     out.push({
       symbol,
       name,
+      assetType: tradeAssetType({ symbol }),
       totalBuyAmount: roundMoney(totalBuy),
       totalSellAmount: roundMoney(totalSell),
       totalCommission: roundMoney(totalCommission),
