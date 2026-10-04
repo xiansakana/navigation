@@ -846,8 +846,7 @@ function filteredTrades() {
 }
 
 function renderTradeFilters(summary = false) {
-  const activeCount = Object.entries(ui.tradeFilter).filter(([key, value]) => key !== 'type' || !summary)
-    .filter(([, value]) => value && value !== 'all').length;
+  const activeCount = activeTradeFilterCount(summary);
   return `<div class="sm-trade-filters ${ui.tradeFilterOpen ? 'is-open' : ''}">
       <button type="button" class="btn ghost sm-btn-sm sm-trade-filter-toggle" data-filter-toggle aria-expanded="${ui.tradeFilterOpen ? 'true' : 'false'}">筛选条件${activeCount ? `（${activeCount}）` : ''}</button>
       <div class="sm-trade-filter-fields">
@@ -869,6 +868,19 @@ function renderTradeFilters(summary = false) {
       <button type="button" class="btn ghost sm-btn-sm" id="filter-reset">重置</button>
       </div>
     </div>`;
+}
+
+function activeTradeFilterCount(summary = ui.tradeTab === 'summary') {
+  return Object.entries(ui.tradeFilter)
+    .filter(([key]) => key !== 'type' || !summary)
+    .filter(([, value]) => value && value !== 'all').length;
+}
+
+function updateTradeFilterToggle(root) {
+  const button = root.querySelector('[data-filter-toggle]');
+  if (!button) return;
+  const count = activeTradeFilterCount();
+  button.textContent = `筛选条件${count ? `（${count}）` : ''}`;
 }
 
 function renderTradeListTab() {
@@ -1055,11 +1067,13 @@ function bindTradeModalEvents(layer) {
   unbound('[data-filter]').forEach((el) => {
     el.addEventListener('change', () => {
       ui.tradeFilter[el.dataset.filter] = el.value;
+      updateTradeFilterToggle(root);
       ui.tradePage = 1;
       window._refreshTradeModal?.();
     });
     el.addEventListener('input', () => {
       ui.tradeFilter[el.dataset.filter] = el.value;
+      updateTradeFilterToggle(root);
       if (el.dataset.filter === 'symbol' || el.dataset.filter === 'otherCategory') {
         clearTimeout(el._debounce);
         el._debounce = setTimeout(() => {
@@ -1071,6 +1085,7 @@ function bindTradeModalEvents(layer) {
   });
   unbound('#filter-reset')[0]?.addEventListener('click', () => {
     ui.tradeFilter = { symbol: '', type: 'all', assetType: 'all', otherCategory: '', start: '', end: '' };
+    updateTradeFilterToggle(root);
     ui.tradePage = 1;
     window._refreshTradeModal?.();
   });
