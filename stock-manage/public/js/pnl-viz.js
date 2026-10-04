@@ -1,5 +1,3 @@
-const DEFAULT_WINDOW_DAYS = 90;
-
 let vizMode = 'line';
 let calGranularity = 'month';
 let calYM = '';
@@ -53,10 +51,8 @@ function rangeFingerprint(series) {
   return `${series.length}\u0001${series[0].date}\u0001${series[series.length - 1].date}`;
 }
 
-function defaultZoom(n) {
-  if (n <= DEFAULT_WINDOW_DAYS) return { start: 0, end: 100 };
-  const start = ((n - DEFAULT_WINDOW_DAYS) / n) * 100;
-  return { start, end: 100 };
+function defaultZoom() {
+  return { start: 0, end: 100 };
 }
 
 function cssVar(name, fallback) {
@@ -340,10 +336,9 @@ function buildChartOption(rangeSlice, totalAssets) {
   const colors = chartColors();
   const dates = rangeSlice.map((p) => p.date);
   const values = rangeSlice.map((p) => p.cumulativeNet);
-  const n = dates.length;
   const zoom = zoomRange && Number.isFinite(zoomRange.start)
     ? zoomRange
-    : defaultZoom(n);
+    : defaultZoom();
   return {
     animation: false,
     backgroundColor: 'transparent',
@@ -625,7 +620,7 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
   const fp = rangeFingerprint(rangeSlice);
   if (fp !== viewFingerprint) {
     viewFingerprint = fp;
-    zoomRange = defaultZoom(rangeSlice.length);
+    zoomRange = defaultZoom();
   }
 
   ensureShell(container);
