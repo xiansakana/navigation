@@ -4,6 +4,16 @@ body.portal-experience .blog-image-preview {
   max-width: 480px; gap: 6px;
 }
 .blog-image-open { position: relative; }
+body.portal-experience .blog-post-images.blog-media-strip {
+  display: flex; flex-wrap: nowrap; max-width: 100%; gap: 10px;
+  overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity;
+  padding-bottom: 8px; -webkit-overflow-scrolling: touch;
+}
+.blog-strip-item { position: relative; flex: 0 0 min(85%, 400px); min-width: 0; height: clamp(220px, 52vw, 320px); scroll-snap-align: start; overflow: hidden; border-radius: 12px; background: var(--input-bg); }
+.blog-strip-item > img, .blog-strip-item > video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.blog-strip-item > .blog-strip-thumbnail { position: absolute; inset: 0; }
+.blog-strip-item > img:not(.blog-strip-thumbnail) { position: relative; }
+.blog-media-strip:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .blog-video-play { position: absolute; inset: 0; display: grid; place-items: center; color: white; font-size: 30px; background: rgba(0,0,0,.18); text-shadow: 0 2px 12px #000; }
 .blog-gallery-more { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.58); color: white; font-size: 30px; font-weight: 700; }
 .blog-media-viewer { padding: 12px; width: min(1100px, 96vw); max-width: 96vw; overflow: hidden; }

@@ -46,6 +46,29 @@
     };
     window.renderBlogGallery = function(root, list) {
         root.replaceChildren(); root.blogGalleryItems = list;
+        if (root.classList.contains('blog-post-images')) {
+            root.classList.add('blog-media-strip');
+            root.tabIndex = 0; root.setAttribute('role', 'region'); root.setAttribute('aria-label', '图片和视频，可左右滑动查看');
+            list.forEach(function(item, position) {
+                var tile = document.createElement('div'); tile.className = 'blog-strip-item';
+                var media = document.createElement(item.kind === 'video' ? 'video' : 'img');
+                if (item.kind === 'video') {
+                    media.controls = true; media.playsInline = true; media.preload = 'none';
+                    if (item.thumbnailUrl) media.poster = item.thumbnailUrl;
+                    media.setAttribute('aria-label', '视频 ' + (position + 1));
+                } else {
+                    media.alt = '博客图片 ' + (position + 1); media.loading = 'lazy'; media.decoding = 'async';
+                    if (item.thumbnailUrl) {
+                        var thumbnail = document.createElement('img'); thumbnail.src = item.thumbnailUrl;
+                        thumbnail.alt = ''; thumbnail.className = 'blog-strip-thumbnail'; thumbnail.loading = 'lazy';
+                        tile.appendChild(thumbnail);
+                        media.addEventListener('load', function() { this.previousElementSibling?.remove(); });
+                    }
+                }
+                media.src = item.url; tile.appendChild(media); root.appendChild(tile);
+            });
+            return;
+        }
         list.slice(0, 9).forEach(function(item, position) {
             var tile = document.createElement('div'); tile.className = 'blog-image-tile';
             var open = document.createElement('button'); open.type = 'button'; open.className = 'blog-image-open';
