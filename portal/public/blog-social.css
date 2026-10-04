@@ -1,6 +1,4 @@
 /* A quiet timeline, with the same controls and permissions in both layouts. */
-body.dashboard-page.portal-experience { --bg: #000; --card: #000; --border: #2f3336; --text: #e7e9ea; --muted: #71767b; --input-bg: #16181c; --accent: #1d9bf0; --accent-hover: #1a8cd8; --elevated: #16181c; background: var(--bg); }
-html[data-theme="light"] body.dashboard-page.portal-experience { --bg: #fff; --card: #fff; --border: #eff3f4; --text: #0f1419; --muted: #536471; --input-bg: #eff3f4; --elevated: #f7f9f9; }
 body.dashboard-page .navbar { box-shadow: none; border-bottom: 1px solid var(--border); background: var(--bg); }
 body.dashboard-page .navbar .btn { border-radius: 24px; }
 body.dashboard-page .page-header { padding-top: 26px; padding-bottom: 16px; }

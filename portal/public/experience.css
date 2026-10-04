@@ -1,50 +1,50 @@
 /* Shared presentation for Portal-owned pages. Loaded after each module's CSS. */
 body.portal-experience {
-  --bg: #101520;
-  --card: #192231;
+  --bg: #000;
+  --card: #000;
   --panel: var(--card);
-  --panel2: #1d293b;
+  --panel2: #16181c;
   --surface: var(--card);
-  --elevated: #131c2a;
-  --border: #2d3b50;
+  --elevated: #16181c;
+  --border: #2f3336;
   --line: var(--border);
-  --text: #edf2fa;
-  --text-soft: #ced8e7;
-  --muted: #a0afc4;
+  --text: #e7e9ea;
+  --text-soft: #b6bbc0;
+  --muted: #71767b;
   --label: var(--text-soft);
-  --accent: #89b5ff;
-  --accent-hover: #a4c6ff;
-  --accent-text: #101b30;
-  --input-bg: #131c2a;
+  --accent: #1d9bf0;
+  --accent-hover: #1a8cd8;
+  --accent-text: #fff;
+  --input-bg: #16181c;
   --input: var(--input-bg);
   --hover-bg: #ffffff08;
   --row-hover: var(--hover-bg);
-  --navbar-bg: #101520ed;
-  --ui-shadow: 0 8px 28px #00000012;
-  --ui-ring: 0 0 0 4px #89b5ff24;
+  --navbar-bg: #000000ed;
+  --ui-shadow: none;
+  --ui-ring: 0 0 0 3px #1d9bf024;
   --navbar-height: 64px;
-  background: radial-gradient(ellipse at 90% 0%, #4378c814, transparent 45%), var(--bg);
+  background: var(--bg);
   font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
 html[data-theme="light"] body.portal-experience {
-  --bg: #f4f7fc;
+  --bg: #fff;
   --card: #ffffff;
-  --panel2: #f8faff;
-  --elevated: #f5f8fd;
-  --border: #dce4ef;
-  --text: #19283e;
-  --text-soft: #3d506b;
-  --muted: #60728a;
-  --accent: #315edb;
-  --accent-hover: #244ac0;
+  --panel2: #f7f9f9;
+  --elevated: #f7f9f9;
+  --border: #eff3f4;
+  --text: #0f1419;
+  --text-soft: #36434c;
+  --muted: #536471;
+  --accent: #1d9bf0;
+  --accent-hover: #1a8cd8;
   --accent-text: #ffffff;
-  --input-bg: #fbfcff;
-  --hover-bg: #315edb08;
+  --input-bg: #eff3f4;
+  --hover-bg: #0f141908;
   --navbar-bg: #ffffffed;
-  --ui-shadow: 0 8px 28px #263e6410;
-  --ui-ring: 0 0 0 4px #315edb18;
+  --ui-shadow: none;
+  --ui-ring: 0 0 0 3px #1d9bf024;
 }
 body.portal-experience :is(button, input, select, textarea) { font: inherit; }
 body.portal-experience :is(a, button, input, select, textarea, [tabindex]):focus-visible {
@@ -53,7 +53,7 @@ body.portal-experience :is(a, button, input, select, textarea, [tabindex]):focus
 }
 body.portal-experience :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]) {
   min-height: 42px;
-  border-radius: 10px;
+  border-radius: 12px;
   border-color: var(--border);
   background-color: var(--input-bg);
   color: var(--text);
@@ -68,25 +68,25 @@ body.portal-experience :is(.btn, .test-btn, .save-btn) {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: 10px;
+  border-radius: 24px;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.3;
   text-decoration: none;
   transition: background .15s, border-color .15s, box-shadow .15s;
 }
-body.portal-experience :is(.btn.primary, .save-btn) { color: var(--accent-text); background: var(--accent); box-shadow: 0 3px 10px #315edb20; }
+body.portal-experience :is(.btn.primary, .save-btn) { color: var(--accent-text); background: var(--accent); box-shadow: none; }
 body.portal-experience :is(.btn.primary, .save-btn):hover { background: var(--accent-hover); }
 body.portal-experience .btn.ghost { background: var(--card); border: 1px solid var(--border); color: var(--text-soft); }
 body.portal-experience .btn.ghost:hover { background: var(--hover-bg); border-color: var(--accent); color: var(--accent); }
 body.portal-experience button:disabled { cursor: not-allowed; opacity: .5; }
-body.portal-experience .navbar { box-shadow: 0 1px 12px #00000008; }
+body.portal-experience .navbar { box-shadow: none; border-bottom: 1px solid var(--border); background: var(--navbar-bg); }
 body.portal-experience .navbar-inner { max-width: 1440px; gap: 14px; }
 body.portal-experience .navbar-actions { gap: 8px; }
 body.portal-experience .navbar-actions .btn { min-height: 36px; padding: 8px 12px !important; }
 body.portal-experience .navbar-logo { width: 36px; height: 36px; border-radius: 12px; }
 body.portal-experience .navbar-brand { letter-spacing: .02em; }
-body.portal-experience :is(.page-header, .toolbox-hero) { padding-top: 44px; padding-bottom: 20px; }
+body.portal-experience :is(.page-header, .toolbox-hero) { padding-top: 28px; padding-bottom: 18px; }
 body.portal-experience :is(.page-header h1, .toolbox-hero h1, .hero h1) { font-size: clamp(28px, 3vw, 38px); letter-spacing: -.035em; }
 body.portal-experience .page-header { position: relative; }
 body.portal-experience .blog-shortcut { position: absolute; right: 24px; top: 42px; margin: 0; }
@@ -95,20 +95,20 @@ body.portal-experience .blog-shortcut { position: absolute; right: 24px; top: 42
 .service-search input { width: 100%; padding: 11px 14px; border: 1px solid var(--border); }
 .service-search-status { color: var(--muted); font-size: 13px; align-self: end; padding-bottom: 12px; }
 body.portal-experience .grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; padding-top: 8px; }
-body.portal-experience .service-card { padding: 22px; border-radius: 18px; box-shadow: var(--ui-shadow); transition: transform .18s, border-color .18s, box-shadow .18s; }
-body.portal-experience .service-card:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 12px 32px #315edb18; }
+body.portal-experience .service-card { padding: 22px; border-radius: 14px; box-shadow: none; transition: background .18s, border-color .18s; }
+body.portal-experience .service-card:hover { background: var(--hover-bg); border-color: var(--accent); }
 body.portal-experience .service-card .icon { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 16px; background: var(--hover-bg); border: 1px solid var(--border); border-radius: 14px; font-size: 25px; }
 body.portal-experience .service-card h2 { font-size: 18px; margin: 0 0 7px; }
 body.portal-experience .service-card p { line-height: 1.7; font-size: 13px; }
 body.portal-experience .service-card .tag { font-size: 11px; background: var(--elevated); color: var(--muted); border-color: var(--border); }
 .service-empty { grid-column: 1 / -1; padding: 36px; text-align: center; color: var(--muted); border: 1px dashed var(--border); border-radius: 16px; }
 body.portal-experience :is(.sm-panel, .card, .quant-card, .quant-toolbar, .quant-stat, .sm-summary-card, .channel-card, .monitor-card, .send-test, .piclist-panel, .piclist-status-card, .toolbox-card) {
-  border-radius: 18px;
+  border-radius: 14px;
   border-color: var(--border);
   background: var(--card);
   box-shadow: var(--ui-shadow);
 }
-body.portal-experience :is(.sm-panel, .card) { padding: 24px; margin-bottom: 22px; }
+body.portal-experience :is(.sm-panel, .card) { padding: 20px; margin-bottom: 18px; }
 body.portal-experience :is(.sm-panel-head, .quant-card-head, .piclist-panel-head) { gap: 16px; flex-wrap: wrap; }
 body.portal-experience :is(.sm-panel-head h2, .card h2, .quant-card-head h2) { font-size: 18px; font-weight: 650; }
 body.portal-experience .sm-summary-card { padding: 20px; }
@@ -118,9 +118,9 @@ body.portal-experience :is(.sm-table, .admin-table, .quant-table) { font-variant
 body.portal-experience :is(.sm-table, .admin-table, .quant-table) th { background: var(--elevated); color: var(--text-soft); font-weight: 600; padding-top: 13px; padding-bottom: 13px; }
 body.portal-experience :is(.sm-table, .admin-table, .quant-table) td { padding-top: 13px; padding-bottom: 13px; }
 body.portal-experience :is(.sm-table, .admin-table, .quant-table) tbody tr:hover { background: var(--hover-bg); }
-body.portal-experience :is(.sm-feature-tabs, .tabs) { gap: 6px; padding: 6px; background: var(--elevated); border: 1px solid var(--border); border-radius: 14px; }
-body.portal-experience :is(.sm-feature-tab, .tab) { border: 0; border-radius: 9px; min-height: 40px; background: transparent; white-space: nowrap; }
-body.portal-experience :is(.sm-feature-tab.active, .tab.active) { color: var(--accent); background: var(--card); box-shadow: 0 2px 6px #0000000d; font-weight: 600; }
+body.portal-experience :is(.sm-feature-tabs, .tabs) { gap: 6px; padding: 0; background: var(--card); border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+body.portal-experience :is(.sm-feature-tab, .tab) { border: 0; border-bottom: 3px solid transparent; border-radius: 0; min-height: 44px; background: transparent; white-space: nowrap; color: var(--muted); }
+body.portal-experience :is(.sm-feature-tab.active, .tab.active) { color: var(--text); border-bottom-color: var(--accent); background: transparent; box-shadow: none; font-weight: 700; }
 body.portal-experience .sm-toggles { padding: 14px 18px; background: var(--elevated); border: 1px solid var(--border); border-radius: 12px; }
 body.portal-experience .sm-toggles .sm-toggle-row { margin: 0; }
 body.portal-experience :is(.quant-sidebar, .admin-sidebar) { border-radius: 16px; background: var(--card); border: 1px solid var(--border); box-shadow: var(--ui-shadow); }
@@ -157,10 +157,10 @@ body.portal-experience .blog-upload-row > span { flex-basis: 100%; line-height: 
 body.portal-experience .blog-post-actions button { min-height: 36px; padding: 5px 10px; border-radius: 8px; background: var(--elevated); }
 body.portal-experience .blog-location-editor { padding: 10px 0; }
 body.portal-experience .blog-location-source { margin-left: 8px; color: var(--muted); font-size: 11px; text-decoration: none; }
-body.portal-experience .login-card { padding: 36px; border-radius: 24px; box-shadow: 0 24px 80px #00000018; width: min(460px, calc(100vw - 32px)); }
+body.portal-experience .login-card { padding: 36px; border-radius: 20px; box-shadow: none; width: min(460px, calc(100vw - 32px)); }
 body.portal-experience .login-card h1 { font-size: 30px; }
 body.portal-experience .login-card .subtitle { font-size: 14px; line-height: 1.8; }
-body.portal-experience :is(.admin-dialog, .sm-modal, .portal-dialog, .error-card) { border-radius: 20px; box-shadow: 0 24px 80px #00000030; }
+body.portal-experience :is(.admin-dialog, .sm-modal, .portal-dialog, .error-card) { border-radius: 20px; box-shadow: 0 8px 40px #00000020; }
 body.portal-experience dialog::backdrop { background: #0810208c; backdrop-filter: blur(4px); }
 /* Option-chain colors follow the selected theme, including sticky headers. */
 body.portal-experience :is(.yolo-chain-scroll, .yolo-expiry-toggle) { background: var(--card); color: var(--text); }

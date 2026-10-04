@@ -350,7 +350,7 @@ function injectPortalShell(html, service) {
     if (service.id === 'notifications') bodyClass += ' notifications-proxied';
     return html
         .replace('<head>', '<head>' + themeBoot + baseTag + portalCss + themeJs + toastJs + dialogJs + layoutJs)
-        .replace(/<\/head>/i, (useExperience ? '<link rel="stylesheet" href="/experience.css?v=20261003">' : '') + '</head>')
+        .replace(/<\/head>/i, (useExperience ? '<link rel="stylesheet" href="/experience.css?v=shared-social-1">' : '') + '</head>')
         .replace(/<body([^>]*)>/, function(match, attrs) {
             var cls = bodyClass;
             if (/class="([^"]*)"/.test(attrs)) {
