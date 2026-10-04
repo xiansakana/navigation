@@ -4,6 +4,8 @@ body.portal-experience .blog-image-preview {
   max-width: 480px; gap: 6px;
 }
 .blog-image-open { position: relative; }
+.blog-feed { grid-template-columns: minmax(0, 1fr); }
+.blog-post { min-width: 0; }
 body.portal-experience .blog-post-images.blog-media-strip {
   display: flex; flex-wrap: nowrap; max-width: 100%; gap: 10px;
   overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity;
