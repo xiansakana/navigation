@@ -25,7 +25,7 @@ button.blog-strip-item { cursor: zoom-in; }
 .blog-media-viewer .blog-lightbox-controls { grid-column: 1; padding: 12px 64px 12px 110px; margin: 0; min-height: 44px; align-items: center; }
 .blog-media-viewer button { background: rgba(40,45,53,.9); color: #fff; border-color: rgba(255,255,255,.2); min-height: 40px; }
 .blog-media-viewer button:disabled { opacity: .3; cursor: default; }
-.blog-viewer-stage { grid-column: 1; min-width: 0; min-height: 0; overflow: auto; display: grid; place-items: center; background: #080b10; touch-action: pan-y pinch-zoom; }
+.blog-viewer-stage { grid-column: 1; min-width: 0; min-height: 0; overflow: auto; display: grid; place-items: center; background: #080b10; background-position: center; background-size: contain; background-repeat: no-repeat; touch-action: pan-y pinch-zoom; }
 .blog-media-viewer .blog-viewer-stage img, .blog-media-viewer .blog-viewer-stage video { max-width: 100%; max-height: calc(100dvh - 100px); margin: 0; object-fit: contain; }
 .blog-media-viewer .blog-viewer-stage img.zoomed { max-width: none; max-height: none; cursor: zoom-out; }
 .blog-viewer-stage img { cursor: zoom-in; }

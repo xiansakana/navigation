@@ -3,6 +3,7 @@ import { enqueueMediaCleanup, kickMediaCleanup } from './blog-media-cleanup.js';
 import { startVideoUpload, findVideoUpload, writeVideoPart, finishVideoUpload, forgetVideoUpload, abortVideoUpload } from './blog-video-upload.js';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { imageCacheHeaders, respondImageNotModified } from './blog-image-cache.js';
 import { normalizeVisibility, visibilityFilter, canViewPost } from './blog-visibility.js';
 import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission, loadRbac, findUserById, resolveUserPermissions } from './rbac.js';
@@ -274,8 +275,10 @@ export async function handleBlogApi(req, res, url, session, json, config) {
         const image = getImage(db, url.pathname.split('/').at(-1), session);
         if (!image) return json(res, 404, { ok: false, error: '图片不存在' });
         const bytes = Buffer.from(image.imageData);
+        const cache = imageCacheHeaders(bytes);
+        if (respondImageNotModified(req, res, cache)) return;
         res.writeHead(200, { 'Content-Type': image.mimeType, 'Content-Length': bytes.length,
-            'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' });
+            ...cache });
         return res.end(bytes);
     }
     if (req.method === 'GET' && url.pathname.startsWith('/api/blog/media/')) {
@@ -285,14 +288,18 @@ export async function handleBlogApi(req, res, url, session, json, config) {
         if (thumbnail) {
             const placeholder = '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320"><rect width="320" height="320" fill="#263247"/><text x="160" y="164" text-anchor="middle" fill="#b6c2d5" font-size="18">缩略图生成中</text></svg>';
             const bytes = media.thumbnailData ? Buffer.from(media.thumbnailData) : Buffer.from(placeholder);
-            res.writeHead(200, { 'Content-Type': media.thumbnailData ? 'image/jpeg' : 'image/svg+xml', 'Content-Length': bytes.length, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
+            const cache = media.thumbnailData ? imageCacheHeaders(bytes) : { 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' };
+            if (media.thumbnailData && respondImageNotModified(req, res, cache)) return;
+            res.writeHead(200, { 'Content-Type': media.thumbnailData ? 'image/jpeg' : 'image/svg+xml', 'Content-Length': bytes.length, ...cache });
             return res.end(bytes);
         }
+        const cache = media.mimeType.startsWith('image/') ? imageCacheHeaders(url.pathname + '\n' + media.url) : { 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' };
+        if (cache.ETag && respondImageNotModified(req, res, cache)) return;
         try {
             const headers = req.headers.range ? { Range: req.headers.range } : {};
             const upstream = await fetch(media.url, { headers, signal: AbortSignal.timeout(120000), redirect: 'error' });
             if (![200, 206, 416].includes(upstream.status)) throw new Error('媒体读取失败');
-            const output = { 'Content-Type': media.mimeType, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' };
+            const output = { 'Content-Type': media.mimeType, ...cache };
             for (const key of ['content-length', 'content-range', 'accept-ranges']) {
                 if (upstream.headers.has(key)) output[key] = upstream.headers.get(key);
             }

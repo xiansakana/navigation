@@ -31,12 +31,13 @@
         stopVideo(); stage.replaceChildren(); stage.scrollTo(0, 0);
         index = Math.max(0, Math.min(position, items.length - 1));
         var item = items[index];
+        stage.style.backgroundImage = item.kind !== 'video' && item.thumbnailUrl ? 'url(' + JSON.stringify(item.thumbnailUrl) + ')' : '';
         status.textContent = (index + 1) + ' / ' + items.length + ' · 正在加载…';
         previous.disabled = index === 0; next.disabled = index === items.length - 1;
         previous.hidden = next.hidden = items.length < 2;
         zoom.hidden = item.kind === 'video'; remove.hidden = !item.removeAction;
         var media = document.createElement(item.kind === 'video' ? 'video' : 'img');
-        var loaded = function() { status.textContent = (index + 1) + ' / ' + items.length; };
+        var loaded = function() { stage.style.backgroundImage = ''; status.textContent = (index + 1) + ' / ' + items.length; };
         if (item.kind === 'video') {
             media.controls = true; media.playsInline = true; media.preload = 'metadata';
             if (item.thumbnailUrl) media.poster = item.thumbnailUrl;
@@ -123,7 +124,7 @@
         if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) show(index + (dx < 0 ? 1 : -1));
     }, { passive: true });
     dialog.addEventListener('click', function(event) { if (event.target === dialog) dialog.close(); });
-    dialog.addEventListener('close', function() { stopVideo(); stage.replaceChildren(); details.replaceChildren(); document.body.style.overflow = previousOverflow || ''; items = []; owner = null; });
+    dialog.addEventListener('close', function() { stopVideo(); stage.replaceChildren(); stage.style.backgroundImage = ''; details.replaceChildren(); document.body.style.overflow = previousOverflow || ''; items = []; owner = null; });
     document.addEventListener('click', function(event) {
         var target = event.target.closest('.blog-post-content img, .blog-rich-editor img');
         if (!target || target.closest('.blog-media-viewer')) return;
