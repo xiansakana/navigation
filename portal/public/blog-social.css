@@ -68,6 +68,7 @@ body.portal-experience .blog-media-viewer { border-radius: 0; box-shadow: none; 
 .blog-media-viewer:has(.blog-viewer-details:not([hidden])) { grid-template-columns: minmax(0, 1fr) 360px; }
 .blog-media-viewer .blog-lightbox-controls { display: contents; }
 .blog-viewer-stage { grid-row: 1; background-color: #000; }
+.blog-viewer-stage:has(img.zoomed) { place-items: start; touch-action: pan-x pan-y pinch-zoom; }
 .blog-viewer-details { grid-row: 1; padding: 22px 18px; background: var(--card); }
 .blog-media-viewer .blog-viewer-stage img, .blog-media-viewer .blog-viewer-stage video { max-height: 100dvh; }
 .blog-media-viewer .blog-lightbox-controls button { display: grid; place-items: center; position: absolute; width: 38px; height: 38px; min-height: 38px; padding: 0; border: 0; border-radius: 50%; background: #0f1419b3; color: #fff; z-index: 5; backdrop-filter: blur(10px); }

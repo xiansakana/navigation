@@ -132,6 +132,7 @@
         });
     };
     dialog.addEventListener('keydown', function(event) {
+        if (event.target.closest('input, textarea, [contenteditable="true"], video')) return;
         if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); show(index + (event.key === 'ArrowLeft' ? -1 : 1)); }
     });
     stage.addEventListener('touchstart', function(event) { var point = event.touches[0]; touch = event.touches.length === 1 ? { x: point.clientX, y: point.clientY } : null; }, { passive: true });
