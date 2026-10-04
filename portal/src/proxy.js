@@ -308,7 +308,7 @@ function injectPortalShell(html, service) {
     if (service.injectBase !== false) {
         baseTag = '<base href="' + service.path.replace(/\/$/, '') + '/">';
     }
-    var portalCss = '<link rel="stylesheet" href="/portal.css?v=0615296">';
+    var portalCss = '<link rel="stylesheet" href="/portal.css?v=modal-scroll-lock-1">';
     if (service.injectBar === false) {
         var isSiyuanAuthPage = service.id === 'notes' && html.includes('id="authCode"');
         var skipShell = service.id === 'napcat' || service.id === 'siyuan-publish'
