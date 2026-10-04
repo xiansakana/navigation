@@ -7,9 +7,10 @@
     <script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
     <link rel="stylesheet" href="/portal.css">
     <link rel="stylesheet" href="/experience.css?v=shared-social-1">
+    <link rel="stylesheet" href="/skeleton/skeleton.css?v=1">
 </head>
 <body class="portal-experience error-page">
-    <div class="error-top-bar">
+    <div class="error-top-bar" data-skeleton="form" data-skeleton-key="page" data-skeleton-static>
         <a href="/" class="btn ghost">返回首页</a>
         <button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题">
             <span class="navbar-theme-icon" aria-hidden="true">☀️</span>
@@ -27,6 +28,7 @@
             <a href="/login.html" class="btn ghost{{LOGIN_CLASS}}">登录其他账号</a>
         </div>
     </main>
+    <script src="/skeleton/skeleton.js?v=1"></script>
     <script src="/theme.js"></script>
 </body>
 </html>

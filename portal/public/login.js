@@ -49,5 +49,5 @@ document.getElementById('login-form').addEventListener('submit', async function(
         });
     }).catch(function() {
         // OAuth 未配置时忽略
-    });
+    }).finally(function() { window.navigationSkeleton?.finish(); });
 })();

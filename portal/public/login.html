@@ -7,6 +7,7 @@
     <script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
     <link rel="stylesheet" href="/portal.css">
     <link rel="stylesheet" href="/experience.css?v=shared-social-1">
+    <link rel="stylesheet" href="/skeleton/skeleton.css?v=1">
 </head>
 <body class="portal-experience login-page">
     <div class="login-top-bar">
@@ -16,7 +17,7 @@
             <span class="label navbar-theme-label">日间</span>
         </button>
     </div>
-    <div class="login-card">
+    <div class="login-card" data-skeleton="form" data-skeleton-key="page">
         <h1>服务导航</h1>
         <p class="subtitle">密码登录，或使用 GitHub / Google 注册（默认仍为游客权限，管理员可在后台分配角色）</p>
         <div class="oauth-buttons" id="oauth-buttons" hidden></div>
@@ -30,9 +31,10 @@
             <p class="error" id="error" hidden></p>
         </form>
     </div>
+    <script src="/skeleton/skeleton.js?v=1"></script>
     <script src="/theme.js"></script>
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
-    <script src="/login.js"></script>
+    <script src="/login.js?v=skeleton-20261004"></script>
 </body>
 </html>

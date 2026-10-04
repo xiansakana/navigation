@@ -1,3 +1,4 @@
+import { serveUiAsset } from '../../shared/ui-assets.js';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -104,6 +105,7 @@ async function handleApi(req, res) {
 }
 
 var server = http.createServer(async function(req, res) {
+    if (serveUiAsset(req, res)) return;
     var url = new URL(req.url, 'http://127.0.0.1');
     if (!authorize(req, res, url)) return denyAccess(res);
     if (url.pathname.startsWith('/api/')) return handleApi(req, res);

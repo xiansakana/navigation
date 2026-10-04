@@ -1,3 +1,4 @@
+import { serveUiAsset } from '../../shared/ui-assets.js';
 /**
  * 通知管理服务。
  *
@@ -127,6 +128,7 @@ export function createNotificationServer(initialConfig, options) {
         }
     }) : null;
     var server = http.createServer(async function(req, res) {
+    if (serveUiAsset(req, res)) return;
         var url = new URL(req.url, 'http://127.0.0.1');
         try {
             if (req.method === 'GET' && url.pathname === '/health') {

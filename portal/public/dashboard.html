@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="/experience.css?v=shared-social-1">
     <link rel="stylesheet" href="/blog-media.css?v=blog-full-width-1">
     <link rel="stylesheet" href="/blog-social.css?v=shared-social-1">
+    <link rel="stylesheet" href="/skeleton/skeleton.css?v=1">
 </head>
 <body class="portal-experience has-navbar portal-layout-enabled dashboard-page">
     <header class="navbar">
@@ -38,7 +39,7 @@
             <span class="service-search-status" id="service-search-status" role="status">正在加载服务…</span>
         </div>
     </div>
-    <main class="grid" id="service-grid"></main>
+    <main class="grid" id="service-grid" data-skeleton="cards" data-skeleton-key="page"></main>
     <section class="blog-section hidden" id="blog-section" aria-label="博客动态">
       <div class="blog-layout">
        <div class="blog-timeline">
@@ -64,7 +65,7 @@
             <p class="blog-upload-hint">视频将自动压缩为 MP4，发布和编辑均显示上传与压缩进度。</p>
             <div class="blog-composer-footer"><span id="blog-upload-status" role="status"></span><span id="blog-count">0 / 10000</span><button class="btn primary" type="submit" id="blog-submit">发布动态</button></div>
         </form>
-        <div class="blog-feed" id="blog-feed" aria-live="polite"></div>
+        <div class="blog-feed" id="blog-feed" aria-live="polite" data-skeleton="cards" data-skeleton-key="blog" data-skeleton-ready></div>
         <div class="blog-loading hidden" id="blog-loading" role="status">
             <span class="blog-spinner" aria-hidden="true"></span><span>正在加载博客…</span>
         </div>
@@ -79,11 +80,12 @@
        </aside>
       </div>
     </section>
+    <script src="/skeleton/skeleton.js?v=1"></script>
     <script src="/theme.js"></script>
     <script src="/layout.js?v=0615296"></script>
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
-    <script src="/dashboard.js?v=ui-20261003"></script>
+    <script src="/dashboard.js?v=skeleton-20261004"></script>
     <script src="/vendor/marked.js"></script>
     <script src="/vendor/purify.js"></script>
     <script src="/blog-rich-editor.js?v=blog-unified-1"></script>
@@ -93,6 +95,6 @@
     <script src="/blog-editor.js?v=blog-unified-1"></script>
     <script src="/blog-visibility.js?v=blog-manager-visibility-1"></script>
     <script src="/blog-upload.js?v=blog-performance-1"></script>
-    <script src="/blog.js?v=blog-social-1"></script>
+    <script src="/blog.js?v=skeleton-20261004"></script>
 </body>
 </html>

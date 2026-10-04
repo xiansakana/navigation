@@ -1260,4 +1260,4 @@ async function init() {
   }
 }
 
-init();
+init().catch((error) => { toastErr(`加载失败: ${error.message}`); }).finally(() => window.navigationSkeleton?.finish());

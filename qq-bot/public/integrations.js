@@ -114,4 +114,4 @@ byId('business-grid').addEventListener('click', async function(event) {
     finally { button.disabled = false; }
 });
 
-loadAccess().then(bizLoad).catch(function(err) { byId('business-grid').textContent = '权限读取失败：' + err.message; });
+loadAccess().then(bizLoad).catch(function(err) { byId('business-grid').textContent = '权限读取失败：' + err.message; }).finally(function() { window.navigationSkeleton?.finish('business'); });

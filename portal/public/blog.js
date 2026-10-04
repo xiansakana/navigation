@@ -184,6 +184,7 @@
         if (state.loading) { if (reset) state.refreshPending = true; return; }
         var query = state.search, tag = state.tag;
         state.loading = true;
+        if (!state.posts.size) window.navigationSkeleton?.start('blog');
         more.disabled = true;
         loading.classList.remove('hidden');
         feed.setAttribute('aria-busy', 'true');
@@ -223,6 +224,7 @@
             searchStatus.textContent = '加载失败，请重新输入关键词重试';
             if (error.message !== '无权查看博客') window.portalToast?.error('博客加载失败：' + error.message);
         } finally {
+            window.navigationSkeleton?.finish('blog');
             state.loading = false;
             more.disabled = false;
             loading.classList.add('hidden');

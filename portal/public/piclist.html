@@ -7,6 +7,7 @@
     <script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
     <link rel="stylesheet" href="/portal.css?v=0615296">
     <link rel="stylesheet" href="/experience.css?v=shared-social-1">
+    <link rel="stylesheet" href="/skeleton/skeleton.css?v=1">
 </head>
 <body class="portal-experience has-navbar piclist-page portal-layout-enabled">
     <header class="navbar">
@@ -25,7 +26,7 @@
         </div>
     </header>
 
-    <main class="piclist-shell" data-layout-container>
+    <main class="piclist-shell" data-layout-container data-skeleton="dashboard" data-skeleton-key="page">
         <section class="piclist-hero">
             <div>
                 <span class="piclist-eyebrow">IMAGE HOSTING</span>
@@ -74,11 +75,12 @@
             </form>
         </section>
     </main>
+    <script src="/skeleton/skeleton.js?v=1"></script>
 
     <script src="/theme.js"></script>
     <script src="/layout.js?v=0615296"></script>
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
-    <script src="/piclist-admin.js"></script>
+    <script src="/piclist-admin.js?v=skeleton-20261004"></script>
 </body>
 </html>

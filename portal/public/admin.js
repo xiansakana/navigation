@@ -589,4 +589,4 @@ api('me').then(function(data) {
     return reload();
 }).catch(function(err) {
     window.portalToast?.error(err.message);
-});
+}).finally(function() { window.navigationSkeleton?.finish(); });

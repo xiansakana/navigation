@@ -258,4 +258,4 @@ document.querySelectorAll('[data-test]').forEach(function(button) {
 Promise.all([api('api/config'), loadAccess()]).then(function(results) {
     fill(results[0]);
     return loadMonitor();
-}).catch(function(err) { toast('加载失败：' + err.message, true); });
+}).catch(function(err) { toast('加载失败：' + err.message, true); }).finally(function() { window.navigationSkeleton?.finish(); });

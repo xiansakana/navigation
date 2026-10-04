@@ -283,4 +283,4 @@ WUI.handleTargetActions($('co-watchers'), function() { return companyWatchers; }
 loadState().then(connectEvents).catch(function(err) {
     $('global-status').textContent = err.message;
     WUI.toastErr(err.message);
-});
+}).finally(function() { window.navigationSkeleton?.finish(); });

@@ -1,3 +1,4 @@
+import { serveUiAsset } from '../../shared/ui-assets.js';
 import express from 'express';
 import path from 'node:path';
 import XLSX from 'xlsx';
@@ -51,6 +52,7 @@ const yoloStore = createYoloStore(config);
 const yoloBacktestJobs = createYoloBacktestJobs(yoloStore);
 const yoloCollector = createYoloCollector({ store: yoloStore, quotes });
 const app = express();
+app.use((req, res, next) => { if (!serveUiAsset(req, res)) next(); });
 
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 

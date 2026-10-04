@@ -79,4 +79,4 @@ api('me').then(function(data) {
     document.getElementById('welcome').textContent = '加载失败';
     document.getElementById('service-search-status').textContent = '服务加载失败，请刷新重试';
     window.portalToast?.error(err.message);
-});
+}).finally(function() { window.navigationSkeleton?.finish(); });

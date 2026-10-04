@@ -129,5 +129,5 @@
   });
 
   refreshButton.addEventListener('click', load);
-  load();
+  load().finally(function() { window.navigationSkeleton?.finish(); });
 })();

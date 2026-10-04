@@ -1256,4 +1256,7 @@ async function init() {
   connectSse();
 }
 
-init();
+init().catch((error) => {
+  $('#error-line').hidden = false;
+  $('#error-line').textContent = error.message;
+}).finally(() => window.navigationSkeleton?.finish());

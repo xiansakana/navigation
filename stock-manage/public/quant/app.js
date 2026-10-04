@@ -610,4 +610,4 @@ async function init() {
   await Promise.all(tasks);
 }
 
-init().catch((error) => { $('#signal-body').innerHTML = `<tr><td colspan="9" class="quant-empty quant-error">${escapeHtml(error.message)}</td></tr>`; });
+init().catch((error) => { $('#signal-body').innerHTML = `<tr><td colspan="9" class="quant-empty quant-error">${escapeHtml(error.message)}</td></tr>`; }).finally(() => window.navigationSkeleton?.finish());

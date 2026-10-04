@@ -6,9 +6,10 @@
     <title>通知管理</title>
     <link rel="stylesheet" href="style.css?v=layout3">
     <link rel="stylesheet" href="integrations.css?v=tibo-targets1">
+    <link rel="stylesheet" href="/skeleton/skeleton.css?v=1">
 </head>
 <body>
-    <main class="notify-app">
+    <main class="notify-app" data-skeleton="dashboard" data-skeleton-key="page">
         <section class="hero">
             <div>
                 <span class="eyebrow">NOTIFICATION HUB</span>
@@ -56,7 +57,7 @@
 
         <section class="business-section" aria-labelledby="business-heading">
             <div class="business-heading"><div><span class="eyebrow">BUSINESS NOTIFICATIONS</span><h2 id="business-heading">业务提醒</h2><p>每项业务可分别启用 QQ / Slack；Torn 还能按监听账号控制。Slack 使用上方渠道配置。</p></div><button id="business-refresh" class="test-btn compact" type="button">刷新状态</button></div>
-            <div id="business-grid" class="business-grid" aria-live="polite"><div class="business-loading"><span class="business-spinner"></span>正在读取业务提醒…</div></div>
+            <div id="business-grid" class="business-grid" data-skeleton="cards" data-skeleton-key="business" aria-live="polite"><div class="business-loading"><span class="business-spinner"></span>正在读取业务提醒…</div></div>
         </section>
 
         <section class="channel-grid">
@@ -119,8 +120,9 @@
         </div>
     </main>
     <div class="toast" id="toast" hidden></div>
+    <script src="/skeleton/skeleton.js?v=1"></script>
     <script src="qq-targets.js?v=tibo-targets1"></script>
-    <script src="app.js?v=tibo-targets1"></script>
-    <script src="integrations.js?v=tibo-targets1"></script>
+    <script src="app.js?v=skeleton-20261004"></script>
+    <script src="integrations.js?v=skeleton-20261004"></script>
 </body>
 </html>

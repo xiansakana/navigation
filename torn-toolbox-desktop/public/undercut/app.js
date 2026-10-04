@@ -461,4 +461,4 @@ WUI.bindTargetTypeChange($('uc-watchers'));
 loadState().then(connectEvents).catch(function(err) {
     $('global-status').textContent = err.message;
     WUI.toastErr(err.message);
-});
+}).finally(function() { window.navigationSkeleton?.finish(); });

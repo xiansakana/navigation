@@ -480,4 +480,4 @@ async function init() {
   state.timer = setInterval(() => loadStatus(true), 30000);
 }
 
-init().catch((error) => { $('#collector-message').textContent = error.message; $('#collector-message').className = 'yolo-message error'; });
+init().catch((error) => { $('#collector-message').textContent = error.message; $('#collector-message').className = 'yolo-message error'; }).finally(() => window.navigationSkeleton?.finish());

@@ -1,3 +1,4 @@
+import { serveUiAsset } from '../../shared/ui-assets.js';
 import http from 'node:http';
 import { getDatabase } from '../../shared/db/index.js';
 import { startMediaCleanup } from './blog-media-cleanup.js';
@@ -495,6 +496,7 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
 }
 
 var server = http.createServer(async function(req, res) {
+    if (serveUiAsset(req, res)) return;
     var url = new URL(req.url, 'http://127.0.0.1');
     var route = resolveRoute(config.services, url.pathname, req.method, url.search, proxyRouteOpts(req));
 

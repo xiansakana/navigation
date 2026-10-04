@@ -647,4 +647,4 @@ loadState().then(function() {
     connectEvents();
 }).catch(function(err) {
     $('global-status').textContent = err.message;
-});
+}).finally(function() { window.navigationSkeleton?.finish(); });

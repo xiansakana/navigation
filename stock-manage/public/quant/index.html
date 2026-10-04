@@ -6,9 +6,10 @@
   <title>量化分析 · 股票管理</title>
   <link rel="stylesheet" href="../style.css">
   <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="/skeleton/skeleton.css?v=1">
 </head>
 <body>
-  <main class="sm-app quant-app">
+  <main class="sm-app quant-app" data-skeleton="dashboard" data-skeleton-key="page">
     <nav class="sm-feature-tabs" aria-label="股票功能">
       <a class="sm-feature-tab" href="/stock-manage/">持仓</a>
       <a class="sm-feature-tab" href="/stock-manage/dip/">抄底监控</a>
@@ -85,7 +86,8 @@
     </div>
     <div id="modal-root"></div>
   </main>
+  <script src="/skeleton/skeleton.js?v=1"></script>
   <script src="../vendor/echarts.min.js"></script>
-  <script type="module" src="./app.js?v=20261003-price3"></script>
+  <script type="module" src="./app.js?v=skeleton-20261004"></script>
 </body>
 </html>
