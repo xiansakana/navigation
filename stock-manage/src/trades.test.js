@@ -6,6 +6,7 @@ import {
   undoCashDelta,
   enrichHoldings,
   deriveHoldings,
+  computeSymbolSummaries,
   cashUsdEquivalent,
   roundMoney
 } from './trades.js';
@@ -21,6 +22,55 @@ test('normalizeTrade infers CNY for A-share', () => {
   assert.equal(t.symbol, '159509');
   assert.equal(t.currency, 'CNY');
   assert.equal(t.total_amount, 123);
+});
+
+function summaryTrade(type, shares, price, day, extras = {}) {
+  return normalizeTrade({ type, symbol: 'AAPL', shares, price, commission: 0,
+    trade_date: `2026-09-${day}T12:00:00Z`, ...extras });
+}
+
+test('summary return matches pre-window buys after pre-window sales', () => {
+  const trades = [summaryTrade('buy', 10, 100, '01'), summaryTrade('sell', 5, 110, '02'),
+    summaryTrade('sell', 5, 120, '10', { commission: 1 })];
+  const [row] = computeSymbolSummaries(trades, { startDate: '2026-09-10', endDate: '2026-09-10' });
+  assert.equal(row.totalBuyAmount, 0);
+  assert.equal(row.netPnl, 99);
+  assert.equal(row.soldCostAmount, 500);
+  assert.equal(row.netPnlRate, 19.8);
+  assert.equal(row.pnlRateUnavailableReason, null);
+});
+
+test('summary denominator excludes unsold purchases and uses FIFO across option lots', () => {
+  const [equity] = computeSymbolSummaries([summaryTrade('buy', 10, 100, '01'), summaryTrade('sell', 4, 120, '10')]);
+  assert.equal(equity.soldCostAmount, 400);
+  assert.equal(equity.netPnlRate, 20);
+  const symbol = 'QQQ261009C600';
+  const [option] = computeSymbolSummaries([summaryTrade('buy', 2, 1, '01', { symbol }),
+    summaryTrade('buy', 2, 2, '02', { symbol }), summaryTrade('sell', 3, 2, '10', { symbol })]);
+  assert.equal(option.soldCostAmount, 400);
+  assert.equal(option.netPnl, 200);
+  assert.equal(option.netPnlRate, 50);
+});
+
+test('summary return uses matching USD-converted cost for CNY trades', () => {
+  const symbol = '159509';
+  const [row] = computeSymbolSummaries([summaryTrade('buy', 1000, 1.234, '01', { symbol }),
+    summaryTrade('sell', 1000, 1.5, '10', { symbol, commission: 7 })], { usdCnyRate: 7 });
+  assert.equal(row.soldCostAmount, roundMoney(1234 / 7));
+  assert.equal(row.netPnl, 37);
+  assert.equal(row.netPnlRate, 20.99);
+});
+
+test('missing purchase costs and unsold holdings leave the return unavailable', () => {
+  for (const trades of [[summaryTrade('sell', 1, 120, '10')],
+    [summaryTrade('buy', 1, 100, '01'), summaryTrade('sell', 2, 120, '10')]]) {
+    const [row] = computeSymbolSummaries(trades);
+    assert.equal(row.netPnlRate, null);
+    assert.equal(row.pnlRateUnavailableReason, 'missing-buy-cost');
+  }
+  const [unsold] = computeSymbolSummaries([summaryTrade('buy', 1, 100, '01')]);
+  assert.equal(unsold.netPnlRate, null);
+  assert.equal(unsold.pnlRateUnavailableReason, 'no-sold-cost');
 });
 
 test('applyCashDelta deducts CNY pocket for A-share buys', () => {

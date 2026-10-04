@@ -121,17 +121,19 @@ function dateKey(t) {
   return tradeCalendarDate(t.trade_date);
 }
 
-function applyFifoSellToQueue(buyQueue, sellShares, sellPrice, symbol) {
+function applyFifoSellToQueue(buyQueue, sellShares, sellPrice, symbol, matched = null) {
   const mult = optionMult(symbol);
   let gain = 0;
   let rem = sellShares;
   while (rem > 0 && buyQueue.length) {
     const u = Math.min(rem, buyQueue[0].shares);
+    if (matched) matched.cost += u * buyQueue[0].price * mult;
     gain += u * (sellPrice - buyQueue[0].price) * mult;
     buyQueue[0].shares -= u;
     rem -= u;
     if (buyQueue[0].shares <= 0) buyQueue.shift();
   }
+  if (matched) matched.unmatchedShares += Math.max(0, rem);
   return gain;
 }
 
@@ -291,6 +293,8 @@ export function computeSymbolSummaries(trades, options = {}) {
     let totalSell = 0;
     let totalCommission = 0;
     let fifoGross = 0;
+    let soldCost = 0;
+    let unmatchedSellShares = 0;
     for (const t of win) {
       const cur = tradeCurrency(t);
       totalCommission += toUsd(t.commission || 0, cur, rate);
@@ -299,7 +303,10 @@ export function computeSymbolSummaries(trades, options = {}) {
         queue.push({ shares: t.shares, price: t.price });
       } else {
         totalSell += toUsd(t.total_amount, cur, rate);
-        fifoGross += toUsd(applyFifoSellToQueue(queue, t.shares, t.price, symbol), cur, rate);
+        const matched = { cost: 0, unmatchedShares: 0 };
+        fifoGross += toUsd(applyFifoSellToQueue(queue, t.shares, t.price, symbol, matched), cur, rate);
+        soldCost += toUsd(matched.cost, cur, rate);
+        unmatchedSellShares += matched.unmatchedShares;
       }
     }
     const netPnl = fifoGross - totalCommission;
@@ -310,7 +317,11 @@ export function computeSymbolSummaries(trades, options = {}) {
       totalCommission: roundMoney(totalCommission),
       fifoRealizedGross: roundMoney(fifoGross),
       netPnl: roundMoney(netPnl),
-      netPnlRate: totalBuy ? roundMoney((netPnl / totalBuy) * 10000) / 100 : null
+      soldCostAmount: roundMoney(soldCost),
+      netPnlRate: soldCost > 0 && unmatchedSellShares <= 1e-8
+        ? roundMoney((netPnl / soldCost) * 100) : null,
+      pnlRateUnavailableReason: unmatchedSellShares > 1e-8
+        ? 'missing-buy-cost' : soldCost <= 0 ? 'no-sold-cost' : null
     });
   }
   out.sort((a, b) => a.symbol.localeCompare(b.symbol));

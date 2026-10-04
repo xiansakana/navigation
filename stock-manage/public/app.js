@@ -939,7 +939,7 @@ async function renderTradeSummaryTab() {
             <tr>
               <td>${r.symbol}</td><td>${fmtUsd(r.totalBuyAmount)}</td><td>${fmtUsd(r.totalSellAmount)}</td>
               <td>${fmtCommission(r.totalCommission)}</td><td class="${cls(r.netPnl)}">${maskPnlValue(fmtUsdSigned(r.netPnl))}</td>
-              <td>${r.netPnlRate == null ? '—' : maskPnlValue(fmtPct(r.netPnlRate))}</td>
+              <td title="${r.pnlRateUnavailableReason === 'missing-buy-cost' ? '卖出数量缺少对应买入记录，无法确定完整成本' : r.pnlRateUnavailableReason === 'no-sold-cost' ? '尚无可计算比例的卖出成本' : '净盈亏 ÷ 按 FIFO 匹配的卖出部分买入成本'}">${r.netPnlRate == null ? '—' : maskPnlValue(fmtPct(r.netPnlRate))}</td>
             </tr>`).join('') : `<tr><td colspan="6" class="empty">暂无数据</td></tr>`}
           <tr class="sm-total-row">
             <td>合计</td><td>${fmtUsd(totals.buy)}</td><td>${fmtUsd(totals.sell)}</td>
@@ -947,7 +947,7 @@ async function renderTradeSummaryTab() {
           </tr></tbody>
         </table>
       </div>
-      <p class="hint">不含「其它」类交易；盈亏按 FIFO 计算。</p>
+      <p class="hint">不含「其它」类交易；盈亏按 FIFO 计算。盈亏比例 = 净盈亏 ÷ 卖出部分的买入成本（可匹配区间前买入）；净盈亏扣除查询区间内手续费。无卖出成本或缺少买入记录时显示「—」。</p>
     </div>`;
 }
 
