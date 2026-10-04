@@ -4,14 +4,17 @@
     var controls = document.createElement('div'); controls.className = 'blog-lightbox-controls';
     var status = document.createElement('span'); status.setAttribute('role', 'status');
     var stage = document.createElement('div'); stage.className = 'blog-viewer-stage';
-    var items = [], index = 0, owner, touch;
+    var details = document.createElement('aside'); details.className = 'blog-viewer-details'; details.setAttribute('aria-label', '动态详情');
+    var items = [], index = 0, owner, touch, previousOverflow;
     function button(label, action) {
         var control = document.createElement('button'); control.type = 'button'; control.textContent = label;
         control.addEventListener('click', action); controls.appendChild(control); return control;
     }
     var previous = button('上一项', function() { show(index - 1); });
+    previous.className = 'blog-viewer-previous';
     controls.appendChild(status);
     var next = button('下一项', function() { show(index + 1); });
+    next.className = 'blog-viewer-next';
     var zoom = button('放大 / 适应', function() { stage.querySelector('img')?.classList.toggle('zoomed'); });
     var remove = button('移除此媒体', function() {
         var action = items[index].removeAction;
@@ -20,16 +23,17 @@
         Object.keys(action).forEach(function(key) { trigger.dataset[key] = action[key]; });
         owner.appendChild(trigger); trigger.click(); trigger.remove(); dialog.close();
     });
-    button('关闭预览', function() { dialog.close(); });
-    dialog.append(controls, stage); document.body.appendChild(dialog);
+    var close = button('关闭预览', function() { dialog.close(); }); close.className = 'blog-viewer-close';
+    dialog.append(controls, stage, details); document.body.appendChild(dialog);
     function stopVideo() { stage.querySelectorAll('video').forEach(function(video) { video.pause(); video.removeAttribute('src'); video.load(); }); }
     function show(position) {
         if (!items.length) return;
         stopVideo(); stage.replaceChildren(); stage.scrollTo(0, 0);
-        index = (position + items.length) % items.length;
+        index = Math.max(0, Math.min(position, items.length - 1));
         var item = items[index];
         status.textContent = (index + 1) + ' / ' + items.length + ' · 正在加载…';
-        previous.disabled = next.disabled = items.length < 2;
+        previous.disabled = index === 0; next.disabled = index === items.length - 1;
+        previous.hidden = next.hidden = items.length < 2;
         zoom.hidden = item.kind === 'video'; remove.hidden = !item.removeAction;
         var media = document.createElement(item.kind === 'video' ? 'video' : 'img');
         var loaded = function() { status.textContent = (index + 1) + ' / ' + items.length; };
@@ -37,12 +41,27 @@
             media.controls = true; media.playsInline = true; media.preload = 'metadata';
             if (item.thumbnailUrl) media.poster = item.thumbnailUrl;
             media.addEventListener('loadedmetadata', loaded);
-        } else { media.alt = '预览图片'; media.addEventListener('load', loaded); }
+        } else { media.alt = '预览图片'; media.addEventListener('load', loaded); media.addEventListener('dblclick', function() { media.classList.toggle('zoomed'); }); }
         media.addEventListener('error', function() { status.textContent = (index + 1) + ' / ' + items.length + ' · 加载失败，可切换或关闭'; });
         media.src = item.url; stage.appendChild(media);
     }
     window.openBlogGallery = function(list, position, root) {
-        items = list.slice(); owner = root; show(position || 0); dialog.showModal();
+        if (!list.length) return;
+        items = list.slice(); owner = root; details.replaceChildren();
+        var post = root?.closest('.blog-post');
+        if (post) {
+            ['.blog-post-meta', '.blog-post-content', '.blog-post-tags'].forEach(function(selector) {
+                var source = post.querySelector(selector); if (!source) return;
+                var copy = source.cloneNode(true);
+                copy.querySelectorAll('button').forEach(function(control) { var text = document.createElement('span'); text.textContent = control.textContent; control.replaceWith(text); });
+                details.appendChild(copy);
+            });
+        }
+        details.hidden = !details.childElementCount;
+        document.querySelectorAll('.blog-media-strip video').forEach(function(video) { video.pause(); });
+        if (!dialog.open) previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        show(position || 0); if (!dialog.open) dialog.showModal();
     };
     window.renderBlogGallery = function(root, list) {
         root.replaceChildren(); root.blogGalleryItems = list;
@@ -50,13 +69,15 @@
             root.classList.add('blog-media-strip');
             root.tabIndex = 0; root.setAttribute('role', 'region'); root.setAttribute('aria-label', '图片和视频，可左右滑动查看');
             list.forEach(function(item, position) {
-                var tile = document.createElement('div'); tile.className = 'blog-strip-item';
+                var tile = document.createElement(item.kind === 'video' ? 'div' : 'button'); tile.className = 'blog-strip-item';
                 var media = document.createElement(item.kind === 'video' ? 'video' : 'img');
                 if (item.kind === 'video') {
                     media.controls = true; media.playsInline = true; media.preload = 'none';
                     if (item.thumbnailUrl) media.poster = item.thumbnailUrl;
                     media.setAttribute('aria-label', '视频 ' + (position + 1));
                 } else {
+                    tile.type = 'button'; tile.setAttribute('aria-label', '预览图片 ' + (position + 1));
+                    tile.addEventListener('click', function() { window.openBlogGallery(root.blogGalleryItems, position, root); });
                     media.alt = '博客图片 ' + (position + 1); media.loading = 'lazy'; media.decoding = 'async';
                     if (item.thumbnailUrl) {
                         var thumbnail = document.createElement('img'); thumbnail.src = item.thumbnailUrl;
@@ -102,10 +123,10 @@
         if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) show(index + (dx < 0 ? 1 : -1));
     }, { passive: true });
     dialog.addEventListener('click', function(event) { if (event.target === dialog) dialog.close(); });
-    dialog.addEventListener('close', function() { stopVideo(); stage.replaceChildren(); items = []; owner = null; });
+    dialog.addEventListener('close', function() { stopVideo(); stage.replaceChildren(); details.replaceChildren(); document.body.style.overflow = previousOverflow || ''; items = []; owner = null; });
     document.addEventListener('click', function(event) {
         var target = event.target.closest('.blog-post-content img, .blog-rich-editor img');
-        if (!target) return;
+        if (!target || target.closest('.blog-media-viewer')) return;
         var root = target.closest('.blog-post-content, .blog-rich-editor');
         var images = Array.from(root.querySelectorAll('img')).map(function(image) { return { kind: 'image', url: image.src }; });
         event.preventDefault(); window.openBlogGallery(images, images.findIndex(function(item) { return item.url === target.src; }), root);
