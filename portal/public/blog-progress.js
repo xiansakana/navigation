@@ -26,7 +26,7 @@
             var bar = document.createElement('progress'); bar.max = 100; bar.value = 0; bar.setAttribute('aria-label', item.file.name + ' 上传进度');
             row.append(label, detail, bar); panel.appendChild(row); return { detail: detail, bar: bar, done: false };
         });
-        if (items.length) root.appendChild(panel);
+        if (items.length) (root.querySelector('.blog-post-main') || root).appendChild(panel);
         function update(index, phase, percent) {
             var row = rows[index]; if (!row) return;
             percent = Math.max(0, Math.min(100, Math.round(percent || 0)));
