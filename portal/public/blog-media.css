@@ -5,6 +5,7 @@ body.portal-experience .blog-image-preview {
 }
 .blog-image-open { position: relative; }
 .blog-feed { grid-template-columns: minmax(0, 1fr); }
+body.portal-experience.portal-layout--full .blog-section { max-width: none; width: 100%; }
 .blog-post { min-width: 0; }
 body.portal-experience .blog-post-images.blog-media-strip {
   display: flex; flex-wrap: nowrap; max-width: 100%; gap: 10px;
