@@ -18,10 +18,15 @@
 .biz-watcher { margin-top:16px; padding:14px; border:1px solid var(--line); border-radius:12px; background:var(--status-bg); }
 .biz-watcher h4 { margin:0; }
 .biz-targets { margin-top:8px; }
-.biz-target { display:grid; grid-template-columns:105px minmax(90px,1fr) minmax(110px,1fr) minmax(110px,1fr) 32px; gap:6px; margin-bottom:6px; }
+.monitor-card { flex-wrap:wrap; }
+.monitor-qq-config { flex:0 0 100%; min-width:0; border-top:1px solid var(--line); padding-top:16px; }
+.monitor-qq-config h3 { margin:0 0 12px; font-size:15px; }
+.monitor-qq-config [hidden] { display:none; }
+.biz-target { display:grid; grid-template-columns:105px minmax(90px,1fr) minmax(110px,1fr) 32px; gap:6px; margin-bottom:6px; }
+.biz-target input[data-field="userId"] { grid-column:2 / span 2; }
 .biz-target [hidden] { display:none; }
 .biz-target input,.biz-target select { min-width:0; padding:7px 8px; }
-.biz-target button { border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--red); cursor:pointer; }
+.biz-target button { grid-column:4; grid-row:1; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--red); cursor:pointer; }
 .biz-link { border:0; padding:4px 0; background:transparent; color:var(--accent); cursor:pointer; }
 .biz-actions { justify-content:flex-end; flex-wrap:wrap; margin-top:17px; }
 .biz-hint { margin-top:12px; }

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>通知管理</title>
     <link rel="stylesheet" href="style.css?v=layout3">
-    <link rel="stylesheet" href="integrations.css?v=2">
+    <link rel="stylesheet" href="integrations.css?v=tibo-targets1">
 </head>
 <body>
     <main class="notify-app">
@@ -45,6 +45,12 @@
                 <button id="monitor-check" class="test-btn compact" type="button">立即检查</button>
                 <button id="monitor-save" class="save-btn" type="button">保存监听配置</button>
                 <span id="monitor-save-state" class="save-state" aria-live="polite">监听配置已加载</span>
+            </div>
+            <div class="monitor-qq-config">
+                <h3>QQ 通知目标</h3>
+                <label class="biz-check"><input id="monitor-qq-default" type="checkbox" checked> 使用 QQ 渠道的默认目标</label>
+                <p class="biz-hint">取消勾选后，可单独添加多个群聊或私聊目标；群内 @ 可填写 QQ 号，填写 all 表示 @所有人。</p>
+                <div id="monitor-qq-targets" hidden></div>
             </div>
         </section>
 
@@ -113,7 +119,8 @@
         </div>
     </main>
     <div class="toast" id="toast" hidden></div>
-    <script src="app.js"></script>
-    <script src="integrations.js"></script>
+    <script src="qq-targets.js?v=tibo-targets1"></script>
+    <script src="app.js?v=tibo-targets1"></script>
+    <script src="integrations.js?v=tibo-targets1"></script>
 </body>
 </html>

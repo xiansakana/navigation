@@ -2,6 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeConfig, publicConfig, applyPublicConfig } from './config.js';
 
+test('Tibo custom QQ targets persist independently of the channel default', function() {
+    var current = normalizeConfig({ defaultTarget: { type: 'private', userId: '111' } });
+    assert.equal(current.monitors.tiboReset.qq.useDefaultTarget, true);
+    var updated = applyPublicConfig(current, { monitors: { tiboReset: { qq: {
+        useDefaultTarget: false,
+        targets: [{ id: 'group1', type: 'group', groupId: '222', atUserId: 'all' }, { id: 'private1', type: 'private', userId: '333' }]
+    } } } });
+    var reloaded = normalizeConfig(JSON.parse(JSON.stringify(updated)));
+    assert.equal(reloaded.monitors.tiboReset.qq.targets.length, 2);
+    assert.equal(reloaded.monitors.tiboReset.qq.targets[0].atUserId, 'all');
+    assert.deepEqual(reloaded.defaultTarget, current.defaultTarget);
+    assert.deepEqual(applyPublicConfig(updated, { channels: { email: { enabled: true } } }).monitors, updated.monitors);
+    assert.throws(function() {
+        applyPublicConfig(current, { monitors: { tiboReset: { qq: { useDefaultTarget: false, targets: [] } } } });
+    }, /至少添加/);
+});
+
 test('legacy QQ config is normalized with email disabled', function() {
     var config = normalizeConfig({
         napcat: { baseUrl: 'http://127.0.0.1:3000' },

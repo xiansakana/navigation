@@ -73,9 +73,9 @@ function checkNotifyAuth(req, notifyToken) {
 function qqTarget(config, body) {
     return {
         type: body.type || config.defaultTarget.type || 'private',
-        userId: body.userId || config.defaultTarget.userId,
-        groupId: body.groupId || config.defaultTarget.groupId,
-        atUserId: body.atUserId || config.defaultTarget.atUserId
+        userId: Object.hasOwn(body, 'userId') ? body.userId : config.defaultTarget.userId,
+        groupId: Object.hasOwn(body, 'groupId') ? body.groupId : config.defaultTarget.groupId,
+        atUserId: Object.hasOwn(body, 'atUserId') ? body.atUserId : config.defaultTarget.atUserId
     };
 }
 
@@ -122,8 +122,8 @@ export function createNotificationServer(initialConfig, options) {
         send: (channel, body) => sendThrough(config, channel, body, options)
     });
     var monitor = options?.startMonitors ? startTiboResetMonitor(function() { return config; }, {
-        send: function(currentConfig, channel, message) {
-            return sendThrough(currentConfig, channel, { message: message }, options);
+        send: function(currentConfig, channel, message, target) {
+            return sendThrough(currentConfig, channel, { ...target, message: message }, options);
         }
     }) : null;
     var server = http.createServer(async function(req, res) {
@@ -190,6 +190,7 @@ export function createNotificationServer(initialConfig, options) {
             }
             if (req.method === 'GET' && url.pathname === '/style.css') return serve('style.css', res);
             if (req.method === 'GET' && url.pathname === '/app.js') return serve('app.js', res);
+            if (req.method === 'GET' && url.pathname === '/qq-targets.js') return serve('qq-targets.js', res);
             if (req.method === 'GET' && url.pathname === '/integrations.js') return serve('integrations.js', res);
             if (req.method === 'GET' && url.pathname === '/integrations.css') return serve('integrations.css', res);
             return json(res, 404, { ok: false, error: 'Not Found' });

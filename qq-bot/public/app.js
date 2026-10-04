@@ -51,6 +51,9 @@ function fill(data) {
     ['qq', 'email', 'slack'].forEach(function(channel) {
         byId('monitor-channel-' + channel).checked = (config.monitors.tiboReset.channels || ['qq']).includes(channel);
     });
+    byId('monitor-qq-default').checked = config.monitors.tiboReset.qq?.useDefaultTarget !== false;
+    byId('monitor-qq-targets').innerHTML = bizTargets(config.monitors.tiboReset.qq?.targets || [], 'tibo');
+    updateMonitorTargets();
     updateTargetFields();
     renderStatus(data.channels || []);
     applyAccess();
@@ -63,6 +66,7 @@ function applyAccess() {
     byId('save').disabled = !access.canEdit;
     byId('monitor-save').disabled = !access.canEdit;
     byId('monitor-check').disabled = !access.canEdit;
+    byId('monitor-qq-targets').querySelectorAll('button').forEach(function(button) { button.disabled = !access.canEdit; });
     document.querySelectorAll('[data-test]').forEach(function(button) {
         button.disabled = button.dataset.test === 'slack' ? !access.canTestSlack : !access.canEdit;
     });
@@ -147,6 +151,10 @@ function channelPayload() {
 
 function monitorPayload() {
     return { monitors: { tiboReset: {
+            qq: {
+                useDefaultTarget: byId('monitor-qq-default').checked,
+                targets: bizReadTargets(byId('monitor-qq-targets'))
+            },
             enabled: byId('monitor-enabled').checked,
             intervalMinutes: Number(byId('monitor-interval').value),
             channels: ['qq', 'email', 'slack'].filter(function(channel) {
@@ -155,6 +163,33 @@ function monitorPayload() {
         } }
     };
 }
+
+function updateMonitorTargets() {
+    byId('monitor-qq-targets').hidden = byId('monitor-qq-default').checked;
+}
+byId('monitor-qq-default').addEventListener('change', updateMonitorTargets);
+['input', 'change'].forEach(function(eventName) {
+    byId('monitor-qq-targets').addEventListener(eventName, function() { byId('monitor-save-state').textContent = '有尚未保存的修改'; });
+});
+byId('monitor-qq-targets').addEventListener('change', function(event) {
+    if (event.target.dataset.field !== 'type') return;
+    var row = event.target.closest('.biz-target');
+    var group = event.target.value === 'group';
+    ['groupId', 'atUserId'].forEach(function(field) { row.querySelector('[data-field="' + field + '"]').hidden = !group; });
+    row.querySelector('[data-field="userId"]').hidden = group;
+});
+byId('monitor-qq-targets').addEventListener('click', function(event) {
+    var button = event.target.closest('[data-action]');
+    if (!button || !access.canEdit) return;
+    if (button.dataset.action === 'remove-target') button.closest('.biz-target').remove();
+    if (button.dataset.action === 'add-target') {
+        byId('monitor-qq-targets').querySelector('.biz-target-list').insertAdjacentHTML('beforeend', bizTargetRow({
+            id: 't-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6), type: 'group'
+        }));
+    }
+    byId('monitor-save-state').textContent = '有尚未保存的修改';
+    applyAccess();
+});
 
 byId('qq-type').addEventListener('change', updateTargetFields);
 document.querySelectorAll('.monitor-card input, .monitor-card select, .channel-grid input, .channel-grid select').forEach(function(input) {

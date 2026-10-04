@@ -41,6 +41,7 @@ export function normalizeConfig(raw) {
             return ['qq', 'email', 'slack'].includes(channel);
         })))
         : ['qq'];
+    config.monitors.tiboReset.qq = Object.assign({ useDefaultTarget: true, targets: [] }, config.monitors.tiboReset.qq || {});
     return config;
 }
 
@@ -110,6 +111,28 @@ export function applyPublicConfig(current, input) {
     }
     if (slack.clearWebhookUrl === true) next.channels.slack.webhookUrl = '';
     var monitor = body.monitors?.tiboReset || {};
+    if (monitor.qq) {
+        if (typeof monitor.qq.useDefaultTarget === 'boolean') next.monitors.tiboReset.qq.useDefaultTarget = monitor.qq.useDefaultTarget;
+        if (Array.isArray(monitor.qq.targets)) {
+            if (monitor.qq.targets.length > 20) throw new Error('Tibo QQ 目标最多 20 个');
+            next.monitors.tiboReset.qq.targets = monitor.qq.targets.map(function(target, index) {
+                var result = {
+                    id: String(target.id || ('target-' + index)).slice(0, 100),
+                    type: target.type === 'private' ? 'private' : 'group',
+                    userId: String(target.userId || '').trim(),
+                    groupId: String(target.groupId || '').trim(),
+                    atUserId: String(target.atUserId || '').trim()
+                };
+                if (!next.monitors.tiboReset.qq.useDefaultTarget) {
+                    if (!/^\d+$/.test(result.type === 'private' ? result.userId : result.groupId)) throw new Error('请填写有效的 Tibo QQ 号或群号');
+                    if (result.type === 'group' && result.atUserId && !/^(\d+|all)$/.test(result.atUserId)) throw new Error('@ 目标应为 QQ 号或 all');
+                }
+                return result;
+            });
+            if (new Set(next.monitors.tiboReset.qq.targets.map(function(target) { return target.id; })).size !== next.monitors.tiboReset.qq.targets.length) throw new Error('Tibo QQ 目标 ID 重复');
+        }
+        if (!next.monitors.tiboReset.qq.useDefaultTarget && !next.monitors.tiboReset.qq.targets.length) throw new Error('请至少添加一个 Tibo QQ 目标');
+    }
     if (typeof monitor.enabled === 'boolean') next.monitors.tiboReset.enabled = monitor.enabled;
     if (Array.isArray(monitor.channels)) {
         if (monitor.channels.some(function(channel) { return !['qq', 'email', 'slack'].includes(channel); })) {

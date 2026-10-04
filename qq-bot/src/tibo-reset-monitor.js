@@ -146,7 +146,19 @@ export async function deliverToChannels(config, message, alreadySent, send, onDe
     var sent = new Set(alreadySent || []);
     for (var channel of config.monitors?.tiboReset?.channels || ['qq']) {
         if (sent.has(channel)) continue;
-        await send(config, channel, message);
+        var qq = config.monitors?.tiboReset?.qq;
+        if (channel === 'qq' && qq?.useDefaultTarget === false) {
+            if (!qq.targets?.length) throw new Error('Tibo 未配置 QQ 通知目标');
+            for (var target of qq.targets) {
+                var deliveryKey = 'qq:' + target.id;
+                if (sent.has(deliveryKey)) continue;
+                await send(config, channel, message, target);
+                sent.add(deliveryKey);
+                onDelivered?.(Array.from(sent));
+            }
+        } else {
+            await send(config, channel, message);
+        }
         sent.add(channel);
         onDelivered?.(Array.from(sent));
     }
@@ -180,10 +192,10 @@ export function startTiboResetMonitor(getConfig, hooks) {
                     runtime.lastTweet = { id: tweet.id, text: tweet.text, at: tweet.at, url: tweet.url, decision: decision };
                     if (decision.relevant) {
                         await deliverToChannels(config, formatMessage(tweet, decision), state.sentChannels[tweet.id],
-                            async function(currentConfig, channel, message) {
-                                if (hooks?.send) return hooks.send(currentConfig, channel, message);
+                            async function(currentConfig, channel, message, target) {
+                                if (hooks?.send) return hooks.send(currentConfig, channel, message, target);
                                 if (channel !== 'qq') throw new Error('监听器缺少 ' + channel + ' 发送器');
-                                return sendMessage(currentConfig.napcat, {
+                                return sendMessage(currentConfig.napcat, target || {
                                     type: currentConfig.defaultTarget.type || 'private',
                                     userId: currentConfig.defaultTarget.userId,
                                     groupId: currentConfig.defaultTarget.groupId,

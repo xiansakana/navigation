@@ -4,6 +4,25 @@ import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import { classifyResetOpportunity, parseRss, deliverToChannels, fetchText } from './tibo-reset-monitor.js';
 
+test('Tibo delivers custom targets and resumes at the failed QQ target', async function() {
+    var config = { monitors: { tiboReset: { channels: ['qq', 'slack'], qq: { useDefaultTarget: false, targets: [
+        { id: 'a', type: 'group', groupId: '123', atUserId: 'all' },
+        { id: 'b', type: 'private', userId: '456' }
+    ] } } } };
+    var checkpoint = [];
+    var delivered = [];
+    var fail = true;
+    var sender = async function(_, channel, message, target) {
+        if (target?.id === 'b' && fail) throw new Error('retry');
+        delivered.push(target || channel);
+    };
+    await assert.rejects(deliverToChannels(config, 'signal', [], sender, function(sent) { checkpoint = sent; }), /retry/);
+    assert.deepEqual(checkpoint, ['qq:a']);
+    fail = false;
+    await deliverToChannels(config, 'signal', checkpoint, sender);
+    assert.deepEqual(delivered, [config.monitors.tiboReset.qq.targets[0], config.monitors.tiboReset.qq.targets[1], 'slack']);
+});
+
 test('tweet source uses IPv4 HTTPS transport and reports response failures', async function() {
     var requestOptions;
     var fakeGet = function(url, options, callback) {

@@ -2,26 +2,6 @@ var businessState = {};
 var businessNames = { stock: '股票管理 · 抄底提醒', undercut: 'Torn · 压价提醒', company: 'Torn · 公司申请' };
 var businessEventNames = { openSummary: '开盘摘要', takeProfit: '止盈', fakeRight: '假右侧', reset: '高点重置', T4_intraday: 'T4 盘中限价', sleeveTqqq: 'TQQQ 袖仓', sleeveSoxl: 'SOXL 袖仓' };
 
-function bizEscape(value) {
-    return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function bizTargetRow(target) {
-    var group = target.type !== 'private';
-    return '<div class="biz-target" data-id="' + bizEscape(target.id) + '">'
-        + '<select data-field="type" aria-label="通知类型"><option value="group"' + (group ? ' selected' : '') + '>群聊</option><option value="private"' + (!group ? ' selected' : '') + '>私聊</option></select>'
-        + '<input data-field="groupId" aria-label="群号" placeholder="群号" value="' + bizEscape(target.groupId) + '"' + (group ? '' : ' hidden') + '>'
-        + '<input data-field="atUserId" aria-label="@ QQ 号" placeholder="@ QQ 号（可选）" value="' + bizEscape(target.atUserId) + '"' + (group ? '' : ' hidden') + '>'
-        + '<input data-field="userId" aria-label="私聊 QQ 号" placeholder="私聊 QQ 号" value="' + bizEscape(target.userId) + '"' + (group ? ' hidden' : '') + '>'
-        + '<button type="button" data-action="remove-target" aria-label="删除通知目标">×</button></div>';
-}
-
-function bizTargets(targets, owner) {
-    return '<div class="biz-targets" data-owner="' + bizEscape(owner) + '">'
-        + '<div class="biz-target-list">' + (targets || []).map(bizTargetRow).join('') + '</div>'
-        + '<button class="biz-link" type="button" data-action="add-target">＋ 添加 QQ 目标</button></div>';
-}
-
 function bizCard(item) {
     var id = item.id;
     var qq = id === 'stock' ? item.notify?.qq || {} : item.notify?.qq || {};
@@ -49,14 +29,6 @@ function bizCard(item) {
     }
     return html + '<div class="biz-actions"><button class="test-btn compact" type="button" data-action="save">保存提醒配置</button>'
         + (id === 'stock' ? '<button class="test-btn compact" type="button" data-action="test-stock">发送测试</button>' : '') + '</div></article>';
-}
-
-function bizReadTargets(container) {
-    return Array.from(container.querySelectorAll('.biz-target')).map(function(row) {
-        var result = { id: row.dataset.id };
-        ['type', 'groupId', 'atUserId', 'userId'].forEach(function(key) { result[key] = row.querySelector('[data-field="' + key + '"]').value.trim(); });
-        return result;
-    });
 }
 
 function bizReadCard(card) {
