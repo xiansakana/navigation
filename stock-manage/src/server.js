@@ -325,7 +325,8 @@ app.get('/api/trades/summary', (req, res) => {
   res.json(computeSymbolSummaries(data.trades, {
     startDate: req.query.start || undefined,
     endDate: req.query.end || undefined,
-    usdCnyRate: data.usdCnyRate
+    usdCnyRate: data.usdCnyRate,
+    quotes: data.quotes
   }));
 });
 

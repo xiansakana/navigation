@@ -5,6 +5,7 @@ import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } fro
 import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const fmt = (n) => Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 const fmtUsd = (n) => Number.isFinite(n) ? '$' + fmt(n) : '—';
 const fmtCny = (n) => Number.isFinite(n) ? '¥' + fmt(n) : '—';
@@ -932,17 +933,17 @@ async function renderTradeSummaryTab() {
       <div class="sm-table-wrap sm-table-wrap--modal">
         <table class="sm-table">
           <thead><tr>
-            <th>代码</th><th>总买入</th><th>总卖出</th><th>总费用</th>
+            <th>代码</th><th>名称</th><th>总买入</th><th>总卖出</th><th>总费用</th>
             ${[['netPnl', '盈亏金额'], ['netPnlRate', '盈亏比例']].map(([key, label]) => `<th aria-sort="${summarySort.key === key ? (summarySort.dir === 1 ? 'ascending' : 'descending') : 'none'}"><button type="button" class="btn link" data-summary-sort="${key}" title="点击切换升序或降序">${label}${sortMark(summarySort, key)}</button></th>`).join('')}
           </tr></thead>
           <tbody>${rows.length ? rows.map((r) => `
             <tr>
-              <td>${r.symbol}</td><td>${fmtUsd(r.totalBuyAmount)}</td><td>${fmtUsd(r.totalSellAmount)}</td>
+              <td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name || '—')}</td><td>${fmtUsd(r.totalBuyAmount)}</td><td>${fmtUsd(r.totalSellAmount)}</td>
               <td>${fmtCommission(r.totalCommission)}</td><td class="${cls(r.netPnl)}">${maskPnlValue(fmtUsdSigned(r.netPnl))}</td>
               <td title="${r.pnlRateUnavailableReason === 'missing-buy-cost' ? '卖出数量缺少对应买入记录，无法确定完整成本' : r.pnlRateUnavailableReason === 'no-sold-cost' ? '尚无可计算比例的卖出成本' : '净盈亏 ÷ 按 FIFO 匹配的卖出部分买入成本'}">${r.netPnlRate == null ? '—' : maskPnlValue(fmtPct(r.netPnlRate))}</td>
-            </tr>`).join('') : `<tr><td colspan="6" class="empty">暂无数据</td></tr>`}
+            </tr>`).join('') : `<tr><td colspan="7" class="empty">暂无数据</td></tr>`}
           <tr class="sm-total-row">
-            <td>合计</td><td>${fmtUsd(totals.buy)}</td><td>${fmtUsd(totals.sell)}</td>
+            <td>合计</td><td>—</td><td>${fmtUsd(totals.buy)}</td><td>${fmtUsd(totals.sell)}</td>
             <td>${fmtCommission(totals.fee)}</td><td class="${cls(totals.pnl)}">${maskPnlValue(fmtUsdSigned(totals.pnl))}</td><td>—</td>
           </tr></tbody>
         </table>

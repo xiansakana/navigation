@@ -274,6 +274,11 @@ export function computeSymbolSummaries(trades, options = {}) {
   const out = [];
   for (const [symbol, symTrades] of bySym) {
     symTrades.sort((a, b) => tradeTime(a.trade_date) - tradeTime(b.trade_date) || a.id.localeCompare(b.id));
+    const quoteName = String(options.quotes?.[symbol]?.name || '').trim();
+    const name = symTrades.reduce((latest, trade) => {
+      const candidate = String(trade.name || '').trim();
+      return candidate && normalizeSymbol(candidate) !== symbol ? candidate : latest;
+    }, quoteName && normalizeSymbol(quoteName) !== symbol ? quoteName : '');
     const pre = [];
     const win = [];
     for (const t of symTrades) {
@@ -312,6 +317,7 @@ export function computeSymbolSummaries(trades, options = {}) {
     const netPnl = fifoGross - totalCommission;
     out.push({
       symbol,
+      name,
       totalBuyAmount: roundMoney(totalBuy),
       totalSellAmount: roundMoney(totalSell),
       totalCommission: roundMoney(totalCommission),

@@ -29,6 +29,16 @@ function summaryTrade(type, shares, price, day, extras = {}) {
     trade_date: `2026-09-${day}T12:00:00Z`, ...extras });
 }
 
+test('summary keeps real historical names when later trades only contain the symbol', () => {
+  const trades = [summaryTrade('buy', 1, 100, '01', { name: 'Apple Inc.' }), summaryTrade('sell', 1, 120, '10')];
+  const [row] = computeSymbolSummaries(trades, { startDate: '2026-09-10' });
+  assert.equal(row.name, 'Apple Inc.');
+  const [fallback] = computeSymbolSummaries([summaryTrade('buy', 1, 100, '01')], { quotes: { AAPL: { name: 'Apple Inc.' } } });
+  assert.equal(fallback.name, 'Apple Inc.');
+  const [missing] = computeSymbolSummaries([summaryTrade('buy', 1, 100, '01')]);
+  assert.equal(missing.name, '');
+});
+
 test('summary return matches pre-window buys after pre-window sales', () => {
   const trades = [summaryTrade('buy', 10, 100, '01'), summaryTrade('sell', 5, 110, '02'),
     summaryTrade('sell', 5, 120, '10', { commission: 1 })];
