@@ -955,6 +955,12 @@ body.portal-dialog-open {
     overflow: hidden;
 }
 
+/* Native admin dialogs use the browser top layer, but explicitly lock the
+   document as well so wheel/touch scrolling cannot move the page behind them. */
+body:has(dialog[open]) {
+    overflow: hidden;
+}
+
 .portal-dialog-host {
     position: fixed;
     inset: 0;

@@ -472,6 +472,13 @@ body.has-navbar {
     background: color-mix(in srgb, var(--bg) 94%, transparent);
     backdrop-filter: blur(12px);
 }
+
+/* Keep the page behind any stock-manage modal from scrolling. Modal content
+   owns its own scroll area when it needs one. This also covers quant/yolo
+   pages, which reuse this stylesheet and the same backdrop class. */
+body:has(.sm-modal-backdrop) {
+    overflow: hidden;
+}
 .sm-feature-tab {
     display: inline-flex;
     align-items: center;

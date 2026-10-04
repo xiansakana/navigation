@@ -275,6 +275,12 @@ body.has-navbar { padding-top: var(--navbar-height); }
     font-size: 13px;
 }
 
+/* Modal backdrops cover the viewport; prevent the document behind them from
+   moving while allowing the modal's own content areas to scroll. */
+body:has(.sm-modal-backdrop) {
+    overflow: hidden;
+}
+
 .sm-pagination {
     display: flex;
     justify-content: space-between;
