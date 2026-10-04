@@ -5,13 +5,14 @@ import { initSchema } from '../../shared/db/schema.js';
 import { createPost, changePost, listPosts, listVisibleTags, addMedia, getVisibleMedia, getImage } from './blog.js';
 import { normalizeVisibility, canViewPost } from './blog-visibility.js';
 import { isPortalApi } from './router.js';
+import { createComment, listComments } from './blog-comments.js';
 
 const writer = { userId: 'author', username: '作者', permissions: ['blog:post:edit'] };
 const member = { userId: 'reader', permissions: ['blog:feed:view'] };
 const guest = { userId: 'author', isGuest: true, permissions: ['blog:feed:view'] };
 const manager = { userId: 'admin', permissions: ['blog:manage:edit'] };
 
-test('audience filters body, search, tags, legacy images and uploaded media without administrator or guest bypass', () => {
+test('blog managers see every audience while ordinary members and guests remain restricted', () => {
   const db = new DatabaseSync(':memory:');
   try {
     initSchema(db);
@@ -23,19 +24,28 @@ test('audience filters body, search, tags, legacy images and uploaded media with
     const ids = session => listPosts(db, null, 20, '', '', session).map(p => p.id).sort();
     assert.deepEqual(ids(guest), [publicId]);
     assert.deepEqual(ids(member), [publicId, membersId].sort());
-    assert.deepEqual(ids(manager), [publicId, membersId].sort());
+    assert.deepEqual(ids(manager), [publicId, membersId, privateId].sort());
     assert.equal(ids(writer).length, 3);
     assert.equal(listPosts(db, null, 20, '', '隐私关键词', member).length, 0);
     assert.equal(listPosts(db, null, 20, '私密标签', '', member).length, 0);
     assert.equal(listVisibleTags(db, member).length, 0);
     assert.equal(listVisibleTags(db, writer)[0].tag, '私密标签');
-    for (const session of [member, manager, guest]) {
+    for (const session of [member, guest, { ...manager, isGuest: true }, { permissions: manager.permissions }]) {
       assert.equal(canViewPost(db, privateId, session), false);
       assert.equal(getVisibleMedia(db, media.id, session), undefined);
       assert.equal(getImage(db, 'legacy', session), undefined);
     }
     assert.ok(getVisibleMedia(db, media.id, writer));
     assert.ok(getImage(db, 'legacy', writer));
+    assert.ok(getVisibleMedia(db, media.id, manager));
+    assert.ok(getVisibleMedia(db, media.id, manager, undefined, true));
+    assert.ok(getImage(db, 'legacy', manager));
+    assert.equal(listPosts(db, null, 20, '', '隐私关键词', manager)[0].id, privateId);
+    assert.equal(listPosts(db, null, 20, '私密标签', '', manager)[0].id, privateId);
+    assert.equal(listVisibleTags(db, manager)[0].tag, '私密标签');
+    assert.equal(createComment(db, privateId, writer, '私密评论').status, 201);
+    assert.equal(listComments(db, privateId, manager).comments[0].content, '私密评论');
+    assert.equal(listComments(db, privateId, member).status, 404);
     assert.match(listPosts(db, null, 20, '', '隐私关键词', writer)[0].images[1].url, /^\/api\/blog\/media\//);
     assert.equal(isPortalApi('/api/blog/media/' + media.id, 'GET'), true);
     assert.equal(changePost(db, privateId, member, '公开', false, { visibility: {} }).status, 403);
@@ -54,6 +64,8 @@ test('custom time uses inclusive start, exclusive end; author retains access, ed
     assert.equal(count(member, startsAt), 1);
     assert.equal(count(member, endsAt), 0);
     assert.equal(count(writer, endsAt), 1);
+    assert.equal(count(manager, '2026-10-04T00:59:59.999Z'), 1);
+    assert.equal(count(manager, endsAt), 1);
     assert.equal(listVisibleTags(db, member, endsAt).length, 0);
     changePost(db, id, writer, '修改正文');
     const post = listPosts(db, null, 20, '', '', writer)[0];

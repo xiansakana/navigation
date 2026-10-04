@@ -3,7 +3,7 @@
         root.className = 'blog-visibility';
         var audience = document.createElement('select');
         audience.setAttribute('aria-label', '可见范围');
-        [['public', '所有有博客访问权限的人'], ['members', '仅登录用户'], ['self', '仅自己']].forEach(function(item) {
+        [['public', '所有有博客访问权限的人'], ['members', '仅登录用户'], ['self', '仅自己（管理员可见）']].forEach(function(item) {
             audience.add(new Option(item[1], item[0]));
         });
         var period = document.createElement('select');
@@ -21,7 +21,7 @@
         var end = document.createElement('input'); end.type = 'datetime-local'; end.setAttribute('aria-label', '结束可见时间');
         dates.append(field('开始（可留空）', start), field('结束（可留空）', end));
         var hint = document.createElement('p'); hint.className = 'blog-visibility-hint';
-        hint.textContent = '作者始终可见。到期后其他人无法查看；自定义时间按当前设备时区设置。';
+        hint.textContent = '作者和有博客管理权限的管理员始终可见。其他用户按可见范围及时间访问；自定义时间按当前设备时区设置。';
         root.append(field('可见范围', audience), field('可见时间', period), dates, hint);
         function update() { dates.hidden = period.value !== 'custom'; }
         period.addEventListener('change', update);

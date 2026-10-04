@@ -124,7 +124,7 @@
         else body.textContent = post.content;
         var visibility = post.visibility || { audience: 'public' };
         var scope = document.createElement('span'); scope.className = 'blog-visibility-badge';
-        scope.textContent = { public: '公开动态', members: '仅登录用户', self: '仅自己' }[visibility.audience];
+        scope.textContent = { public: '公开动态', members: '仅登录用户', self: '仅自己（管理员可见）' }[visibility.audience];
         if (visibility.startsAt) scope.textContent += ' · ' + new Date(visibility.startsAt).toLocaleString('zh-CN') + ' 起可见';
         if (visibility.endsAt) scope.textContent += ' · ' + new Date(visibility.endsAt).toLocaleString('zh-CN') + ' 到期';
         if (visibility.startsAt && new Date(visibility.startsAt) > new Date()) scope.textContent += '（尚未开放）';
