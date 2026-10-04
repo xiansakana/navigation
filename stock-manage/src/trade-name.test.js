@@ -1,8 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeNamedTrade } from './trade-name.js';
+import { normalizeNamedTrade, needsTradeName, backfillTradeName } from './trade-name.js';
 
 const input = { type: 'buy', symbol: 'sz159509', shares: 100, price: 1.234 };
+
+test('bulk name backfill changes only missing names and preserves all trade fields', () => {
+  const names = new Map([['159509', '纳指科技ETF景顺']]);
+  for (const name of [undefined, '', '  ', 'sz159509', '159509']) {
+    const trade = { ...input, id: 'trade-1', name, total_amount: 123.4, trade_date: '2026-09-01' };
+    assert(needsTradeName(trade));
+    assert.deepEqual(backfillTradeName(trade, names), { ...trade, name: '纳指科技ETF景顺' });
+  }
+  for (const trade of [{ ...input, name: '自定义名称' }, { ...input, type: 'other', name: '' }]) {
+    assert.equal(backfillTradeName(trade, names), trade);
+  }
+  assert.equal(backfillTradeName(input, new Map()), input);
+});
 
 test('blank trade name is resolved using the normalized market symbol', async () => {
   const trade = await normalizeNamedTrade({ ...input, name: '  ' }, async (symbol) => {

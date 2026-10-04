@@ -1,4 +1,19 @@
 import { normalizeTrade } from './trades.js';
+import { normalizeSymbol } from './markets.js';
+
+export function needsTradeName(trade) {
+  if (!['buy', 'sell'].includes(trade?.type)) return false;
+  const symbol = normalizeSymbol(trade.symbol);
+  const name = String(trade.name || '').trim();
+  return !!symbol && (!name || normalizeSymbol(name) === symbol);
+}
+
+export function backfillTradeName(trade, names) {
+  if (!needsTradeName(trade)) return trade;
+  const symbol = normalizeSymbol(trade.symbol);
+  const name = String(names.get(symbol) || '').trim();
+  return name && normalizeSymbol(name) !== symbol ? { ...trade, name } : trade;
+}
 
 export async function normalizeNamedTrade(input, getQuote) {
   const name = String(input?.name || '').trim();
