@@ -340,3 +340,28 @@ test('normalizes raw reverse split discontinuities', () => {
   assert.equal(result.candles[0].close, 100);
   assert.equal(result.candles[0].volume, 100000);
 });
+
+
+test('instrument name uses the exact Finnhub search result instead of the quote symbol', async (context) => {
+  const originalFetch = global.fetch;
+  context.after(() => { global.fetch = originalFetch; });
+  global.fetch = async (url) => {
+    assert.match(String(url), /finnhub.io\/api\/v1\/search/);
+    return response({ result: [
+      { symbol: 'AAPL.W', description: 'Wrong security', type: 'Common Stock' },
+      { symbol: 'AAPL', description: 'Apple Inc.', type: 'Common Stock' }
+    ] });
+  };
+  const service = createQuoteService({ finnhubApiKey: 'test-key', polygonApiKey: '' });
+  assert.equal(await service.getInstrumentName('aapl'), 'Apple Inc.');
+});
+
+test('instrument name uses Yahoo company metadata without a Finnhub key', async (context) => {
+  const originalFetch = global.fetch;
+  context.after(() => { global.fetch = originalFetch; });
+  global.fetch = async () => response({ chart: { result: [{ meta: {
+    regularMarketPrice: 100, longName: 'Apple Inc.', shortName: 'Apple'
+  } }] } });
+  const service = createQuoteService({ finnhubApiKey: '', polygonApiKey: '' });
+  assert.equal(await service.getInstrumentName('AAPL'), 'Apple Inc.');
+});

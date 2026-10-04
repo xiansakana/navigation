@@ -10,6 +10,7 @@ import { createYoloBacktestJobs } from './yolo-backtest-jobs.js';
 import { createYoloCollector, isUsOptionMarketOpen } from './yolo-collector.js';
 import { createQuoteService } from './quotes.js';
 import { parseImportBuffer } from './import-moomoo.js';
+import { normalizeNamedTrade } from './trade-name.js';
 import {
   deriveHoldings,
   computePnl,
@@ -17,7 +18,6 @@ import {
   buildDailyCumulativeSeries,
   enrichHoldings,
   computeDailySummary,
-  normalizeTrade,
   recalcCashFromTrades,
   roundMoney,
   roundPrice,
@@ -230,9 +230,9 @@ app.put('/api/holdings-meta/:symbol', (req, res) => {
   sendPortfolio(res, req);
 });
 
-app.post('/api/trades', (req, res) => {
+app.post('/api/trades', async (req, res) => {
   try {
-    const trade = normalizeTrade(req.body || {});
+    const trade = await normalizeNamedTrade(req.body || {}, async (symbol) => ({ name: await quotes.getInstrumentName(symbol) }));
     const data = store.read();
     data.trades.push(trade);
     Object.assign(data, applyCashDelta(data, trade));
@@ -243,9 +243,9 @@ app.post('/api/trades', (req, res) => {
   }
 });
 
-app.put('/api/trades/:id', (req, res) => {
+app.put('/api/trades/:id', async (req, res) => {
   try {
-    const trade = normalizeTrade({ ...req.body, id: req.params.id });
+    const trade = await normalizeNamedTrade({ ...req.body, id: req.params.id }, async (symbol) => ({ name: await quotes.getInstrumentName(symbol) }));
     const data = store.read();
     const i = data.trades.findIndex((t) => t.id === req.params.id);
     if (i < 0) return res.status(404).json({ error: '未找到' });

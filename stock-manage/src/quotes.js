@@ -396,6 +396,7 @@ export function createQuoteService(config) {
     return {
       symbol: sym,
       price,
+      name: meta?.longName || meta?.shortName || sym,
       change: price - prev,
       changePercent: prev ? ((price - prev) / prev) * 100 : 0,
       prevClose: prev,
@@ -1022,5 +1023,29 @@ export function createQuoteService(config) {
     return getUsStockQuote(sym);
   }
 
-  return { getStock, getOption, getQqq1dteChain, getQqqOptionChains, getQqqPreviousSessionSummary, getQuote, getStockHistory, getAShareQuote, getUsdCny, search };
+  async function getInstrumentName(symbol) {
+    const sym = normalizeSymbol(symbol);
+    const realName = (value) => {
+      const name = String(value || '').trim();
+      return name && name.toUpperCase() !== sym ? name : '';
+    };
+    if (!isAShareSymbol(sym) && !parseOptionSymbol(sym)) {
+      const matches = await search(sym);
+      const match = matches.find((item) => normalizeSymbol(item.symbol) === sym);
+      const name = realName(match?.name);
+      if (name) return name;
+      // Finnhub quote responses contain prices only; use company metadata.
+      for (const provider of [getYahooQuote, getNasdaqQuote]) {
+        try {
+          const quote = await provider(sym);
+          const resolved = realName(quote.name);
+          if (resolved) return resolved;
+        } catch { /* Try the next name provider. */ }
+      }
+      return '';
+    }
+    return realName((await getQuote(sym)).name);
+  }
+
+  return { getStock, getOption, getQqq1dteChain, getQqqOptionChains, getQqqPreviousSessionSummary, getQuote, getInstrumentName, getStockHistory, getAShareQuote, getUsdCny, search };
 }

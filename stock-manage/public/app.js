@@ -656,7 +656,7 @@ function tradeFormFields(trade = {}) {
       </select></label>
       <label class="field-other ${type !== 'other' ? 'hidden' : ''}">其它类别<input name="other_category" value="${trade.other_category || ''}"></label>
       <label>代码<input name="symbol" id="trade-symbol" required value="${trade.symbol || ''}"></label>
-      <label>名称<input name="name" value="${trade.name || ''}"></label>
+      <label>名称<input name="name" value="${trade.name || ''}" placeholder="留空自动获取真实名称"></label>
       <label>币种<select name="currency" id="trade-currency">
         <option value="USD" ${currency === 'USD' ? 'selected' : ''}>USD 美元</option>
         <option value="CNY" ${currency === 'CNY' ? 'selected' : ''}>CNY 人民币</option>
