@@ -582,7 +582,32 @@ body.has-navbar {
 }
 
 .sm-modal--trade .sm-table-wrap--modal .sm-table {
-    min-width: 980px;
+    min-width: 0;
+    table-layout: fixed;
+}
+
+.sm-modal--trade .sm-table-wrap--modal {
+    overflow: visible;
+}
+
+.sm-modal--trade .sm-table-wrap--modal .sm-table th,
+.sm-modal--trade .sm-table-wrap--modal .sm-table td {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    padding: 10px 8px;
+    vertical-align: top;
+}
+
+.sm-modal--trade .sm-trade-name {
+    width: 18%;
+}
+
+.sm-modal--trade .sm-trade-filters {
+    overflow: visible;
+}
+
+.sm-modal--trade .sm-trade-modal-scroll {
+    overflow-x: hidden;
 }
 
 .sm-modal--trade .sm-table-wrap--modal .sm-table thead th {

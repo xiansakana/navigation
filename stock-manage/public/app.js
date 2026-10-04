@@ -884,7 +884,7 @@ function renderTradeListTab() {
       <div class="sm-table-wrap sm-table-wrap--modal">
         <table class="sm-table">
           <thead><tr>
-            <th>时间</th><th>交易方向</th><th>类型</th><th>代码</th><th>名称</th><th>币种</th><th>股数</th><th>价格</th><th>金额</th><th>手续费</th><th>操作</th>
+            <th>时间</th><th>交易方向</th><th>类型</th><th>代码</th><th class="sm-trade-name">名称</th><th>币种</th><th>股数</th><th>价格</th><th>金额</th><th>手续费</th><th>操作</th>
           </tr></thead>
           <tbody>${pageRows.length ? pageRows.map((t) => `
             <tr>
@@ -948,7 +948,7 @@ async function renderTradeSummaryTab() {
       <div class="sm-table-wrap sm-table-wrap--modal">
         <table class="sm-table">
           <thead><tr>
-            <th>类型</th><th>代码</th><th>名称</th><th>总买入</th><th>总卖出</th><th>其它收支</th><th>总费用</th>
+            <th>类型</th><th>代码</th><th class="sm-trade-name">名称</th><th>总买入</th><th>总卖出</th><th>其它收支</th><th>总费用</th>
             ${[['netPnl', '盈亏金额'], ['netPnlRate', '盈亏比例']].map(([key, label]) => `<th aria-sort="${summarySort.key === key ? (summarySort.dir === 1 ? 'ascending' : 'descending') : 'none'}"><button type="button" class="btn link" data-summary-sort="${key}" title="点击切换升序或降序">${label}${sortMark(summarySort, key)}</button></th>`).join('')}
           </tr></thead>
           <tbody>${rows.length ? rows.map((r) => `
@@ -986,10 +986,29 @@ async function openTradeHistoryModal(symbol = '') {
   if (symbol) ui.tradeFilter.symbol = symbol;
   ui.tradePage = 1;
   const layer = openModal('交易记录', '<div id="trade-modal-content">加载中…</div>', '<button type="button" class="btn ghost" data-close>关闭</button>', null, { size: 'trade' });
+  let refreshRevision = 0;
   const refresh = async () => {
+    const revision = ++refreshRevision;
     const box = $('#trade-modal-content', layer);
     if (!box) return;
-    box.innerHTML = await renderTradeModalBody();
+    const html = await renderTradeModalBody();
+    if (revision !== refreshRevision || !box.isConnected) return;
+    if ($('[data-tab].active', box)?.dataset.tab === ui.tradeTab) {
+      const template = document.createElement('template');
+      template.innerHTML = html;
+      // Keep filter nodes in place so typing, selection and IME composition survive.
+      for (const selector of ['.sm-trade-modal-scroll', '.sm-pagination']) {
+        const current = $(selector, box);
+        const next = $(selector, template.content);
+        if (current && next) current.replaceWith(next);
+      }
+      box.querySelectorAll('[data-filter]').forEach((el) => {
+        const value = ui.tradeFilter[el.dataset.filter];
+        if (el.value !== value) el.value = value;
+      });
+    } else {
+      box.innerHTML = html;
+    }
     bindTradeModalEvents(layer);
   };
   window._tradeHistoryLayer = layer;
@@ -1006,18 +1025,21 @@ function openTradeHistoryForRange(start, end) {
 function bindTradeModalEvents(layer) {
   const root = $('#trade-modal-content', layer);
   if (!root) return;
-  root.querySelectorAll('[data-summary-sort]').forEach((button) => button.addEventListener('click', async () => {
+  const unbound = (selector) => [...root.querySelectorAll(selector)].filter((el) => {
+    if (el.dataset.tradeBound) return false;
+    el.dataset.tradeBound = '1';
+    return true;
+  });
+  unbound('[data-summary-sort]').forEach((button) => button.addEventListener('click', async () => {
     const key = button.dataset.summarySort;
     ui.tradeSummarySort = { key, dir: ui.tradeSummarySort.key === key ? -ui.tradeSummarySort.dir : -1 };
-    root.innerHTML = await renderTradeModalBody();
-    bindTradeModalEvents(layer);
+    await window._refreshTradeModal?.();
   }));
-  root.querySelectorAll('[data-tab]').forEach((btn) => btn.addEventListener('click', async () => {
+  unbound('[data-tab]').forEach((btn) => btn.addEventListener('click', async () => {
     ui.tradeTab = btn.dataset.tab;
-    root.innerHTML = await renderTradeModalBody();
-    bindTradeModalEvents(layer);
+    await window._refreshTradeModal?.();
   }));
-  root.querySelectorAll('[data-filter]').forEach((el) => {
+  unbound('[data-filter]').forEach((el) => {
     el.addEventListener('change', () => {
       ui.tradeFilter[el.dataset.filter] = el.value;
       ui.tradePage = 1;
@@ -1034,12 +1056,12 @@ function bindTradeModalEvents(layer) {
       }
     });
   });
-  $('#filter-reset', layer)?.addEventListener('click', () => {
+  unbound('#filter-reset')[0]?.addEventListener('click', () => {
     ui.tradeFilter = { symbol: '', type: 'all', assetType: 'all', otherCategory: '', start: '', end: '' };
     ui.tradePage = 1;
     window._refreshTradeModal?.();
   });
-  root.querySelectorAll('[data-page]').forEach((btn) => btn.addEventListener('click', () => {
+  unbound('[data-page]').forEach((btn) => btn.addEventListener('click', () => {
     const v = btn.dataset.page;
     const all = filteredTrades();
     const pages = Math.max(1, Math.ceil(all.length / ui.tradePageSize));
@@ -1048,16 +1070,16 @@ function bindTradeModalEvents(layer) {
     else ui.tradePage = Number(v);
     window._refreshTradeModal?.();
   }));
-  $('#page-size', layer)?.addEventListener('change', (e) => {
+  unbound('#page-size')[0]?.addEventListener('change', (e) => {
     ui.tradePageSize = Number(e.target.value);
     ui.tradePage = 1;
     window._refreshTradeModal?.();
   });
-  root.querySelectorAll('[data-edit]').forEach((btn) => btn.addEventListener('click', () => {
+  unbound('[data-edit]').forEach((btn) => btn.addEventListener('click', () => {
     const trade = state.trades.find((t) => t.id === btn.dataset.edit);
     if (trade) openTradeModal(trade);
   }));
-  root.querySelectorAll('[data-del]').forEach((btn) => btn.addEventListener('click', async () => {
+  unbound('[data-del]').forEach((btn) => btn.addEventListener('click', async () => {
     const ok = window.portalDialog?.confirm
       ? await window.portalDialog.confirm('确定删除这条交易记录？', { title: '删除确认', danger: true, okText: '删除' })
       : confirm('确定删除？');
@@ -1070,9 +1092,9 @@ function bindTradeModalEvents(layer) {
       toastErr(err.message);
     }
   }));
-  $('#modal-add-other', layer)?.addEventListener('click', () => { openTradeModal({ type: 'other' }); });
-  $('#modal-import', layer)?.addEventListener('click', () => { openImportModal(); });
-  $('#modal-export', layer)?.addEventListener('click', () => {
+  unbound('#modal-add-other')[0]?.addEventListener('click', () => { openTradeModal({ type: 'other' }); });
+  unbound('#modal-import')[0]?.addEventListener('click', () => { openImportModal(); });
+  unbound('#modal-export')[0]?.addEventListener('click', () => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(ui.tradeFilter)) {
       if (ui.tradeTab === 'summary' && k === 'type') continue;
