@@ -331,6 +331,7 @@ app.get('/api/trades/summary', (req, res) => {
     usdCnyRate: data.usdCnyRate,
     quotes: data.quotes,
     assetType: req.query.assetType,
+    otherCategory: req.query.otherCategory,
     symbol: req.query.symbol
   }));
 });

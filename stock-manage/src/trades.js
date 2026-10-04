@@ -261,7 +261,6 @@ export function computeSymbolSummaries(trades, options = {}) {
     if (options.symbol && !normalizeSymbol(t.symbol).includes(normalizeSymbol(options.symbol))) continue;
     symbolsInWindow.add(normalizeSymbol(t.symbol));
   }
-  if (!symbolsInWindow.size) return [];
 
   const bySym = new Map();
   for (const t of trades) {
@@ -322,6 +321,7 @@ export function computeSymbolSummaries(trades, options = {}) {
       symbol,
       name,
       assetType: tradeAssetType({ symbol }),
+      otherAmount: 0,
       totalBuyAmount: roundMoney(totalBuy),
       totalSellAmount: roundMoney(totalSell),
       totalCommission: roundMoney(totalCommission),
@@ -334,7 +334,32 @@ export function computeSymbolSummaries(trades, options = {}) {
         ? 'missing-buy-cost' : soldCost <= 0 ? 'no-sold-cost' : null
     });
   }
-  out.sort((a, b) => a.symbol.localeCompare(b.symbol));
+  const otherGroups = new Map();
+  for (const trade of trades) {
+    if (trade.type !== 'other') continue;
+    if (options.assetType && !['all', 'other'].includes(options.assetType)) continue;
+    const d = dateKey(trade);
+    if (!d || (startDate && d < startDate) || (endDate && d > endDate)) continue;
+    const symbol = normalizeSymbol(trade.symbol);
+    if (options.symbol && !symbol.includes(normalizeSymbol(options.symbol))) continue;
+    const category = String(trade.other_category || '').trim() || '未分类收支';
+    if (options.otherCategory && !category.includes(options.otherCategory)) continue;
+    const key = JSON.stringify([symbol, category]);
+    if (!otherGroups.has(key)) otherGroups.set(key, { symbol, name: category, assetType: 'other',
+      otherCategory: category, otherAmount: 0, totalBuyAmount: 0, totalSellAmount: 0,
+      totalCommission: 0, fifoRealizedGross: 0, soldCostAmount: 0,
+      netPnlRate: null, pnlRateUnavailableReason: 'other-income' });
+    const row = otherGroups.get(key);
+    row.otherAmount += toUsd(trade.total_amount || 0, tradeCurrency(trade), rate);
+    row.totalCommission += toUsd(trade.commission || 0, tradeCurrency(trade), rate);
+  }
+  for (const row of otherGroups.values()) {
+    row.netPnl = roundMoney(row.otherAmount - row.totalCommission);
+    row.otherAmount = roundMoney(row.otherAmount);
+    row.totalCommission = roundMoney(row.totalCommission);
+    out.push(row);
+  }
+  out.sort((a, b) => a.symbol.localeCompare(b.symbol) || a.name.localeCompare(b.name));
   return out;
 }
 

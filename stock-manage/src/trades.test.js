@@ -57,6 +57,30 @@ test('summary asset filters preserve historical FIFO cost and combine with symbo
   assert.deepEqual(computeSymbolSummaries(trades, { ...options, assetType: 'other' }), []);
 });
 
+test('summary includes signed other receipts by symbol/category with dates, currencies and fees', () => {
+  const other = (id, category, amount, patch = {}) => ({ id, type: 'other', symbol: 'AAPL',
+    other_category: category, total_amount: amount, commission: 0, currency: 'USD',
+    trade_date: '2026-09-10T12:00:00Z', ...patch });
+  const trades = [summaryTrade('buy', 1, 100, '01'),
+    other('div1', '股息', 10), other('div2', '股息', 7, { currency: 'CNY', commission: 0.7 }),
+    other('fee', '管理费', -3), other('old', '股息', 999, { trade_date: '2026-09-01T12:00:00Z' })];
+  const opts = { startDate: '2026-09-10', endDate: '2026-09-10', usdCnyRate: 7 };
+  const rows = computeSymbolSummaries(trades, opts);
+  assert.equal(rows.length, 2);
+  const dividend = rows.find((r) => r.otherCategory === '股息');
+  assert.equal(dividend.otherAmount, 11);
+  assert.equal(dividend.netPnl, 10.9);
+  assert.equal(dividend.totalCommission, 0.1);
+  assert.equal(dividend.netPnlRate, null);
+  assert.equal(rows.find((r) => r.otherCategory === '管理费').netPnl, -3);
+  assert.deepEqual(computeSymbolSummaries(trades, { ...opts, assetType: 'other' }), rows);
+  assert.deepEqual(computeSymbolSummaries(trades, { ...opts, assetType: 'stock' }), []);
+  assert.equal(computeSymbolSummaries(trades, { ...opts, otherCategory: '股息' }).length, 1);
+  assert.deepEqual(computeSymbolSummaries(trades, { ...opts, symbol: 'QQQ' }), []);
+  const both = computeSymbolSummaries(trades, { usdCnyRate: 7 });
+  assert.equal(both.filter((r) => r.symbol === 'AAPL').length, 3);
+});
+
 test('summary return matches pre-window buys after pre-window sales', () => {
   const trades = [summaryTrade('buy', 10, 100, '01'), summaryTrade('sell', 5, 110, '02'),
     summaryTrade('sell', 5, 120, '10', { commission: 1 })];

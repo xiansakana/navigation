@@ -857,7 +857,7 @@ function renderTradeFilters(summary = false) {
         <option value="all">全部证券类型</option>
         ${Object.entries(TRADE_ASSET_TYPES).map(([key, label]) => `<option value="${key}" ${ui.tradeFilter.assetType === key ? 'selected' : ''}>${label}</option>`).join('')}
       </select>
-      ${summary ? '' : `<input placeholder="其它类别" data-filter="otherCategory" value="${escapeHtml(ui.tradeFilter.otherCategory)}">`}
+      <input placeholder="其它类别" data-filter="otherCategory" value="${escapeHtml(ui.tradeFilter.otherCategory)}">
       <input type="date" data-filter="start" value="${ui.tradeFilter.start}">
       <span class="sm-muted">至</span>
       <input type="date" data-filter="end" value="${ui.tradeFilter.end}">
@@ -924,6 +924,7 @@ async function renderTradeSummaryTab() {
   if (ui.tradeFilter.end) q.set('end', ui.tradeFilter.end);
   if (ui.tradeFilter.assetType !== 'all') q.set('assetType', ui.tradeFilter.assetType);
   if (ui.tradeFilter.symbol) q.set('symbol', ui.tradeFilter.symbol);
+  if (ui.tradeFilter.otherCategory) q.set('otherCategory', ui.tradeFilter.otherCategory);
   const rows = await api('/trades/summary?' + q.toString());
   const summarySort = ui.tradeSummarySort;
   if (summarySort.key) {
@@ -938,8 +939,8 @@ async function renderTradeSummaryTab() {
   }
   const totals = rows.reduce((a, r) => ({
     buy: a.buy + r.totalBuyAmount, sell: a.sell + r.totalSellAmount,
-    fee: a.fee + r.totalCommission, pnl: a.pnl + r.netPnl
-  }), { buy: 0, sell: 0, fee: 0, pnl: 0 });
+    fee: a.fee + r.totalCommission, pnl: a.pnl + r.netPnl, other: a.other + (r.otherAmount || 0)
+  }), { buy: 0, sell: 0, fee: 0, pnl: 0, other: 0 });
 
   return `
     ${renderTradeFilters(true)}
@@ -947,22 +948,22 @@ async function renderTradeSummaryTab() {
       <div class="sm-table-wrap sm-table-wrap--modal">
         <table class="sm-table">
           <thead><tr>
-            <th>类型</th><th>代码</th><th>名称</th><th>总买入</th><th>总卖出</th><th>总费用</th>
+            <th>类型</th><th>代码</th><th>名称</th><th>总买入</th><th>总卖出</th><th>其它收支</th><th>总费用</th>
             ${[['netPnl', '盈亏金额'], ['netPnlRate', '盈亏比例']].map(([key, label]) => `<th aria-sort="${summarySort.key === key ? (summarySort.dir === 1 ? 'ascending' : 'descending') : 'none'}"><button type="button" class="btn link" data-summary-sort="${key}" title="点击切换升序或降序">${label}${sortMark(summarySort, key)}</button></th>`).join('')}
           </tr></thead>
           <tbody>${rows.length ? rows.map((r) => `
             <tr>
               <td>${TRADE_ASSET_TYPES[r.assetType || tradeAssetType(r)]}</td><td>${escapeHtml(r.symbol)}</td><td>${escapeHtml(r.name || '—')}</td><td>${fmtUsd(r.totalBuyAmount)}</td><td>${fmtUsd(r.totalSellAmount)}</td>
-              <td>${fmtCommission(r.totalCommission)}</td><td class="${cls(r.netPnl)}">${maskPnlValue(fmtUsdSigned(r.netPnl))}</td>
-              <td title="${r.pnlRateUnavailableReason === 'missing-buy-cost' ? '卖出数量缺少对应买入记录，无法确定完整成本' : r.pnlRateUnavailableReason === 'no-sold-cost' ? '尚无可计算比例的卖出成本' : '净盈亏 ÷ 按 FIFO 匹配的卖出部分买入成本'}">${r.netPnlRate == null ? '—' : maskPnlValue(fmtPct(r.netPnlRate))}</td>
-            </tr>`).join('') : `<tr><td colspan="8" class="empty">暂无数据</td></tr>`}
+              <td>${r.assetType === 'other' ? maskPnlValue(fmtUsdSigned(r.otherAmount)) : '—'}</td><td>${fmtCommission(r.totalCommission)}</td><td class="${cls(r.netPnl)}">${maskPnlValue(fmtUsdSigned(r.netPnl))}</td>
+              <td title="${r.assetType === 'other' ? '其它收支没有买入成本，不计算盈亏比例' : r.pnlRateUnavailableReason === 'missing-buy-cost' ? '卖出数量缺少对应买入记录，无法确定完整成本' : r.pnlRateUnavailableReason === 'no-sold-cost' ? '尚无可计算比例的卖出成本' : '净盈亏 ÷ 按 FIFO 匹配的卖出部分买入成本'}">${r.netPnlRate == null ? '—' : maskPnlValue(fmtPct(r.netPnlRate))}</td>
+            </tr>`).join('') : `<tr><td colspan="9" class="empty">暂无数据</td></tr>`}
           <tr class="sm-total-row">
             <td>合计</td><td>—</td><td>—</td><td>${fmtUsd(totals.buy)}</td><td>${fmtUsd(totals.sell)}</td>
-            <td>${fmtCommission(totals.fee)}</td><td class="${cls(totals.pnl)}">${maskPnlValue(fmtUsdSigned(totals.pnl))}</td><td>—</td>
+            <td>${maskPnlValue(fmtUsdSigned(totals.other))}</td><td>${fmtCommission(totals.fee)}</td><td class="${cls(totals.pnl)}">${maskPnlValue(fmtUsdSigned(totals.pnl))}</td><td>—</td>
           </tr></tbody>
         </table>
       </div>
-      <p class="hint">不含「其它」类交易；盈亏按 FIFO 计算。盈亏比例 = 净盈亏 ÷ 卖出部分的买入成本（可匹配区间前买入）；净盈亏扣除查询区间内手续费。无卖出成本或缺少买入记录时显示「—」。</p>
+      <p class="hint">其它收支按代码和类别汇总，收入为正、支出为负，扣除手续费后计入净盈亏；金额统一折算为美元。股票和期权盈亏按 FIFO 计算。盈亏比例 = 净盈亏 ÷ 卖出部分的买入成本（可匹配区间前买入）；净盈亏扣除查询区间内手续费。无卖出成本或缺少买入记录时显示「—」。</p>
     </div>`;
 }
 
@@ -1074,7 +1075,7 @@ function bindTradeModalEvents(layer) {
   $('#modal-export', layer)?.addEventListener('click', () => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(ui.tradeFilter)) {
-      if (ui.tradeTab === 'summary' && ['type', 'otherCategory'].includes(k)) continue;
+      if (ui.tradeTab === 'summary' && k === 'type') continue;
       if (v && v !== 'all') q.set(k, v);
     }
     window.open('./api/trades/export?' + q.toString(), '_blank');
