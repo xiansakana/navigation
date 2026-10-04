@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/portal.css?v=blog-unified-1">
     <link rel="stylesheet" href="/experience.css?v=blog-media-2">
     <link rel="stylesheet" href="/blog-media.css?v=blog-full-width-1">
+    <link rel="stylesheet" href="/blog-social.css?v=blog-social-1">
 </head>
 <body class="portal-experience has-navbar portal-layout-enabled dashboard-page">
     <header class="navbar">
@@ -39,36 +40,44 @@
     </div>
     <main class="grid" id="service-grid"></main>
     <section class="blog-section hidden" id="blog-section" aria-label="博客动态">
+      <div class="blog-layout">
+       <div class="blog-timeline">
         <div class="blog-heading">
-            <div><span class="blog-eyebrow">BLOG / MOMENTS</span><h2>博客动态</h2><p>记录想法、进展与生活片段</p></div>
+            <div><h2>博客动态</h2><p>记录想法，分享此刻。</p></div>
         </div>
         <form class="blog-composer hidden" id="blog-composer">
             <label for="blog-content">写点什么</label>
             <div id="blog-content"></div>
+            <details class="blog-compose-options"><summary>标签、位置与可见范围</summary>
             <div id="blog-tags"></div>
             <div id="blog-location"></div>
             <div id="blog-visibility"></div>
+            </details>
             <div class="blog-image-preview" id="blog-preview"></div>
             <div class="blog-upload-row">
                 <label class="btn ghost blog-upload-label" for="blog-images">📷 添加图片</label>
                 <input id="blog-images" type="file" accept="image/*,.heic,.heif" multiple hidden>
                 <label class="btn ghost blog-upload-label" for="blog-videos">🎬 添加视频</label>
                 <input id="blog-videos" type="file" accept="video/mp4,video/webm,video/quicktime,.mov" multiple hidden>
-                <span>图片统一转为 JPG 存入 B2；视频支持 MP4、WebM、MOV，不设 50MB 大小限制。媒体链接可被持有链接的人访问。</span>
+                <span>图片与视频可以混合发布，左右滑动查看。</span>
             </div>
             <p class="blog-upload-hint">视频将自动压缩为 MP4，发布和编辑均显示上传与压缩进度。</p>
             <div class="blog-composer-footer"><span id="blog-upload-status" role="status"></span><span id="blog-count">0 / 10000</span><button class="btn primary" type="submit" id="blog-submit">发布动态</button></div>
         </form>
-        <div class="blog-search-bar">
-            <label for="blog-search">搜索博客<input id="blog-search" type="search" maxlength="200" autocomplete="off" placeholder="搜索正文、作者、标签或地址…" aria-controls="blog-feed" aria-describedby="blog-search-status"></label>
-            <span id="blog-search-status" role="status">输入关键词搜索，清空可查看全部动态</span>
-        </div>
-        <div class="blog-tag-filter" id="blog-tag-filter" aria-label="按标签筛选"></div>
         <div class="blog-feed" id="blog-feed" aria-live="polite"></div>
         <div class="blog-loading hidden" id="blog-loading" role="status">
             <span class="blog-spinner" aria-hidden="true"></span><span>正在加载博客…</span>
         </div>
         <button type="button" class="btn ghost blog-more hidden" id="blog-more">加载更多</button>
+       </div>
+       <aside class="blog-sidebar" aria-label="博客搜索与标签">
+        <div class="blog-search-bar">
+            <label for="blog-search">搜索博客<input id="blog-search" type="search" maxlength="200" autocomplete="off" placeholder="搜索正文、作者、标签或地址…" aria-controls="blog-feed" aria-describedby="blog-search-status"></label>
+            <span id="blog-search-status" role="status">输入关键词搜索，清空可查看全部动态</span>
+        </div>
+        <div class="blog-tag-filter" id="blog-tag-filter" aria-label="按标签筛选"></div>
+       </aside>
+      </div>
     </section>
     <script src="/theme.js"></script>
     <script src="/layout.js?v=0615296"></script>
@@ -79,11 +88,11 @@
     <script src="/vendor/purify.js"></script>
     <script src="/blog-rich-editor.js?v=blog-unified-1"></script>
     <script src="/blog-widgets.js?v=blog-media-2"></script>
-    <script src="/blog-gallery.js?v=blog-image-cache-1"></script>
+    <script src="/blog-gallery.js?v=blog-social-1"></script>
     <script src="/blog-progress.js?v=blog-upload-layout-1"></script>
     <script src="/blog-editor.js?v=blog-unified-1"></script>
     <script src="/blog-visibility.js?v=blog-manager-visibility-1"></script>
     <script src="/blog-upload.js?v=blog-performance-1"></script>
-    <script src="/blog.js?v=blog-manager-visibility-1"></script>
+    <script src="/blog.js?v=blog-social-1"></script>
 </body>
 </html>

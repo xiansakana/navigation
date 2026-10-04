@@ -161,18 +161,19 @@
             var gallery = document.createElement('div'); gallery.className = 'blog-post-images';
             window.renderBlogGallery(gallery, items); main.appendChild(gallery);
         }
+        var footer = document.createElement('div'); footer.className = 'blog-post-footer'; main.appendChild(footer);
         if (state.canViewComments) {
             var comments = document.createElement('div'); comments.className = 'blog-comments';
             var toggle = actionButton('评论 (' + (post.commentCount || 0) + ')', 'comments', post.id);
             toggle.setAttribute('aria-expanded', 'false');
             var content = document.createElement('div'); content.className = 'blog-comments-content'; content.hidden = true;
-            comments.append(toggle, content); main.appendChild(comments);
+            footer.appendChild(toggle); comments.appendChild(content); main.appendChild(comments);
         }
         if (state.canManage || (state.canPost && post.authorId === state.userId)) {
             var actions = document.createElement('div');
             actions.className = 'blog-actions';
             actions.append(actionButton('编辑', 'edit', post.id), actionButton('删除', 'delete', post.id));
-            main.append(actions);
+            footer.append(actions);
         }
         article.append(avatar, main);
         return article;
@@ -366,10 +367,10 @@
     }
 
     var commentDrafts = new Map();
-    async function renderComments(article, before) {
-        var id = article.dataset.id, panel = article.querySelector('.blog-comments-content');
+    async function renderComments(article, before, detailPanel) {
+        var id = article.dataset.id, panel = detailPanel || article.querySelector('.blog-comments-content');
         var toggle = article.querySelector('[data-action="comments"]');
-        panel.hidden = false; toggle.setAttribute('aria-expanded', 'true'); toggle.disabled = true;
+        panel.hidden = false; if (!detailPanel) toggle.setAttribute('aria-expanded', 'true'); toggle.disabled = true;
         var indicator = document.createElement('p'); indicator.className = 'blog-comment-status'; indicator.textContent = '正在加载评论…'; indicator.setAttribute('role', 'status'); panel.appendChild(indicator);
         try {
             var data = await request('posts/' + id + '/comments' + (before ? '?before=' + before : ''));
@@ -385,7 +386,7 @@
                     remove.addEventListener('click', async function() {
                         if (!confirm('确定删除这条评论吗？')) return;
                         remove.disabled = true;
-                        try { await request('comments/' + comment.id, { method: 'DELETE' }); await renderComments(article); }
+                        try { await request('comments/' + comment.id, { method: 'DELETE' }); await renderComments(article, null, detailPanel); }
                         catch (error) { window.portalToast?.error(error.message); remove.disabled = false; }
                     }); meta.appendChild(remove);
                 }
@@ -396,7 +397,7 @@
             });
             if (data.next) {
                 var moreComments = document.createElement('button'); moreComments.type = 'button'; moreComments.className = 'blog-action'; moreComments.textContent = '加载更早的评论'; moreComments.dataset.commentMore = 'true';
-                moreComments.addEventListener('click', function() { moreComments.disabled = true; renderComments(article, data.next); }); panel.appendChild(moreComments);
+                moreComments.addEventListener('click', function() { moreComments.disabled = true; renderComments(article, data.next, detailPanel); }); panel.appendChild(moreComments);
             }
             if (!panel.querySelector('.blog-comment')) { var empty = document.createElement('p'); empty.textContent = '还没有评论，聊聊你的想法。'; panel.appendChild(empty); }
             if (state.canComment && !panel.querySelector('form')) {
@@ -408,7 +409,7 @@
                 form.addEventListener('submit', async function(event) {
                     event.preventDefault(); if (!input.value.trim()) return;
                     input.disabled = submit.disabled = true;
-                    try { await request('posts/' + id + '/comments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: input.value }) }); commentDrafts.delete(id); await renderComments(article); }
+                    try { await request('posts/' + id + '/comments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: input.value }) }); commentDrafts.delete(id); await renderComments(article, null, detailPanel); }
                     catch (error) { window.portalToast?.error(error.message); input.disabled = submit.disabled = false; }
                 });
             }
@@ -416,6 +417,7 @@
         } catch (error) { indicator.textContent = '评论加载失败：' + error.message; window.portalToast?.error(error.message); }
         finally { if (indicator.textContent === '正在加载评论…') indicator.remove(); toggle.disabled = false; }
     }
+    window.renderBlogDetailComments = function(article, panel) { return renderComments(article, null, panel); };
     feed.addEventListener('click', function(event) {
         var toggle = event.target.closest('[data-action="comments"]'); if (!toggle) return;
         var article = toggle.closest('.blog-post'), panel = article.querySelector('.blog-comments-content');
@@ -478,7 +480,7 @@
                 tools.append(label, chooser);
             });
         var actions = article.querySelector('.blog-actions');
-        actions.before(tools);
+        article.querySelector('.blog-post-footer').before(tools);
         actions.replaceChildren(actionButton('保存', 'save', post.id), actionButton('取消', 'cancel', post.id));
         renderEditPreview(article);
         state.editing.editor.focus();
@@ -568,7 +570,7 @@
     setInterval(function() {
         var now = Date.now(), expired = false;
         state.posts.forEach(function(post, id) {
-            if ((state.isGuest || post.authorId !== state.userId) && post.visibility?.endsAt && Date.parse(post.visibility.endsAt) <= now) {
+            if (!state.canManage && (state.isGuest || post.authorId !== state.userId) && post.visibility?.endsAt && Date.parse(post.visibility.endsAt) <= now) {
                 feed.querySelector('[data-id="' + id + '"]')?.remove(); state.posts.delete(id); expired = true;
             }
         });
@@ -577,7 +579,7 @@
             load(true);
         }
     }, 1000);
-    setInterval(function() { if (!document.hidden && !state.editing && !feed.querySelector('.blog-comments-content:not([hidden])') && section.classList.contains('hidden') === false) load(true); }, 60000);
-    document.addEventListener('visibilitychange', function() { if (!document.hidden && !state.editing && !state.saving && !feed.querySelector('.blog-comments-content:not([hidden])') && !section.classList.contains('hidden')) load(true); });
+    setInterval(function() { if (!document.hidden && !state.editing && !document.querySelector('.blog-media-viewer[open]') && !feed.querySelector('.blog-comments-content:not([hidden])') && section.classList.contains('hidden') === false) load(true); }, 60000);
+    document.addEventListener('visibilitychange', function() { if (!document.hidden && !state.editing && !state.saving && !document.querySelector('.blog-media-viewer[open]') && !feed.querySelector('.blog-comments-content:not([hidden])') && !section.classList.contains('hidden')) load(true); });
     initialize();
 })();

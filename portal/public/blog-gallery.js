@@ -6,8 +6,15 @@
     var stage = document.createElement('div'); stage.className = 'blog-viewer-stage';
     var details = document.createElement('aside'); details.className = 'blog-viewer-details'; details.setAttribute('aria-label', '动态详情');
     var items = [], index = 0, owner, touch, previousOverflow;
+    var icons = {
+        '上一项': 'M15 18l-6-6 6-6', '下一项': 'M9 18l6-6-6-6', '关闭预览': 'M6 6l12 12M18 6L6 18',
+        '放大 / 适应': 'M21 21l-5-5M11 8v6M8 11h6M18 11a7 7 0 1 1-14 0 7 7 0 0 1 14 0',
+        '移除此媒体': 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7',
+        '动态详情与评论': 'M21 11a9 9 0 0 1-9 9H3l2-5a9 9 0 1 1 16-4'
+    };
     function button(label, action) {
-        var control = document.createElement('button'); control.type = 'button'; control.textContent = label;
+        var control = document.createElement('button'); control.type = 'button'; control.setAttribute('aria-label', label); control.title = label;
+        control.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + icons[label] + '"></path></svg>';
         control.addEventListener('click', action); controls.appendChild(control); return control;
     }
     var previous = button('上一项', function() { show(index - 1); });
@@ -16,6 +23,7 @@
     var next = button('下一项', function() { show(index + 1); });
     next.className = 'blog-viewer-next';
     var zoom = button('放大 / 适应', function() { stage.querySelector('img')?.classList.toggle('zoomed'); });
+    zoom.className = 'blog-viewer-zoom';
     var remove = button('移除此媒体', function() {
         var action = items[index].removeAction;
         if (!action || !owner) return;
@@ -23,6 +31,10 @@
         Object.keys(action).forEach(function(key) { trigger.dataset[key] = action[key]; });
         owner.appendChild(trigger); trigger.click(); trigger.remove(); dialog.close();
     });
+    remove.className = 'blog-viewer-remove';
+    var detailToggle = button('动态详情与评论', function() {
+        var opened = dialog.classList.toggle('details-open'); detailToggle.setAttribute('aria-expanded', String(opened));
+    }); detailToggle.className = 'blog-viewer-detail-toggle'; detailToggle.setAttribute('aria-expanded', 'false');
     var close = button('关闭预览', function() { dialog.close(); }); close.className = 'blog-viewer-close';
     dialog.append(controls, stage, details); document.body.appendChild(dialog);
     function stopVideo() { stage.querySelectorAll('video').forEach(function(video) { video.pause(); video.removeAttribute('src'); video.load(); }); }
@@ -57,8 +69,14 @@
                 copy.querySelectorAll('button').forEach(function(control) { var text = document.createElement('span'); text.textContent = control.textContent; control.replaceWith(text); });
                 details.appendChild(copy);
             });
+            if (post.querySelector('[data-action="comments"]') && window.renderBlogDetailComments) {
+                var heading = document.createElement('h3'); heading.textContent = '评论';
+                var commentPanel = document.createElement('div'); commentPanel.className = 'blog-viewer-comments';
+                details.append(heading, commentPanel); window.renderBlogDetailComments(post, commentPanel);
+            }
         }
         details.hidden = !details.childElementCount;
+        detailToggle.hidden = details.hidden;
         document.querySelectorAll('.blog-media-strip video').forEach(function(video) { video.pause(); });
         if (!dialog.open) previousOverflow = document.body.style.overflow;
         document.body.style.overflow = 'hidden';
@@ -124,7 +142,7 @@
         if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) show(index + (dx < 0 ? 1 : -1));
     }, { passive: true });
     dialog.addEventListener('click', function(event) { if (event.target === dialog) dialog.close(); });
-    dialog.addEventListener('close', function() { stopVideo(); stage.replaceChildren(); stage.style.backgroundImage = ''; details.replaceChildren(); document.body.style.overflow = previousOverflow || ''; items = []; owner = null; });
+    dialog.addEventListener('close', function() { stopVideo(); stage.replaceChildren(); stage.style.backgroundImage = ''; details.replaceChildren(); dialog.classList.remove('details-open'); detailToggle.setAttribute('aria-expanded', 'false'); document.body.style.overflow = previousOverflow || ''; items = []; owner = null; });
     document.addEventListener('click', function(event) {
         var target = event.target.closest('.blog-post-content img, .blog-rich-editor img');
         if (!target || target.closest('.blog-media-viewer')) return;
