@@ -594,12 +594,19 @@ body.has-navbar {
 .sm-modal--trade .sm-table-wrap--modal .sm-table td {
     white-space: normal;
     overflow-wrap: anywhere;
-    padding: 10px 8px;
+    padding: 10px 4px;
     vertical-align: top;
 }
 
 .sm-modal--trade .sm-trade-name {
     width: 18%;
+}
+
+.sm-modal--trade .sm-table .btn.link {
+    max-width: 100%;
+    padding: 4px 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .sm-modal--trade .sm-trade-filters {
