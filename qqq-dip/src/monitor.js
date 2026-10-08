@@ -2,6 +2,7 @@ import { evaluate, applyRoundFromEval, newAlertKeys, buildBuyPreview } from './p
 import { marketStatus, isOpenSummaryTime, isRth } from './market-hours.js';
 import { appendMarketSnapshot } from './notify.js';
 import { publishBusinessEvent } from '../../shared/business-events.js';
+import { withDeadline } from './deadline.js';
 
 const SYMBOLS = ['QQQ', 'TQQQ', 'SOXL', 'SPY'];
 
@@ -11,7 +12,7 @@ function alertMarket(ev, alert) {
   return { symbol, stats: ev?.[key] || ev?.qqq };
 }
 
-export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
+export function createMonitor({ store, quotes, onSnapshot, refreshFx, stageTimeoutMs = 240000, tickTimeoutMs = 300000 }) {
   let timer = null;
   let running = false;
   let busy = false;
@@ -20,6 +21,20 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
   let checks = 0;
   let lastEval = null;
   let lastMarketStatus = marketStatus();
+  let phase = 'idle';
+  let phaseStartedAt = null;
+  let tickStartedAt = null;
+  let lastCompletedAt = null;
+  let consecutiveFailures = 0;
+  let tickDeadlineAt = 0;
+
+  async function stage(name, operation, limitMs = stageTimeoutMs) {
+    phase = name;
+    phaseStartedAt = new Date().toISOString();
+    const remainingMs = tickDeadlineAt - Date.now();
+    if (remainingMs <= 0) throw new Error(`监控整轮超时，阶段 ${name}`);
+    return withDeadline(operation, Math.min(limitMs, remainingMs), `监控阶段 ${name}`);
+  }
 
   function status() {
     return {
@@ -29,7 +44,12 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
       lastError,
       lastPush,
       market: lastMarketStatus,
-      intervalSeconds: store.getSettings().intervalSeconds
+      intervalSeconds: store.getSettings().intervalSeconds,
+      phase,
+      phaseStartedAt,
+      tickStartedAt,
+      lastCompletedAt,
+      consecutiveFailures
     };
   }
 
@@ -62,19 +82,21 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
   async function tick(opts = {}) {
     if (busy) return lastEval;
     busy = true;
+    tickStartedAt = new Date().toISOString();
+    tickDeadlineAt = Date.now() + tickTimeoutMs;
     lastMarketStatus = marketStatus();
     const rth = isRth();
     try {
-      if (refreshFx) await refreshFx();
+      if (refreshFx) await stage('refreshFx', refreshFx);
       const settings = store.getSettings();
       const cash = store.getCash();
       const round = store.getRound();
-      const bundle = await quotes.getMarketBundle(
+      const bundle = await stage('marketQuotes', () => quotes.getMarketBundle(
         settings.showSpy === false ? ['QQQ', 'TQQQ', 'SOXL'] : SYMBOLS
-      );
+      ));
       const markets = bundle.markets;
       store.setQuotes(markets);
-      const lots = await enrichLots(store.getLots());
+      const lots = await stage('positionQuotes', () => enrichLots(store.getLots()));
       const ev = evaluate({
         cashUsd: cash.cashUsd,
         cashCny: cash.cashCny,
@@ -93,7 +115,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
       });
       ev.quoteErrors = bundle.errors;
       try {
-        ev.suggestedContracts = await suggestLeaps(ev);
+        ev.suggestedContracts = await stage('suggestLeaps', () => suggestLeaps(ev));
       } catch {
         ev.suggestedContracts = [];
       }
@@ -116,7 +138,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
         if (!opts.silent && !quietOffHours) {
           const market = alertMarket(ev, alert);
           const qqText = appendMarketSnapshot(alert.message, market.stats, market.symbol);
-          const qq = await publishBusinessEvent(notify, { source: 'stock', eventKey: alert.event, message: qqText });
+          const qq = await stage('notify', () => publishBusinessEvent(notify, { source: 'stock', eventKey: alert.event, message: qqText }));
           pushResults.push({ key: alert.key, qq });
           store.addAction({
             type: 'notify',
@@ -138,7 +160,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
       const openAlready = !!(nextRound.firedAlerts || {})[openKey];
       if (!opts.silent && isOpenSummaryTime() && !openAlready) {
         const text = ev.primary ? `${ev.primary.title}：${ev.primary.body}` : '抄底监控已开盘';
-        const qq = await publishBusinessEvent(notify, { source: 'stock', eventKey: 'openSummary', message: appendMarketSnapshot(text, ev.qqq, 'QQQ') });
+        const qq = await stage('openSummary', () => publishBusinessEvent(notify, { source: 'stock', eventKey: 'openSummary', message: appendMarketSnapshot(text, ev.qqq, 'QQQ') }));
         nextRound.firedAlerts = { ...(nextRound.firedAlerts || {}), [openKey]: new Date().toISOString() };
         store.addAction({
           type: 'notify',
@@ -158,14 +180,19 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx }) {
       lastError = Object.keys(bundle.errors || {}).length ? bundle.errors : null;
       lastPush = pushResults.length ? { at: new Date().toISOString(), items: pushResults } : lastPush;
       checks += 1;
-      if (onSnapshot) onSnapshot(buildSnapshot());
+      consecutiveFailures = 0;
+      lastCompletedAt = new Date().toISOString();
       return ev;
     } catch (e) {
       lastError = e.message || String(e);
-      if (onSnapshot) onSnapshot(buildSnapshot());
+      consecutiveFailures += 1;
+      console.error('qqq-dip monitor:', JSON.stringify({ phase, tickStartedAt, phaseStartedAt, error: lastError, consecutiveFailures }));
       throw e;
     } finally {
       busy = false;
+      phase = 'idle';
+      phaseStartedAt = null;
+      if (onSnapshot) onSnapshot(buildSnapshot());
     }
   }
 

@@ -1,3 +1,5 @@
+import { withDeadline } from './deadline.js';
+
 const FETCH_TIMEOUT_MS = 12000;
 const FETCH_RETRIES = 2;
 const RETRY_BASE_MS = 500;
@@ -39,7 +41,7 @@ function formatFetchError(err) {
 
 function isRetryable(err, status) {
   if (status === 429 || (status >= 500 && status < 600)) return true;
-  if (err?.name === 'AbortError' || err?.code === 'ABORT_ERR') return true;
+  if (err?.name === 'AbortError' || err?.name === 'TimeoutError' || err?.code === 'ABORT_ERR') return true;
   const blob = `${err?.message || ''} ${err?.cause?.code || ''} ${err?.cause?.message || ''} ${err?.code || ''}`;
   return /fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|UND_ERR_|socket|network|timeout|aborted/i.test(blob);
 }
@@ -50,7 +52,7 @@ async function fetchJson(url, headers = {}) {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
     try {
-      const res = await fetch(url, { signal: ac.signal, headers });
+      const res = await withDeadline(() => fetch(url, { signal: ac.signal, headers }), FETCH_TIMEOUT_MS, `行情请求 ${new URL(url).hostname}`, () => ac.abort());
       if (!res.ok) {
         const err = new Error(`HTTP ${res.status}`);
         err.status = res.status;
@@ -64,7 +66,7 @@ async function fetchJson(url, headers = {}) {
         }
         throw err;
       }
-      return await res.json();
+      return await withDeadline(() => res.json(), FETCH_TIMEOUT_MS, '行情响应解析', () => ac.abort());
     } catch (e) {
       lastErr = e;
       if (attempt < FETCH_RETRIES && isRetryable(e, e.status)) {
@@ -88,7 +90,7 @@ async function fetchText(url, headers = {}, encoding = 'utf-8') {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
     try {
-      const res = await fetch(url, { signal: ac.signal, headers });
+      const res = await withDeadline(() => fetch(url, { signal: ac.signal, headers }), FETCH_TIMEOUT_MS, `行情请求 ${new URL(url).hostname}`, () => ac.abort());
       if (!res.ok) {
         const err = new Error(`HTTP ${res.status}`);
         err.status = res.status;
@@ -99,7 +101,7 @@ async function fetchText(url, headers = {}, encoding = 'utf-8') {
         }
         throw err;
       }
-      const buf = Buffer.from(await res.arrayBuffer());
+      const buf = Buffer.from(await withDeadline(() => res.arrayBuffer(), FETCH_TIMEOUT_MS, '行情响应读取', () => ac.abort()));
       const enc = String(encoding || 'utf-8').toLowerCase();
       if (enc !== 'utf-8' && enc !== 'utf8') {
         try {
