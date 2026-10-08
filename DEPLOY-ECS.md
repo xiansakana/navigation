@@ -4,6 +4,8 @@
 
 **ECS 路径：** `/opt/navigation`
 
+行情服务连接策略与验收说明见 [quote-network-recovery.md](docs/quote-network-recovery.md)。仅 stock-manage、qqq-dip 启用该策略，部署后核对启动日志、采集请求审计和监控完成时间。
+
 ---
 
 ## 一、本地开发（主流程）

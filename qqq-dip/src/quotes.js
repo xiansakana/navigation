@@ -1,9 +1,4 @@
-import { withDeadline } from './deadline.js';
-
-const FETCH_TIMEOUT_MS = 12000;
-const FETCH_RETRIES = 2;
-const RETRY_BASE_MS = 500;
-const POLYGON_429_BASE_MS = 2000;
+import { fetchQuoteResource } from '../../shared/quote-network.js';
 const CANDLE_CACHE = new Map();
 const QUOTE_CACHE = new Map();
 const QUOTE_CACHE_MS = 30000;
@@ -22,107 +17,12 @@ function toPolygonOptionSymbol(symbol) {
   return `O:${p.underlying}${p.expiration}${p.type}${String(strikeInt).padStart(8, '0')}`;
 }
 
-function formatFetchError(err) {
-  if (err?.name === 'AbortError' || err?.code === 'ABORT_ERR') {
-    return `请求超时 (${FETCH_TIMEOUT_MS / 1000}s)`;
-  }
-  const parts = [];
-  const msg = err?.message ? String(err.message) : '';
-  if (msg && msg !== 'fetch failed') parts.push(msg);
-  const cause = err?.cause;
-  if (cause) {
-    const code = cause.code || cause.errno;
-    const cmsg = cause.message ? String(cause.message) : '';
-    if (code) parts.push(String(code));
-    if (cmsg && cmsg !== msg && cmsg !== 'fetch failed') parts.push(cmsg);
-  }
-  return parts.length ? parts.join(': ') : '网络请求失败';
-}
-
-function isRetryable(err, status) {
-  if (status === 429 || (status >= 500 && status < 600)) return true;
-  if (err?.name === 'AbortError' || err?.name === 'TimeoutError' || err?.code === 'ABORT_ERR') return true;
-  const blob = `${err?.message || ''} ${err?.cause?.code || ''} ${err?.cause?.message || ''} ${err?.code || ''}`;
-  return /fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|UND_ERR_|socket|network|timeout|aborted/i.test(blob);
-}
-
 async function fetchJson(url, headers = {}) {
-  let lastErr;
-  for (let attempt = 0; attempt <= FETCH_RETRIES; attempt++) {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
-    try {
-      const res = await withDeadline(() => fetch(url, { signal: ac.signal, headers }), FETCH_TIMEOUT_MS, `行情请求 ${new URL(url).hostname}`, () => ac.abort());
-      if (!res.ok) {
-        const err = new Error(`HTTP ${res.status}`);
-        err.status = res.status;
-        lastErr = err;
-        if (attempt < FETCH_RETRIES && isRetryable(err, res.status)) {
-          const waitMs = res.status === 429
-            ? POLYGON_429_BASE_MS * (attempt + 1)
-            : RETRY_BASE_MS * (attempt + 1);
-          await new Promise((r) => setTimeout(r, waitMs));
-          continue;
-        }
-        throw err;
-      }
-      return await withDeadline(() => res.json(), FETCH_TIMEOUT_MS, '行情响应解析', () => ac.abort());
-    } catch (e) {
-      lastErr = e;
-      if (attempt < FETCH_RETRIES && isRetryable(e, e.status)) {
-        const waitMs = e.status === 429
-          ? POLYGON_429_BASE_MS * (attempt + 1)
-          : RETRY_BASE_MS * (attempt + 1);
-        await new Promise((r) => setTimeout(r, waitMs));
-        continue;
-      }
-      throw new Error(formatFetchError(e));
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  throw new Error(formatFetchError(lastErr));
+  return fetchQuoteResource(url, { headers, rateLimitDelayMs: 2000 });
 }
 
 async function fetchText(url, headers = {}, encoding = 'utf-8') {
-  let lastErr;
-  for (let attempt = 0; attempt <= FETCH_RETRIES; attempt++) {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
-    try {
-      const res = await withDeadline(() => fetch(url, { signal: ac.signal, headers }), FETCH_TIMEOUT_MS, `行情请求 ${new URL(url).hostname}`, () => ac.abort());
-      if (!res.ok) {
-        const err = new Error(`HTTP ${res.status}`);
-        err.status = res.status;
-        lastErr = err;
-        if (attempt < FETCH_RETRIES && isRetryable(err, res.status)) {
-          await new Promise((r) => setTimeout(r, RETRY_BASE_MS * (attempt + 1)));
-          continue;
-        }
-        throw err;
-      }
-      const buf = Buffer.from(await withDeadline(() => res.arrayBuffer(), FETCH_TIMEOUT_MS, '行情响应读取', () => ac.abort()));
-      const enc = String(encoding || 'utf-8').toLowerCase();
-      if (enc !== 'utf-8' && enc !== 'utf8') {
-        try {
-          return new TextDecoder(enc).decode(buf);
-        } catch {
-          // fall through
-        }
-      }
-      return buf.toString('utf8');
-    } catch (e) {
-      lastErr = e;
-      if (attempt < FETCH_RETRIES && isRetryable(e, e.status)) {
-        await new Promise((r) => setTimeout(r, RETRY_BASE_MS * (attempt + 1)));
-        continue;
-      }
-      throw new Error(formatFetchError(e));
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  throw new Error(formatFetchError(lastErr));
+  return fetchQuoteResource(url, { headers, encoding, json: false });
 }
 
 function mapQuote(sym, q) {

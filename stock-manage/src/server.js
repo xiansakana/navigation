@@ -1,5 +1,6 @@
 import { TRADE_ASSET_TYPES, tradeAssetType } from '../public/js/trade-asset-type.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
+import { configureQuoteNetwork } from '../../shared/quote-network.js';
 import express from 'express';
 import path from 'node:path';
 import XLSX from 'xlsx';
@@ -36,6 +37,7 @@ import { redactPortfolioCash } from './portfolio-visibility.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
+console.info('行情网络策略:', JSON.stringify(configureQuoteNetwork()));
 
 let config;
 try {
