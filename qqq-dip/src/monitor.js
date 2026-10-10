@@ -92,7 +92,8 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, stageTimeo
       const cash = store.getCash();
       const round = store.getRound();
       const bundle = await stage('marketQuotes', () => quotes.getMarketBundle(
-        settings.showSpy === false ? ['QQQ', 'TQQQ', 'SOXL'] : SYMBOLS
+        settings.showSpy === false ? ['QQQ', 'TQQQ', 'SOXL'] : SYMBOLS,
+        { previousVxn: store.getQuotes().VXN }
       ));
       const markets = bundle.markets;
       store.setQuotes(markets);

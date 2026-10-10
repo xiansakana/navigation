@@ -331,7 +331,8 @@ function renderAmmo() {
     <div class="sm-summary-card"><div class="label">右侧剩余</div><div class="value">${maskMoney(fmtUsd(rem?.right))}</div>
       <div class="hint">袋 ${maskMoneyText(fmtUsd(bags?.right))}</div></div>
     <div class="sm-summary-card"><div class="label">VXN</div>
-      <div class="value">${ev?.vxn != null ? ev.vxn.toFixed(2) : '—'}</div>
+      <div class="value">${state.quotes?.VXN?.stale ? Number(state.quotes.VXN.price).toFixed(2) : ev?.vxn != null ? ev.vxn.toFixed(2) : '—'}</div>
+      ${state.quotes?.VXN?.stale ? '<div class="hint">缓存值仅供参考 · 期权门槛暂停判定</div>' : ''}
       <div class="hint">T2≥25 ${ev?.vxnGates?.t2?.ok ? '过' : '未过'} · T3≥32 ${ev?.vxnGates?.t3?.ok ? '过' : '未过'}${state.quotes?.VXN?.asOf ? ` · 收盘 ${state.quotes.VXN.asOf}` : ''}</div></div>
     <div class="sm-summary-card"><div class="label">规则</div>
       <label class="hint"><input type="checkbox" id="opt-vboost" ${state.settings.variant === 'vBoost' ? 'checked' : ''}> V 型加强 55/20/25</label>

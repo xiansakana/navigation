@@ -531,7 +531,7 @@ export function evaluate(input) {
   const tqqq = statsFromMarket(input.tqqq || {});
   const soxl = statsFromMarket(input.soxl || {});
   const spy = statsFromMarket(input.spy || {});
-  const vxnPrice = Number(input.vxn?.price);
+  const vxnPrice = input.vxn?.stale ? NaN : Number(input.vxn?.price);
   const vxn = Number.isFinite(vxnPrice) ? vxnPrice : null;
 
   const recovered = shouldReset(qqq);

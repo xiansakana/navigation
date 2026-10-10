@@ -202,12 +202,13 @@ export function createQuoteService(config) {
   }
 
   async function getVxnFromFred() {
-    const text = await fetchText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=VXNCLS');
+    const from = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const text = await fetchText(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=VXNCLS&cosd=${from}`);
     const lines = text.trim().split(/\r?\n/);
     for (let i = lines.length - 1; i >= 1; i--) {
       const [date, raw] = lines[i].split(',');
       const price = Number(raw);
-      if (date && Number.isFinite(price) && price > 0) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(price) && price > 0) {
         return {
           symbol: 'VXN',
           price,
@@ -225,19 +226,46 @@ export function createQuoteService(config) {
     throw new Error('无有效收盘数据');
   }
 
-  async function getVxn() {
+  let vxnCache = null;
+  let vxnRetryAt = 0;
+  let vxnFailure = '';
+
+  async function getVxn(previous = null) {
+    const now = Date.now();
+    const fallback = vxnCache?.quote || previous;
+    const fallbackDate = Date.parse(fallback?.asOf || fallback?.fetchedAt || '');
+    const usableFallback = Number(fallback?.price) > 0 && Number.isFinite(fallbackDate)
+      && fallbackDate <= now && now - fallbackDate <= 7 * 86400000;
+    if (vxnCache && now - vxnCache.at < 60 * 60 * 1000) return vxnCache.quote;
+    if (usableFallback && now < vxnRetryAt) {
+      return { ...fallback, stale: true, warning: vxnFailure };
+    }
+    const remember = (quote) => {
+      const observedAt = Date.parse(quote.asOf || new Date().toISOString());
+      if (!Number.isFinite(observedAt) || observedAt > Date.now() || Date.now() - observedAt > 7 * 86400000) {
+        throw new Error('VXN 数据日期无效或已超过 7 天');
+      }
+      const value = { ...quote, fetchedAt: new Date().toISOString(), stale: false };
+      vxnCache = { at: Date.now(), quote: value };
+      vxnRetryAt = 0;
+      vxnFailure = '';
+      return value;
+    };
     const errors = [];
     try {
-      return await getVxnFromFred();
+      return remember(await getVxnFromFred());
     } catch (e) {
       errors.push(`FRED: ${e.message}`);
     }
     try {
       const q = await getYahooQuote('^VXN');
-      return { ...q, symbol: 'VXN', source: 'yahoo' };
+      return remember({ ...q, symbol: 'VXN', source: 'yahoo' });
     } catch (e) {
       errors.push(`Yahoo: ${e.message}`);
-      throw new Error(`VXN 不可用（${errors.join('; ')}）`);
+      vxnFailure = `VXN 不可用（${errors.join('; ')}）`;
+      vxnRetryAt = Date.now() + 60000;
+      if (usableFallback) return { ...fallback, stale: true, warning: vxnFailure };
+      throw new Error(vxnFailure);
     }
   }
 
@@ -474,7 +502,7 @@ export function createQuoteService(config) {
     }
   }
 
-  async function getMarketBundle(symbols) {
+  async function getMarketBundle(symbols, { previousVxn = null } = {}) {
     const out = {};
     const errors = {};
     for (const symbol of symbols) {
@@ -488,7 +516,8 @@ export function createQuoteService(config) {
       await new Promise((r) => setTimeout(r, 200));
     }
     try {
-      out.VXN = await getVxn();
+      out.VXN = await getVxn(previousVxn);
+      if (out.VXN.stale) errors.VXN = `${out.VXN.warning}；保留最近有效值，仅供参考`;
     } catch (e) {
       errors.VXN = e.message;
     }
