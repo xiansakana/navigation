@@ -8,9 +8,10 @@ test('FRED uses a recent window and successful VXN responses are cached', async 
   context.after(() => { globalThis.fetch = original; });
   let calls = 0;
   const date = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-  globalThis.fetch = async (url) => {
+  globalThis.fetch = async (url, options) => {
     calls += 1;
     assert.ok(new URL(url).searchParams.has('cosd'));
+    assert.equal(options.headers['User-Agent'], 'curl/8.5.0');
     return { ok: true, arrayBuffer: async () => Buffer.from(`DATE,VXNCLS\n${date},21.98\n`) };
   };
   const quotes = createQuoteService({});

@@ -22,7 +22,12 @@ async function fetchJson(url, headers = {}) {
 }
 
 async function fetchText(url, headers = {}, encoding = 'utf-8') {
-  return fetchQuoteResource(url, { headers, encoding, json: false });
+  // FRED's edge currently stalls Node/browser user agents from ECS, while its
+  // CSV endpoint consistently serves curl-style clients. Limit this workaround
+  // to FRED; keep the shared hard deadline and retries in place.
+  const fredHeaders = new URL(url).hostname === 'fred.stlouisfed.org'
+    ? { 'User-Agent': 'curl/8.5.0' } : {};
+  return fetchQuoteResource(url, { headers: { ...fredHeaders, ...headers }, encoding, json: false });
 }
 
 function mapQuote(sym, q) {
