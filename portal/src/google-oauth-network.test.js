@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchGoogleOAuth } from './google-oauth-network.js';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+import { fetchGoogleOAuth, requestOAuthRelay } from './google-oauth-network.js';
 import worker, { handleRequest } from '../../scripts/google-oauth-relay/worker.js';
 
 test('Google relay preserves form and token headers without changing direct requests', async () => {
@@ -63,4 +65,24 @@ test('relay masks upstream failures and secrets', async () => {
   }), { RELAY_SECRET: 'secret' }, () => { throw new Error('secret-token'); });
   assert.equal(response.status, 502);
   assert.equal((await response.text()).includes('secret-token'), false);
+});
+
+test('relay transport uses IPv4, preserves request body and rejects redirect responses', async () => {
+  const requestImpl = (url, options, callback) => {
+    assert.equal(options.family, 4);
+    assert.equal(url, 'https://oauth.saoyu.fun/token');
+    const request = new EventEmitter();
+    request.end = (body) => {
+      assert.equal(body, 'code=test');
+      const response = new PassThrough();
+      response.statusCode = options.status || 200;
+      callback(response);
+      response.end('{"access_token":"test"}');
+    };
+    return request;
+  };
+  const response = await requestOAuthRelay('https://oauth.saoyu.fun/token', { body: 'code=test' }, requestImpl);
+  assert.deepEqual(await response.json(), { access_token: 'test' });
+  await assert.rejects(requestOAuthRelay('https://oauth.saoyu.fun/token',
+    { body: 'code=test', status: 302 }, requestImpl), /不应重定向/);
 });
