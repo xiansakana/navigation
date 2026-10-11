@@ -5,6 +5,7 @@ const endpoints = new Map([
   ['https://oauth2.googleapis.com/token', '/token'],
   ['https://openidconnect.googleapis.com/v1/userinfo', '/userinfo']
 ]);
+const healthyAddresses = new Map();
 
 export async function requestOAuthRelay(url, options, requestImpl = https.request,
   lookupImpl = (hostname) => dns.promises.lookup(hostname, { all: true, family: 4 })) {
@@ -17,9 +18,23 @@ export async function requestOAuthRelay(url, options, requestImpl = https.reques
   try { addresses = await Promise.race([lookupImpl(new URL(url).hostname), aborted]); }
   finally { signal.removeEventListener('abort', rejectLookup); }
   let lastError;
-  for (const address of [...new Set(addresses.map((item) => item.address))].slice(0, 8)) {
+  const hostname = new URL(url).hostname;
+  const preferred = healthyAddresses.get(hostname);
+  const candidates = [...new Set(addresses.map((item) => item.address))].slice(0, 8);
+  if (preferred) candidates.sort((a, b) => Number(b === preferred) - Number(a === preferred));
+  for (const address of candidates) {
     signal.throwIfAborted();
-    try { return await connectAddress(address); }
+    try {
+      // Some routes finish TLS but stall on HTTP. Check the address with a
+      // credential-free request before handing it a one-use authorization code.
+      const probe = await connectAddress(address, true);
+      if (probe.status !== 401 || (await probe.json()).error !== 'unauthorized') {
+        throw new Error('Google OAuth 转发服务连接检查失败');
+      }
+      if (healthyAddresses.size >= 20) healthyAddresses.clear();
+      healthyAddresses.set(hostname, address);
+      return await connectAddress(address);
+    }
     catch (error) {
       if (error.sent || signal.aborted) throw error;
       lastError = error;
@@ -27,12 +42,14 @@ export async function requestOAuthRelay(url, options, requestImpl = https.reques
   }
   throw lastError || new Error('Google OAuth 转发服务没有 IPv4 地址');
 
-  function connectAddress(address) {
+  function connectAddress(address, probe = false) {
     return new Promise((resolve, reject) => {
       let sent = false;
       let timer;
-      const fail = (error) => { clearTimeout(timer); error.sent = sent; reject(error); };
-      const request = requestImpl(url, { ...options, signal, agent: false, family: 4,
+      const fail = (error) => { clearTimeout(timer); error.sent = sent && !probe; reject(error); };
+      const requestOptions = probe ? { method: 'GET', headers: { Accept: 'application/json' },
+        signal: AbortSignal.any([signal, AbortSignal.timeout(3000)]) } : { ...options, signal };
+      const request = requestImpl(url, { ...requestOptions, agent: false, family: 4,
         lookup: (_hostname, _options, callback) => callback(null, address, 4)
       }, (response) => {
         const chunks = [];
@@ -60,7 +77,7 @@ export async function requestOAuthRelay(url, options, requestImpl = https.reques
       request.on('socket', (socket) => socket.once('secureConnect', () => {
         clearTimeout(timer);
         sent = true;
-        request.end(options.body);
+        request.end(requestOptions.body);
       }));
     });
   }
@@ -79,5 +96,9 @@ export function fetchGoogleOAuth(url, options, config, fetchImpl) {
     headers['X-OAuth-Relay-Secret'] = config.relaySecret;
   }
   const transport = fetchImpl || (config.relayUrl ? requestOAuthRelay : globalThis.fetch);
-  return transport(target, { ...options, headers, redirect: 'error', signal: AbortSignal.timeout(15000) });
+  return Promise.resolve().then(() => transport(target,
+    { ...options, headers, redirect: 'error', signal: AbortSignal.timeout(15000) })).catch((error) => {
+    console.warn('Google OAuth request failed', { endpoint: endpoints.get(url), name: error.name, code: error.code });
+    throw new Error('Google 登录服务连接失败，请重试');
+  });
 }

@@ -86,11 +86,11 @@ test('relay transport uses IPv4, preserves request body and rejects redirect res
     assert.equal(url, 'https://oauth.saoyu.fun/token');
     const request = new EventEmitter();
     request.end = (body) => {
-      assert.equal(body, 'code=test');
+      assert.equal(body, options.method === 'GET' ? undefined : 'code=test');
       const response = new PassThrough();
-      response.statusCode = options.status || 200;
+      response.statusCode = options.method === 'GET' ? 401 : options.status || 200;
       callback(response);
-      response.end('{"access_token":"test"}');
+      response.end(options.method === 'GET' ? '{"error":"unauthorized"}' : '{"access_token":"test"}');
     };
     queueMicrotask(() => {
       const socket = new EventEmitter();
@@ -111,21 +111,24 @@ test('relay retries connection failures but never retries a code after TLS compl
   for (const connected of [false, true]) {
     let attempts = 0;
     let sends = 0;
-    const requestImpl = (_url, _options, callback) => {
+    const requestImpl = (_url, options, callback) => {
       attempts++;
       const attempt = attempts;
       const request = new EventEmitter();
-      request.end = () => { sends++; request.emit('error', new Error('response lost')); };
+      request.end = () => {
+        if (options.method !== 'GET') {
+          sends++;
+          if (connected) { request.emit('error', new Error('response lost')); return; }
+        }
+        const response = new PassThrough();
+        response.statusCode = options.method === 'GET' ? 401 : 200;
+        callback(response);
+        response.end(options.method === 'GET' ? '{"error":"unauthorized"}' : '{}');
+      };
       queueMicrotask(() => {
         if (attempt === 1 && !connected) request.emit('error', new Error('connect failed'));
-        else if (attempt === 1) {
-          const socket = new EventEmitter(); request.emit('socket', socket); socket.emit('secureConnect');
-        } else {
+        else {
           const socket = new EventEmitter(); request.emit('socket', socket);
-          request.end = () => {
-            sends++; const response = new PassThrough(); response.statusCode = 200;
-            callback(response); response.end('{}');
-          };
           socket.emit('secureConnect');
         }
       });
@@ -134,7 +137,7 @@ test('relay retries connection failures but never retries a code after TLS compl
     const operation = requestOAuthRelay('https://relay/token', { body: 'code=test' }, requestImpl, addresses);
     if (connected) await assert.rejects(operation, /response lost/);
     else assert.equal((await operation).status, 200);
-    assert.equal(attempts, connected ? 1 : 2);
+    assert.equal(attempts, connected ? 2 : 3);
     assert.equal(sends, 1);
   }
 });
