@@ -157,6 +157,13 @@ function buildNotificationPermissions() {
 }
 
 var SYSTEM_PERMISSIONS = [
+    { id: 'bookkeeping:view', name: '查看记账明细与统计', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '明细与统计'] },
+    { id: 'bookkeeping:entries:edit', name: '新增、编辑和删除账单', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '明细与统计', '记一笔'] },
+    { id: 'bookkeeping:accounts:view', name: '查看资产账户', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '资产'] },
+    { id: 'bookkeeping:accounts:edit', name: '管理账户及余额调整', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '资产', '管理账户'] },
+    { id: 'bookkeeping:import:edit', name: '预览并导入 iCost 账单', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '导入导出', '导入'] },
+    { id: 'bookkeeping:export:view', name: '导出账单', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '导入导出', '导出'] },
+    { id: 'bookkeeping:settings:edit', name: '设置预算及折算汇率', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '统计', '预算与汇率'] },
     { id: 'service:resources:view', name: '查看资源管理', group: '资源管理', serviceId: 'resources', action: 'view', permissionPath: ['首页', '资源管理'] },
     { id: 'blog:feed:view', name: '查看和搜索博客动态', group: '博客', serviceId: 'blog', feature: 'feed', action: 'view', permissionPath: ['首页', '博客'] },
     { id: 'blog:post:edit', name: '发布和编辑自己的博客（含可见范围、标签与富文本）', group: '博客', serviceId: 'blog', feature: 'post', action: 'edit', permissionPath: ['首页', '博客', '我的文章'] },
@@ -392,6 +399,10 @@ export function buildMenusFromServices(services, overrides) {
         enabled: true
     }, overrideMap.menu_admin || {}));
     menus.push(adminMenu);
+    menus.push(Object.assign({
+        id: 'menu_bookkeeping', title: '记账', description: 'iCost 账单、收支统计与多币种资产账户',
+        icon: '📒', type: 'hub', serviceId: 'bookkeeping', sort: 9970, enabled: true
+    }, overrideMap.menu_bookkeeping || {}, { path: '/bookkeeping/', permission: 'bookkeeping:view', serviceId: 'bookkeeping' }));
     menus.push(normalizeMenuPermission(Object.assign({
         id: 'menu_resources', title: '资源管理', description: '服务器负载、服务状态与资源占用监控',
         icon: '🖥️', type: 'hub', serviceId: 'resources', path: '/resources/',

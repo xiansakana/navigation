@@ -44,6 +44,7 @@ import { getPiclistStatus, savePiclistConfig, restartPiclist } from './piclist-a
 import { handleBlogApi, resumeVideoJobs } from './blog.js';
 import { startThumbnailWorker } from './blog-media-process.js';
 import { createResourceMonitor, canViewResources, handleResourceApi } from './resources.js';
+import { canBookkeep, handleBookkeepingApi } from './bookkeeping.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -158,11 +159,12 @@ function publicServices(userCtx, userAgent) {
     if (!userCtx) return [];
     var rbac = loadRbac(config);
     return getVisibleMenus(rbac, userCtx.permissions)
-        .filter(function(menu) { return menu.id !== 'menu_admin' && !(userCtx.isGuest && menu.serviceId === 'resources'); })
+        .filter(function(menu) { return menu.id !== 'menu_admin' && !(userCtx.isGuest && ['resources', 'bookkeeping'].includes(menu.serviceId)); })
         .map(function(menu) { return menuToService(menu, userAgent); });
 }
 
 async function handleApi(req, res, url, session) {
+    if (url.pathname.startsWith('/api/bookkeeping/')) return handleBookkeepingApi(req, res, url, session, json);
     if (url.pathname === '/api/resources/metrics') {
         return handleResourceApi(req, res, session, resourceMonitor, json);
     }
@@ -559,6 +561,14 @@ var server = http.createServer(async function(req, res) {
             });
         }
         return serveStatic(path.join(PUBLIC_DIR, 'resources', 'index.html'), res);
+    }
+
+    if (['/bookkeeping', '/bookkeeping/', '/bookkeeping/index.html'].includes(path.posix.normalize(url.pathname))) {
+        var bookkeepingSession = requireAuth(req, res, { requireLogin: true });
+        if (!bookkeepingSession) return;
+        res.setHeader('Cache-Control', 'no-store');
+        if (!canBookkeep(bookkeepingSession)) return sendError(req, res, url, 403, '无权访问记账模块');
+        return serveStatic(path.join(PUBLIC_DIR, 'bookkeeping', 'index.html'), res);
     }
 
     var hubPath = '/torn-toolbox';

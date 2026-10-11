@@ -1,0 +1,86 @@
+import crypto from 'node:crypto';
+import { getDatabase } from '../../shared/db/index.js';
+import { hasPermission } from './rbac.js';
+import { createBookkeepingStore, summarize } from './bookkeeping-store.js';
+import { parseIcost, exportIcost } from './bookkeeping-import.js';
+
+const imports = new Map();
+const ttl = 15 * 60 * 1000;
+export function canBookkeep(session, feature = 'view') {
+  return !!session?.userId && !session.isGuest && hasPermission(session.permissions || [], 'bookkeeping:' + feature);
+}
+async function body(req, binary = false) {
+  let size = 0; const chunks = [];
+  for await (const chunk of req) {
+    size += chunk.length; if (size > (binary ? 15 : 2) * 1024 * 1024) throw new Error('请求超过大小限制');
+    chunks.push(chunk);
+  }
+  const data = Buffer.concat(chunks);
+  if (binary) return data;
+  try { return JSON.parse(data.toString('utf8')); } catch { throw new Error('请求体不是合法 JSON'); }
+}
+export async function handleBookkeepingApi(req, res, url, session, json) {
+  res.setHeader('Cache-Control', 'no-store');
+  if (!canBookkeep(session)) return json(res, 403, { ok: false, error: '请登录并获取记账查看权限' });
+  const route = url.pathname.slice('/api/bookkeeping'.length), method = req.method;
+  const permission = route.startsWith('/import') ? 'import:edit' : route === '/export' ? 'export:view' : route.startsWith('/settings') && method !== 'GET' ? 'settings:edit' :
+    route.startsWith('/accounts') ? (method === 'GET' ? 'accounts:view' : 'accounts:edit') : method === 'GET' ? 'view' : 'entries:edit';
+  if (!canBookkeep(session, permission)) return json(res, 403, { ok: false, error: '无权执行此记账操作' });
+  if (!['GET', 'HEAD'].includes(method) && req.headers.origin && req.headers.origin !== new URL(req.url, 'http://' + req.headers.host).origin && req.headers.origin !== 'https://' + req.headers.host) {
+    return json(res, 403, { ok: false, error: '不允许跨站写入' });
+  }
+  const store = createBookkeepingStore(getDatabase()), uid = session.userId;
+  try {
+    if (route === '/state' && method === 'GET') {
+      const entries = store.entries(uid, Object.fromEntries(url.searchParams));
+      const offset = Math.max(0, Math.min(50000, Number(url.searchParams.get('offset')) || 0));
+      const limit = Math.max(1, Math.min(200, Number(url.searchParams.get('limit')) || 100));
+      const all = store.entries(uid);
+      return json(res, 200, { ok: true, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),
+        budgetExpense: url.searchParams.get('month') ? summarize(store.entries(uid, { month: url.searchParams.get('month'), currency: 'CNY' })).totals.CNY?.expense || 0 : null,
+        accounts: canBookkeep(session, 'accounts:view') ? store.accounts(uid) : [], settings: store.settings(uid),
+        books: [...new Set(all.map(e => e.book))], categories: [...new Set(all.map(e => e.category))],
+        months: [...new Set(all.map(e => e.date.slice(0, 7)))].sort().reverse() });
+    }
+    if (route === '/accounts' && method === 'GET') return json(res, 200, { ok: true, accounts: store.accounts(uid) });
+    if (route === '/entries' && method === 'POST') return json(res, 201, { ok: true, id: store.saveEntry(uid, await body(req)) });
+    const entry = /^\/entries\/([a-f0-9]{32})$/.exec(route);
+    if (entry && method === 'PUT') return json(res, 200, { ok: true, id: store.saveEntry(uid, await body(req), entry[1]) });
+    if (entry && method === 'DELETE') { store.removeEntry(uid, entry[1]); return json(res, 200, { ok: true }); }
+    if (route === '/accounts' && method === 'POST') return json(res, 201, { ok: true, id: store.saveAccount(uid, await body(req)) });
+    const account = /^\/accounts\/([a-f0-9]{32})(\/adjust)?$/.exec(route);
+    if (account && method === 'PUT' && !account[2]) return json(res, 200, { ok: true, id: store.saveAccount(uid, await body(req), account[1]) });
+    if (account && method === 'POST' && account[2]) return json(res, 200, { ok: true, id: store.adjust(uid, account[1], await body(req)) });
+    if (account && method === 'DELETE' && !account[2]) { store.removeAccount(uid, account[1]); return json(res, 200, { ok: true }); }
+    if (route === '/settings' && method === 'PUT') return json(res, 200, { ok: true, settings: store.saveSettings(uid, await body(req)) });
+    if (route === '/import/preview' && method === 'POST') {
+      const now = Date.now(); for (const [k, v] of imports) if (now - v.at > ttl) imports.delete(k);
+      if (imports.size >= 12) throw new Error('导入任务过多，请稍后重试');
+      const parsed = await parseIcost(await body(req, true));
+      for (const [k, v] of imports) if (v.uid === uid) imports.delete(k);
+      const token = crypto.randomBytes(24).toString('hex');
+      imports.set(token, { uid, at: now, rows: parsed.rows, errors: parsed.errors });
+      return json(res, 200, { ok: true, token, count: parsed.rows.length, errors: parsed.errors.slice(0, 100), errorCount: parsed.errors.length,
+        warnings: parsed.warnings, summary: summarize(parsed.rows), sample: parsed.rows.slice(0, 8).map(({ raw, sourceKey, ...e }) => e) });
+    }
+    if (route === '/import/confirm' && method === 'POST') {
+      const input = await body(req), pending = imports.get(input.token);
+      if (!pending || pending.uid !== uid || Date.now() - pending.at > ttl) throw new Error('导入预览已过期，请重新选择文件');
+      if (pending.errors.length) throw new Error('存在无效行，请修正文件后重新导入');
+      const names = new Set(store.accounts(uid).map(a => a.name));
+      const createsAccounts = input.accounts?.length || pending.rows.some(r => [r.accountName, r.toAccountName].some(n => n && !names.has(n)));
+      if (createsAccounts && !canBookkeep(session, 'accounts:edit')) return json(res, 403, { ok: false, error: '创建导入账户或账户快照需要账户编辑权限' });
+      const result = store.importRows(uid, pending.rows, input.accounts || []); imports.delete(input.token);
+      return json(res, 200, { ok: true, ...result });
+    }
+    if (route === '/export' && method === 'GET') {
+      const buffer = await exportIcost(store.entries(uid, Object.fromEntries(url.searchParams)));
+      res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="bookkeeping.xlsx"', 'Content-Length': buffer.length }); res.end(buffer); return;
+    }
+    return json(res, 404, { ok: false, error: '记账接口不存在' });
+  } catch (e) {
+    if (e.code?.startsWith('SQLITE_')) { console.error('[bookkeeping]', e.code); return json(res, 500, { ok: false, error: '记账保存失败，请稍后重试' }); }
+    return json(res, 400, { ok: false, error: e.message });
+  }
+}
