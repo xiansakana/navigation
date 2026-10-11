@@ -57,6 +57,7 @@ var STOCK_MANAGE_FEATURES = [
     { feature: 'pnl', name: '查询盈亏', action: 'view', permissionPath: ['持仓', '看板'] },
     { feature: 'pnl-toggle', name: '盈亏显隐', action: 'view', permissionPath: ['持仓', '看板'] },
     { feature: 'trades', name: '交易记录', action: 'view', permissionPath: ['持仓', '交易记录'] },
+    { feature: 'trade-review', name: '交易复盘', action: 'view', permissionPath: ['持仓', '交易记录', '交易复盘'] },
     { feature: 'export', name: '导出交易', action: 'view', permissionPath: ['持仓', '交易记录'] },
     { feature: 'import', name: '导入交易', action: 'edit', permissionPath: ['持仓', '交易记录'] },
     { feature: 'columns', name: '列数据显隐控制', action: 'view', permissionPath: ['持仓', '持仓明细'] },

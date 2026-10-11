@@ -1,4 +1,5 @@
 import { TRADE_ASSET_TYPES, tradeAssetType } from './js/trade-asset-type.js';
+import { renderTradeReview } from './js/trade-review.js';
 import { formatPrice, priceInputValue } from './js/price-format.js';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=20261004-full-history';
@@ -870,7 +871,7 @@ function renderTradeFilters(summary = false) {
     </div>`;
 }
 
-function activeTradeFilterCount(summary = ui.tradeTab === 'summary') {
+function activeTradeFilterCount(summary = ui.tradeTab !== 'list') {
   return Object.entries(ui.tradeFilter)
     .filter(([key]) => key !== 'type' || !summary)
     .filter(([, value]) => value && value !== 'all').length;
@@ -990,14 +991,29 @@ async function renderTradeModalBody() {
     <div class="sm-tabs">
       <button type="button" class="sm-tab ${ui.tradeTab === 'list' ? 'active' : ''}" data-tab="list">明细</button>
       <button type="button" class="sm-tab ${ui.tradeTab === 'summary' ? 'active' : ''}" data-tab="summary">盈亏汇总</button>
+      ${can('trade-review') ? `<button type="button" class="sm-tab ${ui.tradeTab === 'review' ? 'active' : ''}" data-tab="review">交易复盘</button>` : ''}
     </div>
     <div class="sm-modal-toolbar">
       ${can('trade', 'edit') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-add-other">＋ 其它收支</button>' : ''}
       ${can('import', 'edit') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-import">导入</button>' : ''}
       ${can('export') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-export">导出 xlsx</button>' : ''}
     </div>`;
-  const content = ui.tradeTab === 'summary' ? await renderTradeSummaryTab() : renderTradeListTab();
+  const content = ui.tradeTab === 'review' && can('trade-review') ? await renderTradeReviewTab() : ui.tradeTab === 'summary' ? await renderTradeSummaryTab() : renderTradeListTab();
   return `<div class="sm-trade-modal-content">${tabs}${content}</div>`;
+}
+
+async function renderTradeReviewTab() {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(ui.tradeFilter)) {
+    if (key !== 'type' && value && value !== 'all') query.set(key, value);
+  }
+  const filters = renderTradeFilters(true);
+  try {
+    const report = await api('/trades/review?' + query);
+    return `${filters}<div class="sm-trade-modal-scroll sm-review">${renderTradeReview(report, ui.reviewCurrency, pnlVisible)}</div>`;
+  } catch (error) {
+    return `${filters}<div class="sm-trade-modal-scroll"><p role="alert" class="hint">${escapeHtml(error.message)}</p></div>`;
+  }
 }
 
 async function openTradeHistoryModal(symbol = '') {
@@ -1054,6 +1070,23 @@ function bindTradeModalEvents(layer) {
     const filters = button.closest('.sm-trade-filters');
     filters?.classList.toggle('is-open', ui.tradeFilterOpen);
     button.setAttribute('aria-expanded', ui.tradeFilterOpen ? 'true' : 'false');
+  }));
+  unbound('[data-review-currency]').forEach((el) => el.addEventListener('change', () => {
+    ui.reviewCurrency = el.value;
+    window._refreshTradeModal?.();
+  }));
+  unbound('[data-review-range]').forEach((el) => el.addEventListener('click', () => {
+    const range = el.dataset.reviewRange;
+    const now = new Date();
+    ui.tradeFilter.end = range === 'all' ? '' : localDateKey(now);
+    if (range === 'all') ui.tradeFilter.start = '';
+    else if (range === 'year') ui.tradeFilter.start = `${now.getFullYear()}-01-01`;
+    else {
+      now.setDate(now.getDate() - Number(range) + 1);
+      ui.tradeFilter.start = localDateKey(now);
+    }
+    updateTradeFilterToggle(root);
+    window._refreshTradeModal?.();
   }));
   unbound('[data-summary-sort]').forEach((button) => button.addEventListener('click', async () => {
     const key = button.dataset.summarySort;
@@ -1125,7 +1158,7 @@ function bindTradeModalEvents(layer) {
   unbound('#modal-export')[0]?.addEventListener('click', () => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(ui.tradeFilter)) {
-      if (ui.tradeTab === 'summary' && k === 'type') continue;
+      if (ui.tradeTab !== 'list' && k === 'type') continue;
       if (v && v !== 'all') q.set(k, v);
     }
     window.open('./api/trades/export?' + q.toString(), '_blank');

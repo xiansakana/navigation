@@ -14,6 +14,7 @@ import { createYoloCollector, isUsOptionMarketOpen } from './yolo-collector.js';
 import { createQuoteService } from './quotes.js';
 import { parseImportBuffer } from './import-moomoo.js';
 import { normalizeNamedTrade } from './trade-name.js';
+import { computeTradeReview } from './trade-review.js';
 import {
   deriveHoldings,
   computePnl,
@@ -323,6 +324,19 @@ app.get('/api/pnl', (req, res) => {
     endDate: req.query.end || undefined,
     usdCnyRate: data.usdCnyRate
   }));
+});
+
+app.get('/api/trades/review', (req, res) => {
+  if (!requireStockPermission(req, res, 'trade-review') || !requireStockPermission(req, res, 'trades')) return;
+  try {
+    const data = store.read();
+    res.json(computeTradeReview(data.trades, {
+      startDate: req.query.start, endDate: req.query.end,
+      symbol: req.query.symbol, assetType: req.query.assetType, otherCategory: req.query.otherCategory
+    }));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 app.get('/api/trades/summary', (req, res) => {
