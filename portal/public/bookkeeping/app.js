@@ -174,7 +174,7 @@
   $('editor-form').addEventListener('submit',async event=>{
     event.preventDefault(); if($('save-item').disabled)return;
     const opened=editing; $('save-item').disabled=true;
-    if(opened.mode==='entry' && !opened.item.id){await locationCapture?.wait();if(editing!==opened || !$('editor').open)return;}
+    if(opened.mode==='entry'){await locationCapture?.wait();if(editing!==opened || !$('editor').open)return;}
     const input = Object.fromEntries(new FormData(event.target)); const { mode,item } = editing; $('save-item').disabled=true;
     try {
       if (mode==='entry') { if (!input.toAmount) delete input.toAmount; await write('/entries'+(item.id?'/'+item.id:''),input,item.id?'PUT':'POST'); }
