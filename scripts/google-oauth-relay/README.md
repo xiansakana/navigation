@@ -13,7 +13,10 @@ client ID and secret, `redirectUri` set to
 provider only after checking the relay from the production host.
 
 Google Cloud project: `saoyu-navigation`. Consent screen only requests
-`openid email profile`. Publish the OAuth audience for public login. New users
+`openid email profile`. Google's basic-identity scope exception allows users
+outside the test-user list even while the consent screen remains in Testing:
+https://support.google.com/cloud/answer/15549945?hl=en . Publish the audience when
+Google's branding configuration allows it. New users
 retain the Portal's configured default role; Google login does not grant admin.
 
 Keep all credentials out of Git. Updating Worker code must use this checked-in

@@ -1,3 +1,5 @@
+import https from 'node:https';
+
 const endpoints = new Map([
   ['https://oauth2.googleapis.com/token', '/token'],
   ['https://openidconnect.googleapis.com/v1/userinfo', '/userinfo']
@@ -43,5 +45,3 @@ export function fetchGoogleOAuth(url, options, config, fetchImpl) {
   const transport = fetchImpl || (config.relayUrl ? requestOAuthRelay : globalThis.fetch);
   return transport(target, { ...options, headers, redirect: 'error', signal: AbortSignal.timeout(15000) });
 }
-import https from 'node:https';
-
