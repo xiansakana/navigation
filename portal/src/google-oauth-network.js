@@ -45,13 +45,15 @@ export async function requestOAuthRelay(url, options, requestImpl = https.reques
   function connectAddress(address, probe = false) {
     return new Promise((resolve, reject) => {
       let sent = false;
+      let phase = probe ? 'probe-connect' : 'connect';
       let timer;
-      const fail = (error) => { clearTimeout(timer); error.sent = sent && !probe; reject(error); };
+      const fail = (error) => { clearTimeout(timer); error.sent = sent && !probe; error.phase = phase; reject(error); };
       const requestOptions = probe ? { method: 'GET', headers: { Accept: 'application/json' },
         signal: AbortSignal.any([signal, AbortSignal.timeout(3000)]) } : { ...options, signal };
       const request = requestImpl(url, { ...requestOptions, agent: false, family: 4,
         lookup: (_hostname, _options, callback) => callback(null, address, 4)
       }, (response) => {
+        phase = probe ? 'probe-body' : 'body';
         const chunks = [];
         let size = 0;
         response.on('data', (chunk) => {
@@ -76,6 +78,7 @@ export async function requestOAuthRelay(url, options, requestImpl = https.reques
       request.on('error', fail);
       request.on('socket', (socket) => socket.once('secureConnect', () => {
         clearTimeout(timer);
+        phase = probe ? 'probe-response' : 'response';
         sent = true;
         request.end(requestOptions.body);
       }));
@@ -98,7 +101,7 @@ export function fetchGoogleOAuth(url, options, config, fetchImpl) {
   const transport = fetchImpl || (config.relayUrl ? requestOAuthRelay : globalThis.fetch);
   return Promise.resolve().then(() => transport(target,
     { ...options, headers, redirect: 'error', signal: AbortSignal.timeout(15000) })).catch((error) => {
-    console.warn('Google OAuth request failed', { endpoint: endpoints.get(url), name: error.name, code: error.code });
+    console.warn('Google OAuth request failed', { endpoint: endpoints.get(url), phase: error.phase, name: error.name, code: error.code });
     throw new Error('Google 登录服务连接失败，请重试');
   });
 }
