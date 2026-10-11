@@ -1,4 +1,5 @@
 import { tradeAssetType } from '../public/js/trade-asset-type.js';
+import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
 import {
   normalizeSymbol,
   inferCurrency,
@@ -654,7 +655,7 @@ export function normalizeTrade(input) {
       currency: currency === 'CNY' ? 'CNY' : 'USD',
       shares: 1,
       price: 0,
-      total_amount: roundMoney(amt),
+      total_amount: roundMoney(normalizeOtherAmount(cat, amt)),
       commission: roundMoney(Number(input.commission) || 0),
       trade_date: input.trade_date || new Date().toISOString(),
       created_at: input.created_at || new Date().toISOString()

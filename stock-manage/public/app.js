@@ -1,4 +1,5 @@
 import { TRADE_ASSET_TYPES, tradeAssetType } from './js/trade-asset-type.js';
+import { isDividendTax, normalizeOtherAmount } from './js/dividend-tax.js';
 import { renderTradeReview } from './js/trade-review.js';
 import { formatPrice, priceInputValue } from './js/price-format.js';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
@@ -705,7 +706,7 @@ function formToTrade(fd, existing = {}) {
     trade_date: datetimeLocalToIso(fd.get('trade_date')),
     id: existing.id,
     ...(type === 'other'
-      ? { other_category: String(fd.get('other_category') || '').trim(), total_amount: Number(fd.get('total_amount')) }
+      ? { other_category: String(fd.get('other_category') || '').trim(), total_amount: normalizeOtherAmount(fd.get('other_category'), fd.get('total_amount')) }
       : { shares: Number(fd.get('shares')), price: Number(fd.get('price')) })
   };
 }
@@ -722,6 +723,21 @@ function openTradeModal(trade = {}) {
     return trade.id ? '交易已更新' : '交易已保存';
   }, { reload: false });
   bindTradeForm(layer.querySelector('.sm-modal-body'));
+  const category = layer.querySelector('[name="other_category"]');
+  const amount = layer.querySelector('[name="total_amount"]');
+  const taxHint = document.createElement('p');
+  taxHint.className = 'hint';
+  taxHint.textContent = '股息税属于支出，输入正数会自动改为负数。';
+  amount?.closest('label')?.append(taxHint);
+  const syncTaxAmount = () => {
+    const tax = isDividendTax(category?.value);
+    taxHint.hidden = !tax;
+    if (tax && Number(amount?.value) > 0) amount.value = String(-Number(amount.value));
+  };
+  category?.addEventListener('input', syncTaxAmount);
+  amount?.addEventListener('input', syncTaxAmount);
+  amount?.addEventListener('change', syncTaxAmount);
+  syncTaxAmount();
   layer.querySelector('#trade-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
     layer.querySelector('[data-modal-save]')?.click();

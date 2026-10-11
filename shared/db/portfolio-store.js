@@ -1,3 +1,5 @@
+import { correctDividendTaxPortfolio } from '../dividend-tax.js';
+
 const DEFAULT_USD_CNY_RATE = 7.2;
 
 const EMPTY = {
@@ -100,7 +102,7 @@ export function createPortfolioStore(db) {
   }
 
   function write(data) {
-    const payload = normalizePortfolio(data);
+    const payload = correctDividendTaxPortfolio(normalizePortfolio(data));
     const tx = db.transaction(function persistPortfolio() {
       setMeta.run('cashUsd', String(payload.cashUsd));
       setMeta.run('cashCny', String(payload.cashCny));

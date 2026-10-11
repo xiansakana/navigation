@@ -1,4 +1,5 @@
 import XLSX from 'xlsx';
+import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
 import { isOptionSymbol, optionMult, roundMoney, roundPrice } from './trades.js';
 
 function normalizeCell(v) {
@@ -198,7 +199,7 @@ export function parseAppBackupBuffer(buffer) {
           other_category: otherCat,
           shares: 1,
           price: 0,
-          total_amount: roundMoney(amt),
+          total_amount: roundMoney(normalizeOtherAmount(otherCat, amt)),
           commission: roundMoney(parseMoney(cells[8]) || 0),
           trade_date: parseTradeDate(cells[0]),
           created_at: now

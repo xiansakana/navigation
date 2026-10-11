@@ -908,6 +908,9 @@ app.post('/api/quotes/refresh', async (req, res) => {
 app.get('/vendor/echarts.min.js', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'node_modules', 'echarts', 'dist', 'echarts.min.js'));
 });
+app.get('/js/dividend-tax.js', (_req, res) => {
+  res.sendFile(path.join(__dirname, '..', '..', 'shared', 'dividend-tax.js'));
+});
 app.use(express.static(PUBLIC));
 app.get('*', (_req, res) => {
   res.sendFile(path.join(PUBLIC, 'index.html'));
