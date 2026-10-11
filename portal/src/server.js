@@ -43,10 +43,12 @@ import { handleOAuthStart, handleOAuthCallback, listOAuthProviders } from './oau
 import { getPiclistStatus, savePiclistConfig, restartPiclist } from './piclist-admin.js';
 import { handleBlogApi, resumeVideoJobs } from './blog.js';
 import { startThumbnailWorker } from './blog-media-process.js';
+import { createResourceMonitor, canViewResources, handleResourceApi } from './resources.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
 var config = loadConfig();
+const resourceMonitor = createResourceMonitor();
 
 function json(res, status, body) {
     var text = JSON.stringify(body);
@@ -156,11 +158,14 @@ function publicServices(userCtx, userAgent) {
     if (!userCtx) return [];
     var rbac = loadRbac(config);
     return getVisibleMenus(rbac, userCtx.permissions)
-        .filter(function(menu) { return menu.id !== 'menu_admin'; })
+        .filter(function(menu) { return menu.id !== 'menu_admin' && !(userCtx.isGuest && menu.serviceId === 'resources'); })
         .map(function(menu) { return menuToService(menu, userAgent); });
 }
 
 async function handleApi(req, res, url, session) {
+    if (url.pathname === '/api/resources/metrics') {
+        return handleResourceApi(req, res, session, resourceMonitor, json);
+    }
     if (url.pathname.startsWith('/api/blog/')) {
         return handleBlogApi(req, res, url, session, json, config);
     }
@@ -542,6 +547,18 @@ var server = http.createServer(async function(req, res) {
             });
         }
         return serveStatic(path.join(PUBLIC_DIR, 'piclist.html'), res);
+    }
+
+    if (['/resources', '/resources/', '/resources/index.html', '/resources.html'].includes(path.posix.normalize(url.pathname))) {
+        var resourceSession = requireAuth(req, res);
+        if (!resourceSession) return;
+        res.setHeader('Cache-Control', 'no-store');
+        if (!canViewResources(resourceSession)) {
+            return sendError(req, res, url, 403, '无权查看资源管理', {
+                title: '无权访问资源管理', hint: '请登录具备资源管理查看权限的账号。'
+            });
+        }
+        return serveStatic(path.join(PUBLIC_DIR, 'resources', 'index.html'), res);
     }
 
     var hubPath = '/torn-toolbox';
