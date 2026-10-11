@@ -49,7 +49,7 @@ export async function requestOAuthRelay(url, options, requestImpl = https.reques
       let timer;
       const fail = (error) => { clearTimeout(timer); error.sent = sent && !probe; error.phase = phase; reject(error); };
       const requestOptions = probe ? { method: 'GET', headers: { Accept: 'application/json' },
-        signal: AbortSignal.any([signal, AbortSignal.timeout(3000)]) } : { ...options, signal };
+        signal } : { ...options, signal };
       const request = requestImpl(url, { ...requestOptions, agent: false, family: 4,
         lookup: (_hostname, _options, callback) => callback(null, address, 4)
       }, (response) => {
@@ -64,6 +64,7 @@ export async function requestOAuthRelay(url, options, requestImpl = https.reques
         response.on('error', fail);
         response.on('aborted', () => fail(new Error('Google OAuth 响应中断')));
         response.on('end', () => {
+          clearTimeout(timer);
           if (size > 65536) { fail(new Error('Google OAuth 响应过大')); return; }
           if (response.statusCode >= 300 && response.statusCode < 400) {
             fail(new Error('Google OAuth 转发服务不应重定向'));
@@ -74,10 +75,10 @@ export async function requestOAuthRelay(url, options, requestImpl = https.reques
       });
       // TCP can connect while TLS hangs. Try another address before sending the
       // authorization code, but never retry once any HTTP request was sent.
-      timer = setTimeout(() => request.destroy(new Error('Google OAuth TLS 连接超时')), 3000);
+      timer = setTimeout(() => request.destroy(new Error(probe ? 'Google OAuth 连接检查超时' : 'Google OAuth TLS 连接超时')), 3000);
       request.on('error', fail);
       request.on('socket', (socket) => socket.once('secureConnect', () => {
-        clearTimeout(timer);
+        if (!probe) clearTimeout(timer);
         phase = probe ? 'probe-response' : 'response';
         sent = true;
         request.end(requestOptions.body);
