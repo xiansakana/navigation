@@ -22,6 +22,8 @@
       "enabled": false,
       "clientId": "",
       "clientSecret": "",
+      "relayUrl": "",
+      "relaySecret": "",
       "redirectUri": "http://127.0.0.1:8080/api/oauth/google/callback"
     }
   },

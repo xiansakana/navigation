@@ -5,6 +5,7 @@ import {
     upsertOAuthUser
 } from './rbac.js';
 import { createSessionCookie } from './auth.js';
+import { fetchGoogleOAuth } from './google-oauth-network.js';
 
 const PROVIDERS = {
     github: {
@@ -153,18 +154,18 @@ async function exchangeGoogleToken(cfg, provider, code) {
         redirect_uri: cfg.redirectUri,
         grant_type: 'authorization_code'
     });
-    var resp = await fetch(provider.tokenUrl, {
+    var resp = await fetchGoogleOAuth(provider.tokenUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString()
-    });
+    }, cfg);
     var data = await readJsonResponse(resp);
     if (!resp.ok || !data.access_token) {
         throw new Error(data.error_description || data.error || 'Google token 交换失败');
     }
-    var userResp = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+    var userResp = await fetchGoogleOAuth('https://openidconnect.googleapis.com/v1/userinfo', {
         headers: { Authorization: 'Bearer ' + data.access_token }
-    });
+    }, cfg);
     var profile = await readJsonResponse(userResp);
     if (!userResp.ok || !profile.sub) {
         throw new Error('无法读取 Google 用户信息');
