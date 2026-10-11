@@ -33,7 +33,14 @@ export async function handleRequest(request, env, fetchImpl = (url, options) => 
     const response = await fetchImpl(upstream, options);
     const data = await response.json();
     return json(data, response.status);
-  } catch {
+  } catch (error) {
+    // Record only an error category, never upstream bodies or credentials.
+    const message = String(error.message || '');
+    const category = /Illegal invocation/.test(message) ? 'receiver'
+      : /redirect/i.test(message) ? 'redirect'
+        : /JSON|Unexpected token/i.test(message) ? 'json'
+          : /timeout|abort/i.test(message) ? 'timeout' : 'network';
+    console.warn('Google OAuth relay failed', { name: error.name, category });
     return json({ error: 'temporarily_unavailable', error_description: 'Google 登录服务暂时不可用，请稍后重试' }, 502);
   }
 }
