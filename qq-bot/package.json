@@ -9,11 +9,12 @@
   },
   "scripts": {
     "test:send": "node src/send-test.js",
-    "test": "node --test src/config.test.js src/server.test.js src/slack.test.js src/tibo-reset-monitor.test.js src/business.test.js",
+    "test": "node --test src/config.test.js src/server.test.js src/slack.test.js src/tibo-reset-monitor.test.js src/business.test.js src/bookkeeping.test.js",
     "start": "node src/server.js"
   },
   "dependencies": {
     "node-notifier": "^10.0.1",
-    "nodemailer": "^9.1.1"
+    "nodemailer": "^9.1.1",
+    "ws": "^8.22.0"
   }
 }

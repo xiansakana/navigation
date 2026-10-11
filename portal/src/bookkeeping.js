@@ -1,3 +1,4 @@
+import { createQqBookkeeping } from './bookkeeping-qq.js';
 import crypto from 'node:crypto';
 import { historicalFx } from './bookkeeping-historical-fx.js';
 import { analyzeBookkeeping } from './bookkeeping-analysis.js';
@@ -26,7 +27,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
   res.setHeader('Cache-Control', 'no-store');
   if (!canBookkeep(session)) return json(res, 403, { ok: false, error: '请登录并获取记账查看权限' });
   const route = url.pathname.slice('/api/bookkeeping'.length), method = req.method;
-  const permission = route.startsWith('/categories') ? (method === 'GET' ? 'categories:view' : 'categories:edit') : route.startsWith('/groups') ? (method === 'GET' ? 'accounts:view' : 'accounts:edit') : route === '/fx/refresh' ? 'fx:edit' : route.startsWith('/import') ? 'import:edit' : route === '/export' ? 'export:view' : route.startsWith('/settings') && method !== 'GET' ? 'settings:edit' :
+  const permission = route.startsWith('/qq') ? 'qq:edit' : route.startsWith('/categories') ? (method === 'GET' ? 'categories:view' : 'categories:edit') : route.startsWith('/groups') ? (method === 'GET' ? 'accounts:view' : 'accounts:edit') : route === '/fx/refresh' ? 'fx:edit' : route.startsWith('/import') ? 'import:edit' : route === '/export' ? 'export:view' : route.startsWith('/settings') && method !== 'GET' ? 'settings:edit' :
     route.startsWith('/accounts') ? (method === 'GET' ? 'accounts:view' : 'accounts:edit') : method === 'GET' ? 'view' : 'entries:edit';
   if (!canBookkeep(session, permission)) return json(res, 403, { ok: false, error: '无权执行此记账操作' });
   if (!['GET', 'HEAD'].includes(method) && req.headers.origin && req.headers.origin !== new URL(req.url, 'http://' + req.headers.host).origin && req.headers.origin !== 'https://' + req.headers.host) {
@@ -34,6 +35,13 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
   }
   const store = createBookkeepingStore(getDatabase()), uid = session.userId;
   try {
+    if (route.startsWith('/qq')) {
+      const service=createQqBookkeeping(getDatabase(),{resolveUser:id=>id===uid?session:null});
+      if(route==='/qq' && method==='GET')return json(res,200,{ok:true,...service.status(uid)});
+      if(route==='/qq' && method==='PUT')return json(res,200,{ok:true,...service.save(uid,await body(req))});
+      if(route==='/qq/code' && method==='POST')return json(res,200,{ok:true,...service.code(uid)});
+      if(route==='/qq' && method==='DELETE'){service.unbind(uid);return json(res,200,{ok:true});}
+    }
     if (route === '/fx' && method === 'GET') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
     if (route === '/fx/refresh' && method === 'POST') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
     if (route === '/state' && method === 'GET') {

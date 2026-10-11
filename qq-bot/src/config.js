@@ -28,6 +28,7 @@ export function normalizeConfig(raw) {
         config.channels.email.smtp || {}
     );
     config.channels.slack = Object.assign({ enabled: false, webhookUrl: '' }, config.channels.slack || {});
+    config.bookkeeping = Object.assign({enabled:false,wsUrl:'ws://127.0.0.1:3001',portalUrl:'http://127.0.0.1:8080'},config.bookkeeping || {});
     config.monitors = config.monitors || {};
     config.monitors.tiboReset = Object.assign({
         enabled: false,

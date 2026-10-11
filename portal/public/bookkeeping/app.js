@@ -118,6 +118,7 @@
       if (seq !== loadSequence) return;
       if (append) data.entries = state.entries.concat(data.entries);
       state = data;
+      window.initQqBookkeeping(can,state);
       for(const id of ['add-entry','add-account','add-category'])$(id).disabled=false;
       populate('book',state.books,'所有账本'); populate('category',state.categories,'所有分类'); populate('account',state.accounts.map(a => ({ value:a.id, label:a.name })),'所有账户');
       renderEntries(); renderAccounts(); management.render();

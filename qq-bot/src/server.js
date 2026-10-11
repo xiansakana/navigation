@@ -1,3 +1,4 @@
+import { createQqCommandReceiver } from './bookkeeping.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
 /**
  * 通知管理服务。
@@ -127,12 +128,15 @@ export function createNotificationServer(initialConfig, options) {
             return sendThrough(currentConfig, channel, { ...target, message: message }, options);
         }
     }) : null;
+    var receiver = createQqCommandReceiver({getConfig:()=>config,request:options?.bookkeepingFetch || fetch,
+        send:(c,event,message)=>(options?.sendQq || sendMessage)(c.napcat,{type:event.type,userId:event.qqId,groupId:event.groupId,atUserId:event.type==='group'?event.qqId:undefined},message)});
+    if(options?.startMonitors)receiver.start();
     var server = http.createServer(async function(req, res) {
     if (serveUiAsset(req, res)) return;
         var url = new URL(req.url, 'http://127.0.0.1');
         try {
             if (req.method === 'GET' && url.pathname === '/health') {
-                return json(res, 200, { ok: true, channels: channelStatus(config) });
+                return json(res, 200, { ok: true, channels: channelStatus(config), bookkeeping:receiver.status() });
             }
             if (req.method === 'GET' && url.pathname === '/api/config') {
                 return json(res, 200, { ok: true, config: publicConfig(config), channels: channelStatus(config) });
@@ -157,6 +161,7 @@ export function createNotificationServer(initialConfig, options) {
             if (req.method === 'PUT' && url.pathname === '/api/config') {
                 Object.assign(config, saveConfig(applyPublicConfig(config, await readJson(req))));
                 monitor?.reschedule();
+                if(options?.startMonitors)receiver.start();
                 return json(res, 200, { ok: true, config: publicConfig(config), channels: channelStatus(config) });
             }
             if (req.method === 'GET' && url.pathname === '/api/monitors/tibo-reset') {
@@ -200,6 +205,8 @@ export function createNotificationServer(initialConfig, options) {
             return json(res, 400, { ok: false, error: err.message });
         }
     });
+    server.on('close',()=>receiver.stop());
+    server.bookkeepingReceiver = receiver;
     server.tiboResetMonitor = monitor;
     return server;
 }

@@ -1,5 +1,7 @@
 # 通知管理服务
 
+支持 QQ 指令记账：NapCat WebSocket 上报消息，qq-bot 转交 Portal 专用内部接口，按发送人绑定的账号和权限入账。私聊与群聊均支持；群聊需要真正 @机器人，并由发送人在记账页“QQ记账”中允许该群。绑定码仅在私聊使用，群回执不展示金额与余额。详细指令、去重及部署说明见 [记账模块](../docs/bookkeeping.md#qq-指令记账)。
+
 集中管理 QQ、邮件和 Slack 通知渠道。QQ 通过 [NapCat](https://napneko.github.io/) 发送私聊/群消息，邮件通过 SMTP 发送，Slack 通过 Incoming Webhook 发送到指定频道，并在每条 Slack 消息中提醒该频道所有成员（`@channel`）。Portal 首页的“通知管理”卡片可进入配置页面。
 
 内置 Tibo 重置机会监听：合并公开 feed 与 RSS，逐条检查 `@thsottiaux` 的新推文，对“可能重置、已预告、已确认”的 Codex 额度信号按所选渠道发送通知。首次启用只建立当前推文基线，不补发历史消息。

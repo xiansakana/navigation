@@ -1,3 +1,4 @@
+import { createQqBookkeeping, internalQqAuthorized } from './bookkeeping-qq.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
 import http from 'node:http';
 import { getDatabase } from '../../shared/db/index.js';
@@ -80,10 +81,15 @@ function redirect(res, location, setCookie) {
     res.end();
 }
 
-function readJson(req) {
+function readJson(req, maxBytes = 0) {
     return new Promise(function(resolve, reject) {
         var chunks = [];
-        req.on('data', function(chunk) { chunks.push(chunk); });
+        var size = 0;
+        req.on('data', function(chunk) {
+            size += chunk.length;
+            if (maxBytes && size > maxBytes) { reject(new Error('请求体过大')); return; }
+            chunks.push(chunk);
+        });
         req.on('end', function() {
             if (!chunks.length) return resolve({});
             try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
@@ -505,6 +511,17 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
 var server = http.createServer(async function(req, res) {
     if (serveUiAsset(req, res)) return;
     var url = new URL(req.url, 'http://127.0.0.1');
+    if (url.pathname === '/api/internal/bookkeeping/qq') {
+        if (req.method !== 'POST' || !internalQqAuthorized(req)) return json(res, 403, {ok:false,error:'Forbidden'});
+        try {
+            const input = await readJson(req, 65536), service = createQqBookkeeping(getDatabase(), {resolveUser: uid => {
+                const ctx = resolveSessionUser({userId:uid}, config);
+                return ctx ? {permissions:ctx.permissions,isGuest:ctx.user.username === (config.auth?.guestUsername || 'guest')} : null;
+            }});
+            if (input.ack) { service.ack(String(input.ack)); return json(res,200,{ok:true}); }
+            return json(res,200,{ok:true,...service.process(input.event || {})});
+        } catch(e) {return json(res,400,{ok:false,error:e.message});}
+    }
     var route = resolveRoute(config.services, url.pathname, req.method, url.search, proxyRouteOpts(req));
 
     if (route.kind === 'portal-oauth') {
