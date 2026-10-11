@@ -69,7 +69,9 @@ test('relay masks upstream failures and secrets', async () => {
 
 test('relay transport uses IPv4, preserves request body and rejects redirect responses', async () => {
   const requestImpl = (url, options, callback) => {
-    assert.equal(options.family, 4);
+    assert.equal(options.family, 0);
+    assert.equal(options.autoSelectFamily, true);
+    assert.equal(options.autoSelectFamilyAttemptTimeout, 2000);
     assert.equal(url, 'https://oauth.saoyu.fun/token');
     const request = new EventEmitter();
     request.end = (body) => {

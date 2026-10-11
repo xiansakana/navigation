@@ -1,4 +1,5 @@
 import https from 'node:https';
+import dns from 'node:dns';
 
 const endpoints = new Map([
   ['https://oauth2.googleapis.com/token', '/token'],
@@ -7,7 +8,13 @@ const endpoints = new Map([
 
 export function requestOAuthRelay(url, options, requestImpl = https.request) {
   return new Promise((resolve, reject) => {
-    const request = requestImpl(url, { ...options, family: 4 }, (response) => {
+    // Race the relay's IPv4 addresses without waiting on an unreachable address.
+    // Only the winning connection sends the one-use authorization code.
+    const request = requestImpl(url, { ...options, family: 0, autoSelectFamily: true,
+      autoSelectFamilyAttemptTimeout: 2000,
+      lookup: (hostname, lookupOptions, callback) => dns.lookup(hostname,
+        { ...lookupOptions, family: 4 }, callback)
+    }, (response) => {
       const chunks = [];
       let size = 0;
       response.on('data', (chunk) => {
