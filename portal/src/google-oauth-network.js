@@ -6,35 +6,64 @@ const endpoints = new Map([
   ['https://openidconnect.googleapis.com/v1/userinfo', '/userinfo']
 ]);
 
-export function requestOAuthRelay(url, options, requestImpl = https.request) {
-  return new Promise((resolve, reject) => {
-    // Race the relay's IPv4 addresses without waiting on an unreachable address.
-    // Only the winning connection sends the one-use authorization code.
-    const request = requestImpl(url, { ...options, family: 0, autoSelectFamily: true,
-      autoSelectFamilyAttemptTimeout: 2000,
-      lookup: (hostname, lookupOptions, callback) => dns.lookup(hostname,
-        { ...lookupOptions, family: 4 }, callback)
-    }, (response) => {
-      const chunks = [];
-      let size = 0;
-      response.on('data', (chunk) => {
-        size += chunk.length;
-        if (size > 65536) request.destroy(new Error('Google OAuth 响应过大'));
-        else chunks.push(chunk);
+export async function requestOAuthRelay(url, options, requestImpl = https.request,
+  lookupImpl = (hostname) => dns.promises.lookup(hostname, { all: true, family: 4 })) {
+  const signal = options.signal || AbortSignal.timeout(15000);
+  signal.throwIfAborted();
+  let rejectLookup;
+  const aborted = new Promise((_, reject) => { rejectLookup = () => reject(signal.reason); });
+  signal.addEventListener('abort', rejectLookup, { once: true });
+  let addresses;
+  try { addresses = await Promise.race([lookupImpl(new URL(url).hostname), aborted]); }
+  finally { signal.removeEventListener('abort', rejectLookup); }
+  let lastError;
+  for (const address of [...new Set(addresses.map((item) => item.address))].slice(0, 8)) {
+    signal.throwIfAborted();
+    try { return await connectAddress(address); }
+    catch (error) {
+      if (error.sent || signal.aborted) throw error;
+      lastError = error;
+    }
+  }
+  throw lastError || new Error('Google OAuth 转发服务没有 IPv4 地址');
+
+  function connectAddress(address) {
+    return new Promise((resolve, reject) => {
+      let sent = false;
+      let timer;
+      const fail = (error) => { clearTimeout(timer); error.sent = sent; reject(error); };
+      const request = requestImpl(url, { ...options, signal, agent: false, family: 4,
+        lookup: (_hostname, _options, callback) => callback(null, address, 4)
+      }, (response) => {
+        const chunks = [];
+        let size = 0;
+        response.on('data', (chunk) => {
+          size += chunk.length;
+          if (size > 65536) request.destroy(new Error('Google OAuth 响应过大'));
+          else chunks.push(chunk);
+        });
+        response.on('error', fail);
+        response.on('aborted', () => fail(new Error('Google OAuth 响应中断')));
+        response.on('end', () => {
+          if (size > 65536) { fail(new Error('Google OAuth 响应过大')); return; }
+          if (response.statusCode >= 300 && response.statusCode < 400) {
+            fail(new Error('Google OAuth 转发服务不应重定向'));
+            return;
+          }
+          resolve(new Response(Buffer.concat(chunks), { status: response.statusCode }));
+        });
       });
-      response.on('error', reject);
-      response.on('aborted', () => reject(new Error('Google OAuth 响应中断')));
-      response.on('end', () => {
-        if (response.statusCode >= 300 && response.statusCode < 400) {
-          reject(new Error('Google OAuth 转发服务不应重定向'));
-          return;
-        }
-        resolve(new Response(Buffer.concat(chunks), { status: response.statusCode }));
-      });
+      // TCP can connect while TLS hangs. Try another address before sending the
+      // authorization code, but never retry once any HTTP request was sent.
+      timer = setTimeout(() => request.destroy(new Error('Google OAuth TLS 连接超时')), 3000);
+      request.on('error', fail);
+      request.on('socket', (socket) => socket.once('secureConnect', () => {
+        clearTimeout(timer);
+        sent = true;
+        request.end(options.body);
+      }));
     });
-    request.on('error', reject);
-    request.end(options.body);
-  });
+  }
 }
 
 export function fetchGoogleOAuth(url, options, config, fetchImpl) {

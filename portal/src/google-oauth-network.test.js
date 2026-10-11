@@ -81,9 +81,8 @@ test('Worker entrypoint preserves the global fetch receiver required by Cloudfla
 
 test('relay transport uses IPv4, preserves request body and rejects redirect responses', async () => {
   const requestImpl = (url, options, callback) => {
-    assert.equal(options.family, 0);
-    assert.equal(options.autoSelectFamily, true);
-    assert.equal(options.autoSelectFamilyAttemptTimeout, 2000);
+    assert.equal(options.family, 4);
+    assert.equal(options.agent, false);
     assert.equal(url, 'https://oauth.saoyu.fun/token');
     const request = new EventEmitter();
     request.end = (body) => {
@@ -93,10 +92,49 @@ test('relay transport uses IPv4, preserves request body and rejects redirect res
       callback(response);
       response.end('{"access_token":"test"}');
     };
+    queueMicrotask(() => {
+      const socket = new EventEmitter();
+      request.emit('socket', socket);
+      socket.emit('secureConnect');
+    });
     return request;
   };
-  const response = await requestOAuthRelay('https://oauth.saoyu.fun/token', { body: 'code=test' }, requestImpl);
+  const lookupImpl = async () => [{ address: '127.0.0.1' }];
+  const response = await requestOAuthRelay('https://oauth.saoyu.fun/token', { body: 'code=test' }, requestImpl, lookupImpl);
   assert.deepEqual(await response.json(), { access_token: 'test' });
   await assert.rejects(requestOAuthRelay('https://oauth.saoyu.fun/token',
-    { body: 'code=test', status: 302 }, requestImpl), /不应重定向/);
+    { body: 'code=test', status: 302 }, requestImpl, lookupImpl), /不应重定向/);
+});
+
+test('relay retries connection failures but never retries a code after TLS completed', async () => {
+  const addresses = async () => [{ address: '127.0.0.1' }, { address: '127.0.0.2' }];
+  for (const connected of [false, true]) {
+    let attempts = 0;
+    let sends = 0;
+    const requestImpl = (_url, _options, callback) => {
+      attempts++;
+      const attempt = attempts;
+      const request = new EventEmitter();
+      request.end = () => { sends++; request.emit('error', new Error('response lost')); };
+      queueMicrotask(() => {
+        if (attempt === 1 && !connected) request.emit('error', new Error('connect failed'));
+        else if (attempt === 1) {
+          const socket = new EventEmitter(); request.emit('socket', socket); socket.emit('secureConnect');
+        } else {
+          const socket = new EventEmitter(); request.emit('socket', socket);
+          request.end = () => {
+            sends++; const response = new PassThrough(); response.statusCode = 200;
+            callback(response); response.end('{}');
+          };
+          socket.emit('secureConnect');
+        }
+      });
+      return request;
+    };
+    const operation = requestOAuthRelay('https://relay/token', { body: 'code=test' }, requestImpl, addresses);
+    if (connected) await assert.rejects(operation, /response lost/);
+    else assert.equal((await operation).status, 200);
+    assert.equal(attempts, connected ? 1 : 2);
+    assert.equal(sends, 1);
+  }
 });
