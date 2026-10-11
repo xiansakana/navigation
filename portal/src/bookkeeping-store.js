@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createBookkeepingCatalog, categoryKind } from './bookkeeping-catalog.js';
 
 export const ENTRY_TYPES = ['支出', '收入', '转账', '还款', '借出', '收回', '退款入账', '已报销', '报销入账', '余额调整'];
 export const TRANSFER_TYPES = ['转账', '还款', '借出', '收回'];
@@ -47,8 +48,16 @@ export function createBookkeepingStore(db) {
     CREATE INDEX IF NOT EXISTS bookkeeping_user_date ON bookkeeping_entries(user_id, date);
     CREATE TABLE IF NOT EXISTS bookkeeping_settings (user_id TEXT PRIMARY KEY, data TEXT NOT NULL);
   `);
+  const columns = new Set(db.prepare('PRAGMA table_info(bookkeeping_accounts)').all().map(c => c.name));
+  for (const [column, definition] of [['archived', 'INTEGER NOT NULL DEFAULT 0'], ['sort_order', 'INTEGER NOT NULL DEFAULT 0'], ['icon', "TEXT NOT NULL DEFAULT '◈'"], ['account_type', "TEXT NOT NULL DEFAULT '其他资产'"]]) {
+    if (!columns.has(column)) db.exec('ALTER TABLE bookkeeping_accounts ADD COLUMN ' + column + ' ' + definition);
+  }
+  if (!columns.has('account_type')) db.prepare("UPDATE bookkeeping_accounts SET account_type='信用卡' WHERE group_name LIKE '%信用%'").run();
+  const catalog = createBookkeepingCatalog(db);
   function accounts(userId) {
-    const list = db.prepare('SELECT * FROM bookkeeping_accounts WHERE user_id = ? ORDER BY rowid').all(userId);
+    catalog.seed(userId);
+    const list = db.prepare(`SELECT a.* FROM bookkeeping_accounts a LEFT JOIN bookkeeping_groups g ON g.user_id=a.user_id AND g.name=a.group_name
+      WHERE a.user_id = ? ORDER BY g.sort_order,a.sort_order,a.rowid`).all(userId);
     const delta = new Map();
     for (const e of db.prepare('SELECT * FROM bookkeeping_entries WHERE user_id = ? AND affects_balance = 1').all(userId)) {
       const add = (accountId, amount) => { if (accountId) delta.set(accountId, (delta.get(accountId) || 0) + amount); };
@@ -59,11 +68,15 @@ export function createBookkeepingStore(db) {
     return list.map(a => ({ id: a.id, name: a.name, group: a.group_name, currency: a.currency,
       opening: a.opening / 100, balance: (a.opening + (delta.get(a.id) || 0)) / 100,
       included: !!a.included, creditLimit: a.credit_limit / 100, billDay: a.bill_day, dueDay: a.due_day,
-      note: a.note, snapshotAt: a.snapshot_at }));
+      note: a.note, snapshotAt: a.snapshot_at, archived: !!a.archived, sortOrder:a.sort_order, icon:a.icon, accountType:a.account_type }));
   }
   function saveAccount(userId, input, accountId) {
+    return db.transaction(() => saveAccountData(userId,input,accountId))();
+  }
+  function saveAccountData(userId, input, accountId) {
     const existing = accountId && accounts(userId).find(a => a.id === accountId);
     if (accountId && !existing) fail('账户不存在');
+    input = { ...existing, ...input };
     const name = text(input.name, 100); if (!name) fail('账户名称不能为空');
     const c = currency(input.currency);
     if (existing && existing.currency !== c && db.prepare('SELECT 1 FROM bookkeeping_entries WHERE user_id=? AND (account_id=? OR to_account_id=?)').get(userId, accountId, accountId)) fail('有账单的账户不能更改货币');
@@ -71,21 +84,25 @@ export function createBookkeepingStore(db) {
     const opening = existing ? cents(existing.opening, true) : cents(input.balance ?? 0, true);
     const credit = cents(input.creditLimit ?? 0, true); if (credit < 0) fail('信用额度不能为负数');
     const aid = existing?.id || id();
+    catalog.ensureGroup(userId, input.group || '资金账户');
     try {
-      db.prepare(`INSERT INTO bookkeeping_accounts (id,user_id,name,group_name,currency,opening,included,credit_limit,bill_day,due_day,note,snapshot_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,group_name=excluded.group_name,currency=excluded.currency,
-        included=excluded.included,credit_limit=excluded.credit_limit,bill_day=excluded.bill_day,due_day=excluded.due_day,note=excluded.note`).run(
+      db.prepare(`INSERT INTO bookkeeping_accounts (id,user_id,name,group_name,currency,opening,included,credit_limit,bill_day,due_day,note,snapshot_at,archived,sort_order,icon,account_type)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,group_name=excluded.group_name,currency=excluded.currency,
+        included=excluded.included,credit_limit=excluded.credit_limit,bill_day=excluded.bill_day,due_day=excluded.due_day,note=excluded.note,
+        archived=excluded.archived,icon=excluded.icon,account_type=excluded.account_type`).run(
         aid, userId, name, text(input.group || '资金账户', 100), c, opening, input.included === false ? 0 : 1,
-        credit, day(input.billDay), day(input.dueDay), text(input.note, 1000), existing?.snapshotAt || text(input.snapshotAt, 100));
+        credit, day(input.billDay), day(input.dueDay), text(input.note, 1000), existing?.snapshotAt || text(input.snapshotAt, 100),
+        input.archived === true ? 1 : 0, existing?.sortOrder ?? db.prepare('SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM bookkeeping_accounts WHERE user_id=?').get(userId).n,
+        text(input.icon || '◈',20), text(input.accountType || (input.group?.includes('信用') ? '信用卡' : '其他资产'),100));
     } catch (error) { if (error.code?.startsWith('SQLITE_CONSTRAINT')) fail('账户名称已存在'); throw error; }
     return aid;
   }
-  function normalizeEntry(userId, input, historical = false) {
+  function normalizeEntry(userId, input, historical = false, allowedArchived = []) {
     const type = text(input.type); if (!ENTRY_TYPES.includes(type)) fail('账单类型无效');
     const amount = cents(input.amount, type === '余额调整' || historical);
     if (amount < 0 && type !== '余额调整') fail('收支与转账金额不能为负数');
     const c = currency(input.currency);
-    const find = aid => { if (!aid) return null; const a = db.prepare('SELECT id,currency FROM bookkeeping_accounts WHERE user_id=? AND id=?').get(userId, aid); if (!a) fail('账户不存在或不属于当前用户'); return a; };
+    const find = aid => { if (!aid) return null; const a = db.prepare('SELECT id,currency,archived FROM bookkeeping_accounts WHERE user_id=? AND id=?').get(userId, aid); if (!a) fail('账户不存在或不属于当前用户'); if (a.archived && !allowedArchived.includes(aid)) fail('账户已归档，请先恢复账户'); return a; };
     const from = find(input.accountId), to = find(input.toAccountId);
     const transfer = TRANSFER_TYPES.includes(type);
     if (!transfer && input.toAccountId) fail('只有转账类账单可填写到账账户');
@@ -111,13 +128,15 @@ export function createBookkeepingStore(db) {
       eid, userId, e.date, e.type, e.amount, e.currency, e.category, e.subcategory, e.accountId, e.toAccountId, e.toAmount,
       e.note, e.book, e.tags, e.location, e.refund, e.discount, e.fee, opts.historical ? 0 : 1, opts.sourceKey || null,
       opts.raw ? JSON.stringify(opts.raw) : null, new Date().toISOString());
+    catalog.ensureCategory(userId, categoryKind(e.type), e.category, e.subcategory);
     return eid;
   }
   function saveEntry(userId, input, eid) {
     return db.transaction(() => {
       const old = eid && db.prepare('SELECT * FROM bookkeeping_entries WHERE user_id=? AND id=?').get(userId, eid);
       if (eid && !old) fail('账单不存在');
-      const normalized = normalizeEntry(userId, input, old?.affects_balance === 0);
+      const normalized = normalizeEntry(userId, input, old?.affects_balance === 0, old ? [old.account_id,old.to_account_id] : []);
+      catalog.validateEntry(userId, normalized, old);
       if (old) db.prepare('DELETE FROM bookkeeping_entries WHERE user_id=? AND id=?').run(userId, eid);
       return insertEntry(userId, normalized, { id: eid, historical: old?.affects_balance === 0, sourceKey: old?.source_key, raw: old?.raw ? JSON.parse(old.raw) : null });
     })();
@@ -125,7 +144,7 @@ export function createBookkeepingStore(db) {
   function entries(userId, filter = {}) {
     const clauses = ['e.user_id = ?'], args = [userId];
     if (filter.month) { if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(filter.month)) fail('月份无效'); clauses.push('substr(e.date,1,7)=?'); args.push(filter.month); }
-    for (const [key, column] of [['type', 'e.type'], ['currency', 'e.currency'], ['book', 'e.book'], ['category', 'e.category']]) {
+    for (const [key, column] of [['type', 'e.type'], ['currency', 'e.currency'], ['book', 'e.book'], ['category', 'e.category'], ['subcategory', 'e.subcategory']]) {
       if (filter[key]) { clauses.push(column + '=?'); args.push(filter[key]); }
     }
     if (filter.accountId) { clauses.push('(e.account_id=? OR e.to_account_id=?)'); args.push(filter.accountId, filter.accountId); }
@@ -175,6 +194,15 @@ export function createBookkeepingStore(db) {
     if (db.prepare('SELECT 1 FROM bookkeeping_entries WHERE user_id=? AND (account_id=? OR to_account_id=?)').get(userId, aid, aid)) fail('账户存在账单，请先处理关联账单');
     if (!db.prepare('DELETE FROM bookkeeping_accounts WHERE user_id=? AND id=?').run(userId, aid).changes) fail('账户不存在');
   }
+  function reorderAccounts(userId, ids) {
+    const actual = accounts(userId).map(a => a.id);
+    if (!Array.isArray(ids) || new Set(ids).size !== ids.length || ids.length !== actual.length || ids.some(aid => !actual.includes(aid))) fail('排序列表与当前用户账户不一致，请刷新');
+    db.transaction(() => ids.forEach((aid,i) => db.prepare('UPDATE bookkeeping_accounts SET sort_order=? WHERE user_id=? AND id=?').run(i,userId,aid)))();
+  }
+  function archiveAccount(userId, aid, archived) {
+    if (typeof archived !== 'boolean') fail('归档状态无效');
+    if (!db.prepare('UPDATE bookkeeping_accounts SET archived=? WHERE user_id=? AND id=?').run(archived?1:0,userId,aid).changes) fail('账户不存在');
+  }
   function adjust(userId, aid, input) {
     return db.transaction(() => {
       const a = accounts(userId).find(a => a.id === aid); if (!a) fail('账户不存在');
@@ -204,14 +232,14 @@ export function createBookkeepingStore(db) {
         const accountId = resolve(row.accountName, row.currency), toAccountId = resolve(row.toAccountName, row.currency);
         // iCost exports specify transaction currency, which can differ from account currency.
         // Historical imports do not alter the snapshot balance and retain the original currency.
-        const e = normalizeEntry(userId, { ...row, accountId, toAccountId }, true);
+        const e = normalizeEntry(userId, { ...row, accountId, toAccountId }, true, [accountId,toAccountId]);
         if (TRANSFER_TYPES.includes(e.type)) e.toAmount = null;
         insertEntry(userId, e, { historical: true, sourceKey: row.sourceKey, raw: row.raw }); inserted++;
       }
       return { inserted, duplicates, createdAccounts };
     })();
   }
-  return { accounts, saveAccount, entries, saveEntry, removeEntry, removeAccount, adjust, settings, saveSettings, saveAutoRates, importRows };
+  return { accounts, saveAccount, entries, saveEntry, removeEntry, removeAccount, reorderAccounts, archiveAccount, adjust, settings, saveSettings, saveAutoRates, importRows, catalog };
 }
 
 export function summarize(entries) {

@@ -5,7 +5,6 @@
   const currencies = ['CNY', 'USD', 'HKD', 'JPY', 'MYR', 'EUR', 'GBP', 'SGD'];
   const types = ['支出', '收入', '转账', '还款', '借出', '收回', '退款入账', '已报销', '报销入账'];
   const transferTypes = ['转账', '还款', '借出', '收回'];
-  const groups = ['资金账户', '海外资金', '信用账户', '理财账户', '海外理财', '社保公积金等', '充值账户', '应收账户'];
   const icons = { 餐饮:'◡', 购物:'▱', 交通:'↗', 工资:'▤', 住房:'⌂', 娱乐:'♫', 通讯:'☎', 学习:'▥', 医疗:'✚', 转账:'⇄', 还款:'↩', 借出:'⇢', 收回:'⇠', 余额调整:'✎' };
   let me, state, activeTab = 'entries', pageSize = 100, pendingImport = null, snapshots = [], editing = null, loadSequence = 0;
   const now = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19); };
@@ -51,7 +50,7 @@
       const expense = ['支出','已报销'].includes(e.type), transfer = transferTypes.includes(e.type) || e.type === '余额调整';
       const account = [e.accountName, e.toAccountName].filter(Boolean).join(' → ');
       const subtitle = [e.date.slice(11,16), account, e.note || e.tags].filter(Boolean).join(' · ');
-      return heading + '<button class="bk-entry" data-entry="' + e.id + '"><span class="bk-badge">' + (icons[e.type] || icons[e.category] || '◈') + '</span><span class="bk-entry-main"><strong>' + esc(title) + '</strong><p>' + esc(subtitle) + '</p>' + (e.location ? '<p>⌖ ' + esc(e.location) + '</p>' : '') + '</span><span class="bk-entry-amount ' + (expense?'bk-expense':transfer?'bk-transfer':'bk-income') + '">' + m(expense?-e.amount:e.amount,e.currency) + '<small>' + esc(e.type) + (e.historical?' · 历史':'') + '</small></span></button>';
+      return heading + '<button class="bk-entry" data-entry="' + e.id + '"><span class="bk-badge">' + (icons[e.type] || state.categoryTree?.find(c=>c.kind===(e.type==='收入'?'income':'expense') && c.name===(e.subcategory||e.category) && (e.subcategory?state.categoryTree.some(p=>p.id===c.parentId && p.name===e.category):!c.parentId))?.icon || icons[e.category] || '◈') + '</span><span class="bk-entry-main"><strong>' + esc(title) + '</strong><p>' + esc(subtitle) + '</p>' + (e.location ? '<p>⌖ ' + esc(e.location) + '</p>' : '') + '</span><span class="bk-entry-amount ' + (expense?'bk-expense':transfer?'bk-transfer':'bk-income') + '">' + m(expense?-e.amount:e.amount,e.currency) + '<small>' + esc(e.type) + (e.historical?' · 历史':'') + '</small></span></button>';
     }).join('') || '<div class="bk-empty">还没有符合条件的账单<br>记下第一笔，或从 iCost 导入历史记录。</div>';
     $('more').classList.toggle('hidden', state.entries.length >= state.count);
     $('mini-categories').innerHTML = categoriesHtml(state.summary.categories,6); $('categories').innerHTML = categoriesHtml(state.summary.categories);
@@ -103,9 +102,11 @@
     }
     $('assets-summary').innerHTML = metrics || metric('净资产',m(0),'新增账户，建立资产基准');
     const grouped = {};
-    for (const a of state.accounts) (grouped[a.group] ||= []).push(a);
-    $('account-groups').innerHTML = Object.entries(grouped).map(([g,list]) => '<details open class="bk-panel bk-account-group"><summary>' + esc(g) + ' · ' + list.length + ' 个账户</summary>' + list.map(a => '<div class="bk-account"><span class="bk-badge">' + (g.includes('信用')?'▤':g.includes('理财')?'▥':g.includes('充值')?'▣':'◈') + '</span><div class="bk-entry-main"><strong>' + esc(a.name) + (!a.included?' <small class="bk-muted">不计入</small>':'') + '</strong><p>' + esc(a.currency + (a.note?' · '+a.note:'')) + '</p>' + (a.creditLimit ? '<p>可用额度 ' + m(a.creditLimit+a.balance,a.currency) + (a.billDay?' · 账单日 '+a.billDay+' 日':'') + (a.dueDay?' · 还款日 '+a.dueDay+' 日':'') + '</p>':'') + '<div class="bk-asset-controls"><button data-account-ledger="' + a.id + '">明细</button>' + (can('accounts:edit')?'<button data-account-edit="' + a.id + '">编辑</button><button data-account-adjust="' + a.id + '">核对余额</button>':'') + '</div></div><div class="bk-entry-amount ' + (a.balance<0?'bk-expense':'') + '">' + m(a.balance,a.currency) + '</div></div>').join('') + '</details>').join('') || '<p class="bk-empty">暂无账户。可新增账户或导入账户快照。</p>';
+    const selectedGroup = $('asset-group').value; $('asset-group').innerHTML = options(state.accountGroups.map(g=>g.name),selectedGroup,'全部分组');
+    for (const a of state.accounts) if ((!a.archived || $('show-archived-accounts').checked) && (!selectedGroup || a.group===selectedGroup) && (!$('asset-search').value || (a.name+' '+a.note).toLowerCase().includes($('asset-search').value.toLowerCase()))) (grouped[a.group] ||= []).push(a);
+    $('account-groups').innerHTML = Object.entries(grouped).map(([g,list]) => '<details open class="bk-panel bk-account-group"><summary>' + esc(g) + ' · ' + list.length + ' 个账户</summary><p class="bk-muted">' + Object.entries(list.reduce((t,a)=>{t[a.currency]=(t[a.currency]||0)+a.balance;return t;},{})).map(([c,v])=>esc(c)+' '+m(v,c)).join(' · ') + '（当前列表余额）</p>' + list.map(a => '<div class="bk-account"><span class="bk-badge">' + esc(a.icon || '◈') + '</span><div class="bk-entry-main"><strong>' + esc(a.name) + (a.archived?' <small class="bk-muted">已归档</small>':'') + (!a.included?' <small class="bk-muted">不计入</small>':'') + '</strong><p>' + esc(a.currency + ' · ' + a.accountType + (a.note?' · '+a.note:'')) + '</p>' + (a.creditLimit ? '<p>可用额度 ' + m(a.creditLimit+a.balance,a.currency) + (a.billDay?' · 账单日 '+a.billDay+' 日':'') + (a.dueDay?' · 还款日 '+a.dueDay+' 日':'') + '</p>':'') + '<div class="bk-asset-controls"><button data-account-ledger="' + a.id + '">明细</button>' + (can('accounts:edit')?'<button data-account-edit="' + a.id + '">编辑</button>' + (!a.archived?'<button data-account-adjust="' + a.id + '">核对余额</button>':'') + management.accountActions(a):'') + '</div></div><div class="bk-entry-amount ' + (a.balance<0?'bk-expense':'') + '">' + m(a.balance,a.currency) + '</div></div>').join('') + '</details>').join('') || '<p class="bk-empty">暂无账户。可新增账户或导入账户快照。</p>';
   }
+  const management = window.createBookkeepingManagement({ $, esc, can, api, write, load, field, select, options, getState:()=>state, openEditor });
   async function load(append = false) {
     const seq = ++loadSequence; $('error').classList.add('hidden');
     try {
@@ -114,30 +115,35 @@
       if (seq !== loadSequence) return;
       if (append) data.entries = state.entries.concat(data.entries);
       state = data;
+      for(const id of ['add-entry','add-account','add-category'])$(id).disabled=false;
       populate('book',state.books,'所有账本'); populate('category',state.categories,'所有分类'); populate('account',state.accounts.map(a => ({ value:a.id, label:a.name })),'所有账户');
-      renderEntries(); renderAccounts();
+      renderEntries(); renderAccounts(); management.render();
     } catch (e) { $('error').textContent = e.message; $('error').classList.remove('hidden'); }
   }
   function tab(name) {
     activeTab = name;
     document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active',b.dataset.tab===name));
     document.querySelectorAll('.bk-view').forEach(v => v.classList.toggle('hidden',v.id!==name+'-view'));
-    $('filters').classList.toggle('hidden',name==='accounts');
+    $('filters').classList.toggle('hidden',['accounts','catalog'].includes(name));
   }
   function field(name, label, value = '', extra = '') { return '<label>' + esc(label) + '<input name="' + name + '" value="' + esc(value) + '" ' + extra + '></label>'; }
   function select(name, label, values, selected = '', empty = null) { return '<label>' + esc(label) + '<select name="' + name + '" aria-label="' + esc(label) + '">' + options(values,selected,empty) + '</select></label>'; }
-  const accountOptions = () => state.accounts.map(a => ({ value:a.id, label:a.name+' · '+a.currency }));
+  const accountOptions = () => {
+    const list=state.accounts.filter(a=>!a.archived || [editing?.item.accountId,editing?.item.toAccountId].includes(a.id)).map(a => ({ value:a.id, label:a.name+' · '+a.currency }));
+    for(const [id,name] of [[editing?.item.accountId,editing?.item.accountName],[editing?.item.toAccountId,editing?.item.toAccountName]]) if(id && !list.some(a=>a.value===id))list.push({value:id,label:name||'原关联账户'});
+    return list;
+  };
   function openEditor(mode, item = {}) {
     editing = { mode, item }; $('editor-error').textContent = ''; $('save-item').disabled = false;
     $('delete-item').classList.toggle('hidden',!item.id || !['entry','account'].includes(mode) || !can(mode==='entry'?'entries:edit':'accounts:edit'));
     let html = '';
     if (mode === 'entry') {
       $('editor-title').textContent = item.id ? '账单详情' : '记一笔';
-      html = select('type','类型',item.type==='余额调整'?[...types,'余额调整']:types,item.type||'支出') + field('amount','金额',item.amount??'','type="number" step="0.01" required') + select('currency','货币',currencies,item.currency||'CNY') + field('date','日期与时间',item.date||now(),'type="datetime-local" step="1" required') + field('category','一级分类',item.category||'餐饮','required maxlength="200" list="category-suggestions"') + field('subcategory','二级分类',item.subcategory,'maxlength="200"') + select('accountId','付款 / 收款账户',accountOptions(),item.accountId,'未关联账户') + select('toAccountId','转入账户',accountOptions(),item.toAccountId,'请选择') + field('toAmount','跨币种到账金额',item.toAmount??'','type="number" min="0.01" step="0.01"') + field('fee','手续费（付款币种）',item.fee||0,'type="number" min="0" step="0.01"') + field('book','账本',item.book||$('book').value||'个人账本','required') + field('tags','标签',item.tags) + field('location','位置',item.location) + field('refund','退款信息（辅助字段）',item.refund||0,'type="number" min="0" step="0.01"') + field('discount','优惠信息（辅助字段）',item.discount||0,'type="number" min="0" step="0.01"') + '<label class="full">备注<textarea name="note" maxlength="5000">' + esc(item.note) + '</textarea></label><datalist id="category-suggestions">' + state.categories.map(c => '<option value="'+esc(c)+'">').join('') + '</datalist>';
+      html = select('type','类型',item.type==='余额调整'?[...types,'余额调整']:types,item.type||'支出') + field('amount','金额',item.amount??'','type="number" step="0.01" required') + select('currency','货币',currencies,item.currency||'CNY') + field('date','日期与时间',item.date||now(),'type="datetime-local" step="1" required') + select('category','一级分类',[],item.category) + select('subcategory','二级分类',[],item.subcategory,'无二级分类') + select('accountId','付款 / 收款账户',accountOptions(),item.accountId,'未关联账户') + select('toAccountId','转入账户',accountOptions(),item.toAccountId,'请选择') + field('toAmount','跨币种到账金额',item.toAmount??'','type="number" min="0.01" step="0.01"') + field('fee','手续费（付款币种）',item.fee||0,'type="number" min="0" step="0.01"') + field('book','账本',item.book||$('book').value||'个人账本','required') + field('tags','标签',item.tags) + field('location','位置',item.location) + field('refund','退款信息（辅助字段）',item.refund||0,'type="number" min="0" step="0.01"') + field('discount','优惠信息（辅助字段）',item.discount||0,'type="number" min="0" step="0.01"') + '<label class="full">备注<textarea name="note" maxlength="5000">' + esc(item.note) + '</textarea></label><datalist id="category-suggestions">' + state.categories.map(c => '<option value="'+esc(c)+'">').join('') + '</datalist>';
       if (item.historical) html += '<p class="bk-form-hint">这是历史导入记录，编辑或删除不会改变资产基准。原导出的跨币种转账没有到账金额。</p>';
     } else if (mode === 'account') {
       $('editor-title').textContent = item.id?'编辑账户':'新增账户';
-      html = field('name','账户名称',item.name,'required maxlength="100"') + field('group','资产分组',item.group||'资金账户','required list="group-suggestions"') + select('currency','货币',currencies,item.currency||'CNY') + (item.id?'<p class="bk-form-hint">当前余额 '+m(item.balance,item.currency)+'，如需修改请使用“核对余额”。</p>':field('balance','初始余额（负数为欠款）',0,'type="number" step="0.01" required')) + field('creditLimit','信用额度',item.creditLimit||0,'type="number" min="0" step="0.01"') + field('billDay','账单日（0 表示未设置）',item.billDay||0,'type="number" min="0" max="31"') + field('dueDay','还款日（0 表示未设置）',item.dueDay||0,'type="number" min="0" max="31"') + field('note','账户备注',item.note) + '<label>计入总资产<input type="checkbox" name="included" '+(item.included!==false?'checked':'')+'></label><datalist id="group-suggestions">'+groups.map(g=>'<option value="'+esc(g)+'">').join('')+'</datalist>';
+      html = field('name','账户名称',item.name,'required maxlength="100"') + select('group','资产分组',state.accountGroups.length?state.accountGroups.map(g=>g.name):['资金账户'],item.group||state.accountGroups[0]?.name||'资金账户') + select('accountType','账户类型',['现金','银行卡','信用卡','储值卡','投资账户','社保账户','应收款','其他资产'],item.accountType||'其他资产') + field('icon','账户图标',item.icon||'◈','maxlength="20"') + select('currency','货币',currencies,item.currency||'CNY') + (item.id?'<p class="bk-form-hint">当前余额 '+m(item.balance,item.currency)+'，如需修改请使用“核对余额”。</p>':field('balance','初始余额（负数为欠款）',0,'type="number" step="0.01" required')) + field('creditLimit','信用额度',item.creditLimit||0,'type="number" min="0" step="0.01"') + field('billDay','账单日（0 表示未设置）',item.billDay||0,'type="number" min="0" max="31"') + field('dueDay','还款日（0 表示未设置）',item.dueDay||0,'type="number" min="0" max="31"') + field('note','账户备注',item.note) + '<label>计入总资产<input type="checkbox" name="included" '+(item.included!==false?'checked':'')+'></label>';
     } else if (mode === 'adjust') {
       $('editor-title').textContent = '核对余额 · ' + item.name;
       html = field('balance','实际余额（'+item.currency+'）',item.balance,'type="number" step="0.01" required') + field('date','调整时间',now(),'type="datetime-local" step="1" required') + field('note','调整原因','手动核对余额') + '<p class="bk-form-hint">保存一条余额调整记录，使账户余额等于填写值，不计入收支。</p>';
@@ -151,6 +157,7 @@
     $('editor').showModal();
     if (mode==='entry') {
       const form = $('editor-form'), t = form.elements.type;
+      management.bindCategoryPicker(form,item);
       const update = () => { const transfer = transferTypes.includes(t.value); ['toAccountId','toAmount'].forEach(n=>form.elements[n].closest('label').classList.toggle('hidden',!transfer)); if (!transfer) { form.elements.toAccountId.value=''; form.elements.toAmount.value=''; } };
       t.addEventListener('change',update); update();
       form.elements.accountId.addEventListener('change',()=>{ const a=state.accounts.find(a=>a.id===form.elements.accountId.value); if(a) form.elements.currency.value=a.currency; });
@@ -163,12 +170,12 @@
       else if (mode==='account') { input.included=event.target.elements.included.checked; await write('/accounts'+(item.id?'/'+item.id:''),input,item.id?'PUT':'POST'); }
       else if (mode==='adjust') await write('/accounts/'+item.id+'/adjust',input);
       else { const rates={ CNY:1 }, budgets={...state.settings.budgets}; for(const c of currencies) if(input['rate_'+c]) rates[c]=Number(input['rate_'+c]); budgets[input.budgetMonth]=Number(input.budget); await write('/settings',{rates,budgets},'PUT'); }
-      $('editor').close(); await load(); window.portalToast?.success('已保存');
+      await load(); $('editor').close(); window.portalToast?.success('已保存');
     } catch(e) { $('editor-error').textContent=e.message; } finally { $('save-item').disabled=false; }
   });
   $('delete-item').addEventListener('click',async()=>{
     if(!window.confirm(editing.mode==='entry'?'删除这条账单？新账单会撤销对账户余额的影响。':'删除这个账户？存在关联账单时不能删除。')) return;
-    try { await api('/'+(editing.mode==='entry'?'entries':'accounts')+'/'+editing.item.id,{method:'DELETE'}); $('editor').close(); await load(); } catch(e) { $('editor-error').textContent=e.message; }
+    try { await api('/'+(editing.mode==='entry'?'entries':'accounts')+'/'+editing.item.id,{method:'DELETE'}); await load(); $('editor').close(); } catch(e) { $('editor-error').textContent=e.message; }
   });
   $('close-editor').onclick=()=>$('editor').close();
   $('add-entry').onclick=()=>openEditor('entry'); $('add-account').onclick=()=>openEditor('account'); $('settings').onclick=()=>openEditor('settings');
@@ -176,7 +183,7 @@
   $('entry-list').addEventListener('click',e=>{const b=e.target.closest('[data-entry]');if(b)openEditor('entry',state.entries.find(x=>x.id===b.dataset.entry));});
   $('account-groups').addEventListener('click',e=>{
     const b=e.target.closest('button'); if(!b)return;
-    if(b.dataset.accountLedger){$('account').value=b.dataset.accountLedger;tab('entries');load();}
+    if(b.dataset.accountLedger){for(const id of ['month','book','currency','type','category','search'])$(id).value='';$('account').value=b.dataset.accountLedger;tab('entries');load();}
     if(b.dataset.accountEdit)openEditor('account',state.accounts.find(a=>a.id===b.dataset.accountEdit));
     if(b.dataset.accountAdjust)openEditor('adjust',state.accounts.find(a=>a.id===b.dataset.accountAdjust));
   });
@@ -207,6 +214,8 @@
       $('extra-filters').open = window.innerWidth > 760;
       for(const [id,p] of [['add-entry','entries:edit'],['add-account','accounts:edit'],['settings','settings:edit'],['import-label','import:edit'],['snapshot-label','accounts:edit'],['export','export:view'],['import-shortcut','import:edit']])$(id).classList.toggle('hidden',!can(p));
       for (const id of ['refresh-fx','refresh-asset-fx']) $(id).classList.toggle('hidden', !can('fx:edit'));
+      document.querySelector('[data-tab="catalog"]').classList.toggle('hidden',!can('categories:view'));
+      $('add-category').classList.toggle('hidden',!can('categories:edit')); $('manage-groups').classList.toggle('hidden',!can('accounts:edit'));
       document.querySelector('[data-tab="accounts"]').classList.toggle('hidden',!can('accounts:view'));$('account-filter-label').classList.toggle('hidden',!can('accounts:view'));
       document.querySelector('[data-tab="import"]').classList.toggle('hidden',!can('import:edit')&&!can('export:view'));
       await load();

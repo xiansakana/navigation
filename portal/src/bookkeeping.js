@@ -24,7 +24,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
   res.setHeader('Cache-Control', 'no-store');
   if (!canBookkeep(session)) return json(res, 403, { ok: false, error: '请登录并获取记账查看权限' });
   const route = url.pathname.slice('/api/bookkeeping'.length), method = req.method;
-  const permission = route === '/fx/refresh' ? 'fx:edit' : route.startsWith('/import') ? 'import:edit' : route === '/export' ? 'export:view' : route.startsWith('/settings') && method !== 'GET' ? 'settings:edit' :
+  const permission = route.startsWith('/categories') ? (method === 'GET' ? 'categories:view' : 'categories:edit') : route.startsWith('/groups') ? (method === 'GET' ? 'accounts:view' : 'accounts:edit') : route === '/fx/refresh' ? 'fx:edit' : route.startsWith('/import') ? 'import:edit' : route === '/export' ? 'export:view' : route.startsWith('/settings') && method !== 'GET' ? 'settings:edit' :
     route.startsWith('/accounts') ? (method === 'GET' ? 'accounts:view' : 'accounts:edit') : method === 'GET' ? 'view' : 'entries:edit';
   if (!canBookkeep(session, permission)) return json(res, 403, { ok: false, error: '无权执行此记账操作' });
   if (!['GET', 'HEAD'].includes(method) && req.headers.origin && req.headers.origin !== new URL(req.url, 'http://' + req.headers.host).origin && req.headers.origin !== 'https://' + req.headers.host) {
@@ -42,10 +42,28 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       return json(res, 200, { ok: true, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),
         budgetExpense: url.searchParams.get('month') ? summarize(store.entries(uid, { month: url.searchParams.get('month'), currency: 'CNY' })).totals.CNY?.expense || 0 : null,
         accounts: canBookkeep(session, 'accounts:view') ? store.accounts(uid) : [], settings: store.settings(uid), fx: effectiveBookkeepingFx(store.settings(uid)),
+        categoryTree: store.catalog.list(uid), accountGroups: canBookkeep(session,'accounts:view') ? store.catalog.groupList(uid) : [],
         books: [...new Set(all.map(e => e.book))], categories: [...new Set(all.map(e => e.category))],
         months: [...new Set(all.map(e => e.date.slice(0, 7)))].sort().reverse() });
     }
     if (route === '/accounts' && method === 'GET') return json(res, 200, { ok: true, accounts: store.accounts(uid) });
+    if (route === '/categories' && method === 'GET') return json(res,200,{ok:true,categories:store.catalog.list(uid)});
+    if (route === '/categories' && method === 'POST') return json(res,201,{ok:true,id:store.catalog.save(uid,await body(req))});
+    if (route === '/categories/order' && method === 'PUT') { store.catalog.reorder(uid,'categories',(await body(req)).ids); return json(res,200,{ok:true}); }
+    const category = /^\/categories\/([a-f0-9]{32})(\/merge)?$/.exec(route);
+    if (category && method === 'PUT' && !category[2]) return json(res,200,{ok:true,id:store.catalog.save(uid,await body(req),category[1])});
+    if (category && method === 'POST' && category[2]) return json(res,200,{ok:true,...store.catalog.merge(uid,category[1],(await body(req)).targetId)});
+    if (category && method === 'DELETE' && !category[2]) { store.catalog.remove(uid,category[1]); return json(res,200,{ok:true}); }
+    if (route === '/groups' && method === 'GET') return json(res,200,{ok:true,groups:store.catalog.groupList(uid)});
+    if (route === '/groups' && method === 'POST') return json(res,201,{ok:true,id:store.catalog.saveGroup(uid,await body(req))});
+    if (route === '/groups/order' && method === 'PUT') { store.catalog.reorder(uid,'groups',(await body(req)).ids); return json(res,200,{ok:true}); }
+    const group = /^\/groups\/([a-f0-9]{32})(\/merge)?$/.exec(route);
+    if (group && method === 'PUT' && !group[2]) return json(res,200,{ok:true,id:store.catalog.saveGroup(uid,await body(req),group[1])});
+    if (group && method === 'DELETE' && !group[2]) { store.catalog.removeGroup(uid,group[1]); return json(res,200,{ok:true}); }
+    if (group && method === 'POST' && group[2]) { store.catalog.removeGroup(uid,group[1],(await body(req)).targetId); return json(res,200,{ok:true}); }
+    if (route === '/accounts/order' && method === 'PUT') { store.reorderAccounts(uid,(await body(req)).ids); return json(res,200,{ok:true}); }
+    const archive = /^\/accounts\/([a-f0-9]{32})\/archive$/.exec(route);
+    if (archive && method === 'POST') { store.archiveAccount(uid,archive[1],(await body(req)).archived); return json(res,200,{ok:true}); }
     if (route === '/entries' && method === 'POST') return json(res, 201, { ok: true, id: store.saveEntry(uid, await body(req)) });
     const entry = /^\/entries\/([a-f0-9]{32})$/.exec(route);
     if (entry && method === 'PUT') return json(res, 200, { ok: true, id: store.saveEntry(uid, await body(req), entry[1]) });

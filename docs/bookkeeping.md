@@ -4,7 +4,7 @@
 
 ## 权限和存储
 
-权限集中定义于 `portal/src/rbac.js` 的 `bookkeeping:*` 条目，包含查看、账单编辑、资产查看/编辑、导入、导出、预算和汇率设置。每一项含首页下的 permissionPath。管理员自动获得权限，普通用户由管理员分配；游客无法访问。页面、API 和首页均检查权限。SQLite 的三张 bookkeeping 表按 Portal userId 隔离，客户端提交的用户 ID 不参与数据归属。
+权限集中定义于 `portal/src/rbac.js` 的 `bookkeeping:*` 条目，包含查看、账单编辑、资产查看/编辑、分类查看/编辑、导入、导出、预算和汇率设置。每一项含首页下的 permissionPath。管理员自动获得权限，普通用户由管理员分配；游客无法访问。页面、API 和首页均检查权限。SQLite 的 bookkeeping 表按 Portal userId 隔离，客户端提交的用户 ID 不参与数据归属。
 
 ## 迁移口径
 
@@ -33,3 +33,13 @@ node scripts/import-icost.mjs --user admin --file '<iCost.xlsx>' --accounts '<ac
 进入记账页面后台加载汇率，不阻塞账单。资产按有效参考汇率自动折算，统计与资产页面展示来源、数据日和获取时间。手动“更新参考汇率”使用 `bookkeeping:fx:edit` 权限；60 秒缓存合并并发请求与失败退避。自动结果按 userId 保存在现有 bookkeeping_settings 中，修改预算或手动值不会抹除它。自动失败时优先手动备用值，随后上次成功值，后者显示历史缓存标记。超过一小时未重新获取的数据、重启后更新失败的数据均标记历史缓存；无法获取且无备用值时明确显示缺失。浏览器返回的来源/状态不含供应商密钥或底层错误详情。
 
 FRED 口径参考：[HKD](https://fred.stlouisfed.org/series/DEXHKUS)、[JPY](https://fred.stlouisfed.org/series/DEXJPUS)、[MYR](https://fred.stlouisfed.org/series/DEXMAUS)、[EUR](https://fred.stlouisfed.org/series/DEXUSEU)、[GBP](https://fred.stlouisfed.org/series/DEXUSUK)、[SGD](https://fred.stlouisfed.org/series/DEXSIUS)。
+
+## 分类与资产管理
+
+分类页以支出/收入分别维护一级与二级分类，支持图标、排序、重命名、二级分类移动、停用/启用、同类型同层级合并和未使用分类删除。首次访问从该用户现有账单建立目录，再补充基础分类；之后不会因刷新重新创建已经移除的目录。重命名/合并同步关联账单的分类文本，保留账单 ID、原始行、去重标识、历史标记和金额。一级分类合并携带子分类，同名子分类自动归并。停用分类在新记账选择器中隐藏，原账单可保留原分类继续编辑；导入仍保留原始分类。分类笔数涵盖所有日期、账本和币种。新手工账单须选择已维护的启用分类。
+
+资产页支持名称/备注搜索、分组筛选、账户类型与图标、组内排序、归档/恢复和信用卡还款入口。分组可以新增、重命名、排序、合并或删除空组；分组变更不影响账户 ID、余额或历史账单。账户明细入口清除日期、货币等其他筛选，展示该账户的全部历史记录。归档只隐藏账户且禁止新增关联账单/余额核对，仍保留关联历史及余额；历史账单可继续编辑。是否计入净资产由 included 单独决定，归档不会自动排除资产。信用卡还款通过原有转账逻辑同时联动付款账户与信用账户，跨币种仍需明确到账额。
+
+首次运行幂等添加账户 archived/sort_order/icon/account_type 列和 categories/groups/catalog_init 表，不改动金额字段；原信用分组账户初始化为信用卡类型。目录按 userId 隔离，分类管理使用 bookkeeping:categories:view/edit，资产操作沿用 bookkeeping:accounts:view/edit，还款同时要求 bookkeeping:entries:edit。重命名、移动、合并及排序均在 SQLite 事务中执行。仅本模块管理变更时部署 portal 即可。
+
+回归验证：Node 22 运行 node --test portal/src/*.test.js，新增覆盖合并去重、导入标识、停用分类、归档账户、分组迁移、余额保持及跨用户/只读权限；浏览器验证 PC 和手机布局及实际保存操作。
