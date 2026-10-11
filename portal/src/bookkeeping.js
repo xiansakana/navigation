@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { historicalFx } from './bookkeeping-historical-fx.js';
 import { analyzeBookkeeping } from './bookkeeping-analysis.js';
 import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
@@ -36,15 +37,21 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
     if (route === '/fx' && method === 'GET') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
     if (route === '/fx/refresh' && method === 'POST') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
     if (route === '/state' && method === 'GET') {
-      const entries = store.entries(uid, Object.fromEntries(url.searchParams));
+      const history=historicalFx(getDatabase()), allOriginal=store.entries(uid), permittedAccounts=canBookkeep(session,'accounts:view')?store.accounts(uid):null;
+      const destinations=allOriginal.filter(e=>e.toAccountId && e.toAmount!=null).map(e=>({...e,currency:permittedAccounts?.find(a=>a.id===e.toAccountId)?.currency||'CNY'}));
+      await history.ensure([...allOriginal,...destinations]);
+      const entries = store.entries(uid, Object.fromEntries(url.searchParams)).map(history.enrich);
       const offset = Math.max(0, Math.min(50000, Number(url.searchParams.get('offset')) || 0));
       const limit = Math.max(1, Math.min(200, Number(url.searchParams.get('limit')) || 100));
-      const all = store.entries(uid), accounts = canBookkeep(session,'accounts:view') ? store.accounts(uid) : null;
-      const settings=store.settings(uid);
-      return json(res, 200, { ok: true, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),
-        budgetExpense: url.searchParams.get('month') ? summarize(store.entries(uid, { month: url.searchParams.get('month'), currency: 'CNY' })).totals.CNY?.expense || 0 : null,
-        accounts: accounts || [], settings, fx: effectiveBookkeepingFx(settings),
-        analysis: canBookkeep(session,'analysis:view') ? analyzeBookkeeping(entries,all,accounts,settings,Object.fromEntries(url.searchParams)) : null,
+      const all = allOriginal.map(history.enrich), accounts = permittedAccounts;
+      const settings=store.settings(uid), fx=effectiveBookkeepingFx(settings);
+      for(const e of all){if(e.toAccountId){const a=accounts?.find(a=>a.id===e.toAccountId);if(a){e.toHistoricalRate=history.quote(a.currency,e.date.slice(0,10))?.rate||null;if(e.toAmount!=null && !e.toHistoricalRate)e.toFxMissing=a.currency;}}}
+      const budgetMonth=url.searchParams.get('month'), budgetData=budgetMonth?analyzeBookkeeping(all.filter(e=>e.date.startsWith(budgetMonth)),all,null,settings,{month:budgetMonth},undefined,fx.rates):null;
+      const calculation=analyzeBookkeeping(entries,all,canBookkeep(session,'analysis:view')?accounts:null,settings,Object.fromEntries(url.searchParams),undefined,fx.rates);
+      return json(res, 200, { ok: true, equivalentSummary:calculation.equivalentSummary, conversionMissing:calculation.billing.missingCurrencies, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),
+        budgetExpense: budgetData?(budgetData.billing.missingCurrencies.length?null:budgetData.equivalentSummary.totals.CNY?.expense||0):null,
+        accounts: accounts || [], settings, fx,
+        analysis: canBookkeep(session,'analysis:view') ? calculation : null,
         categoryTree: store.catalog.list(uid), accountGroups: canBookkeep(session,'accounts:view') ? store.catalog.groupList(uid) : [],
         books: [...new Set(all.map(e => e.book))], categories: [...new Set(all.map(e => e.category))],
         months: [...new Set(all.map(e => e.date.slice(0, 7)))].sort().reverse() });

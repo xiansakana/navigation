@@ -147,6 +147,8 @@ export function createBookkeepingStore(db) {
     for (const [key, column] of [['type', 'e.type'], ['currency', 'e.currency'], ['book', 'e.book'], ['category', 'e.category'], ['subcategory', 'e.subcategory']]) {
       if (filter[key]) { clauses.push(column + '=?'); args.push(filter[key]); }
     }
+    for(const [key,op] of [['start','>='],['end','<=']])if(filter[key]){entryDate(filter[key]+'T00:00:00');clauses.push('substr(e.date,1,10)'+op+'?');args.push(filter[key]);}
+    if(filter.start && filter.end && filter.start>filter.end)fail('开始日期不能晚于结束日期');
     if (filter.through) { if (!/^\d{4}-\d{2}-\d{2}$/.test(filter.through)) fail('截止日期无效'); clauses.push('substr(e.date,1,10)<=?'); args.push(filter.through); }
     if (filter.day) { if (!/^\d{4}-\d{2}-\d{2}$/.test(filter.day)) fail('日期无效'); clauses.push('substr(e.date,1,10)=?'); args.push(filter.day); }
     if (filter.flow) {

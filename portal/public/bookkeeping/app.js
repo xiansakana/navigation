@@ -8,7 +8,8 @@
   const icons = { 餐饮:'◡', 购物:'▱', 交通:'↗', 工资:'▤', 住房:'⌂', 娱乐:'♫', 通讯:'☎', 学习:'▥', 医疗:'✚', 转账:'⇄', 还款:'↩', 借出:'⇢', 收回:'⇠', 余额调整:'✎' };
   let me, state, activeTab = 'entries', pageSize = 100, pendingImport = null, snapshots = [], editing = null, loadSequence = 0;
   const now = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19); };
-  const money = (n, c = 'CNY') => new Intl.NumberFormat('zh-CN', { style:'currency', currency:c, currencyDisplay:'narrowSymbol', minimumFractionDigits:2, maximumFractionDigits:2 }).format(n);
+  const symbols={CNY:'¥',USD:'US$',HKD:'HK$',JPY:'JP¥',MYR:'RM',EUR:'€',GBP:'£',SGD:'S$'};
+  const money = (n,c='CNY') => (n<0?'-':'')+(symbols[c]||c+' ')+new Intl.NumberFormat('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(n));
   const m = (n, c) => '<span data-money>' + esc(money(n, c)) + '</span>';
   const can = p => (me?.permissions || []).some(grant => grant === '*' || grant === 'bookkeeping:*' || grant === 'bookkeeping:' + p || (p.endsWith(':view') && grant === 'bookkeeping:' + p.replace(/:view$/, ':edit')));
   async function api(path, options = {}) {
@@ -26,22 +27,24 @@
   function query() {
     const p = new URLSearchParams();
     for (const [id, key] of [['month','month'], ['book','book'], ['currency','currency'], ['type','type'], ['category','category'], ['account','accountId'], ['search','q']]) if ($(id).value) p.set(key, $(id).value);
-    for(const [key,value] of Object.entries(analysis.query()))if(value)p.set(key,value);
+    for(const [key,value] of Object.entries({...periods.query(),...analysis.query()}))if(value)p.set(key,value);
     return p;
   }
   function metric(label, value, note = '', className = '', richNote = false, drill = null) { const tag=drill?'button':'div'; return '<'+tag+' class="bk-metric"'+(drill?analysis.attr(drill):'')+'><p>' + esc(label) + '</p><strong class="' + className + '">' + value + '</strong><small>' + (richNote ? note : esc(note)) + '</small></'+tag+'>'; }
-  function summaryHtml(summary) {
+  function summaryHtml(summary, equivalent=false) {
     const parts = Object.entries(summary.totals);
-    if (!parts.length) return metric('支出', m(0, $('currency').value || 'CNY'), '当前筛选无账单') + metric('收入', m(0, $('currency').value || 'CNY'));
-    return parts.map(([c,t]) => metric(c + ' 支出', m(t.expense,c), '已扣除退款与报销 · 点击查看', 'bk-expense',false,{currency:c,flow:'expense'}) + metric(c + ' 收入', m(t.income,c), '转账、借还款不计入 · 点击查看', 'bk-income',false,{currency:c,flow:'income'}) + metric(c + ' 结余', m(t.net,c), '收入 − 净支出 · 点击查看','',false,{currency:c,flow:'net'})).join('');
+    if (!parts.length) return metric('支出', m(0, equivalent?'CNY':$('currency').value || 'CNY'), '当前筛选无账单','bk-expense') + metric('收入', m(0, equivalent?'CNY':$('currency').value || 'CNY'),'','bk-income') + metric('结余', m(0, equivalent?'CNY':$('currency').value || 'CNY'));
+    return parts.map(([c,t]) => metric(c + ' 支出', m(t.expense,c), '已扣除退款与报销 · 点击查看', 'bk-expense',false,{currency:equivalent?$('currency').value:c,flow:'expense'}) + metric(c + ' 收入', m(t.income,c), '转账、借还款不计入 · 点击查看', 'bk-income',false,{currency:equivalent?$('currency').value:c,flow:'income'}) + metric(c + ' 结余', m(t.net,c), '收入 − 净支出 · 点击查看','',false,{currency:equivalent?$('currency').value:c,flow:'net'})).join('');
   }
-  function categoriesHtml(items, max = 1000) {
+  function categoriesHtml(items, max = 1000, equivalent=false) {
     const list = items.filter(x => x.amount !== 0).slice(0,max), totals = {};
     for (const x of items) if (x.amount > 0) totals[x.currency] = (totals[x.currency] || 0) + x.amount;
-    return list.map(x => '<button class="bk-category bk-category-drill"'+analysis.attr({category:x.category,currency:x.currency,flow:'expense'})+'><div class="bk-category-title"><span>' + esc(x.category) + ' <small class="bk-muted">' + esc(x.currency) + '</small></span>' + m(x.amount,x.currency) + '</div><div class="bk-bar"><span style="width:' + Math.max(0,Math.min(100,x.amount/(totals[x.currency] || 1)*100)) + '%"></span></div></button>').join('') || '<p class="bk-empty">暂时没有支出记录</p>';
+    return list.map(x => '<button class="bk-category bk-category-drill"'+analysis.attr({category:x.category,currency:equivalent?$('currency').value:x.currency,flow:'expense'})+'><div class="bk-category-title"><span>' + esc(x.category) + ' <small class="bk-muted">' + esc(x.currency) + '</small></span>' + m(x.amount,x.currency) + '</div><div class="bk-bar"><span style="width:' + Math.max(0,Math.min(100,x.amount/(totals[x.currency] || 1)*100)) + '%"></span></div></button>').join('') || '<p class="bk-empty">暂时没有支出记录</p>';
   }
   function renderEntries() {
-    $('summary').innerHTML = summaryHtml(state.summary); $('stats-summary').innerHTML = summaryHtml(state.summary);
+    const converted=state.equivalentSummary||state.analysis?.equivalentSummary, missing=state.conversionMissing||state.analysis?.billing.missingCurrencies||[];
+    const summary=missing.length?'<p class="bk-muted">缺少 '+esc(missing.join('、'))+' 历史汇率，CNY 汇总待补齐。</p>':summaryHtml(converted||state.summary,true);
+    $('summary').innerHTML=summary;$('stats-summary').innerHTML=summary;
     $('count').textContent = state.count + ' 笔';
     let lastDay = '';
     $('entry-list').innerHTML = state.entries.map(e => {
@@ -51,15 +54,15 @@
       const expense = ['支出','已报销'].includes(e.type), transfer = transferTypes.includes(e.type) || e.type === '余额调整';
       const account = [e.accountName, e.toAccountName].filter(Boolean).join(' → ');
       const subtitle = [e.date.slice(11,16), account, e.note || e.tags].filter(Boolean).join(' · ');
-      return heading + '<button class="bk-entry" data-entry="' + e.id + '"><span class="bk-badge">' + (icons[e.type] || state.categoryTree?.find(c=>c.kind===(e.type==='收入'?'income':'expense') && c.name===(e.subcategory||e.category) && (e.subcategory?state.categoryTree.some(p=>p.id===c.parentId && p.name===e.category):!c.parentId))?.icon || icons[e.category] || '◈') + '</span><span class="bk-entry-main"><strong>' + esc(title) + '</strong><p>' + esc(subtitle) + '</p>' + (e.location ? '<p>⌖ ' + esc(e.location) + '</p>' : '') + '</span><span class="bk-entry-amount ' + (expense?'bk-expense':transfer?'bk-transfer':'bk-income') + '">' + m(expense?-e.amount:e.amount,e.currency) + '<small>' + esc(e.type) + (e.historical?' · 历史':'') + '</small></span></button>';
+      return heading + '<button class="bk-entry" data-entry="' + e.id + '"><span class="bk-badge">' + (icons[e.type] || state.categoryTree?.find(c=>c.kind===(e.type==='收入'?'income':'expense') && c.name===(e.subcategory||e.category) && (e.subcategory?state.categoryTree.some(p=>p.id===c.parentId && p.name===e.category):!c.parentId))?.icon || icons[e.category] || '◈') + '</span><span class="bk-entry-main"><strong>' + esc(title) + '</strong><p>' + esc(subtitle) + '</p>' + (e.location ? '<p>⌖ ' + esc(e.location) + '</p>' : '') + '</span><span class="bk-entry-amount ' + (expense?'bk-expense':transfer?'bk-transfer':'bk-income') + '">' + m(expense?-e.amount:e.amount,e.currency) + (e.currency!=='CNY'?'<small>'+ (e.fxMissing?'CNY 等效待获取': '≈ '+m(expense?-e.cnyAmount:e.cnyAmount,'CNY')+' · 汇率日 '+esc(e.rateDate))+'</small>':'') + '<small>' + esc(e.type) + (e.historical?' · 历史':'') + '</small></span></button>';
     }).join('') || '<div class="bk-empty">还没有符合条件的账单<br>记下第一笔，或从 iCost 导入历史记录。</div>';
     $('more').classList.toggle('hidden', state.entries.length >= state.count);
-    $('mini-categories').innerHTML = categoriesHtml(state.summary.categories,6); $('categories').innerHTML = categoriesHtml(state.summary.categories);
+    $('mini-categories').innerHTML = categoriesHtml(state.equivalentSummary?.categories || state.summary.categories,6,!!state.equivalentSummary); $('categories').innerHTML = categoriesHtml(state.equivalentSummary?.categories || state.summary.categories,1000,!!state.equivalentSummary);
     renderStats();
   }
   function renderStats() {
-    const monthly = !$('month').value, grouped = new Map();
-    for (const d of state.summary.days) {
+    const monthly = state.analysis?.billing.granularity==='month', grouped = new Map();
+    for (const d of state.analysis?.billing.points || []) {
       const date = monthly ? d.date.slice(0,7) : d.date;
       const key = date+' '+d.currency, existing = grouped.get(key) || { date, currency:d.currency, income:0, expense:0 };
       existing.income += d.income; existing.expense += d.expense; grouped.set(key,existing);
@@ -68,9 +71,9 @@
     $('trend-title').textContent = monthly ? '每月收支' : '每日收支';
     const maxes = {};
     days.forEach(d => { maxes[d.currency] = Math.max(maxes[d.currency] || 1,d.income,d.expense); });
-    $('trend').innerHTML = days.map(d => '<button class="bk-chart-row"'+analysis.attr({currency:d.currency,month:d.date.slice(0,7),...(monthly?{}:{day:d.date}),flow:'net'})+'><span>' + esc(monthly ? d.date : d.date.slice(5)) + '<br>' + esc(d.currency) + '</span><div class="bk-chart-bars"><span class="income" style="width:' + Math.max(0,d.income/maxes[d.currency]*100) + '%"></span><span class="expense" style="width:' + Math.max(0,d.expense/maxes[d.currency]*100) + '%"></span></div><span>' + m(d.income,d.currency) + '<br>' + m(d.expense,d.currency) + '</span></button>').join('') || '<p class="bk-empty">暂无收支趋势</p>';
+    $('trend').innerHTML = days.map(d => '<button class="bk-chart-row"'+analysis.attr({currency:$('currency').value,month:d.date.slice(0,7),...(monthly?{}:{day:d.date}),flow:'net'})+'><span>' + esc(monthly ? d.date : d.date.slice(5)) + '<br>' + esc(d.currency) + '</span><div class="bk-chart-bars"><span class="income" style="width:' + Math.max(0,d.income/maxes[d.currency]*100) + '%"></span><span class="expense" style="width:' + Math.max(0,d.expense/maxes[d.currency]*100) + '%"></span></div><span>' + m(d.income,d.currency) + '<br>' + m(d.expense,d.currency) + '</span></button>').join('') || '<p class="bk-empty">暂无收支趋势</p>';
     const month = $('month').value, budget = state.settings.budgets[month], cny = state.budgetExpense || 0;
-    $('budget').innerHTML = month ? (budget ? '<p>' + esc(month) + ' 人民币月预算 ' + m(budget) + ' · 剩余 ' + m(budget-cny) + '</p><div class="bk-bar"><span style="width:' + Math.max(0,Math.min(100,cny/budget*100)) + '%"></span></div>' : '<p class="bk-muted">尚未设置 ' + esc(month) + ' 的人民币预算。</p>') : '<p class="bk-muted">选择月份以查看预算。预算仅针对 CNY 账单。</p>';
+    $('budget').innerHTML = month && budget && state.budgetExpense==null?'<p class="bk-muted">历史汇率尚未补齐，暂不能核算 CNY 预算消耗。</p>':month ? (budget ? '<p>' + esc(month) + ' 人民币月预算 ' + m(budget) + ' · 剩余 ' + m(budget-cny) + '</p><div class="bk-bar"><span style="width:' + Math.max(0,Math.min(100,cny/budget*100)) + '%"></span></div>' : '<p class="bk-muted">尚未设置 ' + esc(month) + ' 的人民币预算。</p>') : '<p class="bk-muted">选择月份以查看预算。预算仅针对 CNY 账单。</p>';
     renderFx(); analysis.render();
   }
   function renderFx() {
@@ -86,7 +89,7 @@
     for (const id of ['refresh-fx','refresh-asset-fx']) { $(id).disabled = true; $(id).textContent = '获取汇率中…'; }
     try {
       const data = await api(manual ? '/fx/refresh' : '/fx', manual ? { method:'POST' } : {});
-      state.fx = data.fx; renderAccounts(); renderFx();
+      state.fx = data.fx; await load(); renderAccounts(); renderFx();
       $('fx-status').textContent = data.fx.errors.length ? data.fx.errors.join('；') + '。优先使用手动备用值，其次使用上次成功值。' : '参考汇率已更新；行情来源可能存在延迟，请查看各币种的数据日期。';
     } catch (e) { $('fx-status').textContent = '汇率获取失败：' + e.message + '，保留已保存的汇率。'; }
     finally { for (const id of ['refresh-fx','refresh-asset-fx']) { $(id).disabled = false; $(id).textContent = '更新参考汇率'; } }
@@ -94,20 +97,18 @@
   function renderAccounts() {
     const totals = {};
     for (const a of state.accounts) if (a.included) { const t = totals[a.currency] ||= { assets:0, debt:0 }; if (a.balance >= 0) t.assets += a.balance; else t.debt -= a.balance; }
-    let metrics = Object.entries(totals).map(([c,t]) => metric(c + ' 净资产',m(t.assets-t.debt,c),'资产 '+m(t.assets,c)+'<br>负债 '+m(t.debt,c),'',true)).join('');
-    const rates = state.fx?.rates || state.settings.rates;
-    const missing = Object.keys(totals).filter(c => !rates[c]);
-    if (Object.keys(totals).some(c => c !== 'CNY')) {
-      if (missing.length) metrics += metric('人民币折算净资产','—','待获取汇率：' + missing.join('、'));
-      else { const total = Object.entries(totals).reduce((s,[c,t]) => s+(t.assets-t.debt)*rates[c],0); const fallback = Object.keys(totals).some(c => state.fx?.quotes[c]?.stale || state.fx?.quotes[c]?.source === 'manual'); metrics += metric('人民币折算净资产',m(total),fallback ? '含手动备用值或历史缓存，请核对汇率' : '采用自动获取的参考汇率'); }
-    }
+    const rates=state.fx?.rates||state.settings.rates, missing=Object.keys(totals).filter(c=>!rates[c]);
+    const asset=state.analysis?.asset, last=asset?.points.at(-1);
+    let metrics=missing.length?metric('CNY 净资产','—','待获取汇率：'+missing.join('、')):metric('当前 CNY 净资产',m(Object.entries(totals).reduce((n,[c,t])=>n+(t.assets-t.debt)*rates[c],0)),'按当前汇率折算');
+    if(last)metrics+=metric('范围期末反推净资产',m(last.balance),'截至 '+last.date+' · 历史估算');
     $('assets-summary').innerHTML = metrics || metric('净资产',m(0),'新增账户，建立资产基准');
     const grouped = {};
     const selectedGroup = state.accountGroups.some(g=>g.name===$('asset-group').value)?$('asset-group').value:''; $('asset-group').innerHTML = options(state.accountGroups.map(g=>g.name),selectedGroup,'全部分组');
     for (const a of state.accounts) if ((!a.archived || $('show-archived-accounts').checked) && (!selectedGroup || a.group===selectedGroup) && (!$('asset-search').value || (a.name+' '+a.note).toLowerCase().includes($('asset-search').value.toLowerCase()))) (grouped[a.group] ||= []).push(a);
     $('account-groups').innerHTML = Object.entries(grouped).map(([g,list]) => '<details open class="bk-panel bk-account-group"><summary>' + esc(g) + ' · ' + list.length + ' 个账户</summary><p class="bk-muted">' + Object.entries(list.reduce((t,a)=>{t[a.currency]=(t[a.currency]||0)+a.balance;return t;},{})).map(([c,v])=>esc(c)+' '+m(v,c)).join(' · ') + '（当前列表余额）</p>' + list.map(a => '<div class="bk-account"><span class="bk-badge">' + esc(a.icon || '◈') + '</span><div class="bk-entry-main"><strong>' + esc(a.name) + (a.archived?' <small class="bk-muted">已归档</small>':'') + (!a.included?' <small class="bk-muted">不计入</small>':'') + '</strong><p>' + esc(a.currency + ' · ' + a.accountType + (a.note?' · '+a.note:'')) + '</p>' + (a.creditLimit ? '<p>可用额度 ' + m(a.creditLimit+a.balance,a.currency) + (a.billDay?' · 账单日 '+a.billDay+' 日':'') + (a.dueDay?' · 还款日 '+a.dueDay+' 日':'') + '</p>':'') + '<div class="bk-asset-controls"><button data-account-ledger="' + a.id + '">明细</button>' + (can('accounts:edit')?'<button data-account-edit="' + a.id + '">编辑</button>' + (!a.archived?'<button data-account-adjust="' + a.id + '">核对余额</button>':'') + management.accountActions(a):'') + '</div></div><div class="bk-entry-amount ' + (a.balance<0?'bk-expense':'') + '">' + m(a.balance,a.currency) + '</div></div>').join('') + '</details>').join('') || '<p class="bk-empty">暂无账户。可新增账户或导入账户快照。</p>';
   }
-  const analysis = window.createBookkeepingAnalysis({ $, esc, m, money, can, load, tab, getState:()=>state });
+  const periods = window.createBookkeepingPeriods({ $, load, clearFocus:()=>analysis.clearFocus() });
+  const analysis = window.createBookkeepingAnalysis({ $, esc, m, money, can, load, tab, getState:()=>state, periods });
   const management = window.createBookkeepingManagement({ $, esc, can, api, write, load, field, select, options, getState:()=>state, openEditor });
   async function load(append = false) {
     const seq = ++loadSequence; $('error').classList.add('hidden');
@@ -126,7 +127,7 @@
     activeTab = name;
     document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active',b.dataset.tab===name));
     document.querySelectorAll('.bk-view').forEach(v => v.classList.toggle('hidden',v.id!==name+'-view'));
-    $('filters').classList.toggle('hidden',['accounts','catalog'].includes(name));
+    $('filters').classList.toggle('hidden',['accounts','catalog'].includes(name));$('period-selector').classList.toggle('hidden',name==='catalog');
   }
   function field(name, label, value = '', extra = '') { return '<label>' + esc(label) + '<input name="' + name + '" value="' + esc(value) + '" ' + extra + '></label>'; }
   function select(name, label, values, selected = '', empty = null) { return '<label>' + esc(label) + '<select name="' + name + '" aria-label="' + esc(label) + '">' + options(values,selected,empty) + '</select></label>'; }
@@ -191,13 +192,13 @@
   $('entry-list').addEventListener('click',e=>{const b=e.target.closest('[data-entry]');if(b)openEditor('entry',state.entries.find(x=>x.id===b.dataset.entry));});
   $('account-groups').addEventListener('click',e=>{
     const b=e.target.closest('button'); if(!b)return;
-    if(b.dataset.accountLedger){analysis.clearFocus();for(const id of ['month','book','currency','type','category','search'])$(id).value='';$('account').value=b.dataset.accountLedger;tab('entries');load();}
+    if(b.dataset.accountLedger){analysis.clearFocus();periods.choose('all',false);for(const id of ['month','book','currency','type','category','search'])$(id).value='';$('account').value=b.dataset.accountLedger;tab('entries');load();}
     if(b.dataset.accountEdit)openEditor('account',state.accounts.find(a=>a.id===b.dataset.accountEdit));
     if(b.dataset.accountAdjust)openEditor('adjust',state.accounts.find(a=>a.id===b.dataset.accountAdjust));
   });
   for(const id of ['month','book','currency','type','category','account'])$(id).addEventListener('change',()=>{analysis.clearFocus();load();});
   let searchTimer; $('search').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>load(),250);});
-  $('all-dates').onclick=()=>{analysis.clearFocus();$('month').value='';load();}; $('more').onclick=()=>load(true);
+  $('all-dates').onclick=()=>periods.choose('all'); $('more').onclick=()=>load(true);
   $('privacy').onclick=()=>{const on=document.querySelector('.bk-shell').classList.toggle('bk-private');$('privacy').setAttribute('aria-pressed',String(on));$('privacy').textContent=on?'显示金额':'隐藏金额';};
   $('import-shortcut').onclick=()=>tab('import');
   $('snapshot-file').addEventListener('change',async()=>{
@@ -218,7 +219,7 @@
   $('refresh-fx').onclick = () => refreshFx(true); $('refresh-asset-fx').onclick = () => refreshFx(true);
   async function boot(){
     try { const r=await fetch('/api/me'); me=await r.json();if(me.isGuest||!me.ok)throw new Error('请登录后访问记账模块');$('owner').textContent=me.username;
-      populate('currency',currencies,'全部货币');$('currency').value='CNY';populate('type',[...types,'余额调整'],'所有类型');$('month').value=now().slice(0,7);
+      populate('currency',currencies,'全部货币');$('currency').value='';populate('type',[...types,'余额调整'],'所有类型');$('month').value=now().slice(0,7);
       $('extra-filters').open = window.innerWidth > 760;
       for(const [id,p] of [['add-entry','entries:edit'],['add-account','accounts:edit'],['settings','settings:edit'],['import-label','import:edit'],['snapshot-label','accounts:edit'],['export','export:view'],['import-shortcut','import:edit']])$(id).classList.toggle('hidden',!can(p));
       for (const id of ['refresh-fx','refresh-asset-fx']) $(id).classList.toggle('hidden', !can('fx:edit'));
