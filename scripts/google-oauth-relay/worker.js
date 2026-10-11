@@ -8,7 +8,7 @@ export async function handleRequest(request, env, fetchImpl = (url, options) => 
   }
   const url = new URL(request.url);
   let upstream;
-  const options = { headers: { Accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(10000) };
+  const options = { headers: { Accept: 'application/json' }, redirect: 'manual', signal: AbortSignal.timeout(10000) };
   if (url.pathname === '/token' && request.method === 'POST') {
     const body = await request.text();
     if (body.length > 8192) return json({ error: 'request_too_large' }, 413);
@@ -31,6 +31,7 @@ export async function handleRequest(request, env, fetchImpl = (url, options) => 
   }
   try {
     const response = await fetchImpl(upstream, options);
+    if (response.status >= 300 && response.status < 400) throw new Error('Unexpected upstream redirect');
     const data = await response.json();
     return json(data, response.status);
   } catch (error) {

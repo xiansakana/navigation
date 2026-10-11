@@ -44,7 +44,7 @@ test('relay forwards only fixed Google endpoints and does not cache token respon
     env, async (url, options) => {
       assert.equal(url, 'https://oauth2.googleapis.com/token');
       assert.equal(options.body, body);
-      assert.equal(options.redirect, 'error');
+      assert.equal(options.redirect, 'manual');
       return Response.json({ access_token: 'token' });
     });
   assert.equal(response.headers.get('Cache-Control'), 'no-store');
