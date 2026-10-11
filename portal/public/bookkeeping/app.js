@@ -26,18 +26,19 @@
   function query() {
     const p = new URLSearchParams();
     for (const [id, key] of [['month','month'], ['book','book'], ['currency','currency'], ['type','type'], ['category','category'], ['account','accountId'], ['search','q']]) if ($(id).value) p.set(key, $(id).value);
+    for(const [key,value] of Object.entries(analysis.query()))if(value)p.set(key,value);
     return p;
   }
-  function metric(label, value, note = '', className = '', richNote = false) { return '<div class="bk-metric"><p>' + esc(label) + '</p><strong class="' + className + '">' + value + '</strong><small>' + (richNote ? note : esc(note)) + '</small></div>'; }
+  function metric(label, value, note = '', className = '', richNote = false, drill = null) { const tag=drill?'button':'div'; return '<'+tag+' class="bk-metric"'+(drill?analysis.attr(drill):'')+'><p>' + esc(label) + '</p><strong class="' + className + '">' + value + '</strong><small>' + (richNote ? note : esc(note)) + '</small></'+tag+'>'; }
   function summaryHtml(summary) {
     const parts = Object.entries(summary.totals);
     if (!parts.length) return metric('支出', m(0, $('currency').value || 'CNY'), '当前筛选无账单') + metric('收入', m(0, $('currency').value || 'CNY'));
-    return parts.map(([c,t]) => metric(c + ' 支出', m(t.expense,c), '已扣除退款与报销', 'bk-expense') + metric(c + ' 收入', m(t.income,c), '转账、借还款不计入', 'bk-income') + metric(c + ' 结余', m(t.net,c), '收入 − 净支出')).join('');
+    return parts.map(([c,t]) => metric(c + ' 支出', m(t.expense,c), '已扣除退款与报销 · 点击查看', 'bk-expense',false,{currency:c,flow:'expense'}) + metric(c + ' 收入', m(t.income,c), '转账、借还款不计入 · 点击查看', 'bk-income',false,{currency:c,flow:'income'}) + metric(c + ' 结余', m(t.net,c), '收入 − 净支出 · 点击查看','',false,{currency:c,flow:'net'})).join('');
   }
   function categoriesHtml(items, max = 1000) {
     const list = items.filter(x => x.amount !== 0).slice(0,max), totals = {};
     for (const x of items) if (x.amount > 0) totals[x.currency] = (totals[x.currency] || 0) + x.amount;
-    return list.map(x => '<div class="bk-category"><div class="bk-category-title"><span>' + esc(x.category) + ' <small class="bk-muted">' + esc(x.currency) + '</small></span>' + m(x.amount,x.currency) + '</div><div class="bk-bar"><span style="width:' + Math.max(0,Math.min(100,x.amount/(totals[x.currency] || 1)*100)) + '%"></span></div></div>').join('') || '<p class="bk-empty">暂时没有支出记录</p>';
+    return list.map(x => '<button class="bk-category bk-category-drill"'+analysis.attr({category:x.category,currency:x.currency,flow:'expense'})+'><div class="bk-category-title"><span>' + esc(x.category) + ' <small class="bk-muted">' + esc(x.currency) + '</small></span>' + m(x.amount,x.currency) + '</div><div class="bk-bar"><span style="width:' + Math.max(0,Math.min(100,x.amount/(totals[x.currency] || 1)*100)) + '%"></span></div></button>').join('') || '<p class="bk-empty">暂时没有支出记录</p>';
   }
   function renderEntries() {
     $('summary').innerHTML = summaryHtml(state.summary); $('stats-summary').innerHTML = summaryHtml(state.summary);
@@ -67,10 +68,10 @@
     $('trend-title').textContent = monthly ? '每月收支' : '每日收支';
     const maxes = {};
     days.forEach(d => { maxes[d.currency] = Math.max(maxes[d.currency] || 1,d.income,d.expense); });
-    $('trend').innerHTML = days.map(d => '<div class="bk-chart-row"><span>' + esc(monthly ? d.date : d.date.slice(5)) + '<br>' + esc(d.currency) + '</span><div class="bk-chart-bars"><span class="income" style="width:' + Math.max(0,d.income/maxes[d.currency]*100) + '%"></span><span class="expense" style="width:' + Math.max(0,d.expense/maxes[d.currency]*100) + '%"></span></div><span>' + m(d.income,d.currency) + '<br>' + m(d.expense,d.currency) + '</span></div>').join('') || '<p class="bk-empty">暂无收支趋势</p>';
+    $('trend').innerHTML = days.map(d => '<button class="bk-chart-row"'+analysis.attr({currency:d.currency,month:d.date.slice(0,7),...(monthly?{}:{day:d.date}),flow:'net'})+'><span>' + esc(monthly ? d.date : d.date.slice(5)) + '<br>' + esc(d.currency) + '</span><div class="bk-chart-bars"><span class="income" style="width:' + Math.max(0,d.income/maxes[d.currency]*100) + '%"></span><span class="expense" style="width:' + Math.max(0,d.expense/maxes[d.currency]*100) + '%"></span></div><span>' + m(d.income,d.currency) + '<br>' + m(d.expense,d.currency) + '</span></button>').join('') || '<p class="bk-empty">暂无收支趋势</p>';
     const month = $('month').value, budget = state.settings.budgets[month], cny = state.budgetExpense || 0;
     $('budget').innerHTML = month ? (budget ? '<p>' + esc(month) + ' 人民币月预算 ' + m(budget) + ' · 剩余 ' + m(budget-cny) + '</p><div class="bk-bar"><span style="width:' + Math.max(0,Math.min(100,cny/budget*100)) + '%"></span></div>' : '<p class="bk-muted">尚未设置 ' + esc(month) + ' 的人民币预算。</p>') : '<p class="bk-muted">选择月份以查看预算。预算仅针对 CNY 账单。</p>';
-    renderFx();
+    renderFx(); analysis.render();
   }
   function renderFx() {
     const quotes = state.fx?.quotes || {}, sources = { fixed:'固定', finnhub:'Finnhub', fred:'FRED', yahoo:'Yahoo', manual:'手动备用' };
@@ -106,6 +107,7 @@
     for (const a of state.accounts) if ((!a.archived || $('show-archived-accounts').checked) && (!selectedGroup || a.group===selectedGroup) && (!$('asset-search').value || (a.name+' '+a.note).toLowerCase().includes($('asset-search').value.toLowerCase()))) (grouped[a.group] ||= []).push(a);
     $('account-groups').innerHTML = Object.entries(grouped).map(([g,list]) => '<details open class="bk-panel bk-account-group"><summary>' + esc(g) + ' · ' + list.length + ' 个账户</summary><p class="bk-muted">' + Object.entries(list.reduce((t,a)=>{t[a.currency]=(t[a.currency]||0)+a.balance;return t;},{})).map(([c,v])=>esc(c)+' '+m(v,c)).join(' · ') + '（当前列表余额）</p>' + list.map(a => '<div class="bk-account"><span class="bk-badge">' + esc(a.icon || '◈') + '</span><div class="bk-entry-main"><strong>' + esc(a.name) + (a.archived?' <small class="bk-muted">已归档</small>':'') + (!a.included?' <small class="bk-muted">不计入</small>':'') + '</strong><p>' + esc(a.currency + ' · ' + a.accountType + (a.note?' · '+a.note:'')) + '</p>' + (a.creditLimit ? '<p>可用额度 ' + m(a.creditLimit+a.balance,a.currency) + (a.billDay?' · 账单日 '+a.billDay+' 日':'') + (a.dueDay?' · 还款日 '+a.dueDay+' 日':'') + '</p>':'') + '<div class="bk-asset-controls"><button data-account-ledger="' + a.id + '">明细</button>' + (can('accounts:edit')?'<button data-account-edit="' + a.id + '">编辑</button>' + (!a.archived?'<button data-account-adjust="' + a.id + '">核对余额</button>':'') + management.accountActions(a):'') + '</div></div><div class="bk-entry-amount ' + (a.balance<0?'bk-expense':'') + '">' + m(a.balance,a.currency) + '</div></div>').join('') + '</details>').join('') || '<p class="bk-empty">暂无账户。可新增账户或导入账户快照。</p>';
   }
+  const analysis = window.createBookkeepingAnalysis({ $, esc, m, money, can, load, tab, getState:()=>state });
   const management = window.createBookkeepingManagement({ $, esc, can, api, write, load, field, select, options, getState:()=>state, openEditor });
   async function load(append = false) {
     const seq = ++loadSequence; $('error').classList.add('hidden');
@@ -177,19 +179,25 @@
     if(!window.confirm(editing.mode==='entry'?'删除这条账单？新账单会撤销对账户余额的影响。':'删除这个账户？存在关联账单时不能删除。')) return;
     try { await api('/'+(editing.mode==='entry'?'entries':'accounts')+'/'+editing.item.id,{method:'DELETE'}); await load(); $('editor').close(); } catch(e) { $('editor-error').textContent=e.message; }
   });
+  for(const id of ['editor','manager-editor']) {
+    const dialog=$(id); let outside=false;
+    const isOutside=e=>{const r=dialog.getBoundingClientRect();return e.target===dialog && (e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom);};
+    dialog.addEventListener('pointerdown',e=>{outside=isOutside(e);});
+    dialog.addEventListener('click',e=>{if(outside && isOutside(e))dialog.close();outside=false;});
+  }
   $('close-editor').onclick=()=>$('editor').close();
   $('add-entry').onclick=()=>openEditor('entry'); $('add-account').onclick=()=>openEditor('account'); $('settings').onclick=()=>openEditor('settings');
   document.querySelector('.bk-tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)tab(b.dataset.tab);});
   $('entry-list').addEventListener('click',e=>{const b=e.target.closest('[data-entry]');if(b)openEditor('entry',state.entries.find(x=>x.id===b.dataset.entry));});
   $('account-groups').addEventListener('click',e=>{
     const b=e.target.closest('button'); if(!b)return;
-    if(b.dataset.accountLedger){for(const id of ['month','book','currency','type','category','search'])$(id).value='';$('account').value=b.dataset.accountLedger;tab('entries');load();}
+    if(b.dataset.accountLedger){analysis.clearFocus();for(const id of ['month','book','currency','type','category','search'])$(id).value='';$('account').value=b.dataset.accountLedger;tab('entries');load();}
     if(b.dataset.accountEdit)openEditor('account',state.accounts.find(a=>a.id===b.dataset.accountEdit));
     if(b.dataset.accountAdjust)openEditor('adjust',state.accounts.find(a=>a.id===b.dataset.accountAdjust));
   });
-  for(const id of ['month','book','currency','type','category','account'])$(id).addEventListener('change',()=>load());
+  for(const id of ['month','book','currency','type','category','account'])$(id).addEventListener('change',()=>{analysis.clearFocus();load();});
   let searchTimer; $('search').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>load(),250);});
-  $('all-dates').onclick=()=>{$('month').value='';load();}; $('more').onclick=()=>load(true);
+  $('all-dates').onclick=()=>{analysis.clearFocus();$('month').value='';load();}; $('more').onclick=()=>load(true);
   $('privacy').onclick=()=>{const on=document.querySelector('.bk-shell').classList.toggle('bk-private');$('privacy').setAttribute('aria-pressed',String(on));$('privacy').textContent=on?'显示金额':'隐藏金额';};
   $('import-shortcut').onclick=()=>tab('import');
   $('snapshot-file').addEventListener('change',async()=>{
@@ -214,6 +222,7 @@
       $('extra-filters').open = window.innerWidth > 760;
       for(const [id,p] of [['add-entry','entries:edit'],['add-account','accounts:edit'],['settings','settings:edit'],['import-label','import:edit'],['snapshot-label','accounts:edit'],['export','export:view'],['import-shortcut','import:edit']])$(id).classList.toggle('hidden',!can(p));
       for (const id of ['refresh-fx','refresh-asset-fx']) $(id).classList.toggle('hidden', !can('fx:edit'));
+      document.querySelector('[data-tab="stats"]').classList.toggle('hidden',!can('analysis:view'));
       document.querySelector('[data-tab="catalog"]').classList.toggle('hidden',!can('categories:view'));
       $('add-category').classList.toggle('hidden',!can('categories:edit')); $('manage-groups').classList.toggle('hidden',!can('accounts:edit'));
       document.querySelector('[data-tab="accounts"]').classList.toggle('hidden',!can('accounts:view'));$('account-filter-label').classList.toggle('hidden',!can('accounts:view'));

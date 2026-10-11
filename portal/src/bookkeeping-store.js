@@ -91,7 +91,7 @@ export function createBookkeepingStore(db) {
         included=excluded.included,credit_limit=excluded.credit_limit,bill_day=excluded.bill_day,due_day=excluded.due_day,note=excluded.note,
         archived=excluded.archived,icon=excluded.icon,account_type=excluded.account_type`).run(
         aid, userId, name, text(input.group || '资金账户', 100), c, opening, input.included === false ? 0 : 1,
-        credit, day(input.billDay), day(input.dueDay), text(input.note, 1000), existing?.snapshotAt || text(input.snapshotAt, 100),
+        credit, day(input.billDay), day(input.dueDay), text(input.note, 1000), existing ? existing.snapshotAt : text(input.snapshotAt || new Date(Date.now()+8*60*60*1000).toISOString().slice(0,19), 100),
         input.archived === true ? 1 : 0, existing?.sortOrder ?? db.prepare('SELECT COALESCE(MAX(sort_order),-1)+1 AS n FROM bookkeeping_accounts WHERE user_id=?').get(userId).n,
         text(input.icon || '◈',20), text(input.accountType || (input.group?.includes('信用') ? '信用卡' : '其他资产'),100));
     } catch (error) { if (error.code?.startsWith('SQLITE_CONSTRAINT')) fail('账户名称已存在'); throw error; }
@@ -146,6 +146,13 @@ export function createBookkeepingStore(db) {
     if (filter.month) { if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(filter.month)) fail('月份无效'); clauses.push('substr(e.date,1,7)=?'); args.push(filter.month); }
     for (const [key, column] of [['type', 'e.type'], ['currency', 'e.currency'], ['book', 'e.book'], ['category', 'e.category'], ['subcategory', 'e.subcategory']]) {
       if (filter[key]) { clauses.push(column + '=?'); args.push(filter[key]); }
+    }
+    if (filter.through) { if (!/^\d{4}-\d{2}-\d{2}$/.test(filter.through)) fail('截止日期无效'); clauses.push('substr(e.date,1,10)<=?'); args.push(filter.through); }
+    if (filter.day) { if (!/^\d{4}-\d{2}-\d{2}$/.test(filter.day)) fail('日期无效'); clauses.push('substr(e.date,1,10)=?'); args.push(filter.day); }
+    if (filter.flow) {
+      const expense = "(e.type IN ('支出','已报销','退款入账','报销入账') OR (e.type!='余额调整' AND e.fee!=0))";
+      if (!['expense','income','net'].includes(filter.flow)) fail('收支范围无效');
+      clauses.push(filter.flow==='expense'?expense:filter.flow==='income'?"e.type='收入'":"(e.type='收入' OR "+expense+")");
     }
     if (filter.accountId) { clauses.push('(e.account_id=? OR e.to_account_id=?)'); args.push(filter.accountId, filter.accountId); }
     if (filter.q) { clauses.push('(e.note LIKE ? OR e.category LIKE ? OR e.subcategory LIKE ? OR e.tags LIKE ? OR e.location LIKE ? OR a.name LIKE ? OR b.name LIKE ?)'); for (let i = 0; i < 7; i++) args.push('%' + text(filter.q) + '%'); }

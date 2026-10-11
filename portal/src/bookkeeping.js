@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { analyzeBookkeeping } from './bookkeeping-analysis.js';
 import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
 import { createBookkeepingStore, summarize } from './bookkeeping-store.js';
@@ -38,10 +39,12 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       const entries = store.entries(uid, Object.fromEntries(url.searchParams));
       const offset = Math.max(0, Math.min(50000, Number(url.searchParams.get('offset')) || 0));
       const limit = Math.max(1, Math.min(200, Number(url.searchParams.get('limit')) || 100));
-      const all = store.entries(uid);
+      const all = store.entries(uid), accounts = canBookkeep(session,'accounts:view') ? store.accounts(uid) : null;
+      const settings=store.settings(uid);
       return json(res, 200, { ok: true, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),
         budgetExpense: url.searchParams.get('month') ? summarize(store.entries(uid, { month: url.searchParams.get('month'), currency: 'CNY' })).totals.CNY?.expense || 0 : null,
-        accounts: canBookkeep(session, 'accounts:view') ? store.accounts(uid) : [], settings: store.settings(uid), fx: effectiveBookkeepingFx(store.settings(uid)),
+        accounts: accounts || [], settings, fx: effectiveBookkeepingFx(settings),
+        analysis: canBookkeep(session,'analysis:view') ? analyzeBookkeeping(entries,all,accounts,settings,Object.fromEntries(url.searchParams)) : null,
         categoryTree: store.catalog.list(uid), accountGroups: canBookkeep(session,'accounts:view') ? store.catalog.groupList(uid) : [],
         books: [...new Set(all.map(e => e.book))], categories: [...new Set(all.map(e => e.category))],
         months: [...new Set(all.map(e => e.date.slice(0, 7)))].sort().reverse() });
