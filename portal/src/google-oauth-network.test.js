@@ -82,7 +82,7 @@ test('Worker entrypoint preserves the global fetch receiver required by Cloudfla
 test('relay transport uses IPv4, preserves request body and rejects redirect responses', async () => {
   const requestImpl = (url, options, callback) => {
     assert.equal(options.family, 4);
-    assert.equal(options.agent, false);
+    assert.equal(options.agent.keepAlive, true);
     assert.equal(url, 'https://oauth.saoyu.fun/token');
     const request = new EventEmitter();
     request.end = (body) => {

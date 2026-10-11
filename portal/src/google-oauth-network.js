@@ -6,10 +6,28 @@ const endpoints = new Map([
   ['https://openidconnect.googleapis.com/v1/userinfo', '/userinfo']
 ]);
 const healthyAddresses = new Map();
+const relayAgents = new Map();
+
+function relayAgent(url, address) {
+  const key = new URL(url).origin + ':' + address;
+  let entry = relayAgents.get(key);
+  if (!entry) {
+    if (relayAgents.size >= 20) {
+      const [oldKey, old] = relayAgents.entries().next().value;
+      clearTimeout(old.timer); old.agent.destroy(); relayAgents.delete(oldKey);
+    }
+    entry = { agent: new https.Agent({ keepAlive: true, maxSockets: 4 }) };
+    relayAgents.set(key, entry);
+  }
+  clearTimeout(entry.timer);
+  entry.timer = setTimeout(() => { entry.agent.destroy(); relayAgents.delete(key); }, 60000);
+  entry.timer.unref();
+  return entry.agent;
+}
 
 export async function requestOAuthRelay(url, options, requestImpl = https.request,
   lookupImpl = (hostname) => dns.promises.lookup(hostname, { all: true, family: 4 })) {
-  const signal = options.signal || AbortSignal.timeout(15000);
+  const signal = options.signal || AbortSignal.timeout(30000);
   signal.throwIfAborted();
   let rejectLookup;
   const aborted = new Promise((_, reject) => { rejectLookup = () => reject(signal.reason); });
@@ -50,7 +68,7 @@ export async function requestOAuthRelay(url, options, requestImpl = https.reques
       const fail = (error) => { clearTimeout(timer); error.sent = sent && !probe; error.phase = phase; reject(error); };
       const requestOptions = probe ? { method: 'GET', headers: { Accept: 'application/json' },
         signal } : { ...options, signal };
-      const request = requestImpl(url, { ...requestOptions, agent: false, family: 4,
+      const request = requestImpl(url, { ...requestOptions, agent: relayAgent(url, address), family: 4,
         lookup: (_hostname, _options, callback) => callback(null, address, 4)
       }, (response) => {
         phase = probe ? 'probe-body' : 'body';
@@ -75,14 +93,18 @@ export async function requestOAuthRelay(url, options, requestImpl = https.reques
       });
       // TCP can connect while TLS hangs. Try another address before sending the
       // authorization code, but never retry once any HTTP request was sent.
-      timer = setTimeout(() => request.destroy(new Error(probe ? 'Google OAuth 连接检查超时' : 'Google OAuth TLS 连接超时')), 3000);
+      timer = setTimeout(() => request.destroy(new Error(probe ? 'Google OAuth 连接检查超时' : 'Google OAuth TLS 连接超时')), 10000);
       request.on('error', fail);
-      request.on('socket', (socket) => socket.once('secureConnect', () => {
+      const send = () => {
         if (!probe) clearTimeout(timer);
         phase = probe ? 'probe-response' : 'response';
         sent = true;
         request.end(requestOptions.body);
-      }));
+      };
+      request.on('socket', (socket) => {
+        if (socket.authorized && !socket.connecting) send();
+        else socket.once('secureConnect', send);
+      });
     });
   }
 }
@@ -101,7 +123,7 @@ export function fetchGoogleOAuth(url, options, config, fetchImpl) {
   }
   const transport = fetchImpl || (config.relayUrl ? requestOAuthRelay : globalThis.fetch);
   return Promise.resolve().then(() => transport(target,
-    { ...options, headers, redirect: 'error', signal: AbortSignal.timeout(15000) })).catch((error) => {
+    { ...options, headers, redirect: 'error', signal: AbortSignal.timeout(30000) })).catch((error) => {
     console.warn('Google OAuth request failed', { endpoint: endpoints.get(url), phase: error.phase, name: error.name, code: error.code });
     throw new Error('Google 登录服务连接失败，请重试');
   });
