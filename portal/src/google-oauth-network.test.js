@@ -67,6 +67,18 @@ test('relay masks upstream failures and secrets', async () => {
   assert.equal((await response.text()).includes('secret-token'), false);
 });
 
+test('Worker entrypoint preserves the global fetch receiver required by Cloudflare', async (t) => {
+  t.mock.method(globalThis, 'fetch', function () {
+    assert.equal(this, globalThis);
+    return Promise.resolve(Response.json({ sub: '123' }));
+  });
+  const response = await worker.fetch(new Request('https://relay/userinfo', {
+    headers: { 'X-OAuth-Relay-Secret': 'secret', Authorization: 'Bearer token' }
+  }), { RELAY_SECRET: 'secret' }, {});
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { sub: '123' });
+});
+
 test('relay transport uses IPv4, preserves request body and rejects redirect responses', async () => {
   const requestImpl = (url, options, callback) => {
     assert.equal(options.family, 0);

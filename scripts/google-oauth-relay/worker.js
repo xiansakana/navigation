@@ -2,7 +2,7 @@ function json(data, status) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
-export async function handleRequest(request, env, fetchImpl = fetch) {
+export async function handleRequest(request, env, fetchImpl = (url, options) => globalThis.fetch(url, options)) {
   if (!env.RELAY_SECRET || request.headers.get('X-OAuth-Relay-Secret') !== env.RELAY_SECRET) {
     return json({ error: 'unauthorized' }, 401);
   }
