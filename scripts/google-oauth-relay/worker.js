@@ -33,7 +33,9 @@ export async function handleRequest(request, env, fetchImpl = (url, options) => 
     const response = await fetchImpl(upstream, options);
     if (response.status >= 300 && response.status < 400) throw new Error('Unexpected upstream redirect');
     const data = await response.json();
-    return json(data, response.status);
+    // Portal uses the access token to read userinfo; it does not need Google's
+    // larger ID token or other fields from the token exchange response.
+    return json(url.pathname === '/token' && response.ok ? { access_token: data.access_token } : data, response.status);
   } catch (error) {
     // Record only an error category, never upstream bodies or credentials.
     const message = String(error.message || '');
