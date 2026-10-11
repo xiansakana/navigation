@@ -13,6 +13,14 @@ test('group writes require real bot mention; self, ordinary chat and media are i
   assert.equal(qqCommandEvent({...event,message_type:'group',message:'[CQ:at,qq=2942493314] 记账 支出 35 餐饮'}),null);
   assert.equal(qqCommandEvent({...event,message:[...event.message,{type:'image',data:{}}]}),null);
 });
+test('QQ map JSON and standard location are extracted, unrelated cards never execute bills',()=>{
+  const card={type:'json',data:{data:JSON.stringify({app:'com.tencent.map',meta:{'Location.Search':{name:'餐厅',address:'上海',lat:31.2,lng:121.5}}})}};
+  const parsed=qqCommandEvent({...event,message:[card]});assert.equal(parsed.location.label,'餐厅 · 上海');assert.equal(parsed.location.latitude,31.2);
+  const group=qqCommandEvent({...event,message_type:'group',group_id:123456,message:[card]});assert.equal(group.locationOnly,true);
+  assert.equal(qqCommandEvent({...event,message:[{type:'json',data:{data:'{"app":"unrelated"}'}},...event.message]}),null);
+  assert.equal(qqCommandEvent({...event,message:[{type:'location',data:{lat:91,lon:121}}]}),null);
+  assert.ok(qqCommandEvent({...event,message:[{type:'text',data:{text:'跳过定位'}}]}));
+});
 test('receiver sends correct reply target, then acknowledges; persisted duplicate sends no reply',async()=>{
   const requests=[],sent=[],config={bookkeeping:{enabled:true},server:{notifyToken:'secret'},channels:{qq:{enabled:true}}};
   const receiver=createQqCommandReceiver({getConfig:()=>config,send:async(c,e,m)=>sent.push({e,m}),request:async(url,opts)=>{

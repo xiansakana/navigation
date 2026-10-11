@@ -137,13 +137,15 @@
     for(const [id,name] of [[editing?.item.accountId,editing?.item.accountName],[editing?.item.toAccountId,editing?.item.toAccountName]]) if(id && !list.some(a=>a.value===id))list.push({value:id,label:name||'原关联账户'});
     return list;
   };
+  let locationCapture=null;
   function openEditor(mode, item = {}) {
+    locationCapture?.cancel(); locationCapture=null;
     editing = { mode, item }; $('editor-error').textContent = ''; $('save-item').disabled = false;
     $('delete-item').classList.toggle('hidden',!item.id || !['entry','account'].includes(mode) || !can(mode==='entry'?'entries:edit':'accounts:edit'));
     let html = '';
     if (mode === 'entry') {
       $('editor-title').textContent = item.id ? '账单详情' : '记一笔';
-      html = select('type','类型',item.type==='余额调整'?[...types,'余额调整']:types,item.type||'支出') + field('amount','金额',item.amount??'','type="number" step="0.01" required') + select('currency','货币',currencies,item.currency||'CNY') + field('date','日期与时间',item.date||now(),'type="datetime-local" step="1" required') + select('category','一级分类',[],item.category) + select('subcategory','二级分类',[],item.subcategory,'无二级分类') + select('accountId','付款 / 收款账户',accountOptions(),item.accountId,'未关联账户') + select('toAccountId','转入账户',accountOptions(),item.toAccountId,'请选择') + field('toAmount','跨币种到账金额',item.toAmount??'','type="number" min="0.01" step="0.01"') + field('fee','手续费（付款币种）',item.fee||0,'type="number" min="0" step="0.01"') + field('book','账本',item.book||$('book').value||'个人账本','required') + field('tags','标签',item.tags) + field('location','位置',item.location) + field('refund','退款信息（辅助字段）',item.refund||0,'type="number" min="0" step="0.01"') + field('discount','优惠信息（辅助字段）',item.discount||0,'type="number" min="0" step="0.01"') + '<label class="full">备注<textarea name="note" maxlength="5000">' + esc(item.note) + '</textarea></label><datalist id="category-suggestions">' + state.categories.map(c => '<option value="'+esc(c)+'">').join('') + '</datalist>';
+      html = select('type','类型',item.type==='余额调整'?[...types,'余额调整']:types,item.type||'支出') + field('amount','金额',item.amount??'','type="number" step="0.01" required') + select('currency','货币',currencies,item.currency||'CNY') + field('date','日期与时间',item.date||now(),'type="datetime-local" step="1" required') + select('category','一级分类',[],item.category) + select('subcategory','二级分类',[],item.subcategory,'无二级分类') + select('accountId','付款 / 收款账户',accountOptions(),item.accountId,'未关联账户') + select('toAccountId','转入账户',accountOptions(),item.toAccountId,'请选择') + field('toAmount','跨币种到账金额',item.toAmount??'','type="number" min="0.01" step="0.01"') + field('fee','手续费（付款币种）',item.fee||0,'type="number" min="0" step="0.01"') + field('book','账本',item.book||$('book').value||'个人账本','required') + field('tags','标签',item.tags) + '<label><span class="bk-location-heading">位置 <small id="location-status"></small></span><span class="bk-location-input"><input name="location" aria-label="位置" value="'+esc(item.location)+'"><button type="button" id="location-retry" class="btn ghost" aria-label="重新获取当前位置" title="重新获取当前位置">⌖</button></span></label>' + field('refund','退款信息（辅助字段）',item.refund||0,'type="number" min="0" step="0.01"') + field('discount','优惠信息（辅助字段）',item.discount||0,'type="number" min="0" step="0.01"') + '<label class="full">备注<textarea name="note" maxlength="5000">' + esc(item.note) + '</textarea></label><datalist id="category-suggestions">' + state.categories.map(c => '<option value="'+esc(c)+'">').join('') + '</datalist>';
       if (item.historical) html += '<p class="bk-form-hint">这是历史导入记录，编辑或删除不会改变资产基准。原导出的跨币种转账没有到账金额。</p>';
     } else if (mode === 'account') {
       $('editor-title').textContent = item.id?'编辑账户':'新增账户';
@@ -161,6 +163,8 @@
     $('editor').showModal();
     if (mode==='entry') {
       const form = $('editor-form'), t = form.elements.type;
+      locationCapture=window.createBookkeepingLocation({input:form.elements.location,status:$('location-status'),retry:$('location-retry'),active:()=>editing?.mode==='entry' && $('editor').open && form.elements.location===$('editor-form').elements.location,enabled:!readonly && can('location:edit')});
+      if(!item.id)void locationCapture.start();
       management.bindCategoryPicker(form,item);
       const update = () => { const transfer = transferTypes.includes(t.value); ['toAccountId','toAmount'].forEach(n=>form.elements[n].closest('label').classList.toggle('hidden',!transfer)); if (!transfer) { form.elements.toAccountId.value=''; form.elements.toAmount.value=''; } };
       t.addEventListener('change',update); update();
@@ -168,7 +172,10 @@
     }
   }
   $('editor-form').addEventListener('submit',async event=>{
-    event.preventDefault(); const input = Object.fromEntries(new FormData(event.target)); const { mode,item } = editing; $('save-item').disabled=true;
+    event.preventDefault(); if($('save-item').disabled)return;
+    const opened=editing; $('save-item').disabled=true;
+    if(opened.mode==='entry' && !opened.item.id){await locationCapture?.wait();if(editing!==opened || !$('editor').open)return;}
+    const input = Object.fromEntries(new FormData(event.target)); const { mode,item } = editing; $('save-item').disabled=true;
     try {
       if (mode==='entry') { if (!input.toAmount) delete input.toAmount; await write('/entries'+(item.id?'/'+item.id:''),input,item.id?'PUT':'POST'); }
       else if (mode==='account') { input.included=event.target.elements.included.checked; await write('/accounts'+(item.id?'/'+item.id:''),input,item.id?'PUT':'POST'); }
@@ -187,6 +194,7 @@
     dialog.addEventListener('pointerdown',e=>{outside=isOutside(e);});
     dialog.addEventListener('click',e=>{if(outside && isOutside(e))dialog.close();outside=false;});
   }
+  $('editor').addEventListener('close',()=>{if(!$('editor').open)locationCapture?.cancel();});
   $('close-editor').onclick=()=>$('editor').close();
   $('add-entry').onclick=()=>openEditor('entry'); $('add-account').onclick=()=>openEditor('account'); $('settings').onclick=()=>openEditor('settings');
   document.querySelector('.bk-tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)tab(b.dataset.tab);});

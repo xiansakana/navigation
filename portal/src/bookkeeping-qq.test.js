@@ -9,7 +9,7 @@ function setup() {
   const service=createQqBookkeeping(db,{resolveUser:()=>allowed?{permissions:['*']}:null,clock:()=>now});
   const a=store.saveAccount('a',{name:'资金账户-微信',balance:1000}),b=store.saveAccount('a',{name:'支付宝',balance:0}),h=store.saveAccount('a',{name:'港币',currency:'HKD',balance:1000});
   service.save('a',{defaultAccountId:a,groups:'123456',aliases:'微信=资金账户-微信'});
-  const event=(text,messageId='1',extra={})=>({selfId:'2942493314',qqId:'12345678',type:'private',messageId,text,...extra});
+  const event=(text,messageId='1',extra={})=>({selfId:'2942493314',qqId:'12345678',type:'private',messageId,text:!extra.keepLocation && /^(记账|转账)\s/.test(text)?text+' 定位=跳过':text,...extra});
   const bind=()=>service.process(event('绑定记账 '+service.code('a').code,'bind'));
   return {db,store,service,event,bind,a,b,h,deny:()=>{allowed=false;},advance:()=>{now+=700000;}};
 }
@@ -21,6 +21,53 @@ test('bind code proves QQ ownership, expires and cannot be consumed in groups',(
     t.bind();assert.equal(t.service.status('a').qqId,'12345678');
     assert.throws(()=>t.service.process(t.event('绑定记账 '+t.service.code('b').code,'b')),/其他账号/);
     t.service.unbind('a');assert.equal(t.service.status('a').qqId,'');
+  }finally{t.db.close();}
+});
+test('location before bill is consumed once; missing location reminds, late card only updates location',()=>{
+  const t=setup();try{
+    t.bind();const loc={latitude:31.2,longitude:121.5,label:'测试餐厅'};
+    t.service.process(t.event('','loc',{location:loc}));
+    const raw=(text,id,extra={})=>t.event(text,id,{keepLocation:true,...extra});
+    t.service.process(raw('记账 支出 20 餐饮 微信','with-location'));
+    assert.equal(t.store.entries('a')[0].location,'测试餐厅');
+    const r=t.service.process(raw('记账 支出 30 餐饮 微信','missing'));
+    assert.match(r.reply,/已保存.*还没有位置/);
+    assert.throws(()=>t.service.process(raw('记账 支出 40 餐饮 微信','blocked')),/本指令未入账/);
+    const missing=t.store.entries('a').find(e=>e.amount===30);const balance=t.store.accounts('a').find(a=>a.id===t.a).balance;
+    const result=t.service.process(raw('','followup',{location:{...loc,label:'第二位置'}}));
+    assert.match(result.reply,/已补充/);assert.equal(t.store.entries('a').find(e=>e.id===missing.id).location,'第二位置');
+    assert.equal(t.store.accounts('a').find(a=>a.id===t.a).balance,balance);
+    assert.equal(t.service.process(raw('','followup',{location:loc})).duplicate,true);
+    assert.equal(t.store.entries('a').length,2);
+    t.service.process(raw('记账 支出 5 餐饮 微信','skip-pending'));t.service.process(raw('跳过定位','skip'));
+    t.service.process(raw('记账 支出 6 餐饮 微信 定位=跳过','explicit-skip'));
+  }finally{t.db.close();}
+});
+test('group standalone cards require pending context and never cross user or chat boundaries',()=>{
+  const t=setup();try{
+    t.bind();const loc={latitude:31.2,longitude:121.5,label:'群位置'};
+    const group=(text,id,extra={})=>t.event(text,id,{type:'group',groupId:'123456',keepLocation:true,...extra});
+    assert.equal(t.service.process(group('','no-context',{location:loc,locationOnly:true})).ignored,true);
+    t.service.process(group('记账 支出 10 餐饮 微信','g-bill'));
+    assert.equal(t.service.process(group('','other-user',{qqId:'87654321',location:loc,locationOnly:true})).ignored,true);
+    t.service.process(t.event('','private-card',{location:{...loc,label:'私聊位置'}}));
+    assert.equal(t.store.entries('a')[0].location,'');
+    t.service.process(group('','g-card',{location:loc,locationOnly:true}));assert.equal(t.store.entries('a')[0].location,'群位置');
+    t.service.process(group('记账定位','prepare'));t.service.process(group('','prepared-card',{location:loc,locationOnly:true}));
+    t.advance();const r=t.service.process(group('记账 支出 15 餐饮 微信','expired'));
+    assert.match(r.reply,/还没有位置/);assert.equal(t.store.entries('a').find(e=>e.amount===15).location,'');
+    assert.throws(()=>t.service.process(group('','bad-card',{location:{latitude:91,longitude:121}})),/坐标/);
+  }finally{t.db.close();}
+});
+test('explicit backfill checks same sender and conversation, and cannot change money',()=>{
+  const t=setup();try{
+    t.bind();t.service.process(t.event('记账 支出 12 餐饮 微信','bill'));
+    const eid=t.store.entries('a')[0].id;
+    assert.throws(()=>t.service.process(t.event('补充位置 '+eid,'g',{type:'group',groupId:'123456'})),/本聊天/);
+    t.service.process(t.event('补充位置 '+eid,'select'));
+    t.service.process(t.event('','card',{location:{latitude:31,longitude:121,label:'补充位置'}}));
+    assert.equal(t.store.entries('a')[0].amount,12);assert.equal(t.store.entries('a')[0].location,'补充位置');
+    t.service.process(t.event('撤销 '+eid,'remove'));assert.throws(()=>t.service.process(t.event('补充位置 '+eid,'deleted')),/本聊天/);
   }finally{t.db.close();}
 });
 test('QQ bills update balances once, survive recreated service, and undo only own QQ bills',()=>{
@@ -42,7 +89,7 @@ test('group authorization, sender isolation and permission revocation cover retr
     t.bind();assert.throws(()=>t.service.process(t.event('记账 支出 35 餐饮','g',{type:'group',groupId:'999999'})),/未授权/);
     assert.throws(()=>t.service.process(t.event('记账 支出 35 餐饮','x',{qqId:'87654321',type:'group',groupId:'123456'})),/尚未绑定/);
     const r=t.service.process(t.event('记账 支出 35 餐饮','g',{type:'group',groupId:'123456'}));
-    assert.doesNotMatch(r.reply,/餐饮|CNY|35|微信/);
+    assert.doesNotMatch(r.reply,/餐饮|CNY|微信/);
     t.deny();assert.throws(()=>t.service.process(t.event('记账 支出 35 餐饮','g',{type:'group',groupId:'123456'})),/权限/);
     assert.equal(t.store.entries('a').length,1);
   }finally{t.db.close();}

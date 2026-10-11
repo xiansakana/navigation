@@ -1,15 +1,21 @@
 import WebSocket from 'ws';
+import { qqLocationFromSegments } from '../../shared/bookkeeping-location.js';
 
 export function qqCommandEvent(event) {
   if(event.post_type!=='message' || !['private','group'].includes(event.message_type) || String(event.user_id)===String(event.self_id))return null;
   // Array mode preserves real mention elements; plain text CQ-like strings cannot trigger group writes.
   if(!Array.isArray(event.message))return null;
-  if(event.message_type==='group' && !event.message.some(s=>s.type==='at' && String(s.data?.qq)===String(event.self_id)))return null;
-  if(event.message.some(s=>!['text','at','reply'].includes(s.type)))return null;
+  const location=qqLocationFromSegments(event.message);
+  const mentioned=event.message.some(s=>s.type==='at' && String(s.data?.qq)===String(event.self_id));
+  if(event.message_type==='group' && !mentioned && !location)return null;
+  if(event.message.some(s=>!['text','at','reply','location','json'].includes(s.type)))return null;
+  if(event.message.some(s=>['location','json'].includes(s.type)) && !location)return null;
   const text=event.message.filter(s=>s.type==='text').map(s=>s.data?.text || '').join('').trim();
-  if(!/^(记账帮助$|绑定记账\s|记账\s|转账\s|撤销\s)/.test(text))return null;
+  if(!location && !/^(记账帮助$|记账定位$|跳过定位$|补充位置\s|绑定记账\s|记账\s|转账\s|撤销\s)/.test(text))return null;
+  if(event.message_type==='group' && !mentioned && text)return null;
   return {selfId:String(event.self_id),qqId:String(event.user_id),groupId:event.message_type==='group'?String(event.group_id):'',
-    messageId:String(event.message_id),type:event.message_type,text};
+    messageId:String(event.message_id),type:event.message_type,text, ...(location?{location,locationOnly:!mentioned}:{}),
+    ...(event.message.find(s=>s.type==='reply')?{replyMessageId:String(event.message.find(s=>s.type==='reply').data?.id)}:{})};
 }
 
 export function createQqCommandReceiver({ getConfig, send, request=fetch, Socket=WebSocket, log=console } ) {

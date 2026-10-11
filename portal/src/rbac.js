@@ -157,6 +157,7 @@ function buildNotificationPermissions() {
 }
 
 var SYSTEM_PERMISSIONS = [
+    { id: 'bookkeeping:location:edit', name: '获取记账当前位置', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '明细与统计', '记一笔', '当前位置'] },
     { id: 'bookkeeping:qq:edit', name: '绑定 QQ 和使用指令记账', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', 'QQ记账'] },
     { id: 'bookkeeping:view', name: '查看记账明细与统计', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '明细与统计'] },
     { id: 'bookkeeping:entries:edit', name: '新增、编辑和删除账单', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '明细与统计', '记一笔'] },

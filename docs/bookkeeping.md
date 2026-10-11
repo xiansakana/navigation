@@ -84,3 +84,13 @@ FRED 口径参考：[HKD](https://fred.stlouisfed.org/series/DEXHKUS)、[JPY](ht
 消息处理结果与账单在同一 SQLite 事务中持久化，使用机器人账号、消息场景、发送人和消息 ID 去重；回复成功后确认送达。重复上报不会重复入账，回复投递失败保留未确认结果。手动重新发送是一条新消息，若上一条超时或未收到回执，先在网页核对避免人为重记。当前使用 WebSocket 实时接收，掉线期间不保证历史消息补收。每个 QQ 每分钟最多处理10条指令。
 
 部署：更新 portal 和 qq-bot 后执行 `node scripts/configure-qq-bookkeeping.mjs`，仅修改私有运行时配置并保留备份；启用 NapCat 的本机3001 WebSocket映射，array 消息格式和 Token，随后重启 NapCat 与 qq-bot。`/health` 的 `bookkeeping.connected` 应为 true。发送接口继续走原 HTTP3000；新增内部 Portal `/api/internal/bookkeeping/qq` 仅允许本机连接和现有通知服务 Bearer Token。不使用浏览器管理员 Cookie，不将发送人的 QQ 号直接作为 Portal 用户 ID，不自动绑定通知接收人。
+
+## 账单位置
+
+NapCat 位置消息按官方兼容说明以 JSON 上报，接收端解析 `com.tencent.map` 的 `meta["Location.Search"]`（name/address/lat/lng）、`Location.Show` 和标准 location 消息段；只读取卡片内的地址及合法坐标，不访问卡片 URL，不接受普通分享卡片伪装成位置。来源：https://napneko.github.io/develop/msg 。QQ分享位置来自用户主动选择，不能证明实际实时 GPS 所在地。
+
+私聊可以先分享位置卡片，再在10分钟内记一笔，位置使用后立即清除。漏发位置的账单先正常保存，并提醒分享卡片补充或发送 `跳过定位`；在补齐或跳过前，下一条记账指令会明确拒绝入账，防止多个待补账单混淆。也可以在本笔指令中加 `定位=跳过`。超时后账单保留且不自动附带旧位置，可发送 `补充位置 完整账单编号` 再分享卡片。
+
+群聊首次位置准备需要 `@机器人 记账定位`，随后10分钟内接受该发送人的位置卡片，再由 @机器人 记账指令消费；已有待补位置账单时可以直接分享卡片。未经准备且没有待补账单的群位置卡片静默忽略。定位上下文按机器人、发送人、私聊/群聊及群号隔离，绑定变更或解绑时清除，SQLite持久化，重启不丢失。补位置仅更新当前用户账单的 location，不重新保存金额或重算余额。也支持引用原记账指令的位置卡片；定位补充和重复上报使用原消息去重。群内回执不披露地址或坐标。
+
+网页在打开“新增账单”时请求浏览器当前位置并反查地址，支持显式重新定位；编辑既有账单不自动改写原位置。需要 `bookkeeping:entries:edit` 和 `bookkeeping:location:edit` 权限。定位需 HTTPS（线上使用 https://saoyu.fun/bookkeeping/）及用户浏览器授权；HTTP公网IP入口明确提示需要 HTTPS。手填位置优先，关闭弹窗或切换编辑对象后忽略迟到结果。保存新增账单会等待正在进行的定位，整个过程最多12秒；拒绝、超时或不支持时允许无位置保存，地址服务失败保留合法坐标。
