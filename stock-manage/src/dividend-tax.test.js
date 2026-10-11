@@ -44,7 +44,8 @@ test('cash correction applies only sign deltas and is idempotent, leaving unrela
 
 test('database writes enforce expense signs when callers bypass trade normalization', () => {
   const require = createRequire(import.meta.url);
-  const Database = require('../node_modules/better-sqlite3');
+  // The shared store uses Portal's native SQLite binding first on ECS.
+  const Database = require('../../portal/node_modules/better-sqlite3');
   const db = new Database(':memory:');
   try {
     db.exec('CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT); CREATE TABLE trades(id TEXT PRIMARY KEY, data TEXT); CREATE TABLE quotes(symbol TEXT PRIMARY KEY, data TEXT); CREATE TABLE holdings_meta(symbol TEXT PRIMARY KEY, data TEXT);');
