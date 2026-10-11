@@ -3,6 +3,7 @@ import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
 import { createBookkeepingStore, summarize } from './bookkeeping-store.js';
 import { parseIcost, exportIcost } from './bookkeeping-import.js';
+import { effectiveBookkeepingFx, refreshBookkeepingFx } from './bookkeeping-fx.js';
 
 const imports = new Map();
 const ttl = 15 * 60 * 1000;
@@ -23,7 +24,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
   res.setHeader('Cache-Control', 'no-store');
   if (!canBookkeep(session)) return json(res, 403, { ok: false, error: '请登录并获取记账查看权限' });
   const route = url.pathname.slice('/api/bookkeeping'.length), method = req.method;
-  const permission = route.startsWith('/import') ? 'import:edit' : route === '/export' ? 'export:view' : route.startsWith('/settings') && method !== 'GET' ? 'settings:edit' :
+  const permission = route === '/fx/refresh' ? 'fx:edit' : route.startsWith('/import') ? 'import:edit' : route === '/export' ? 'export:view' : route.startsWith('/settings') && method !== 'GET' ? 'settings:edit' :
     route.startsWith('/accounts') ? (method === 'GET' ? 'accounts:view' : 'accounts:edit') : method === 'GET' ? 'view' : 'entries:edit';
   if (!canBookkeep(session, permission)) return json(res, 403, { ok: false, error: '无权执行此记账操作' });
   if (!['GET', 'HEAD'].includes(method) && req.headers.origin && req.headers.origin !== new URL(req.url, 'http://' + req.headers.host).origin && req.headers.origin !== 'https://' + req.headers.host) {
@@ -31,6 +32,8 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
   }
   const store = createBookkeepingStore(getDatabase()), uid = session.userId;
   try {
+    if (route === '/fx' && method === 'GET') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
+    if (route === '/fx/refresh' && method === 'POST') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
     if (route === '/state' && method === 'GET') {
       const entries = store.entries(uid, Object.fromEntries(url.searchParams));
       const offset = Math.max(0, Math.min(50000, Number(url.searchParams.get('offset')) || 0));
@@ -38,7 +41,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       const all = store.entries(uid);
       return json(res, 200, { ok: true, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),
         budgetExpense: url.searchParams.get('month') ? summarize(store.entries(uid, { month: url.searchParams.get('month'), currency: 'CNY' })).totals.CNY?.expense || 0 : null,
-        accounts: canBookkeep(session, 'accounts:view') ? store.accounts(uid) : [], settings: store.settings(uid),
+        accounts: canBookkeep(session, 'accounts:view') ? store.accounts(uid) : [], settings: store.settings(uid), fx: effectiveBookkeepingFx(store.settings(uid)),
         books: [...new Set(all.map(e => e.book))], categories: [...new Set(all.map(e => e.category))],
         months: [...new Set(all.map(e => e.date.slice(0, 7)))].sort().reverse() });
     }

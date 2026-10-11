@@ -71,15 +71,35 @@
     $('trend').innerHTML = days.map(d => '<div class="bk-chart-row"><span>' + esc(monthly ? d.date : d.date.slice(5)) + '<br>' + esc(d.currency) + '</span><div class="bk-chart-bars"><span class="income" style="width:' + Math.max(0,d.income/maxes[d.currency]*100) + '%"></span><span class="expense" style="width:' + Math.max(0,d.expense/maxes[d.currency]*100) + '%"></span></div><span>' + m(d.income,d.currency) + '<br>' + m(d.expense,d.currency) + '</span></div>').join('') || '<p class="bk-empty">暂无收支趋势</p>';
     const month = $('month').value, budget = state.settings.budgets[month], cny = state.budgetExpense || 0;
     $('budget').innerHTML = month ? (budget ? '<p>' + esc(month) + ' 人民币月预算 ' + m(budget) + ' · 剩余 ' + m(budget-cny) + '</p><div class="bk-bar"><span style="width:' + Math.max(0,Math.min(100,cny/budget*100)) + '%"></span></div>' : '<p class="bk-muted">尚未设置 ' + esc(month) + ' 的人民币预算。</p>') : '<p class="bk-muted">选择月份以查看预算。预算仅针对 CNY 账单。</p>';
+    renderFx();
+  }
+  function renderFx() {
+    const quotes = state.fx?.quotes || {}, sources = { fixed:'固定', finnhub:'Finnhub', fred:'FRED', yahoo:'Yahoo', manual:'手动备用' };
+    const used = new Set([...state.accounts.map(a => a.currency), ...Object.keys(state.summary.totals)]);
+    const html = currencies.filter(c => c !== 'CNY' && (used.has(c) || quotes[c])).map(c => {
+      const q = quotes[c];
+      return '<div class="bk-fx-rate"><strong>' + c + ' → CNY</strong><span>' + (q ? '1 ' + c + ' = ' + Number(q.rate.toFixed(6)) + ' CNY' : '暂无可用汇率') + '</span><small>' + (q ? esc(sources[q.source] || q.source) + (q.stale ? ' · 历史缓存' : '') + (q.asOf ? ' · 数据日 ' + esc(q.asOf) : '') + (q.fetchedAt ? ' · 获取于 ' + esc(new Date(q.fetchedAt).toLocaleString('zh-CN',{hour12:false})) : '') : '可更新汇率或填写手动备用值') + '</small></div>';
+    }).join('');
+    for (const id of ['fx-rates','asset-fx-rates']) $(id).innerHTML = html || '<p class="bk-muted">正在获取参考汇率…</p>';
+  }
+  async function refreshFx(manual = false) {
+    for (const id of ['refresh-fx','refresh-asset-fx']) { $(id).disabled = true; $(id).textContent = '获取汇率中…'; }
+    try {
+      const data = await api(manual ? '/fx/refresh' : '/fx', manual ? { method:'POST' } : {});
+      state.fx = data.fx; renderAccounts(); renderFx();
+      $('fx-status').textContent = data.fx.errors.length ? data.fx.errors.join('；') + '。优先使用手动备用值，其次使用上次成功值。' : '参考汇率已更新；行情来源可能存在延迟，请查看各币种的数据日期。';
+    } catch (e) { $('fx-status').textContent = '汇率获取失败：' + e.message + '，保留已保存的汇率。'; }
+    finally { for (const id of ['refresh-fx','refresh-asset-fx']) { $(id).disabled = false; $(id).textContent = '更新参考汇率'; } }
   }
   function renderAccounts() {
     const totals = {};
     for (const a of state.accounts) if (a.included) { const t = totals[a.currency] ||= { assets:0, debt:0 }; if (a.balance >= 0) t.assets += a.balance; else t.debt -= a.balance; }
     let metrics = Object.entries(totals).map(([c,t]) => metric(c + ' 净资产',m(t.assets-t.debt,c),'资产 '+m(t.assets,c)+'<br>负债 '+m(t.debt,c),'',true)).join('');
-    const missing = Object.keys(totals).filter(c => !state.settings.rates[c]);
-    if (Object.keys(totals).length > 1) {
-      if (missing.length) metrics += metric('人民币折算净资产','—','待填写汇率：' + missing.join('、'));
-      else { const total = Object.entries(totals).reduce((s,[c,t]) => s+(t.assets-t.debt)*state.settings.rates[c],0); metrics += metric('人民币折算净资产',m(total),'采用手动设置汇率'); }
+    const rates = state.fx?.rates || state.settings.rates;
+    const missing = Object.keys(totals).filter(c => !rates[c]);
+    if (Object.keys(totals).some(c => c !== 'CNY')) {
+      if (missing.length) metrics += metric('人民币折算净资产','—','待获取汇率：' + missing.join('、'));
+      else { const total = Object.entries(totals).reduce((s,[c,t]) => s+(t.assets-t.debt)*rates[c],0); const fallback = Object.keys(totals).some(c => state.fx?.quotes[c]?.stale || state.fx?.quotes[c]?.source === 'manual'); metrics += metric('人民币折算净资产',m(total),fallback ? '含手动备用值或历史缓存，请核对汇率' : '采用自动获取的参考汇率'); }
     }
     $('assets-summary').innerHTML = metrics || metric('净资产',m(0),'新增账户，建立资产基准');
     const grouped = {};
@@ -123,7 +143,7 @@
       html = field('balance','实际余额（'+item.currency+'）',item.balance,'type="number" step="0.01" required') + field('date','调整时间',now(),'type="datetime-local" step="1" required') + field('note','调整原因','手动核对余额') + '<p class="bk-form-hint">保存一条余额调整记录，使账户余额等于填写值，不计入收支。</p>';
     } else {
       $('editor-title').textContent = '预算与汇率';
-      html = field('budgetMonth','预算月份',$('month').value||now().slice(0,7),'type="month" required') + field('budget','人民币月预算',state.settings.budgets[$('month').value]||0,'type="number" min="0" step="0.01" required') + currencies.filter(c=>c!=='CNY').map(c=>field('rate_'+c,c+' → CNY（留空不折算）',state.settings.rates[c]||'','type="number" min="0.000001" step="any"')).join('');
+      html = field('budgetMonth','预算月份',$('month').value||now().slice(0,7),'type="month" required') + field('budget','人民币月预算',state.settings.budgets[$('month').value]||0,'type="number" min="0" step="0.01" required') + '<p class="bk-form-hint">默认自动获取参考汇率。下列手动值仅在自动更新失败时备用；留空则使用上次成功缓存或显示缺失。</p>' + currencies.filter(c=>c!=='CNY').map(c=>field('rate_'+c,c+' → CNY（手动备用值）',state.settings.rates[c]||'','type="number" min="0.000001" step="any"')).join('');
     }
     $('editor-fields').innerHTML = html;
     const readonly = mode==='entry' && !can('entries:edit');
@@ -180,14 +200,17 @@
     try{const result=await write('/import/confirm',{token:pendingImport.token,accounts:snapshots});$('import-preview').textContent='导入完成：新增 '+result.inserted+' 笔，跳过重复 '+result.duplicates+' 笔，创建 '+result.createdAccounts+' 个账户。';pendingImport=null;$('confirm-import').classList.add('hidden');await load();}catch(e){$('import-preview').textContent=e.message;}finally{$('confirm-import').disabled=false;}
   };
   $('export').onclick=()=>{location.href='/api/bookkeeping/export?'+query();};
+  $('refresh-fx').onclick = () => refreshFx(true); $('refresh-asset-fx').onclick = () => refreshFx(true);
   async function boot(){
     try { const r=await fetch('/api/me'); me=await r.json();if(me.isGuest||!me.ok)throw new Error('请登录后访问记账模块');$('owner').textContent=me.username;
       populate('currency',currencies,'全部货币');$('currency').value='CNY';populate('type',[...types,'余额调整'],'所有类型');$('month').value=now().slice(0,7);
       $('extra-filters').open = window.innerWidth > 760;
       for(const [id,p] of [['add-entry','entries:edit'],['add-account','accounts:edit'],['settings','settings:edit'],['import-label','import:edit'],['snapshot-label','accounts:edit'],['export','export:view'],['import-shortcut','import:edit']])$(id).classList.toggle('hidden',!can(p));
+      for (const id of ['refresh-fx','refresh-asset-fx']) $(id).classList.toggle('hidden', !can('fx:edit'));
       document.querySelector('[data-tab="accounts"]').classList.toggle('hidden',!can('accounts:view'));$('account-filter-label').classList.toggle('hidden',!can('accounts:view'));
       document.querySelector('[data-tab="import"]').classList.toggle('hidden',!can('import:edit')&&!can('export:view'));
       await load();
+      if (state) refreshFx();
     }catch(e){$('error').textContent=e.message;$('error').classList.remove('hidden');}
   }
   boot();

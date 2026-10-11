@@ -160,6 +160,16 @@ export function createBookkeepingStore(db) {
     db.prepare('INSERT INTO bookkeeping_settings VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data').run(userId, JSON.stringify(next));
     return next;
   }
+  function saveAutoRates(userId, quotes) {
+    const next = settings(userId); next.autoRates ||= {};
+    for (const [c, quote] of Object.entries(quotes)) {
+      currency(c);
+      if (c === 'CNY' || !Number.isFinite(quote.rate) || quote.rate <= 0 || !Number.isFinite(Date.parse(quote.fetchedAt))) continue;
+      next.autoRates[c] = { rate: quote.rate, source: text(quote.source, 40), asOf: text(quote.asOf, 40) || null,
+        fetchedAt: quote.fetchedAt, stale: quote.stale === true };
+    }
+    db.prepare('INSERT INTO bookkeeping_settings VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data').run(userId, JSON.stringify(next));
+  }
   function removeEntry(userId, eid) { if (!db.prepare('DELETE FROM bookkeeping_entries WHERE user_id=? AND id=?').run(userId, eid).changes) fail('账单不存在'); }
   function removeAccount(userId, aid) {
     if (db.prepare('SELECT 1 FROM bookkeeping_entries WHERE user_id=? AND (account_id=? OR to_account_id=?)').get(userId, aid, aid)) fail('账户存在账单，请先处理关联账单');
@@ -201,7 +211,7 @@ export function createBookkeepingStore(db) {
       return { inserted, duplicates, createdAccounts };
     })();
   }
-  return { accounts, saveAccount, entries, saveEntry, removeEntry, removeAccount, adjust, settings, saveSettings, importRows };
+  return { accounts, saveAccount, entries, saveEntry, removeEntry, removeAccount, adjust, settings, saveSettings, saveAutoRates, importRows };
 }
 
 export function summarize(entries) {

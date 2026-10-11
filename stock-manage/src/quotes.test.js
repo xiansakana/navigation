@@ -2,6 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { adjustCandlesForSplits, createQuoteService } from './quotes.js';
 
+test('USD/CNY uses the shared Finnhub/FRED fallback and caches observation metadata', async context => {
+  const original = global.fetch; context.after(() => { global.fetch = original; });
+  let requests = 0;
+  global.fetch = async url => {
+    requests++;
+    if (String(url).includes('finnhub')) return new Response('{}', { status:403 });
+    assert.match(String(url), /fredgraph.csv\?id=DEXCHUS&/);
+    return new Response('observation_date,DEXCHUS\n2026-10-01,7.1\n2026-10-02,.\n');
+  };
+  const service = createQuoteService({ finnhubApiKey:'x', polygonApiKey:'' });
+  const first = await service.getUsdCny(), second = await service.getUsdCny();
+  assert.equal(first.rate,7.1);assert.equal(first.source,'fred');assert.equal(second.asOf,'2026-10-01');assert.equal(requests,2);
+});
+
 function response(data, status = 200) {
   return {
     ok: status >= 200 && status < 300,

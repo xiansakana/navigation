@@ -164,6 +164,7 @@ var SYSTEM_PERMISSIONS = [
     { id: 'bookkeeping:import:edit', name: '预览并导入 iCost 账单', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '导入导出', '导入'] },
     { id: 'bookkeeping:export:view', name: '导出账单', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '导入导出', '导出'] },
     { id: 'bookkeeping:settings:edit', name: '设置预算及折算汇率', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '统计', '预算与汇率'] },
+    { id: 'bookkeeping:fx:edit', name: '更新参考汇率', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '统计', '预算与汇率'] },
     { id: 'service:resources:view', name: '查看资源管理', group: '资源管理', serviceId: 'resources', action: 'view', permissionPath: ['首页', '资源管理'] },
     { id: 'blog:feed:view', name: '查看和搜索博客动态', group: '博客', serviceId: 'blog', feature: 'feed', action: 'view', permissionPath: ['首页', '博客'] },
     { id: 'blog:post:edit', name: '发布和编辑自己的博客（含可见范围、标签与富文本）', group: '博客', serviceId: 'blog', feature: 'post', action: 'edit', permissionPath: ['首页', '博客', '我的文章'] },

@@ -6,6 +6,7 @@ import {
 } from './markets.js';
 import { yoloMarketDate } from './yolo-time.js';
 import { fetchQuoteResource } from '../../shared/quote-network.js';
+import { createForeignExchangeService } from '../../shared/foreign-exchange.js';
 
 function parseOptionSymbol(symbol) {
   const m = String(symbol).toUpperCase().match(/^([A-Z]+)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
@@ -475,57 +476,10 @@ export function createQuoteService(config) {
     }
   }
 
-  async function getUsdCnyFromFred() {
-    const text = await fetchText('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DEXCHUS');
-    const lines = text.trim().split(/\r?\n/);
-    for (let i = lines.length - 1; i >= 1; i--) {
-      const [date, raw] = lines[i].split(',');
-      const rate = Number(raw);
-      if (date && Number.isFinite(rate) && rate > 0) {
-        return { rate, source: 'fred', asOf: date };
-      }
-    }
-    throw new Error('无有效收盘数据');
-  }
-
-  let usdCnyCache = { rate: null, source: null, at: 0 };
-  const USD_CNY_CACHE_MS = 60 * 1000;
+  const foreignExchange = createForeignExchangeService({ finnhubApiKey: finnhubKey, yahooQuote: getYahooQuote });
 
   async function getUsdCny() {
-    if (usdCnyCache.rate && Date.now() - usdCnyCache.at < USD_CNY_CACHE_MS) {
-      return { rate: usdCnyCache.rate, source: usdCnyCache.source };
-    }
-    const errors = [];
-    if (finnhubKey) {
-      try {
-        const url = `https://finnhub.io/api/v1/forex/rates?base=USD&token=${finnhubKey}`;
-        const data = await fetchJson(url);
-        const rate = data?.quote?.CNY || data?.quote?.CNH;
-        if (rate) {
-          const out = { rate: Number(rate), source: 'finnhub' };
-          usdCnyCache = { rate: out.rate, source: out.source, at: Date.now() };
-          return out;
-        }
-      } catch (e) {
-        errors.push(`Finnhub: ${e.message}`);
-      }
-    }
-    try {
-      const fx = await getUsdCnyFromFred();
-      usdCnyCache = { rate: fx.rate, source: fx.source, at: Date.now() };
-      return fx;
-    } catch (e) {
-      errors.push(`FRED: ${e.message}`);
-    }
-    try {
-      const q = await getYahooQuote('USDCNY=X');
-      const out = { rate: q.price, source: 'yahoo' };
-      usdCnyCache = { rate: out.rate, source: out.source, at: Date.now() };
-      return out;
-    } catch (e) {
-      errors.push(`Yahoo: ${e.message}`);
-      throw new Error(`USD/CNY 不可用（${errors.join('; ')}）`);
-    }
+    return foreignExchange.getRate('USD');
   }
 
   async function getStock(symbol) {
