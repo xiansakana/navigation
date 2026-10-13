@@ -56,15 +56,14 @@
       return '可从“'+esc(item.category)+'”明细检查重复订阅和可延后的购买，结合实际需求设定分类预算。';
     }
     function render() {
-      const analysis=getState()?.analysis;if(!analysis){for(const id of ['spending-insights','billing-charts','asset-charts','asset-overview-charts'])$(id).innerHTML='';for(const id of ['asset-analysis-panel','asset-overview'])$(id).classList.add('hidden');return;}
+      const analysis=getState()?.analysis;if(!analysis){for(const id of ['spending-insights','billing-charts','asset-overview-charts'])$(id).innerHTML='';$('asset-overview').classList.add('hidden');return;}
       $('billing-charts').innerHTML=analysis.billing.missingCurrencies.length?'<p class="bk-empty">缺少 '+esc(analysis.billing.missingCurrencies.join('、'))+' 汇率，暂不能汇总 CNY 走势。</p>':chart(analysis.billing.points,[{key:'income',label:'收入',color:'var(--green)'},{key:'expense',label:'净支出',color:'var(--red)'},{key:'cumulative',label:'累计账单结余',color:'#d89812'}],'CNY 等效总收支走势',analysis.billing.granularity)||'<p class="bk-empty">当前筛选无账单，可选择全部日期查看历史走势。</p>';
       $('spending-insights').innerHTML=analysis.insights.map(i=>'<section class="bk-insight"><h3>'+esc(i.currency)+' · '+i.count+' 笔账单</h3><p>收入 '+m(i.income,i.currency)+'，净支出 '+m(i.expense,i.currency)+'，结余 '+m(i.net,i.currency)+'。</p>'+(i.topCategory?'<p>最大支出分类 <button class="bk-text-button"'+attr({category:i.topCategory.category,currency:$('currency').value,flow:'expense'})+'>'+esc(i.topCategory.category)+' →</button> '+m(i.topCategory.amount,i.currency)+'，占正向分类支出的 <span data-money>'+(i.share*100).toFixed(1)+'%</span>。</p>':'')+(i.comparison?'<p>较 '+esc(i.comparison.month)+' '+(i.comparison.change>=0?'增长':'下降')+' <span data-money>'+Math.abs(i.comparison.change*100).toFixed(1)+'%</span>。</p>':'')+'<ul>'+i.suggestions.map(s=>'<li>'+suggestion(s,i.currency)+'</li>').join('')+'</ul></section>').join('')+'<p class="bk-muted">'+esc(analysis.comparisonNote)+' 分类建议基于当前记录，未设置预算时不推测你的收入或消费能力。</p>';
       const assets=analysis.asset;
-      $('asset-analysis-panel').classList.toggle('hidden',!assets);$('asset-overview').classList.toggle('hidden',!assets);if(!assets){$('asset-charts').innerHTML='';$('asset-overview-charts').innerHTML='';}
+      $('asset-overview').classList.toggle('hidden',!assets);if(!assets){$('asset-overview-charts').innerHTML='';}
       if(assets) {
-        $('asset-trend-note').textContent=assets.note+' 反推使用全部关联账单，再按所选日期范围截取；账本、分类等收支筛选不改变反推基础。';
-        $('asset-charts').innerHTML=assets.missingCurrencies.length?'<p class="bk-empty">缺少 '+esc(assets.missingCurrencies.join('、'))+' 汇率，暂不能反推 CNY 资产走势。</p>':(assets.points.length?chart(assets.points,[{key:'balance',label:'反推净资产',color:'#d89812'}],'CNY 等效总资产走势')+'<p class="bk-muted">以当前资产余额为反推锚点，所选历史范围期末可能不同；'+assets.estimatedTransfers+' 笔跨币种转账按等值估算，'+assets.unlinkedEntries+' 笔未关联账户记录按总资产变化估算。</p>':'<p class="bk-empty">暂无计入总资产的账户</p>');
-        $('asset-overview').classList.remove('hidden');$('asset-overview-note').textContent=$('asset-trend-note').textContent;$('asset-overview-charts').innerHTML=$('asset-charts').innerHTML;
+        $('asset-overview-note').textContent=assets.note+' 反推使用全部关联账单，再按所选日期范围截取；账本、分类等收支筛选不改变反推基础。';
+        $('asset-overview-charts').innerHTML=assets.missingCurrencies.length?'<p class="bk-empty">缺少 '+esc(assets.missingCurrencies.join('、'))+' 汇率，暂不能反推 CNY 资产走势。</p>':(assets.points.length?chart(assets.points,[{key:'balance',label:'反推净资产',color:'#d89812'}],'CNY 等效总资产走势')+'<p class="bk-muted">以当前资产余额为反推锚点，所选历史范围期末可能不同；'+assets.estimatedTransfers+' 笔跨币种转账按等值估算，'+assets.unlinkedEntries+' 笔未关联账户记录按总资产变化估算。</p>':'<p class="bk-empty">暂无计入总资产的账户</p>');
       }
     }
     return {render,attr,query:()=>focus,clearFocus,drill};
