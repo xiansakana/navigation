@@ -196,6 +196,15 @@ export function createBookkeepingStore(db) {
     db.prepare('INSERT INTO bookkeeping_settings VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data').run(userId, JSON.stringify(next));
     return next;
   }
+  function savePeriodPreferences(userId, input) {
+    if (!['week','month','year','all','range'].includes(input.kind)) fail('日期范围模式无效');
+    const date = value => value ? entryDate(value + 'T12:00:00').slice(0,10) : '';
+    const period = { kind:input.kind, anchor:date(input.anchor), rangeStart:date(input.rangeStart), rangeEnd:date(input.rangeEnd) };
+    if (period.rangeStart && period.rangeEnd && period.rangeStart > period.rangeEnd) fail('开始日期不能晚于结束日期');
+    const next = settings(userId); next.period = period;
+    db.prepare('INSERT INTO bookkeeping_settings VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data').run(userId, JSON.stringify(next));
+    return period;
+  }
   function saveAutoRates(userId, quotes) {
     const next = settings(userId); next.autoRates ||= {};
     for (const [c, quote] of Object.entries(quotes)) {
@@ -287,7 +296,7 @@ export function createBookkeepingStore(db) {
       ['accounts','entries','settings','categories','groups'].map(name=>['bookkeeping_'+name,db.prepare('SELECT * FROM bookkeeping_'+name+' WHERE user_id=?').all(userId)])
     )}))();
   }
-  return { accounts, saveAccount, entries, saveEntry, removeEntry, removeAccount, reorderAccounts, archiveAccount, adjust, settings, saveSettings, saveAutoRates, importRows, importBalanceAdjustments, backup, catalog };
+  return { accounts, saveAccount, entries, saveEntry, removeEntry, removeAccount, reorderAccounts, archiveAccount, adjust, settings, saveSettings, savePeriodPreferences, saveAutoRates, importRows, importBalanceAdjustments, backup, catalog };
 }
 
 export function summarize(entries) {

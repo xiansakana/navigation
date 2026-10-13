@@ -114,7 +114,8 @@
     for (const a of state.accounts) if ((!a.archived || $('show-archived-accounts').checked) && (!selectedGroup || a.group===selectedGroup) && (!$('asset-search').value || (a.name+' '+a.note).toLowerCase().includes($('asset-search').value.toLowerCase()))) (grouped[a.group] ||= []).push(a);
     $('account-groups').innerHTML = Object.entries(grouped).map(([g,list]) => '<details open class="bk-panel bk-account-group"><summary>' + esc(g) + ' · ' + list.length + ' 个账户</summary><p class="bk-muted">' + Object.entries(list.reduce((t,a)=>{t[a.currency]=(t[a.currency]||0)+a.balance;return t;},{})).map(([c,v])=>esc(c)+' '+m(v,c)).join(' · ') + '（当前列表余额）</p>' + list.map(a => '<div class="bk-account"><span class="bk-badge">' + esc(a.icon || '◈') + '</span><div class="bk-entry-main"><strong>' + esc(a.name) + (a.archived?' <small class="bk-muted">已归档</small>':'') + (!a.included?' <small class="bk-muted">不计入</small>':'') + '</strong><p>' + esc(a.currency + ' · ' + a.accountType + (a.note?' · '+a.note:'')) + '</p>' + (a.creditLimit ? '<p>可用额度 ' + m(a.creditLimit+a.balance,a.currency) + (a.billDay?' · 账单日 '+a.billDay+' 日':'') + (a.dueDay?' · 还款日 '+a.dueDay+' 日':'') + '</p>':'') + '<div class="bk-asset-controls"><button data-account-ledger="' + a.id + '">明细</button>' + (can('accounts:edit')?'<button data-account-edit="' + a.id + '">编辑</button>' + (!a.archived?'<button data-account-adjust="' + a.id + '">核对余额</button>':'') + management.accountActions(a):'') + '</div></div><div class="bk-entry-amount ' + (a.balance<0?'bk-expense':'') + '">' + m(a.balance,a.currency) + '</div></div>').join('') + '</details>').join('') || '<p class="bk-empty">暂无账户。可新增账户或导入账户快照。</p>';
   }
-  const periods = window.createBookkeepingPeriods({ $, load, clearFocus:()=>analysis.clearFocus() });
+  let periodSave = Promise.resolve();
+  const periods = window.createBookkeepingPeriods({ $, load, clearFocus:()=>analysis.clearFocus(), save:value=>{periodSave=periodSave.then(()=>write('/preferences',value,'PUT')).catch(e=>{$('error').textContent='日期筛选保存失败：'+e.message;$('error').classList.remove('hidden');});} });
   const analysis = window.createBookkeepingAnalysis({ $, esc, m, money, can, load, tab, getState:()=>state, periods });
   const management = window.createBookkeepingManagement({ $, esc, can, api, write, load, field, select, options, getState:()=>state, openEditor });
   async function load(append = false) {
@@ -244,6 +245,7 @@
       $('add-category').classList.toggle('hidden',!can('categories:edit')); $('manage-groups').classList.toggle('hidden',!can('accounts:edit'));
       document.querySelector('[data-tab="accounts"]').classList.toggle('hidden',!can('accounts:view'));$('account-filter-label').classList.toggle('hidden',!can('accounts:view'));
       document.querySelector('[data-tab="import"]').classList.toggle('hidden',!can('import:edit')&&!can('export:view'));
+      periods.hydrate((await api('/preferences')).period);
       await load();
       if (state) refreshFx();
     }catch(e){$('error').textContent=e.message;$('error').classList.remove('hidden');}

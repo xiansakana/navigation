@@ -1,12 +1,13 @@
 (function(){
   'use strict';
-  window.createBookkeepingPeriods=function({$,load,clearFocus}){
+  window.createBookkeepingPeriods=function({$,load,clearFocus,save=()=>{}}){
     const iso=d=>new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);
     const today=iso(new Date());
+    let rangeStart=today,rangeEnd=today;
     $('period-anchor').value=today;
     function update(reload=true){
       const kind=$('period-kind').value,anchor=new Date(($('period-anchor').value||today)+'T12:00:00');let start='',end='';
-      if(kind==='range'){start=$('range-start').value;end=$('range-end').value;}
+      if(kind==='range'){start=$('range-start').value;end=$('range-end').value;if(reload){rangeStart=start;rangeEnd=end;}}
       else if(kind!=='all'){
         const a=new Date(anchor),b=new Date(anchor);
         if(kind==='week'){a.setDate(a.getDate()-((a.getDay()+6)%7));b.setTime(a.getTime());b.setDate(b.getDate()+6);}
@@ -19,14 +20,15 @@
       $('period-prev').disabled=['range','all'].includes(kind);$('period-next').disabled=['range','all'].includes(kind);
       $('period-caption').textContent=kind==='all'?'全部日期':start+' ～ '+end;
       document.querySelectorAll('[data-period]').forEach(b=>b.classList.toggle('active',b.dataset.period===kind));
-      if(reload){clearFocus();load();}
+      if(reload){save({kind,anchor:$('period-anchor').value,rangeStart,rangeEnd});clearFocus();load();}
     }
-    function choose(kind,reload=true){$('period-kind').value=kind;update(reload);}
+    function choose(kind,reload=true){if(kind==='range'){$('range-start').value=rangeStart;$('range-end').value=rangeEnd;}$('period-kind').value=kind;update(reload);}
     for(const id of ['period-anchor','range-start','range-end'])$(id).addEventListener('change',()=>update());
     $('period-buttons').onclick=e=>{const b=e.target.closest('[data-period]');if(b)choose(b.dataset.period);};
     for(const [id,step] of [['period-prev',-1],['period-next',1]])$(id).onclick=()=>{const a=new Date($('period-anchor').value+'T12:00:00'),kind=$('period-kind').value;if(kind==='week')a.setDate(a.getDate()+7*step);if(kind==='month'){a.setDate(1);a.setMonth(a.getMonth()+step);}if(kind==='year'){a.setDate(1);a.setFullYear(a.getFullYear()+step);} $('period-anchor').value=iso(a);update();};
     function query(){const kind=$('period-kind').value;if(kind==='all')return {};return {start:$('range-start').value,end:$('range-end').value};}
     function focusDate(data){if(data.day||data.month){const previous=query(),start=data.day||data.month+'-01',end=data.day||new Date(Date.UTC(Number(data.month.slice(0,4)),Number(data.month.slice(5,7)),0)).toISOString().slice(0,10);$('period-kind').value='range';$('range-start').value=previous.start && previous.start>start?previous.start:start;$('range-end').value=previous.end && previous.end<end?previous.end:end;update(false);}}
-    update(false);return {query,choose,focusDate,restore:()=>update(false)};
+    function hydrate(value){if(!value)return;rangeStart=value.rangeStart||today;rangeEnd=value.rangeEnd||today;$('period-anchor').value=value.anchor||today;$('period-kind').value=value.kind;$('range-start').value=rangeStart;$('range-end').value=rangeEnd;update(false);}
+    update(false);return {query,choose,focusDate,hydrate,restore:()=>update(false)};
   };
 })();
