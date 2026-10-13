@@ -38,3 +38,4 @@
   .bk-dialog .bk-form-grid label,.bk-dialog .bk-form-grid input,.bk-dialog .bk-form-grid select { min-width:0; }
   #qq-dialog .bk-form-grid .full { grid-column:auto; }
 }
+.bk-entry-amount small.bk-ledger-balance { font-size:12px; color:var(--text); margin-top:8px; }.bk-ledger-note { font-size:12px; line-height:1.7; }@media(max-width:760px) { .bk-entry-amount { max-width:52%; overflow-wrap:anywhere; }.bk-entry-amount small.bk-ledger-balance { font-size:11px; } }

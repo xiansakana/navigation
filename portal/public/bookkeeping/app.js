@@ -47,15 +47,17 @@
     $('summary').innerHTML=summary;$('stats-summary').innerHTML=summary;
     $('count').textContent = state.count + ' 笔';
     let lastDay = '';
-    $('entry-list').innerHTML = state.entries.map(e => {
+    const ledgerNote=can('accounts:view') && $('account').value && state.entries.some(e=>e.balanceEstimated)?'<p class="bk-muted bk-ledger-note">历史余额按当前账户余额和完整账单反推；跨币种缺少到账金额时按账单日期汇率估算，仅供核对。</p>':'';
+    $('entry-list').innerHTML = ledgerNote + (state.entries.map(e => {
       const day = e.date.slice(0,10), title = [e.category,e.subcategory].filter(Boolean).join(' · ');
       let heading = '';
       if (day !== lastDay) { lastDay = day; heading = '<div class="bk-day"><span>' + esc(day) + '</span><span>' + esc(new Date(day + 'T12:00:00').toLocaleDateString('zh-CN',{weekday:'long'})) + '</span></div>'; }
       const expense = ['支出','已报销'].includes(e.type), transfer = transferTypes.includes(e.type) || e.type === '余额调整';
       const account = [e.accountName, e.toAccountName].filter(Boolean).join(' → ');
       const subtitle = [e.date.slice(11,16), account, e.note || e.tags].filter(Boolean).join(' · ');
-      return heading + '<button class="bk-entry" data-entry="' + e.id + '"><span class="bk-badge">' + (icons[e.type] || state.categoryTree?.find(c=>c.kind===(e.type==='收入'?'income':'expense') && c.name===(e.subcategory||e.category) && (e.subcategory?state.categoryTree.some(p=>p.id===c.parentId && p.name===e.category):!c.parentId))?.icon || icons[e.category] || '◈') + '</span><span class="bk-entry-main"><strong>' + esc(title) + '</strong><p>' + esc(subtitle) + '</p>' + (e.location ? '<p>⌖ ' + esc(e.location) + '</p>' : '') + '</span><span class="bk-entry-amount ' + (expense?'bk-expense':transfer?'bk-transfer':'bk-income') + '">' + m(expense?-e.amount:e.amount,e.currency) + (e.currency!=='CNY'?'<small>'+ (e.fxMissing?'CNY 等效待获取': '≈ '+m(expense?-e.cnyAmount:e.cnyAmount,'CNY')+' · 汇率日 '+esc(e.rateDate))+'</small>':'') + '<small>' + esc(e.type) + (e.historical?' · 历史':'') + '</small></span></button>';
-    }).join('') || '<div class="bk-empty">还没有符合条件的账单<br>记下第一笔，或从 iCost 导入历史记录。</div>';
+      const balance=can('accounts:view') && $('account').value && e.balanceCurrency?'<small class="bk-ledger-balance">本笔后余额 '+(e.balanceAfter==null?'待核对':(e.balanceEstimated?'≈ ':'')+m(e.balanceAfter,e.balanceCurrency))+'</small>':'';
+      return heading + '<button class="bk-entry" data-entry="' + e.id + '"><span class="bk-badge">' + (icons[e.type] || state.categoryTree?.find(c=>c.kind===(e.type==='收入'?'income':'expense') && c.name===(e.subcategory||e.category) && (e.subcategory?state.categoryTree.some(p=>p.id===c.parentId && p.name===e.category):!c.parentId))?.icon || icons[e.category] || '◈') + '</span><span class="bk-entry-main"><strong>' + esc(title) + '</strong><p>' + esc(subtitle) + '</p>' + (e.location ? '<p>⌖ ' + esc(e.location) + '</p>' : '') + '</span><span class="bk-entry-amount ' + (expense?'bk-expense':transfer?'bk-transfer':'bk-income') + '">' + m(expense?-e.amount:e.amount,e.currency) + (e.currency!=='CNY'?'<small>'+ (e.fxMissing?'CNY 等效待获取': '≈ '+m(expense?-e.cnyAmount:e.cnyAmount,'CNY')+' · 汇率日 '+esc(e.rateDate))+'</small>':'') + '<small>' + esc(e.type) + (e.historical?' · 历史':'') + '</small>' + balance + '</span></button>';
+    }).join('') || '<div class="bk-empty">还没有符合条件的账单<br>记下第一笔，或从 iCost 导入历史记录。</div>');
     $('more').classList.toggle('hidden', state.entries.length >= state.count);
     $('mini-categories').innerHTML = categoriesHtml(state.equivalentSummary?.categories || state.summary.categories,6,!!state.equivalentSummary); $('categories').innerHTML = categoriesHtml(state.equivalentSummary?.categories || state.summary.categories,1000,!!state.equivalentSummary);
     $('income-categories').innerHTML=missing.length?'<p class="bk-empty">缺少历史汇率，分类收入待折算。</p>':categoriesHtml(converted?.incomeCategories || [],1000,true,'income');

@@ -3,6 +3,7 @@ import { parseCoordinates, resolveAddress } from './blog-address.js';
 import crypto from 'node:crypto';
 import { historicalFx } from './bookkeeping-historical-fx.js';
 import { analyzeBookkeeping } from './bookkeeping-analysis.js';
+import { accountLedger } from './bookkeeping-ledger.js';
 import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
 import { createBookkeepingStore, summarize } from './bookkeeping-store.js';
@@ -53,8 +54,12 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
     if (route === '/state' && method === 'GET') {
       const history=historicalFx(getDatabase()), allOriginal=store.entries(uid), permittedAccounts=canBookkeep(session,'accounts:view')?store.accounts(uid):null;
       const destinations=allOriginal.filter(e=>e.toAccountId && e.toAmount!=null).map(e=>({...e,currency:permittedAccounts?.find(a=>a.id===e.toAccountId)?.currency||'CNY'}));
-      await history.ensure([...allOriginal,...destinations]);
+      const ledgerAccount=permittedAccounts?.find(a=>a.id===url.searchParams.get('accountId'));
+      const ledgerQuotes=ledgerAccount?allOriginal.filter(e=>e.accountId===ledgerAccount.id || e.toAccountId===ledgerAccount.id).map(e=>({...e,currency:ledgerAccount.currency})):[];
+      await history.ensure([...allOriginal,...destinations,...ledgerQuotes]);
       const entries = store.entries(uid, Object.fromEntries(url.searchParams)).map(history.enrich);
+      const balances=accountLedger(allOriginal,ledgerAccount,history.quote);
+      for(const e of entries)if(balances.has(e.id))Object.assign(e,balances.get(e.id));
       const offset = Math.max(0, Math.min(50000, Number(url.searchParams.get('offset')) || 0));
       const limit = Math.max(1, Math.min(200, Number(url.searchParams.get('limit')) || 100));
       const all = allOriginal.map(history.enrich), accounts = permittedAccounts;
