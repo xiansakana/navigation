@@ -11,6 +11,7 @@ portal/data/
 data/navigation.db
 data/navigation.db-wal
 data/navigation.db-shm
+data/bookkeeping-backups/
 siyuan/data/
 siyuan/.env
 siyuan-share/data/

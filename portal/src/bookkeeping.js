@@ -59,7 +59,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       await history.ensure([...allOriginal,...destinations,...ledgerQuotes]);
       const entries = store.entries(uid, Object.fromEntries(url.searchParams)).map(history.enrich);
       const balances=accountLedger(allOriginal,ledgerAccount,history.quote);
-      for(const e of entries)if(balances.has(e.id))Object.assign(e,balances.get(e.id));
+      for(const e of entries){if(balances.has(e.id))Object.assign(e,balances.get(e.id));delete e.balanceCheckpoint;}
       const offset = Math.max(0, Math.min(50000, Number(url.searchParams.get('offset')) || 0));
       const limit = Math.max(1, Math.min(200, Number(url.searchParams.get('limit')) || 100));
       const all = allOriginal.map(history.enrich), accounts = permittedAccounts;

@@ -47,7 +47,7 @@
     $('summary').innerHTML=summary;$('stats-summary').innerHTML=summary;
     $('count').textContent = state.count + ' 笔';
     let lastDay = '';
-    const ledgerNote=can('accounts:view') && $('account').value && state.entries.some(e=>e.balanceEstimated)?'<p class="bk-muted bk-ledger-note">历史余额按当前账户余额和完整账单反推；跨币种缺少到账金额时按账单日期汇率估算，仅供核对。</p>':'';
+    const ledgerNote=can('accounts:view') && $('account').value && state.entries.some(e=>e.balanceEstimated)?'<p class="bk-muted bk-ledger-note">历史余额按当前余额、账单及余额调整反推；截图核对的调整余额按原币显示，其他反推或跨币种估算值标注 ≈。</p>':'';
     $('entry-list').innerHTML = ledgerNote + (state.entries.map(e => {
       const day = e.date.slice(0,10), title = [e.category,e.subcategory].filter(Boolean).join(' · ');
       let heading = '';

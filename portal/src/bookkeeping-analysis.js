@@ -36,7 +36,7 @@ export function assetTrends(accounts, entries, today, rates={CNY:1}, filter={}) 
   const included=accounts.filter(a=>a.included), byId=new Map(accounts.map(a=>[a.id,a])), ids=new Set(included.map(a=>a.id));
   const relevant=entries.filter(e=>ids.has(e.accountId)||ids.has(e.toAccountId)||(!e.accountId&&!e.toAccountId));
   const missing=[...new Set([...included.map(a=>a.currency).filter(c=>!Number.isFinite(Number(rates[c]))||rates[c]<=0),...relevant.filter(e=>e.fxMissing).map(e=>e.currency),...relevant.map(e=>e.toFxMissing).filter(Boolean)])];
-  const note='以当前计入总资产的账户余额为终点，倒序撤销历史及新增账单的资产影响，反推历史日末余额。账单变化按账单日期的历史参考汇率折算 CNY，当前资产作为锚点按当前汇率折算；不含未记录的资产涨跌及外币存量的汇率重估；历史账户范围按当前计入设置处理。跨币种转账缺少到账金额时，按等值本金估算，内部转账只影响手续费；未关联账户的收支按总资产变化估算。';
+  const note='以当前计入总资产的账户余额为终点，倒序撤销历史及新增账单的资产影响，反推历史日末余额。账单变化按账单日期的历史参考汇率折算 CNY，当前资产作为锚点按当前汇率折算；包含已记录的余额调整；不含未记录的资产涨跌及外币存量的汇率重估；历史账户范围按当前计入设置处理。跨币种转账缺少到账金额时，按等值本金估算，内部转账只影响手续费；未关联账户的收支按总资产变化估算。';
   if(missing.length)return {points:[],missingCurrencies:missing,note,estimatedTransfers:0,unlinkedEntries:0};
   if(!included.length)return {points:[],missingCurrencies:[],note,estimatedTransfers:0,unlinkedEntries:0};
   const current=rounded(included.reduce((n,a)=>n+a.balance*rates[a.currency],0)), changes=new Map();
@@ -70,12 +70,13 @@ export function assetTrends(accounts, entries, today, rates={CNY:1}, filter={}) 
   return {points:scoped,missingCurrencies:[],note,estimatedTransfers,unlinkedEntries,current,asOf:end};
 }
 export function analyzeBookkeeping(entries, allEntries, accounts, settings, filter={}, today=new Date(Date.now()+8*60*60*1000).toISOString().slice(0,10), fxRates=settings.rates||{CNY:1}) {
+  entries=entries.filter(e=>e.type!=='余额调整');
   const rates={...fxRates,CNY:1}, converted=conversion(entries,rates);
   const summary=summarize(converted.entries), month=filter.month||'', previous=month?previousMonth(month):null;
   const compare=previous?allEntries.filter(e=>e.date.startsWith(previous) && (!filter.currency||e.currency===filter.currency) && (!filter.book||e.book===filter.book) && (!filter.category||e.category===filter.category) && (!filter.subcategory||e.subcategory===filter.subcategory) && (!filter.accountId||e.accountId===filter.accountId||e.toAccountId===filter.accountId) && (!filter.type||e.type===filter.type) && (!filter.q||[e.note,e.category,e.subcategory,e.tags,e.location,e.accountName,e.toAccountName].some(v=>String(v||'').toLowerCase().includes(filter.q.toLowerCase())))):[];
   // A focused day/flow is not a comparable full-month period.
   const comparable=!!month && !filter.day && !filter.flow && !filter.through && (!filter.month || month!==today.slice(0,7));
-  const comparison=totals(conversion(compare,rates).entries), insights=[];
+  const comparison=totals(conversion(compare.filter(e=>e.type!=='余额调整'),rates).entries), insights=[];
   for(const [currency,t] of Object.entries(summary.totals)) {
     const top=summary.categories.filter(c=>c.currency===currency && c.amount>0), positive=top.reduce((n,c)=>n+c.amount,0), lead=top[0];
     const prev=comparison[currency], change=comparable && prev && prev.expense>0?(t.expense-prev.expense)/prev.expense:null;

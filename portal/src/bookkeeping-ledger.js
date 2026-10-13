@@ -22,9 +22,11 @@ export function accountLedger(entries, account, quote) {
       delta = convert((debit ? -e.amount : e.amount) - (e.fee || 0));
     }
     estimated ||= !!e.historical;
+    const checkpoint=e.type==='余额调整'?e.balanceCheckpoint:null;
+    if(checkpoint)balance=Math.round(checkpoint.after*100);
     result.set(e.id, { balanceAfter: balance == null ? null : balance / 100,
-      balanceCurrency: account.currency, balanceEstimated: estimated });
-    balance = balance == null || delta == null ? null : balance - delta;
+      balanceCurrency: account.currency, balanceEstimated: checkpoint?false:estimated });
+    balance = checkpoint?Math.round(checkpoint.before*100):balance == null || delta == null ? null : balance - delta;
   }
   return result;
 }

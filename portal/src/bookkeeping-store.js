@@ -26,6 +26,11 @@ function currency(value) {
   if (!CURRENCIES.includes(c)) fail('不支持该货币');
   return c;
 }
+function screenshotCheckpoint(raw) {
+  if(!raw)return {};
+  const data=JSON.parse(raw);
+  return data.kind==='icost-screenshot-adjustment-v1' && data.checkpoint?{balanceCheckpoint:data.checkpoint}:{};
+}
 
 export function createBookkeepingStore(db) {
   db.exec(`
@@ -137,8 +142,10 @@ export function createBookkeepingStore(db) {
       if (eid && !old) fail('账单不存在');
       const normalized = normalizeEntry(userId, input, old?.affects_balance === 0, old ? [old.account_id,old.to_account_id] : []);
       catalog.validateEntry(userId, normalized, old);
+      let raw=old?.raw?JSON.parse(old.raw):null;
+      if(raw?.kind==='icost-screenshot-adjustment-v1' && (normalized.type!==old.type || normalized.date!==old.date || normalized.amount!==old.amount || normalized.currency!==old.currency || normalized.accountId!==old.account_id || normalized.fee!==old.fee))raw={...raw,checkpoint:null};
       if (old) db.prepare('DELETE FROM bookkeeping_entries WHERE user_id=? AND id=?').run(userId, eid);
-      return insertEntry(userId, normalized, { id: eid, historical: old?.affects_balance === 0, sourceKey: old?.source_key, raw: old?.raw ? JSON.parse(old.raw) : null });
+      return insertEntry(userId, normalized, { id: eid, historical: old?.affects_balance === 0, sourceKey: old?.source_key, raw });
     })();
   }
   function entries(userId, filter = {}) {
@@ -165,7 +172,8 @@ export function createBookkeepingStore(db) {
       id: e.id, date: e.date, type: e.type, amount: e.amount / 100, currency: e.currency, category: e.category, subcategory: e.subcategory,
       accountId: e.account_id, toAccountId: e.to_account_id, toAmount: e.to_amount == null ? null : e.to_amount / 100,
       accountName: e.account_name, toAccountName: e.to_account_name, note: e.note, book: e.book, tags: e.tags, location: e.location,
-      refund: e.refund / 100, discount: e.discount / 100, fee: e.fee / 100, historical: !e.affects_balance
+      refund: e.refund / 100, discount: e.discount / 100, fee: e.fee / 100, historical: !e.affects_balance,
+      ...(e.type==='余额调整'?screenshotCheckpoint(e.raw):{})
     }));
   }
   function settings(userId) {
@@ -248,12 +256,39 @@ export function createBookkeepingStore(db) {
       return { inserted, duplicates, createdAccounts };
     })();
   }
-  return { accounts, saveAccount, entries, saveEntry, removeEntry, removeAccount, reorderAccounts, archiveAccount, adjust, settings, saveSettings, saveAutoRates, importRows, catalog };
+  function importBalanceAdjustments(userId, rows, {apply=false}={}) {
+    if(!Array.isArray(rows) || !rows.length || rows.length>2000)fail('余额调整数据须为非空数组且不超过 2000 条');
+    return db.transaction(()=>{
+      const accountMap=new Map(accounts(userId).map(a=>[a.name,a])), seen=new Map();
+      let inserted=0,duplicates=0;
+      for(const row of rows) {
+        const a=accountMap.get(row.accountName);if(!a || a.currency!==row.currency)fail('截图账户不存在或货币不匹配');
+        const before=cents(row.beforeBalance,true),after=cents(row.afterBalance,true),date=entryDate(row.date);
+        cents((after-before)/100,true);
+        if(a.snapshotAt && date.slice(0,10)>a.snapshotAt.slice(0,10))fail('历史调整时间不能晚于账户快照');
+        const source=text(row.source,500);if(!source)fail('截图记录缺少来源');
+        const key='icost-screenshot-adjustment:v1:'+crypto.createHash('sha256').update(a.id+'|'+date).digest('hex');
+        const raw={kind:'icost-screenshot-adjustment-v1',source,datePrecision:'minute',checkpoint:{before:before/100,after:after/100}};
+        const old=db.prepare('SELECT raw FROM bookkeeping_entries WHERE user_id=? AND source_key=?').get(userId,key);
+        const prior=old?.raw?JSON.parse(old.raw):seen.get(key);
+        if(prior) {if(JSON.stringify(prior.checkpoint)!==JSON.stringify(raw.checkpoint))fail('重复截图的调整余额不一致，请核对');duplicates++;continue;}
+        seen.set(key,raw);
+        if(apply) {
+          const e=normalizeEntry(userId,{date,type:'余额调整',amount:(after-before)/100,currency:a.currency,accountId:a.id,category:'余额调整',note:'截图补录：'+source+'（金额为调整差额，不计入收支）'},true,[a.id]);
+          insertEntry(userId,e,{historical:true,sourceKey:key,raw});
+        }
+        inserted++;
+      }
+      return {inserted,duplicates,accounts:new Set(rows.map(r=>r.accountName)).size,applied:apply};
+    })();
+  }
+  return { accounts, saveAccount, entries, saveEntry, removeEntry, removeAccount, reorderAccounts, archiveAccount, adjust, settings, saveSettings, saveAutoRates, importRows, importBalanceAdjustments, catalog };
 }
 
 export function summarize(entries) {
   const totals = {}, categories = {}, incomeCategories = {}, days = {};
   for (const e of entries) {
+    if(e.type==='余额调整')continue;
     const t = totals[e.currency] ||= { income: 0, expense: 0, refund: 0, reimbursement: 0, fees: 0, transfers: 0 };
     const amount = cents(e.amount, true), fee = cents(e.fee || 0, true);
     let expense = 0, income = 0;

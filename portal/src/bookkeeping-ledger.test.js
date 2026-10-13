@@ -58,6 +58,7 @@ test('state API balances survive date/type filters and pagination and require ow
     const s=createBookkeepingStore(getDatabase()), a=s.saveAccount('ledger-a',{name:'现金',balance:100});
     const expense=s.saveEntry('ledger-a',{date:'2026-10-01T12:00:00',type:'支出',amount:10,accountId:a});
     s.saveEntry('ledger-a',{date,type:'收入',amount:20,accountId:a});
+    s.importBalanceAdjustments('ledger-a',[{accountName:'现金',currency:'CNY',date:'2026-09-01T12:00:00',beforeBalance:80,afterBalance:100,source:'screenshot.png'}],{apply:true});
     const foreign=s.saveAccount('ledger-b',{name:'其他人',balance:999});
     s.saveEntry('ledger-b',{date,type:'收入',amount:1,accountId:foreign});
     const get=async(query,permissions=['bookkeeping:view','bookkeeping:accounts:view'])=>{
@@ -70,7 +71,7 @@ test('state API balances survive date/type filters and pagination and require ow
     const paged=await get('accountId='+a+'&offset=1&limit=1');assert.equal(paged.entries[0].balanceAfter,90);
     const latest=await get('accountId='+a+'&limit=1');assert.equal(latest.entries[0].balanceAfter,110);
     for(const data of [await get('accountId='+a,['bookkeeping:view','bookkeeping:analysis:view']),await get('')]) {
-      assert.ok(data.entries.every(e=>!Object.hasOwn(e,'balanceAfter') && !Object.hasOwn(e,'balanceCurrency')));
+      assert.ok(data.entries.every(e=>!Object.hasOwn(e,'balanceAfter') && !Object.hasOwn(e,'balanceCurrency') && !Object.hasOwn(e,'balanceCheckpoint')));
     }
     assert.deepEqual((await get('accountId='+foreign)).entries,[]);
   } finally {
