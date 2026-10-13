@@ -42,6 +42,20 @@ test('credit adjustments reduce or increase signed debt rather than crediting th
   } finally {db.close();}
 });
 
+test('pre-import backup contains only the selected user bookkeeping tables and preserves raw adjustment evidence',()=>{
+  const db=new Database(':memory:');try {
+    const s=createBookkeepingStore(db);s.saveAccount('a',{name:'账户',balance:100});s.saveAccount('b',{name:'别人的账户',balance:999});
+    s.importBalanceAdjustments('a',[{accountName:'账户',currency:'CNY',date,beforeBalance:90,afterBalance:100,source:'source.png'}],{apply:true});
+    db.exec("CREATE TABLE unrelated_secret(value TEXT);INSERT INTO unrelated_secret VALUES('secret');");
+    const snapshot=s.backup('a');assert.equal(snapshot.userId,'a');
+    assert.deepEqual(Object.keys(snapshot.tables),['bookkeeping_accounts','bookkeeping_entries','bookkeeping_settings','bookkeeping_categories','bookkeeping_groups']);
+    assert.ok(Object.values(snapshot.tables).flat().every(row=>row.user_id==='a'));
+    assert.equal(snapshot.tables.bookkeeping_accounts.length,1);
+    assert.equal(JSON.parse(snapshot.tables.bookkeeping_entries[0].raw).checkpoint.after,100);
+    assert.equal(JSON.stringify(snapshot).includes('secret'),false);
+  } finally {db.close();}
+});
+
 test('historical adjustments change asset curves but no billing totals, categories, cumulative series or missing FX status',()=>{
   const bill={id:'bill',date:'2026-09-01T12:00:00',type:'收入',amount:20,currency:'CNY',accountId:'a',category:'工资'};
   const adjustment={id:'adjustment',date,type:'余额调整',amount:30,currency:'CNY',accountId:'a',category:'余额调整',historical:true};

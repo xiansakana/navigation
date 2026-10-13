@@ -12,7 +12,8 @@ try {
   const preview=store.importBalanceAdjustments(userId,rows);
   if(apply) {
     const dir=path.join(path.dirname(getDbPath()),'bookkeeping-backups');fs.mkdirSync(dir,{recursive:true});
-    const backup=path.join(dir,'before-adjustments-'+Date.now()+'.db');await db.backup(backup);
+    const backup=path.join(dir,'before-adjustments-'+Date.now()+'.json');
+    fs.writeFileSync(backup,JSON.stringify(store.backup(userId)),{encoding:'utf8',mode:0o600});
     const before=JSON.stringify(store.accounts(userId)), result=store.importBalanceAdjustments(userId,rows,{apply:true});
     if(JSON.stringify(store.accounts(userId))!==before)throw new Error('账户当前余额核对失败');
     console.log(JSON.stringify({...result,backup,balancesUnchanged:true}));

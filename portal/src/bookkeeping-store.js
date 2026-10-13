@@ -282,7 +282,12 @@ export function createBookkeepingStore(db) {
       return {inserted,duplicates,accounts:new Set(rows.map(r=>r.accountName)).size,applied:apply};
     })();
   }
-  return { accounts, saveAccount, entries, saveEntry, removeEntry, removeAccount, reorderAccounts, archiveAccount, adjust, settings, saveSettings, saveAutoRates, importRows, importBalanceAdjustments, catalog };
+  function backup(userId) {
+    return db.transaction(()=>({version:1,userId,createdAt:new Date().toISOString(),tables:Object.fromEntries(
+      ['accounts','entries','settings','categories','groups'].map(name=>['bookkeeping_'+name,db.prepare('SELECT * FROM bookkeeping_'+name+' WHERE user_id=?').all(userId)])
+    )}))();
+  }
+  return { accounts, saveAccount, entries, saveEntry, removeEntry, removeAccount, reorderAccounts, archiveAccount, adjust, settings, saveSettings, saveAutoRates, importRows, importBalanceAdjustments, backup, catalog };
 }
 
 export function summarize(entries) {
