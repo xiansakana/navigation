@@ -67,7 +67,13 @@ export function assetTrends(accounts, entries, today, rates={CNY:1}, filter={}) 
   const lower=filter.start && filter.start>points[0].date?filter.start:points[0].date,upper=filter.end && filter.end<end?filter.end:end;
   const at=date=>points.filter(p=>p.date<=date).at(-1)?.balance??points[0].balance;
   const scoped=lower<=upper?[...new Set([lower,...points.map(p=>p.date).filter(d=>d>=lower && d<=upper),upper])].sort().map(date=>({date,currency:'CNY',balance:at(date)})):[];
-  return {points:scoped,missingCurrencies:[],note,estimatedTransfers,unlinkedEntries,current,asOf:end};
+  const startDate=filter.start || (filter.month?filter.month+'-01':points[0].date);
+  const requestedEnd=filter.end || (filter.month?new Date(Date.UTC(Number(filter.month.slice(0,4)),Number(filter.month.slice(5,7)),0)).toISOString().slice(0,10):end);
+  const endDate=requestedEnd<end?requestedEnd:end;
+  const preceding=new Date(startDate+'T12:00:00Z');preceding.setUTCDate(preceding.getUTCDate()-1);
+  const openingAsOf=preceding.toISOString().slice(0,10),opening=at(openingAsOf),closing=at(endDate);
+  const period=startDate<=endDate?{start:startDate,end:endDate,openingAsOf,opening,closing,change:rounded(closing-opening)}:null;
+  return {points:scoped,missingCurrencies:[],note,estimatedTransfers,unlinkedEntries,current,asOf:end,period};
 }
 export function analyzeBookkeeping(entries, allEntries, accounts, settings, filter={}, today=new Date(Date.now()+8*60*60*1000).toISOString().slice(0,10), fxRates=settings.rates||{CNY:1}) {
   entries=entries.filter(e=>e.type!=='余额调整');

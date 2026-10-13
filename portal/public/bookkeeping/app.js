@@ -101,9 +101,13 @@
     const totals = {};
     for (const a of state.accounts) if (a.included) { const t = totals[a.currency] ||= { assets:0, debt:0 }; if (a.balance >= 0) t.assets += a.balance; else t.debt -= a.balance; }
     const rates=state.fx?.rates||state.settings.rates, missing=Object.keys(totals).filter(c=>!rates[c]);
-    const asset=state.analysis?.asset, last=asset?.points.at(-1);
+    const asset=state.analysis?.asset, period=asset?.period;
     let metrics=missing.length?metric('CNY 净资产','—','待获取汇率：'+missing.join('、')):metric('当前 CNY 净资产',m(Object.entries(totals).reduce((n,[c,t])=>n+(t.assets-t.debt)*rates[c],0)),'按当前汇率折算');
-    if(last)metrics+=metric('范围期末反推净资产',m(last.balance),'截至 '+last.date+' · 历史估算');
+    if(period) {
+      metrics+=metric('范围期初净资产',m(period.opening),'截至 '+period.openingAsOf+' 日末 · 历史反推');
+      metrics+=metric('范围期末净资产',m(period.closing),'截至 '+period.end+' 日末 · 历史反推');
+      metrics+=metric('范围内资产变化',(period.change>0?'+ ':'')+m(period.change),period.start+' ～ '+period.end+' · 期末 − 期初，含余额调整',period.change>0?'bk-income':period.change<0?'bk-expense':'');
+    } else if(asset)metrics+=metric('范围内资产变化','—',asset.missingCurrencies.length?'缺少历史汇率，暂无法计算':'所选范围暂无可反推的资产数据');
     $('assets-summary').innerHTML = metrics || metric('净资产',m(0),'新增账户，建立资产基准');
     const grouped = {};
     const selectedGroup = state.accountGroups.some(g=>g.name===$('asset-group').value)?$('asset-group').value:''; $('asset-group').innerHTML = options(state.accountGroups.map(g=>g.name),selectedGroup,'全部分组');
