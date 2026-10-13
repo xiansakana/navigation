@@ -10,6 +10,26 @@ import { handleBookkeepingApi } from './bookkeeping.js';
 import { getDatabase, closeDatabase } from '../../shared/db/index.js';
 
 const date='2026-10-11T12:00:00';
+test('observed credit balances carry forward across later bills despite a different current snapshot',()=>{
+  const account={id:'credit',currency:'USD',balance:-1.38};
+  const entries=[
+    {id:'bus',date:'2026-07-19T19:24:27',type:'支出',currency:'USD',amount:0.44,accountId:'credit',historical:true},
+    {id:'metro',date:'2026-07-19T18:45:35',type:'支出',currency:'USD',amount:0.31,accountId:'credit',historical:true},
+    {id:'adjust',date:'2026-07-11T10:56:59',type:'余额调整',currency:'USD',amount:6.77,accountId:'credit',historical:true,balanceCheckpoint:{before:-7.51,after:-0.74}},
+    {id:'old',date:'2026-07-11T10:56:07',type:'支出',currency:'USD',amount:7.51,accountId:'credit',historical:true}
+  ];
+  const balances=accountLedger(entries,account);
+  assert.deepEqual(entries.map(e=>balances.get(e.id).balanceAfter),[-1.49,-1.05,-0.74,-7.51]);
+  assert.equal(account.balance,-1.38);
+  assert.equal(balances.get('adjust').balanceEstimated,false);
+  const nextCheckpoint={id:'next',date,type:'余额调整',currency:'USD',amount:0.11,accountId:'credit',balanceCheckpoint:{before:-1.49,after:-1.38}};
+  const later={id:'later',date,type:'收入',currency:'USD',amount:1,accountId:'credit'};
+  const multiple=accountLedger([later,nextCheckpoint,...entries],account);
+  assert.equal(multiple.get('next').balanceAfter,-1.38);
+  assert.equal(multiple.get('later').balanceAfter,-0.38);
+  assert.equal(multiple.get('metro').balanceAfter,-1.05);
+});
+
 test('account running balances include fees, incoming transfers, refunds and signed adjustments in stable store order',()=>{
   const db=new Database(':memory:');
   try {
