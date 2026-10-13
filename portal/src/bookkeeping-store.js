@@ -252,7 +252,7 @@ export function createBookkeepingStore(db) {
 }
 
 export function summarize(entries) {
-  const totals = {}, categories = {}, days = {};
+  const totals = {}, categories = {}, incomeCategories = {}, days = {};
   for (const e of entries) {
     const t = totals[e.currency] ||= { income: 0, expense: 0, refund: 0, reimbursement: 0, fees: 0, transfers: 0 };
     const amount = cents(e.amount, true), fee = cents(e.fee || 0, true);
@@ -266,12 +266,17 @@ export function summarize(entries) {
     t.income += income; t.expense += expense; t.fees += fee;
     const categoryKey = JSON.stringify([e.currency, e.category]);
     categories[categoryKey] = (categories[categoryKey] || 0) + expense;
+    if(e.type==='收入') {
+      const item=incomeCategories[categoryKey] ||= {amount:0,count:0};
+      item.amount+=income;item.count++;
+    }
     const dayKey = JSON.stringify([e.currency, e.date.slice(0, 10)]);
     const d = days[dayKey] ||= { expense: 0, income: 0 }; d.expense += expense; d.income += income;
   }
   return {
     totals: Object.fromEntries(Object.entries(totals).map(([c, t]) => [c, Object.fromEntries(Object.entries({ ...t, net: t.income - t.expense }).map(([k, v]) => [k, v / 100]))])),
     categories: Object.entries(categories).map(([k, v]) => { const [currency, category] = JSON.parse(k); return { currency, category, amount: v / 100 }; }).sort((a, b) => b.amount - a.amount),
+    incomeCategories: Object.entries(incomeCategories).map(([k,v])=>{const [currency,category]=JSON.parse(k);return {currency,category,amount:v.amount/100,count:v.count};}).sort((a,b)=>b.amount-a.amount),
     days: Object.entries(days).map(([k, v]) => { const [currency, date] = JSON.parse(k); return { currency, date, income: v.income / 100, expense: v.expense / 100 }; }).sort((a, b) => a.date.localeCompare(b.date))
   };
 }

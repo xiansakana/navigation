@@ -36,10 +36,10 @@
     if (!parts.length) return metric('支出', m(0, equivalent?'CNY':$('currency').value || 'CNY'), '当前筛选无账单','bk-expense') + metric('收入', m(0, equivalent?'CNY':$('currency').value || 'CNY'),'','bk-income') + metric('结余', m(0, equivalent?'CNY':$('currency').value || 'CNY'));
     return parts.map(([c,t]) => metric(c + ' 支出', m(t.expense,c), '已扣除退款与报销 · 点击查看', 'bk-expense',false,{currency:equivalent?$('currency').value:c,flow:'expense'}) + metric(c + ' 收入', m(t.income,c), '转账、借还款不计入 · 点击查看', 'bk-income',false,{currency:equivalent?$('currency').value:c,flow:'income'}) + metric(c + ' 结余', m(t.net,c), '收入 − 净支出 · 点击查看','',false,{currency:equivalent?$('currency').value:c,flow:'net'})).join('');
   }
-  function categoriesHtml(items, max = 1000, equivalent=false) {
+  function categoriesHtml(items, max = 1000, equivalent=false, flow='expense') {
     const list = items.filter(x => x.amount !== 0).slice(0,max), totals = {};
     for (const x of items) if (x.amount > 0) totals[x.currency] = (totals[x.currency] || 0) + x.amount;
-    return list.map(x => '<button class="bk-category bk-category-drill"'+analysis.attr({category:x.category,currency:equivalent?$('currency').value:x.currency,flow:'expense'})+'><div class="bk-category-title"><span>' + esc(x.category) + ' <small class="bk-muted">' + esc(x.currency) + '</small></span>' + m(x.amount,x.currency) + '</div><div class="bk-bar"><span style="width:' + Math.max(0,Math.min(100,x.amount/(totals[x.currency] || 1)*100)) + '%"></span></div></button>').join('') || '<p class="bk-empty">暂时没有支出记录</p>';
+    return list.map(x => '<button class="bk-category bk-category-drill"'+analysis.attr({category:x.category,currency:equivalent?$('currency').value:x.currency,flow})+'><div class="bk-category-title"><span>' + esc(x.category) + ' <small class="bk-muted">' + esc(x.currency) + '</small>'+(flow==='income'?'<small> · '+x.count+' 笔 · '+(x.amount>0?(x.amount/(totals[x.currency]||1)*100).toFixed(1)+'%':'冲减')+'</small>':'')+'</span>' + m(x.amount,x.currency) + '</div><div class="bk-bar"><span style="width:' + Math.max(0,Math.min(100,x.amount/(totals[x.currency] || 1)*100)) + '%"></span></div></button>').join('') || '<p class="bk-empty">'+(flow==='income'?'暂无非零分类收入':'暂时没有支出记录')+'</p>';
   }
   function renderEntries() {
     const converted=state.equivalentSummary||state.analysis?.equivalentSummary, missing=state.conversionMissing||state.analysis?.billing.missingCurrencies||[];
@@ -58,6 +58,7 @@
     }).join('') || '<div class="bk-empty">还没有符合条件的账单<br>记下第一笔，或从 iCost 导入历史记录。</div>';
     $('more').classList.toggle('hidden', state.entries.length >= state.count);
     $('mini-categories').innerHTML = categoriesHtml(state.equivalentSummary?.categories || state.summary.categories,6,!!state.equivalentSummary); $('categories').innerHTML = categoriesHtml(state.equivalentSummary?.categories || state.summary.categories,1000,!!state.equivalentSummary);
+    $('income-categories').innerHTML=missing.length?'<p class="bk-empty">缺少历史汇率，分类收入待折算。</p>':categoriesHtml(converted?.incomeCategories || [],1000,true,'income');
     renderStats();
   }
   function renderStats() {

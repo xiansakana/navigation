@@ -5,6 +5,16 @@ import { analyzeBookkeeping, assetTrends } from './bookkeeping-analysis.js';
 import { createBookkeepingStore, summarize } from './bookkeeping-store.js';
 const day='2026-10-11',date=day+'T12:00:00', settings={budgets:{'2026-10':100}};
 const e=(type,amount,extra={})=>({date,type,amount,currency:'CNY',category:'餐饮',fee:0,...extra});
+test('income categories reconcile historical CNY totals, count bills and exclude repayments and refunds',()=>{
+  const entries=[e('收入',100,{category:'工资',fee:2}),e('收入',10,{category:'工资',currency:'USD',cnyAmount:70,cnyFee:0}),e('收入',20,{category:'利息'}),e('收入',-5,{category:'利息',historical:true}),e('退款入账',50,{category:'退款'}),e('报销入账',30,{category:'报销'}),e('转账',500),e('收回',200),e('余额调整',500)];
+  const result=analyzeBookkeeping(entries,entries,null,settings,{},day,{CNY:1,USD:99});
+  assert.deepEqual(result.equivalentSummary.incomeCategories,[{currency:'CNY',category:'工资',amount:170,count:2},{currency:'CNY',category:'利息',amount:15,count:2}]);
+  assert.equal(result.equivalentSummary.incomeCategories.reduce((n,c)=>n+c.amount,0),result.equivalentSummary.totals.CNY.income);
+  assert.equal(result.equivalentSummary.totals.CNY.income,185);
+  assert.deepEqual(summarize([]).incomeCategories,[]);
+  const missing=analyzeBookkeeping([e('收入',10,{currency:'USD',fxMissing:true})],[],null,settings,{},day);
+  assert.deepEqual(missing.equivalentSummary.incomeCategories,[]);
+});
 test('billing trends reconcile refunds and fees, zero-fill days, and combine currencies into CNY',()=>{
   const entries=[e('支出',50),e('收入',100),e('退款入账',10),e('转账',1000,{fee:2}),e('余额调整',100),e('支出',3,{currency:'USD'})];
   const result=analyzeBookkeeping(entries,entries,null,settings,{month:'2026-10'},day,{CNY:1,USD:7});
