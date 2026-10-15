@@ -1,6 +1,10 @@
 import { TRADE_ASSET_TYPES, tradeAssetType } from '../public/js/trade-asset-type.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
 import { portfolioIdentityMiddleware } from '../../shared/portfolio-user.js';
+import { currentPortfolioUserId } from '../../shared/portfolio-user.js';
+import { getDatabase } from '../../shared/db/index.js';
+import { investmentRows, saveInvestmentAccount, unlinkInvestmentAccount } from '../../shared/investment-accounts.js';
+import { createBookkeepingStore } from '../../portal/src/bookkeeping-store.js';
 import { configureQuoteNetwork } from '../../shared/quote-network.js';
 import express from 'express';
 import path from 'node:path';
@@ -50,6 +54,7 @@ try {
 }
 
 const store = createStore(config);
+const portfolioDb = getDatabase({ dbPath: config.dbPath });
 const quantStore = createQuantStore(config);
 const quantBacktestStore = createQuantBacktestStore(config);
 const quotes = createQuoteService(config);
@@ -162,9 +167,79 @@ function pnlOptsFromReq(req) {
 }
 
 function portfolioForRequest(req, data = store.read()) {
+  const accounts = data.investmentAccounts || [];
+  if (req.query.accountId) {
+    const selected = accounts.find((a) => a.id === req.query.accountId);
+    data = { ...data, trades: data.trades.filter((t) => (t.account_id || 'unassigned') === req.query.accountId), cashUsd: selected?.currency === 'USD' ? selected.cash : 0, cashCny: selected?.currency === 'CNY' ? selected.cash : 0 };
+  }
   const portfolio = buildPortfolio(data, pnlOptsFromReq(req));
+  portfolio.investmentAccounts = accounts.map(({ id, name, currency }) => ({ id, name, currency }));
+  portfolio.accountCashEnabled = !!data.accountCashEnabled;
+  const incomplete = accounts.filter((a) => (!req.query.accountId || req.query.accountId === a.id) && a.missingQuotes.length);
+  if (incomplete.length) {
+    portfolio.summary.totalAssets = null; portfolio.summary.totalAssetsCny = null; portfolio.summary.totalMv = null;
+    if (incomplete.some((a) => a.currency === 'USD')) portfolio.summary.assetsUsd = null;
+    if (incomplete.some((a) => a.currency === 'CNY')) portfolio.summary.assetsCny = null;
+  }
+  for (const holding of portfolio.holdings) holding.accountName = accounts.find((a) => a.id === holding.accountId)?.name || '待归属';
   return hasStockPermission(req, 'cash') ? { ...portfolio, cashVisible: true } : redactPortfolioCash(portfolio);
 }
+
+function scopedTrades(req, trades) {
+  return req.query.accountId ? trades.filter((t) => (t.account_id || 'unassigned') === req.query.accountId) : trades;
+}
+
+function accountEditor(req, res, binding = false) {
+  if (!requireStockPermission(req, res, 'accounts', 'edit') || !requireStockPermission(req, res, 'cash', 'edit')) return false;
+  const permissions = portalPermissions(req) || [];
+  if (binding && !permissions.includes('*') && !permissions.includes('bookkeeping:accounts:edit')) {
+    res.status(403).json({ error: '绑定需要记账账户编辑权限' }); return false;
+  }
+  return true;
+}
+
+app.get('/api/accounts', (req, res) => {
+  if (!requireStockPermission(req, res, 'accounts')) return;
+  const data = store.read();
+  const full = hasStockPermission(req, 'cash');
+  const permissions = portalPermissions(req) || [];
+  const ledgerDetails = permissions.includes('*') || (permissions.includes('bookkeeping:view') && permissions.includes('bookkeeping:accounts:view'));
+  res.json({ accounts: (data.investmentAccounts || []).map((a) => full ? { ...a, movements: a.movements.filter((m) => m.kind === 'stock' || ledgerDetails), ...(!ledgerDetails ? { bookkeepingName: a.bookkeepingId ? '已绑定记账账户' : null, oldLedgerBalance: null } : {}) } : { id: a.id, name: a.name, currency: a.currency }), unassigned: data.trades.filter((t) => !t.account_id).length });
+});
+app.get('/api/accounts/bookkeeping-options', (req, res) => {
+  if (!requireStockPermission(req, res, 'accounts') || !requireStockPermission(req, res, 'cash')) return;
+  const permissions = portalPermissions(req) || [];
+  if (!permissions.includes('*') && !permissions.includes('bookkeeping:accounts:view')) return res.status(403).json({ error: '需要记账账户查看权限' });
+  const accounts = createBookkeepingStore(portfolioDb).accounts(currentPortfolioUserId());
+  res.json(accounts.filter((a) => !a.archived && ['USD', 'CNY'].includes(a.currency) && a.accountType !== '信用卡').map(({ id, name, group, currency, balance, balanceSource }) => ({ id, name, group, currency, balance, balanceSource })));
+});
+app.post('/api/accounts', (req, res) => {
+  if (!accountEditor(req, res, !!req.body.bookkeepingId)) return;
+  try { const id = saveInvestmentAccount(portfolioDb, currentPortfolioUserId(), req.body); res.json({ id }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.put('/api/accounts/:id', (req, res) => {
+  const old = investmentRows(portfolioDb, currentPortfolioUserId()).find((a) => a.id === req.params.id);
+  if (!accountEditor(req, res, !!old?.bookkeeping_id || !!req.body.bookkeepingId)) return;
+  try { const id = saveInvestmentAccount(portfolioDb, currentPortfolioUserId(), req.body, req.params.id); res.json({ id }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/accounts/:id/unlink', (req, res) => {
+  if (!accountEditor(req, res, true)) return;
+  try { unlinkInvestmentAccount(portfolioDb, currentPortfolioUserId(), req.params.id); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/accounts/:id/assign', (req, res) => {
+  if (!accountEditor(req, res) || !requireStockPermission(req, res, 'trade', 'edit')) return;
+  try {
+    const account = investmentRows(portfolioDb, currentPortfolioUserId()).find((a) => a.id === req.params.id);
+    if (!account) throw new Error('账户不存在');
+    const data = store.read();
+    let count = 0;
+    data.trades = data.trades.map((t) => {
+      if (!t.account_id && (t.currency || (/^\d{6}$/.test(t.symbol) ? 'CNY' : 'USD')) === account.currency) { count++; return { ...t, account_id: account.id }; }
+      return t;
+    });
+    store.write(data); res.json({ count });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 
 function sendPortfolio(res, req) {
   res.json(portfolioForRequest(req));
@@ -179,6 +254,7 @@ app.get('/api/portfolio', (req, res) => {
 app.put('/api/cash', (req, res) => {
   if (!requireStockPermission(req, res, 'cash', 'edit')) return;
   const data = store.read();
+  if (data.accountCashEnabled) return res.status(400).json({ error: '现金已按账户自动汇总，请在账户管理中核对现金' });
   const body = req.body || {};
   let cashUsd = data.cashUsd;
   let cashCny = data.cashCny;
@@ -300,11 +376,11 @@ app.post('/api/trades/import', express.raw({
   const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
   if (!buf.length) return res.status(400).json({ error: '空文件' });
   try {
-    const imported = parseImportBuffer(buf);
+    const imported = parseImportBuffer(buf).map((t) => req.query.accountId ? { ...t, account_id: req.query.accountId } : t);
     if (!imported.length) return res.status(400).json({ error: '未解析到有效记录' });
     const data = store.read();
     const mode = String(req.query.mode || 'merge');
-    if (mode === 'replace') data.trades = imported;
+    if (mode === 'replace') data.trades = req.query.accountId ? data.trades.filter((t) => t.account_id !== req.query.accountId).concat(imported) : imported;
     else data.trades = data.trades.concat(imported);
     const recalc = recalcCashFromTrades(data.trades, {
       cashUsd: 0,
@@ -321,7 +397,7 @@ app.post('/api/trades/import', express.raw({
 
 app.get('/api/pnl', (req, res) => {
   const data = store.read();
-  res.json(computePnl(data.trades, {
+  res.json(computePnl(scopedTrades(req, data.trades), {
     startDate: req.query.start || undefined,
     endDate: req.query.end || undefined,
     usdCnyRate: data.usdCnyRate
@@ -332,7 +408,7 @@ app.get('/api/trades/review', (req, res) => {
   if (!requireStockPermission(req, res, 'trade-review') || !requireStockPermission(req, res, 'trades')) return;
   try {
     const data = store.read();
-    res.json(computeTradeReview(data.trades, {
+    res.json(computeTradeReview(scopedTrades(req, data.trades), {
       startDate: req.query.start, endDate: req.query.end,
       symbol: req.query.symbol, assetType: req.query.assetType, otherCategory: req.query.otherCategory
     }));
@@ -343,7 +419,7 @@ app.get('/api/trades/review', (req, res) => {
 
 app.get('/api/trades/summary', (req, res) => {
   const data = store.read();
-  res.json(computeSymbolSummaries(data.trades, {
+  res.json(computeSymbolSummaries(scopedTrades(req, data.trades), {
     startDate: req.query.start || undefined,
     endDate: req.query.end || undefined,
     usdCnyRate: data.usdCnyRate,
@@ -356,7 +432,7 @@ app.get('/api/trades/summary', (req, res) => {
 
 app.get('/api/trades/export', (req, res) => {
   const data = store.read();
-  let trades = [...data.trades].sort((a, b) => new Date(b.trade_date) - new Date(a.trade_date));
+  let trades = [...scopedTrades(req, data.trades)].sort((a, b) => new Date(b.trade_date) - new Date(a.trade_date));
   const sym = String(req.query.symbol || '').trim().toUpperCase();
   const type = req.query.type;
   const start = req.query.start;
@@ -369,6 +445,8 @@ app.get('/api/trades/export', (req, res) => {
   if (end) trades = trades.filter((t) => (tradeCalendarDate(t.trade_date) || '') <= end);
 
   const rows = trades.map((t) => ({
+    账户ID: t.account_id || '',
+    证券账户: data.investmentAccounts?.find((a) => a.id === t.account_id)?.name || '待归属',
     时间: formatZonedDateTime(t.trade_date),
     类型: TRADE_ASSET_TYPES[tradeAssetType(t)],
     交易方向: t.type === 'buy' ? '买入' : t.type === 'sell' ? '卖出' : '其它',

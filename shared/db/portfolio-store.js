@@ -1,5 +1,6 @@
 import { correctDividendTaxPortfolio } from '../dividend-tax.js';
 import { requirePortfolioUserId } from '../portfolio-user.js';
+import { projectInvestments, prepareInvestmentTrades, investmentRows } from '../investment-accounts.js';
 
 const DEFAULT_USD_CNY_RATE = 7.2;
 
@@ -149,12 +150,26 @@ export function createPortfolioStore(db, userId) {
   const upsert = db.prepare('INSERT INTO portfolio_users(user_id,data,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at');
   return {
     userId,
-    read() { return normalizePortfolio(JSON.parse(select.get(userId)?.data || '{}')); },
+    read() {
+      const data = normalizePortfolio(JSON.parse(select.get(userId)?.data || '{}'));
+      const accounts = projectInvestments(db, userId, data);
+      if (!accounts.length) return data;
+      const sum = (cur) => roundMoney(accounts.filter((a) => a.currency === cur).reduce((s, a) => s + a.cash, 0));
+      return { ...data, cashUsd: sum('USD'), cashCny: sum('CNY'), cash: roundMoney(sum('USD') + sum('CNY') / data.usdCnyRate), investmentAccounts: accounts, accountCashEnabled: true };
+    },
     write(input) {
       const payload = correctDividendTaxPortfolio(normalizePortfolio(input));
       const updatedAt = new Date().toISOString();
-      upsert.run(userId, JSON.stringify(payload), updatedAt);
-      return { ...payload, updatedAt };
+      return db.transaction(() => {
+        const before = normalizePortfolio(JSON.parse(select.get(userId)?.data || '{}'));
+        if (investmentRows(db, userId).length) {
+          payload.trades = prepareInvestmentTrades(db, userId, payload.trades, before);
+          // Managed cash is derived, never write a displayed aggregate back into its baseline.
+          payload.cashUsd = before.cashUsd; payload.cashCny = before.cashCny; payload.cash = before.cash;
+        }
+        upsert.run(userId, JSON.stringify(payload), updatedAt);
+        return { ...this.read(), updatedAt };
+      }).immediate();
     }
   };
 }

@@ -12,6 +12,13 @@ import { effectiveBookkeepingFx, refreshBookkeepingFx } from './bookkeeping-fx.j
 
 const imports = new Map();
 const ttl = 15 * 60 * 1000;
+export const publicAccounts = (accounts, session) => accounts.map((a) => {
+  if (!a.investment) return a;
+  const permissions = session?.permissions || [];
+  const cashAllowed = permissions.includes('*') || permissions.includes('service:stock-manage:edit') || permissions.includes('service:stock-manage:cash:view') || permissions.includes('service:stock-manage:cash:edit');
+  const { ledgerBalance, ...visible } = a;
+  return { ...visible, balance: cashAllowed ? a.balance : null, investment: { id: a.investment.id, name: a.investment.name, ...(cashAllowed ? { cash: a.investment.cash, marketValue: a.investment.marketValue } : { permissionMissing: true }), baselineAt: a.investment.baselineAt, missingQuotes: a.investment.missingQuotes } };
+});
 export function canBookkeep(session, feature = 'view') {
   return !!session?.userId && !session.isGuest && hasPermission(session.permissions || [], 'bookkeeping:' + feature);
 }
@@ -54,7 +61,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
     if (route === '/fx' && method === 'GET') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
     if (route === '/fx/refresh' && method === 'POST') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
     if (route === '/state' && method === 'GET') {
-      const history=historicalFx(getDatabase()), allOriginal=store.entries(uid), permittedAccounts=canBookkeep(session,'accounts:view')?store.accounts(uid):null;
+      const history=historicalFx(getDatabase()), allOriginal=store.entries(uid), permittedAccounts=canBookkeep(session,'accounts:view')?publicAccounts(store.accounts(uid),session):null;
       const destinations=allOriginal.filter(e=>e.toAccountId && e.toAmount!=null).map(e=>({...e,currency:permittedAccounts?.find(a=>a.id===e.toAccountId)?.currency||'CNY'}));
       const ledgerAccount=permittedAccounts?.find(a=>a.id===url.searchParams.get('accountId'));
       const ledgerQuotes=ledgerAccount?allOriginal.filter(e=>e.accountId===ledgerAccount.id || e.toAccountId===ledgerAccount.id).map(e=>({...e,currency:ledgerAccount.currency})):[];
@@ -77,7 +84,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
         books: [...new Set(all.map(e => e.book))], categories: [...new Set(all.map(e => e.category))],
         months: [...new Set(all.map(e => e.date.slice(0, 7)))].sort().reverse() });
     }
-    if (route === '/accounts' && method === 'GET') return json(res, 200, { ok: true, accounts: store.accounts(uid) });
+    if (route === '/accounts' && method === 'GET') return json(res, 200, { ok: true, accounts: publicAccounts(store.accounts(uid),session) });
     if (route === '/categories' && method === 'GET') return json(res,200,{ok:true,categories:store.catalog.list(uid)});
     if (route === '/categories' && method === 'POST') return json(res,201,{ok:true,id:store.catalog.save(uid,await body(req))});
     if (route === '/categories/order' && method === 'PUT') { store.catalog.reorder(uid,'categories',(await body(req)).ids); return json(res,200,{ok:true}); }

@@ -4,6 +4,10 @@ import { TRANSFER_TYPES } from './bookkeeping-store.js';
 export function accountLedger(entries, account, quote) {
   const result = new Map();
   if (!account) return result;
+  if (account.balanceSource === 'portfolio') {
+    for (const e of entries) if (e.accountId === account.id || e.toAccountId === account.id) result.set(e.id, { balanceAfter: null, balanceCurrency: account.currency, balanceEstimated: true });
+    return result;
+  }
   let balance = Math.round(account.balance * 100), estimated = false;
   const movements = [];
   for (const e of entries) {

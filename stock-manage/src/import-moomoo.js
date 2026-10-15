@@ -193,6 +193,8 @@ export function parseAppBackupBuffer(buffer) {
         if (!otherCat || !Number.isFinite(amt) || amt === 0) continue;
         out.push({
           id: `backup-${r}-${Date.now()}`,
+          ...(hdr.includes('账户ID') && normalizeCell(rows[r][hdr.indexOf('账户ID')]) ? { account_id: normalizeCell(rows[r][hdr.indexOf('账户ID')]) } : {}),
+          ...(hdr.includes('币种') ? { currency: normalizeCell(rows[r][hdr.indexOf('币种')]) } : {}),
           symbol: symbol || 'OTHER',
           name: normalizeCell(cells[4]) || otherCat,
           type: 'other',
@@ -213,6 +215,8 @@ export function parseAppBackupBuffer(buffer) {
       const mult = optionMult(symbol);
       out.push({
         id: `backup-${r}-${Date.now()}`,
+        ...(hdr.includes('账户ID') && normalizeCell(rows[r][hdr.indexOf('账户ID')]) ? { account_id: normalizeCell(rows[r][hdr.indexOf('账户ID')]) } : {}),
+        ...(hdr.includes('币种') ? { currency: normalizeCell(rows[r][hdr.indexOf('币种')]) } : {}),
         symbol,
         name: normalizeCell(cells[4]) || symbol,
         type,

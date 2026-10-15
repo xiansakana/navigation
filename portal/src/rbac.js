@@ -15,6 +15,7 @@ var NOTIFICATIONS_SERVICE_ID = 'notifications';
 
 var STOCK_MANAGE_HOLDINGS_COLUMNS = [
     { key: 'type', name: '类型' },
+    { key: 'account', name: '账户' },
     { key: 'symbol', name: '代码' },
     { key: 'name', name: '名称' },
     { key: 'shares', name: '股数' },
@@ -57,6 +58,8 @@ var STOCK_MANAGE_FEATURES = [
     { feature: 'pnl', name: '查询盈亏', action: 'view', permissionPath: ['持仓', '看板'] },
     { feature: 'pnl-toggle', name: '盈亏显隐', action: 'view', permissionPath: ['持仓', '看板'] },
     { feature: 'trades', name: '交易记录', action: 'view', permissionPath: ['持仓', '交易记录'] },
+    { feature: 'accounts', name: '查看证券账户', action: 'view', permissionPath: ['持仓', '账户管理'] },
+    { feature: 'accounts', name: '管理证券账户及绑定', action: 'edit', permissionPath: ['持仓', '账户管理'] },
     { feature: 'trade-review', name: '交易复盘', action: 'view', permissionPath: ['持仓', '交易记录', '交易复盘'] },
     { feature: 'export', name: '导出交易', action: 'view', permissionPath: ['持仓', '交易记录'] },
     { feature: 'import', name: '导入交易', action: 'edit', permissionPath: ['持仓', '交易记录'] },

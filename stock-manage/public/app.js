@@ -1,4 +1,5 @@
 import { TRADE_ASSET_TYPES, tradeAssetType } from './js/trade-asset-type.js';
+import { openInvestmentAccounts } from './js/investment-accounts.js';
 import { isDividendTax, normalizeOtherAmount } from './js/dividend-tax.js';
 import { renderTradeReview } from './js/trade-review.js';
 import { formatPrice, priceInputValue } from './js/price-format.js';
@@ -109,6 +110,7 @@ let dragSourceSymbol = null;
 let quotesRefreshBusy = false;
 let pnlStart = '';
 let pnlEnd = '';
+let selectedAccountId = new URLSearchParams(location.search).get('accountId') || '';
 let prefSaveTimer = null;
 
 const ui = {
@@ -135,6 +137,7 @@ async function api(path, opts = {}) {
 
 function pnlQuery() {
   const q = new URLSearchParams();
+  if (selectedAccountId) q.set('accountId', selectedAccountId);
   if (pnlStart) q.set('start', pnlStart);
   if (pnlEnd) q.set('end', pnlEnd);
   const s = q.toString();
@@ -269,7 +272,7 @@ function renderDashboard() {
   const dailyMetaHint = (dailyHint && dailyHint !== '—') ? dailyHint : '';
   const cashField = !dashboardVisible
     ? `<div class="value">${MASK}</div>`
-    : can('cash', 'edit')
+    : can('cash', 'edit') && !state.accountCashEnabled
       ? `<div class="sm-cash-dual">
           <div class="sm-cash-input-wrap"><span>$</span><input type="number" step="0.01" id="cash-usd-input" value="${state.cashUsd ?? 0}"></div>
           <div class="sm-cash-input-wrap"><span>¥</span><input type="number" step="0.01" id="cash-cny-input" value="${state.cashCny ?? 0}"></div>
@@ -277,13 +280,13 @@ function renderDashboard() {
       : `<div class="value">${fmtUsd(state.cashUsd)} · ${fmtCny(state.cashCny)}</div>`;
   const rateHint = `汇率 ${Number(state.usdCnyRate || 0).toFixed(4)} · 折合 ${maskDashboardValue(fmtUsd(cashEq))} · 占组合 ${maskDashboardValue(fmtPct(cashPct))}`;
   const rate = Number(state.usdCnyRate) > 0 ? Number(state.usdCnyRate) : 7.2;
-  const assetsUsd = Number.isFinite(s.assetsUsd)
+  const assetsUsd = s.assetsUsd === null ? null : Number.isFinite(s.assetsUsd)
     ? s.assetsUsd
     : roundMoneyClient((Number(s.stockMv) || 0) + (Number(s.optionMv) || 0) + (Number(state.cashUsd) || 0));
-  const assetsCny = Number.isFinite(s.assetsCny)
+  const assetsCny = s.assetsCny === null ? null : Number.isFinite(s.assetsCny)
     ? s.assetsCny
     : roundMoneyClient((Number(s.ashareMvNative) || 0) + (Number(state.cashCny) || 0));
-  const totalAssetsCny = Number.isFinite(s.totalAssetsCny)
+  const totalAssetsCny = s.totalAssetsCny === null ? null : Number.isFinite(s.totalAssetsCny)
     ? s.totalAssetsCny
     : roundMoneyClient((Number(s.totalAssets) || 0) * rate);
   const totalAssetsLine = `${fmtUsd(s.totalAssets)}（${fmtCny(totalAssetsCny)}）`;
@@ -336,6 +339,7 @@ function renderDashboard() {
 }
 
 function bindCashInput() {
+  if (state.accountCashEnabled) return;
   if (!can('cash', 'edit')) return;
   const usdEl = $('#cash-usd-input');
   const cnyEl = $('#cash-cny-input');
@@ -388,6 +392,8 @@ function holdingsCellContent(h, key, ctx) {
   switch (key) {
     case 'type':
       return maskCol('type', holdingTypeLabel(h));
+    case 'account':
+      return maskCol('account', escapeHtml(h.accountName || '待归属'));
     case 'symbol':
       return maskCol('symbol', symInner);
     case 'name':
@@ -425,8 +431,8 @@ function holdingsCellContent(h, key, ctx) {
       return maskCol('signal', `<select class="sm-cell-select" data-meta="signal" data-symbol="${h.symbol}" ${can('meta', 'edit') ? '' : 'disabled'}>${signalOptions(h.signal)}</select>`);
     case 'actions':
       return maskCol('actions', can('row-trade', 'edit') ? `
-        <button type="button" class="btn link" data-trade="buy" data-symbol="${h.symbol}">买</button>
-        <button type="button" class="btn link" data-trade="sell" data-symbol="${h.symbol}">卖</button>
+        <button type="button" class="btn link" data-trade="buy" data-symbol="${h.symbol}" data-account="${h.accountId || ''}">买</button>
+        <button type="button" class="btn link" data-trade="sell" data-symbol="${h.symbol}" data-account="${h.accountId || ''}">卖</button>
         <button type="button" class="btn link" data-history="${h.symbol}">记录</button>` : '—');
     default:
       return MASK;
@@ -549,6 +555,9 @@ function renderPnl() {
 
 function applyPortfolio(data) {
   state = data;
+  const filter = $('#account-filter');
+  if (filter) filter.innerHTML = '<option value="">全部账户</option><option value="unassigned">待归属交易</option>' + (state.investmentAccounts || []).map((a) => `<option value="${a.id}" ${selectedAccountId === a.id ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('');
+  if (filter) filter.value = selectedAccountId;
   renderDashboard();
   renderHoldings();
   renderPnl();
@@ -556,6 +565,7 @@ function applyPortfolio(data) {
 
 async function loadPortfolio() {
   const q = new URLSearchParams();
+  if (selectedAccountId) q.set('accountId', selectedAccountId);
   if (pnlStart) q.set('start', pnlStart);
   if (pnlEnd) q.set('end', pnlEnd);
   applyPortfolio(await api('/portfolio?' + q.toString()));
@@ -660,6 +670,7 @@ function tradeFormFields(trade = {}) {
         <option value="sell" ${type === 'sell' ? 'selected' : ''}>卖出</option>
         <option value="other" ${type === 'other' ? 'selected' : ''}>其它收支</option>
       </select></label>
+      ${(state.investmentAccounts || []).length ? `<label>证券账户<select name="account_id" required><option value="">请选择实际归属账户</option>${state.investmentAccounts.map((a) => `<option value="${a.id}" ${a.id === (trade.account_id || selectedAccountId) ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></label>` : ''}
       <label class="field-other ${type !== 'other' ? 'hidden' : ''}">其它类别<input name="other_category" value="${trade.other_category || ''}"></label>
       <label>代码<input name="symbol" id="trade-symbol" required value="${trade.symbol || ''}"></label>
       <label>名称<input name="name" value="${trade.name || ''}" placeholder="留空自动获取真实名称"></label>
@@ -699,6 +710,7 @@ function formToTrade(fd, existing = {}) {
   const type = fd.get('type');
   return {
     type,
+    ...(fd.get('account_id') ? { account_id: fd.get('account_id') } : {}),
     symbol: String(fd.get('symbol') || '').trim(),
     name: String(fd.get('name') || '').trim(),
     currency: String(fd.get('currency') || 'USD').toUpperCase(),
@@ -712,10 +724,13 @@ function formToTrade(fd, existing = {}) {
 }
 
 function openTradeModal(trade = {}) {
+  const recordingAt = new Date().toISOString();
+  const initialDateValue = toDatetimeLocalValue(trade.trade_date || recordingAt);
   const layer = openModal(trade.id ? '编辑交易' : '记一笔', tradeFormFields(trade), null, async (modal) => {
     const form = modal.querySelector('#trade-form');
     const fd = modal._formData || new FormData(form);
     const body = formToTrade(fd, trade);
+    if (!trade.id && !trade.trade_date && fd.get('trade_date') === initialDateValue) body.trade_date = recordingAt;
     const data = trade.id
       ? await api('/trades/' + trade.id + pnlQuery(), { method: 'PUT', body })
       : await api('/trades' + pnlQuery(), { method: 'POST', body });
@@ -830,7 +845,7 @@ function openImportModal() {
     if (layer.dataset.busy === '1') return;
     setModalBusy(layer, true, '导入中…');
     try {
-      const res = await fetch('./api/trades/import?mode=' + encodeURIComponent(importState.mode), {
+      const res = await fetch('./api/trades/import?mode=' + encodeURIComponent(importState.mode) + (selectedAccountId && selectedAccountId !== 'unassigned' ? '&accountId=' + encodeURIComponent(selectedAccountId) : ''), {
         method: 'POST',
         headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
         body: importState.buffer
@@ -955,6 +970,7 @@ function renderTradeListTab() {
 
 async function renderTradeSummaryTab() {
   const q = new URLSearchParams();
+  if (selectedAccountId) q.set('accountId', selectedAccountId);
   if (ui.tradeFilter.start) q.set('start', ui.tradeFilter.start);
   if (ui.tradeFilter.end) q.set('end', ui.tradeFilter.end);
   if (ui.tradeFilter.assetType !== 'all') q.set('assetType', ui.tradeFilter.assetType);
@@ -1020,6 +1036,7 @@ async function renderTradeModalBody() {
 
 async function renderTradeReviewTab() {
   const query = new URLSearchParams();
+  if (selectedAccountId) query.set('accountId', selectedAccountId);
   for (const [key, value] of Object.entries(ui.tradeFilter)) {
     if (key !== 'type' && value && value !== 'all') query.set(key, value);
   }
@@ -1173,6 +1190,7 @@ function bindTradeModalEvents(layer) {
   unbound('#modal-import')[0]?.addEventListener('click', () => { openImportModal(); });
   unbound('#modal-export')[0]?.addEventListener('click', () => {
     const q = new URLSearchParams();
+    if (selectedAccountId) q.set('accountId', selectedAccountId);
     for (const [k, v] of Object.entries(ui.tradeFilter)) {
       if (ui.tradeTab !== 'list' && k === 'type') continue;
       if (v && v !== 'all') q.set(k, v);
@@ -1257,6 +1275,9 @@ async function refreshQuotes(symbol) {
 $('#btn-refresh').addEventListener('click', () => refreshQuotes());
 
 $('#btn-add').addEventListener('click', () => openTradeModal());
+$('#account-filter')?.addEventListener('change', (e) => { selectedAccountId = e.target.value; loadPortfolio().catch((error) => toastErr(error.message)); });
+const openAccounts = () => openInvestmentAccounts({ api, openModal, closeModal, reload: loadPortfolio, can, toastErr, toastOk });
+$('#btn-accounts')?.addEventListener('click', openAccounts);
 $('#btn-import').addEventListener('click', openImportModal);
 $('#btn-trades').addEventListener('click', () => openTradeHistoryModal());
 
@@ -1336,7 +1357,7 @@ $('#holdings-body').addEventListener('click', async (e) => {
   const tradeType = e.target.closest('[data-trade]')?.dataset.trade;
   const tradeSym = e.target.closest('[data-trade]')?.dataset.symbol;
   if (tradeType && tradeSym) {
-    openTradeModal({ prefillType: tradeType, symbol: tradeSym, name: state.holdings.find((h) => h.symbol === tradeSym)?.name || '' });
+    openTradeModal({ prefillType: tradeType, symbol: tradeSym, account_id: e.target.closest('[data-trade]')?.dataset.account || '', name: state.holdings.find((h) => h.symbol === tradeSym)?.name || '' });
     return;
   }
   const histSym = e.target.closest('[data-history]')?.dataset.history;
@@ -1361,6 +1382,7 @@ $('#holdings-body').addEventListener('change', async (e) => {
 
 async function init() {
   await loadPortalContext();
+  if ($('#btn-accounts')) $('#btn-accounts').hidden = !can('accounts');
   applyPortalPrefs();
   applyPermissions();
   applyDipTabs();
@@ -1369,6 +1391,7 @@ async function init() {
   $('#toggle-pnl-visible').checked = pnlVisible;
   try {
     await loadPortfolio();
+    if (new URLSearchParams(location.search).get('showAccounts') === '1' && can('accounts')) await openAccounts();
   } catch (e) {
     toastErr(`加载失败: ${e.message}`);
     document.body.innerHTML = `<p class="sm-error">加载失败: ${e.message}</p>`;
@@ -1376,3 +1399,12 @@ async function init() {
 }
 
 init().catch((error) => { toastErr(`加载失败: ${error.message}`); }).finally(() => window.navigationSkeleton?.finish());
+let accountSyncBusy = false;
+const syncAccountView = async () => {
+  if (document.hidden || !state.accountCashEnabled || accountSyncBusy || $('#modal-root')?.children.length) return;
+  accountSyncBusy = true;
+  try { await loadPortfolio(); } catch { /* The next visible refresh retries; do not flood toasts. */ }
+  finally { accountSyncBusy = false; }
+};
+document.addEventListener('visibilitychange', syncAccountView);
+setInterval(syncAccountView, 15000);

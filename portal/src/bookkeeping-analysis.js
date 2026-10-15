@@ -39,7 +39,9 @@ export function assetTrends(accounts, entries, today, rates={CNY:1}, filter={}) 
   const note='以当前计入总资产的账户余额为终点，倒序撤销历史及新增账单的资产影响，反推历史日末余额。账单变化按账单日期的历史参考汇率折算 CNY，当前资产作为锚点按当前汇率折算；包含已记录的余额调整；不含未记录的资产涨跌及外币存量的汇率重估；历史账户范围按当前计入设置处理。跨币种转账缺少到账金额时，按等值本金估算，内部转账只影响手续费；未关联账户的收支按总资产变化估算。';
   if(missing.length)return {points:[],missingCurrencies:missing,note,estimatedTransfers:0,unlinkedEntries:0};
   if(!included.length)return {points:[],missingCurrencies:[],note,estimatedTransfers:0,unlinkedEntries:0};
+  if(included.some(a=>a.balance==null))return {points:[],missingCurrencies:[],missingValuations:included.filter(a=>a.balance==null).map(a=>a.name),note:'绑定证券账户存在缺失行情，暂不汇总不完整的资产；补齐行情后自动恢复。',estimatedTransfers:0,unlinkedEntries:0};
   const current=rounded(included.reduce((n,a)=>n+a.balance*rates[a.currency],0)), changes=new Map();
+  if(included.some(a=>a.balanceSource==='portfolio'))return {points:[{date:today,currency:'CNY',balance:current}],currentOnly:true,missingCurrencies:[],note:'包含证券联动账户：最新余额由现金及最新可用行情估值组成。尚无逐日持仓估值快照，不用当前报价反推历史净值、期初资产或历史收益；旧手工余额保留作核对快照。',estimatedTransfers:0,unlinkedEntries:0};
   let estimatedTransfers=0,unlinkedEntries=0;
   for(const e of relevant) {
     const rate=e.historicalRate||rates[e.currency],principal=Number.isFinite(e.cnyAmount)?e.cnyAmount:e.amount*rate,fee=Number.isFinite(e.cnyFee)?e.cnyFee:(e.fee||0)*rate;let delta=0;

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>股票管理</title>
-  <link rel="stylesheet" href="./style.css?v=trade-review-1">
+  <link rel="stylesheet" href="./style.css?v=investment-accounts-1">
   <link rel="stylesheet" href="/skeleton/skeleton.css?v=2">
   <script src="/ui/input-guard.js?v=20261011-2"></script>
 </head>
@@ -58,6 +58,8 @@
       <div class="sm-panel-head">
         <h2>持仓明细</h2>
         <div class="sm-panel-head-actions">
+          <select id="account-filter" aria-label="证券账户"><option value="">全部账户</option></select>
+          <button type="button" id="btn-accounts" class="btn ghost sm-btn-sm">账户管理</button>
           <button type="button" id="btn-trades" class="btn ghost sm-btn-sm">交易记录</button>
           <button type="button" id="btn-import" class="btn ghost sm-btn-sm">导入交易</button>
           <button type="button" id="btn-add" class="btn primary sm-btn-sm">记一笔</button>
@@ -79,6 +81,6 @@
   <div id="modal-root"></div>
   <script src="/skeleton/skeleton.js?v=1"></script>
   <script src="./vendor/echarts.min.js"></script>
-  <script type="module" src="./app.js?v=dividend-tax-sign-1"></script>
+  <script type="module" src="./app.js?v=investment-accounts-1"></script>
 </body>
 </html>

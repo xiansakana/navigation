@@ -542,6 +542,10 @@ body:has(.sm-modal-backdrop) {
 }
 
 .sm-review { overflow-wrap: anywhere; }
+.sm-account-manager { overflow: auto; padding: 16px 20px; min-height: 0; }
+.sm-account-card { border: 1px solid var(--border); padding: 16px; border-radius: 12px; margin: 16px 0; overflow-wrap: anywhere; }
+.sm-account-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#account-filter { width: auto; max-width: 200px; }
 .sm-review-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
 .sm-review-controls select { width: auto; min-width: 90px; }
 .sm-review-presets { display: flex; flex-wrap: wrap; gap: 6px; }

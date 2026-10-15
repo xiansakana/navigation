@@ -53,6 +53,7 @@ export function getPortfolioCash(options = {}) {
   const fx = readFxMeta(dbSingleton, store.userId);
   return {
     cashUsd: Number(data.cashUsd) || 0,
+    ...(data.accountCashEnabled ? { accountCashEnabled: true } : {}),
     cashCny: Number(data.cashCny) || 0,
     usdCnyRate: Number(data.usdCnyRate) > 0 ? Number(data.usdCnyRate) : DEFAULT_USD_CNY_RATE,
     fxSource: fx.fxSource,
@@ -63,6 +64,7 @@ export function getPortfolioCash(options = {}) {
 export function setPortfolioCash(patch = {}, options = {}) {
   const store = getPortfolioStore(options);
   const data = store.read();
+  if (data.accountCashEnabled && (('cashUsd' in patch && Number(patch.cashUsd) !== data.cashUsd) || ('cashCny' in patch && Number(patch.cashCny) !== data.cashCny))) throw new Error('账户现金已自动汇总，请在证券账户中核对现金');
   if (patch.cashUsd != null) data.cashUsd = roundMoney(Number(patch.cashUsd) || 0);
   if (patch.cashCny != null) data.cashCny = roundMoney(Number(patch.cashCny) || 0);
   if (patch.usdCnyRate != null && Number(patch.usdCnyRate) > 0) {
@@ -202,6 +204,7 @@ export function appendTradesDeductFormCash({
 } = {}) {
   const store = getPortfolioStore(options);
   const data = store.read();
+  if (data.accountCashEnabled) throw new Error('已启用证券账户，请在股票管理中选择账户记录抄底交易，避免计划金额与实际成交重复扣款');
   const created = [];
 
   for (const raw of trades) {

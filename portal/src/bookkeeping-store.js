@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { decorateInvestmentBalances, assertUnboundLedgerAccount, investmentRows } from '../../shared/investment-accounts.js';
 import { createBookkeepingCatalog, categoryKind } from './bookkeeping-catalog.js';
 
 export const ENTRY_TYPES = ['支出', '收入', '转账', '还款', '借出', '收回', '退款入账', '已报销', '报销入账', '余额调整'];
@@ -70,10 +71,10 @@ export function createBookkeepingStore(db) {
       else if (['支出', '已报销'].includes(e.type)) add(e.account_id, -e.amount - e.fee);
       else add(e.account_id, e.amount - e.fee);
     }
-    return list.map(a => ({ id: a.id, name: a.name, group: a.group_name, currency: a.currency,
+    return decorateInvestmentBalances(db, userId, list.map(a => ({ id: a.id, name: a.name, group: a.group_name, currency: a.currency,
       opening: a.opening / 100, balance: (a.opening + (delta.get(a.id) || 0)) / 100,
       included: !!a.included, creditLimit: a.credit_limit / 100, billDay: a.bill_day, dueDay: a.due_day,
-      note: a.note, snapshotAt: a.snapshot_at, archived: !!a.archived, sortOrder:a.sort_order, icon:a.icon, accountType:a.account_type }));
+      note: a.note, snapshotAt: a.snapshot_at, archived: !!a.archived, sortOrder:a.sort_order, icon:a.icon, accountType:a.account_type })));
   }
   function saveAccount(userId, input, accountId) {
     return db.transaction(() => saveAccountData(userId,input,accountId))();
@@ -84,6 +85,7 @@ export function createBookkeepingStore(db) {
     input = { ...existing, ...input };
     const name = text(input.name, 100); if (!name) fail('账户名称不能为空');
     const c = currency(input.currency);
+    if (existing && existing.currency !== c) assertUnboundLedgerAccount(db, userId, accountId);
     if (existing && existing.currency !== c && db.prepare('SELECT 1 FROM bookkeeping_entries WHERE user_id=? AND (account_id=? OR to_account_id=?)').get(userId, accountId, accountId)) fail('有账单的账户不能更改货币');
     const day = value => { const n = Number(value || 0); if (!Number.isInteger(n) || n < 0 || n > 31) fail('账单日或还款日应为 0 至 31'); return n; };
     const opening = existing ? cents(existing.opening, true) : cents(input.balance ?? 0, true);
@@ -109,6 +111,8 @@ export function createBookkeepingStore(db) {
     const c = currency(input.currency);
     const find = aid => { if (!aid) return null; const a = db.prepare('SELECT id,currency,archived FROM bookkeeping_accounts WHERE user_id=? AND id=?').get(userId, aid); if (!a) fail('账户不存在或不属于当前用户'); if (a.archived && !allowedArchived.includes(aid)) fail('账户已归档，请先恢复账户'); return a; };
     const from = find(input.accountId), to = find(input.toAccountId);
+    const linkedIds = new Set(investmentRows(db, userId).map((a) => a.bookkeeping_id));
+    if (type === '余额调整' && linkedIds.has(input.accountId)) throw new Error('已绑定证券账户，请在股票管理中核对可用现金');
     const transfer = TRANSFER_TYPES.includes(type);
     if (!transfer && input.toAccountId) fail('只有转账类账单可填写到账账户');
     if (from && from.currency !== c && !historical) fail('账单货币须与付款/收款账户一致');
@@ -217,6 +221,7 @@ export function createBookkeepingStore(db) {
   }
   function removeEntry(userId, eid) { if (!db.prepare('DELETE FROM bookkeeping_entries WHERE user_id=? AND id=?').run(userId, eid).changes) fail('账单不存在'); }
   function removeAccount(userId, aid) {
+    assertUnboundLedgerAccount(db, userId, aid);
     if (db.prepare('SELECT 1 FROM bookkeeping_entries WHERE user_id=? AND (account_id=? OR to_account_id=?)').get(userId, aid, aid)) fail('账户存在账单，请先处理关联账单');
     if (!db.prepare('DELETE FROM bookkeeping_accounts WHERE user_id=? AND id=?').run(userId, aid).changes) fail('账户不存在');
   }
@@ -226,10 +231,12 @@ export function createBookkeepingStore(db) {
     db.transaction(() => ids.forEach((aid,i) => db.prepare('UPDATE bookkeeping_accounts SET sort_order=? WHERE user_id=? AND id=?').run(i,userId,aid)))();
   }
   function archiveAccount(userId, aid, archived) {
+    if (archived) assertUnboundLedgerAccount(db, userId, aid);
     if (typeof archived !== 'boolean') fail('归档状态无效');
     if (!db.prepare('UPDATE bookkeeping_accounts SET archived=? WHERE user_id=? AND id=?').run(archived?1:0,userId,aid).changes) fail('账户不存在');
   }
   function adjust(userId, aid, input) {
+    assertUnboundLedgerAccount(db, userId, aid);
     return db.transaction(() => {
       const a = accounts(userId).find(a => a.id === aid); if (!a) fail('账户不存在');
       const delta = cents(input.balance, true) - cents(a.balance, true);

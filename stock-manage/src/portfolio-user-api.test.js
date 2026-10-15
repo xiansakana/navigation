@@ -7,6 +7,8 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import XLSX from 'xlsx';
+import { createRequire } from 'node:module';
+import { createBookkeepingStore } from '../../portal/src/bookkeeping-store.js';
 
 test('real API rejects anonymous access and scopes portfolio, updates, import, export, review and summary', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-user-api-'));
@@ -50,6 +52,27 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.equal((await (await call('/portfolio', 'a')).json()).trades[0].symbol, 'AAPL');
     assert.equal((await (await call('/portfolio', 'b')).json()).trades[0].symbol, 'GOOG');
     assert.match((await call('/portfolio', 'a')).headers.get('cache-control'), /no-store/);
+    const require = createRequire(import.meta.url);
+    const Database = require('../../portal/node_modules/better-sqlite3');
+    const db = new Database(path.join(directory, 'db.sqlite'));
+    let lid;
+    try { lid = createBookkeepingStore(db).saveAccount('a', { name: '海外理财', currency: 'USD', balance: 99999 }); } finally { db.close(); }
+    const denied = await fetch(base + '/accounts', { headers: { 'x-portal-user-id': 'a', 'x-portal-permissions': Buffer.from('[]').toString('base64url') } });
+    assert.equal(denied.status, 403);
+    assert.equal((await call('/accounts', 'a', 'POST', { name: '券商', currency: 'USD', bookkeepingId: lid, baselineCash: 100 })).status, 200);
+    const investment = (await (await call('/accounts', 'a')).json()).accounts[0];
+    assert.equal(investment.cash, 100);
+    assert.equal((await (await call('/accounts', 'b')).json()).accounts.length, 0);
+    assert.equal((await call('/accounts/' + investment.id, 'b', 'PUT', { name: '越权' })).status, 400);
+    assert.equal((await call('/cash', 'a', 'PUT', { cashUsd: 999 })).status, 400);
+    assert.equal((await call('/accounts/' + investment.id + '/assign', 'a', 'POST', {})).status, 200);
+    const assigned = await (await call('/portfolio?accountId=' + investment.id, 'a')).json();
+    assert.equal(assigned.trades[0].account_id, investment.id);
+    assert.equal(assigned.holdings[0].accountName, '券商');
+    assert.equal(assigned.cashUsd, 100);
+    const readonly = await fetch(base + '/accounts', { headers: { 'x-portal-user-id': 'a', 'x-portal-permissions': Buffer.from('["service:stock-manage:accounts:view"]').toString('base64url') } });
+    const masked = await readonly.json();
+    assert.equal('cash' in masked.accounts[0], false);
   } finally {
     child.kill();
     await new Promise((resolve) => child.exitCode != null ? resolve() : child.once('exit', resolve));

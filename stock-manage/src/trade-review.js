@@ -78,8 +78,9 @@ export function computeTradeReview(trades, options = {}) {
         continue;
       }
       const key = String(t.symbol || '').toUpperCase();
-      if (!queue.has(key)) queue.set(key, []);
-      const lots = queue.get(key);
+      const inventoryKey = JSON.stringify([t.account_id || '', key]);
+      if (!queue.has(inventoryKey)) queue.set(inventoryKey, []);
+      const lots = queue.get(inventoryKey);
       if (t.type === 'buy') { lots.push({ trade: t, remaining: qty }); continue; }
       let remaining = qty, cost = 0, gross = 0, fees = 0, holding = 0, matched = 0;
       while (remaining > 1e-8 && lots.length) {
@@ -108,7 +109,7 @@ export function computeTradeReview(trades, options = {}) {
     const tradeStats = stats(complete);
     const realized = money(sales.reduce((s, r) => s + r.pnl, 0));
     const realizedFees = money(sales.reduce((s, r) => s + r.fees, 0));
-    const open = [...queue].flatMap(([symbol, lots]) => lots.length ? [{ symbol,
+    const open = [...queue].flatMap(([inventoryKey, lots]) => lots.length ? [{ symbol: JSON.parse(inventoryKey)[1], accountId: JSON.parse(inventoryKey)[0],
       shares: lots.reduce((s, l) => s + l.remaining, 0),
       cost: money(lots.reduce((s, l) => s + number(l.trade.total_amount) * l.remaining / number(l.trade.shares), 0)),
       buyFees: money(lots.reduce((s, l) => s + number(l.trade.commission) * l.remaining / number(l.trade.shares), 0)) }] : []);

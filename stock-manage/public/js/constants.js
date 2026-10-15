@@ -1,5 +1,6 @@
 export const HOLDINGS_COLUMNS = [
   { key: 'type', label: '类型' },
+  { key: 'account', label: '账户' },
   { key: 'symbol', label: '代码' },
   { key: 'name', label: '名称' },
   { key: 'shares', label: '股数' },

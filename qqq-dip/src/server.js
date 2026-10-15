@@ -151,6 +151,7 @@ app.get('/api/events', async (req, res) => {
 
 app.put('/api/cash', (req, res) => {
   const prev = store.getCash();
+  if (prev.accountCashEnabled) return res.status(400).json({ error: '现金已由证券账户自动汇总，请在股票管理的账户管理中核对现金' });
   const body = req.body || {};
   const next = {
     cashUsd: body.cashUsd != null ? Number(body.cashUsd) || 0 : prev.cashUsd,

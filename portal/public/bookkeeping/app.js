@@ -47,7 +47,7 @@
     $('summary').innerHTML=summary;$('stats-summary').innerHTML=summary;
     $('count').textContent = state.count + ' 笔';
     let lastDay = '';
-    const ledgerNote=can('accounts:view') && $('account').value && state.entries.some(e=>e.balanceEstimated)?'<p class="bk-muted bk-ledger-note">历史余额按当前余额、账单及余额调整反推；截图核对的调整余额按原币显示，其他反推或跨币种估算值标注 ≈。</p>':'';
+    const ledgerNote=can('accounts:view') && $('account').value && state.entries.some(e=>e.balanceEstimated)?(state.accounts.find(a=>a.id===$('account').value)?.investment?'<p class="bk-muted bk-ledger-note">本页展示记账流水；证券账户总资产包含持仓估值，不由这些流水反推历史余额。现金和持仓详情请打开资产页的证券明细。</p>':'<p class="bk-muted bk-ledger-note">历史余额按当前余额、账单及余额调整反推；截图核对的调整余额按原币显示，其他反推或跨币种估算值标注 ≈。</p>'):'';
     $('entry-list').innerHTML = ledgerNote + (state.entries.map(e => {
       const day = e.date.slice(0,10), title = [e.category,e.subcategory].filter(Boolean).join(' · ');
       let heading = '';
@@ -102,17 +102,18 @@
     for (const a of state.accounts) if (a.included) { const t = totals[a.currency] ||= { assets:0, debt:0 }; if (a.balance >= 0) t.assets += a.balance; else t.debt -= a.balance; }
     const rates=state.fx?.rates||state.settings.rates, missing=Object.keys(totals).filter(c=>!rates[c]);
     const asset=state.analysis?.asset, period=asset?.period;
-    let metrics=missing.length?metric('CNY 净资产','—','待获取汇率：'+missing.join('、')):metric('当前 CNY 净资产',m(Object.entries(totals).reduce((n,[c,t])=>n+(t.assets-t.debt)*rates[c],0)),'按当前汇率折算');
+    const incomplete=state.accounts.filter(a=>a.included && a.balance==null);
+    let metrics=incomplete.length?metric('当前 CNY 净资产','—','待补齐证券行情：'+incomplete.map(a=>a.name).join('、')):missing.length?metric('CNY 净资产','—','待获取汇率：'+missing.join('、')):metric('当前 CNY 净资产',m(Object.entries(totals).reduce((n,[c,t])=>n+(t.assets-t.debt)*rates[c],0)),'按当前汇率折算');
     if(period) {
       metrics+=metric('范围期初净资产',m(period.opening),'截至 '+period.openingAsOf+' 日末 · 历史反推');
       metrics+=metric('范围期末净资产',m(period.closing),'截至 '+period.end+' 日末 · 历史反推');
       metrics+=metric('范围内资产变化',(period.change>0?'+ ':'')+m(period.change),period.start+' ～ '+period.end+' · 期末 − 期初，含余额调整',period.change>0?'bk-income':period.change<0?'bk-expense':'');
-    } else if(asset)metrics+=metric('范围内资产变化','—',asset.missingCurrencies.length?'缺少历史汇率，暂无法计算':'所选范围暂无可反推的资产数据');
+    } else if(asset)metrics+=metric('范围内资产变化','—',asset.missingCurrencies.length?'缺少历史汇率，暂无法计算':asset.missingValuations?.length?'证券行情待补齐，暂不汇总部分资产':'所选范围暂无可反推的资产数据');
     $('assets-summary').innerHTML = metrics || metric('净资产',m(0),'新增账户，建立资产基准');
     const grouped = {};
     const selectedGroup = state.accountGroups.some(g=>g.name===$('asset-group').value)?$('asset-group').value:''; $('asset-group').innerHTML = options(state.accountGroups.map(g=>g.name),selectedGroup,'全部分组');
     for (const a of state.accounts) if ((!a.archived || $('show-archived-accounts').checked) && (!selectedGroup || a.group===selectedGroup) && (!$('asset-search').value || (a.name+' '+a.note).toLowerCase().includes($('asset-search').value.toLowerCase()))) (grouped[a.group] ||= []).push(a);
-    $('account-groups').innerHTML = Object.entries(grouped).map(([g,list]) => '<details open class="bk-panel bk-account-group"><summary>' + esc(g) + ' · ' + list.length + ' 个账户</summary><p class="bk-muted">' + Object.entries(list.reduce((t,a)=>{t[a.currency]=(t[a.currency]||0)+a.balance;return t;},{})).map(([c,v])=>esc(c)+' '+m(v,c)).join(' · ') + '（当前列表余额）</p>' + list.map(a => '<div class="bk-account"><span class="bk-badge">' + esc(a.icon || '◈') + '</span><div class="bk-entry-main"><strong>' + esc(a.name) + (a.archived?' <small class="bk-muted">已归档</small>':'') + (!a.included?' <small class="bk-muted">不计入</small>':'') + '</strong><p>' + esc(a.currency + ' · ' + a.accountType + (a.note?' · '+a.note:'')) + '</p>' + (a.creditLimit ? '<p>可用额度 ' + m(a.creditLimit+a.balance,a.currency) + (a.billDay?' · 账单日 '+a.billDay+' 日':'') + (a.dueDay?' · 还款日 '+a.dueDay+' 日':'') + '</p>':'') + '<div class="bk-asset-controls"><button data-account-ledger="' + a.id + '">明细</button>' + (can('accounts:edit')?'<button data-account-edit="' + a.id + '">编辑</button>' + (!a.archived?'<button data-account-adjust="' + a.id + '">核对余额</button>':'') + management.accountActions(a):'') + '</div></div><div class="bk-entry-amount ' + (a.balance<0?'bk-expense':'') + '">' + m(a.balance,a.currency) + '</div></div>').join('') + '</details>').join('') || '<p class="bk-empty">暂无账户。可新增账户或导入账户快照。</p>';
+    $('account-groups').innerHTML = Object.entries(grouped).map(([g,list]) => '<details open class="bk-panel bk-account-group"><summary>' + esc(g) + ' · ' + list.length + ' 个账户</summary><p class="bk-muted">' + (list.some(a=>a.balance==null)?'证券行情待补齐，暂不显示部分合计':Object.entries(list.reduce((t,a)=>{t[a.currency]=(t[a.currency]||0)+a.balance;return t;},{})).map(([c,v])=>esc(c)+' '+m(v,c)).join(' · ')) + '（当前列表余额）</p>' + list.map(a => '<div class="bk-account"><span class="bk-badge">' + esc(a.icon || '◈') + '</span><div class="bk-entry-main"><strong>' + esc(a.name) + (a.balanceSource==='portfolio'?' <small class="bk-muted">证券联动</small>':'') + (a.archived?' <small class="bk-muted">已归档</small>':'') + (!a.included?' <small class="bk-muted">不计入</small>':'') + '</strong><p>' + esc(a.currency + ' · ' + a.accountType + (a.note?' · '+a.note:'')) + '</p>' + (a.creditLimit ? '<p>可用额度 ' + m(a.creditLimit+a.balance,a.currency) + (a.billDay?' · 账单日 '+a.billDay+' 日':'') + (a.dueDay?' · 还款日 '+a.dueDay+' 日':'') + '</p>':'') + '<div class="bk-asset-controls"><button data-account-ledger="' + a.id + '">明细</button>' + (a.investment && (me.permissions.includes('*') || me.permissions.includes('service:stock-manage:edit') || me.permissions.includes('service:stock-manage:accounts:view'))?'<a href="/stock-manage/?accountId='+encodeURIComponent(a.investment.id)+'&showAccounts=1">证券明细／现金核对</a>':'') + (can('accounts:edit')?'<button data-account-edit="' + a.id + '">编辑</button>' + (!a.archived && !a.investment?'<button data-account-adjust="' + a.id + '">核对余额</button>':'') + management.accountActions(a):'') + '</div></div><div class="bk-entry-amount ' + (a.balance<0?'bk-expense':'') + '">' + (a.balance==null?'行情待补齐':m(a.balance,a.currency)) + '</div></div>').join('') + '</details>').join('') || '<p class="bk-empty">暂无账户。可新增账户或导入账户快照。</p>';
   }
   let periodSave = Promise.resolve();
   const periods = window.createBookkeepingPeriods({ $, load, clearFocus:()=>analysis.clearFocus(), save:value=>{periodSave=periodSave.then(()=>write('/preferences',value,'PUT')).catch(e=>{$('error').textContent='日期筛选保存失败：'+e.message;$('error').classList.remove('hidden');});} });
@@ -251,4 +252,11 @@
     }catch(e){$('error').textContent=e.message;$('error').classList.remove('hidden');}
   }
   boot();
+  let investmentSyncBusy=false;
+  const syncInvestmentAccounts=async()=>{
+    if(document.hidden || activeTab!=='accounts' || !state?.accounts?.some(a=>a.investment) || document.querySelector('dialog[open]') || investmentSyncBusy)return;
+    investmentSyncBusy=true;try{await load();}catch{}finally{investmentSyncBusy=false;}
+  };
+  document.addEventListener('visibilitychange',syncInvestmentAccounts);
+  setInterval(syncInvestmentAccounts,15000);
 })();

@@ -4,11 +4,23 @@ import Database from 'better-sqlite3';
 import ExcelJS from 'exceljs';
 import { createBookkeepingStore, summarize, entryDate } from './bookkeeping-store.js';
 import { parseIcost, exportIcost, ICOST_HEADERS } from './bookkeeping-import.js';
-import { canBookkeep, handleBookkeepingApi } from './bookkeeping.js';
+import { canBookkeep, handleBookkeepingApi, publicAccounts } from './bookkeeping.js';
 import { buildMenusFromServices, SYSTEM_PERMISSIONS } from './rbac.js';
 import { resolveRoute, resolveProxyContext } from './router.js';
 
 const date = '2026-10-11T12:00:00';
+test('linked bookkeeping assets respect stock cash permissions and omit raw portfolio details', () => {
+  const linked = { id: 'ledger', balance: 1550, ledgerBalance: 30000, balanceSource: 'portfolio', investment: { id: 'broker', name: 'Broker', cash: 1000, marketValue: 550, positions: [{ symbol: 'AAPL' }], movements: [{ delta: 5 }], missingQuotes: [] } };
+  const hidden = publicAccounts([linked], { permissions: ['bookkeeping:view', 'bookkeeping:accounts:view'] })[0];
+  assert.equal(hidden.balance, null);
+  assert.equal(hidden.investment.permissionMissing, true);
+  for (const key of ['cash', 'marketValue', 'positions', 'movements']) assert.equal(hidden.investment[key], undefined);
+  assert.equal(hidden.ledgerBalance, undefined);
+  const visible = publicAccounts([linked], { permissions: ['service:stock-manage:cash:view'] })[0];
+  assert.equal(visible.balance, 1550);
+  assert.equal(visible.investment.cash, 1000);
+  assert.equal(visible.investment.positions, undefined);
+});
 function setup() { const db = new Database(':memory:'); return { db, store: createBookkeepingStore(db) }; }
 test('account balances use integer cents, transfers and refunds; changes reverse correctly', () => {
   const { db, store:s } = setup();

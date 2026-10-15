@@ -160,12 +160,13 @@ export function deriveHoldings(trades) {
     if (t.type !== 'buy' && t.type !== 'sell') continue;
     const sym = normalizeSymbol(t.symbol);
     if (!sym) continue;
-    if (!bySym.has(sym)) bySym.set(sym, []);
-    bySym.get(sym).push(t);
+    if (!bySym.has(JSON.stringify([t.account_id || '', sym]))) bySym.set(JSON.stringify([t.account_id || '', sym]), []);
+    bySym.get(JSON.stringify([t.account_id || '', sym])).push(t);
   }
 
   const out = [];
-  for (const [symbol, list] of bySym) {
+  for (const [, list] of bySym) {
+    const symbol = normalizeSymbol(list[0].symbol);
     list.sort((a, b) => tradeTime(a.trade_date) - tradeTime(b.trade_date) || a.id.localeCompare(b.id));
     const queue = [];
     let name = symbol;
@@ -179,6 +180,7 @@ export function deriveHoldings(trades) {
     const cost = queue.reduce((s, x) => s + x.shares * x.price, 0);
     const type = holdingTypeForSymbol(symbol);
     out.push({
+      accountId: list[0].account_id || '',
       symbol,
       name,
       shares,
@@ -220,12 +222,13 @@ export function computePnl(trades, options = {}) {
   const bySym = new Map();
   for (const t of fifoTrades) {
     const sym = normalizeSymbol(t.symbol);
-    if (!bySym.has(sym)) bySym.set(sym, []);
-    bySym.get(sym).push(t);
+    if (!bySym.has(JSON.stringify([t.account_id || '', sym]))) bySym.set(JSON.stringify([t.account_id || '', sym]), []);
+    bySym.get(JSON.stringify([t.account_id || '', sym])).push(t);
   }
 
   let realized = 0;
-  for (const [symbol, list] of bySym) {
+  for (const [, list] of bySym) {
+    const symbol = normalizeSymbol(list[0].symbol);
     list.sort((a, b) => tradeTime(a.trade_date) - tradeTime(b.trade_date));
     const queue = [];
     const cur = isAShareSymbol(symbol) ? 'CNY' : 'USD';
@@ -270,12 +273,13 @@ export function computeSymbolSummaries(trades, options = {}) {
     if (!symbolsInWindow.has(sym)) continue;
     const d = dateKey(t);
     if (!d || (endDate && d > endDate)) continue;
-    if (!bySym.has(sym)) bySym.set(sym, []);
-    bySym.get(sym).push(t);
+    if (!bySym.has(JSON.stringify([t.account_id || '', sym]))) bySym.set(JSON.stringify([t.account_id || '', sym]), []);
+    bySym.get(JSON.stringify([t.account_id || '', sym])).push(t);
   }
 
   const out = [];
-  for (const [symbol, symTrades] of bySym) {
+  for (const [, symTrades] of bySym) {
+    const symbol = normalizeSymbol(symTrades[0].symbol);
     symTrades.sort((a, b) => tradeTime(a.trade_date) - tradeTime(b.trade_date) || a.id.localeCompare(b.id));
     const quoteName = String(options.quotes?.[symbol]?.name || '').trim();
     const name = symTrades.reduce((latest, trade) => {
@@ -322,6 +326,7 @@ export function computeSymbolSummaries(trades, options = {}) {
       symbol,
       name,
       assetType: tradeAssetType({ symbol }),
+      accountId: symTrades[0].account_id || '',
       otherAmount: 0,
       totalBuyAmount: roundMoney(totalBuy),
       totalSellAmount: roundMoney(totalSell),
@@ -393,7 +398,7 @@ export function buildDailyCumulativeSeries(trades, options = {}) {
         cumOther += toUsd(tr.total_amount, cur, rate);
         continue;
       }
-      const key = normalizeSymbol(tr.symbol);
+      const key = JSON.stringify([tr.account_id || '', normalizeSymbol(tr.symbol)]);
       if (!queues.has(key)) queues.set(key, []);
       const q = queues.get(key);
       if (tr.type === 'buy') q.push({ shares: tr.shares, price: tr.price });
@@ -648,6 +653,7 @@ export function normalizeTrade(input) {
     if (!cat || !Number.isFinite(amt) || amt === 0) throw new Error('其它收支需填写类别与非零金额');
     return {
       id: input.id || crypto.randomUUID(),
+      ...(input.account_id ? { account_id: String(input.account_id) } : {}),
       symbol: symbol || 'OTHER',
       name: String(input.name || cat),
       type: 'other',
@@ -668,6 +674,7 @@ export function normalizeTrade(input) {
   const total = roundMoney(shares * price * mult);
   return {
     id: input.id || crypto.randomUUID(),
+    ...(input.account_id ? { account_id: String(input.account_id) } : {}),
     symbol,
     name: String(input.name || symbol),
     type: type === 'sell' ? 'sell' : 'buy',
