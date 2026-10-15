@@ -27,7 +27,6 @@ var STOCK_MANAGE_HOLDINGS_COLUMNS = [
     { key: 'dailyPnlPct', name: '当日盈亏比例' },
     { key: 'position', name: '持仓' },
     { key: 'weight', name: '仓位 / 占比' },
-    { key: 'target', name: '1y目标价' },
     { key: 'optinfo', name: '期权信息' },
     { key: 'signal', name: '打分' },
     { key: 'actions', name: '操作' }

@@ -397,7 +397,7 @@ function holdingsCellContent(h, key, ctx) {
     case 'symbol':
       return maskCol('symbol', symInner);
     case 'name':
-      return maskCol('name', h.name && h.name !== h.symbol ? h.name : (h.name || '—'));
+      return maskCol('name', escapeHtml(h.name || '—'));
     case 'shares':
       return maskCol('shares', h.shares);
     case 'cost':
@@ -423,8 +423,6 @@ function holdingsCellContent(h, key, ctx) {
     }
     case 'weight':
       return maskCol('weight', fmtPct(h.weight));
-    case 'target':
-      return maskCol('target', `<input class="sm-cell-input" data-meta="target" data-symbol="${h.symbol}" type="number" step="0.001" value="${priceInputValue(h.targetPrice)}" placeholder="—" ${can('meta', 'edit') ? '' : 'readonly'}>`);
     case 'optinfo':
       return maskCol('optinfo', optStr);
     case 'signal':
@@ -451,9 +449,9 @@ function renderHoldingsRowCells(h, group, i) {
   return visibleHoldingsColumns().map((c) => {
     if (c.key === 'weight') {
       if (i !== 0) return '';
-      return `<td rowspan="${group.items.length}" class="sm-weight-cell">${holdingsCellContent(h, 'weight', {})}</td>`;
+      return `<td data-label="${c.label}" rowspan="${group.items.length}" class="sm-weight-cell">${holdingsCellContent(h, 'weight', {})}</td>`;
     }
-    const tdCls = pnlCellClass(c.key, h);
+    const tdCls = [pnlCellClass(c.key, h), c.key === 'name' ? 'sm-holding-name' : ''].filter(Boolean).join(' ');
     const opt = h.optionInfo;
     const optStr = opt ? `${opt.type} ${formatPrice(opt.strike, 'USD')} · ${opt.expiration}` : '—';
     const lots = h.costLots?.length > 1 ? `<div class="sm-lots-hint">${h.costLots.length} 笔合计</div>` : '';
@@ -462,22 +460,22 @@ function renderHoldingsRowCells(h, group, i) {
           <strong>${h.symbol}</strong>
           ${h.groupWith ? `<button type="button" class="btn link sm-clear-group" data-clear-group="${h.symbol}" title="恢复自动分组">↺</button>` : ''}
         </span>` : MASK;
-    return `<td${tdCls ? ` class="${tdCls}"` : ''}>${holdingsCellContent(h, c.key, { optStr, lots, symInner })}</td>`;
+    return `<td data-label="${c.label}"${tdCls ? ` class="${tdCls}"` : ''}>${holdingsCellContent(h, c.key, { optStr, lots, symInner })}</td>`;
   }).join('');
 }
 
 function renderCashRowCells(cashPct) {
   const cashEq = Number.isFinite(state.summary?.cashUsdEq) ? state.summary.cashUsdEq : state.cash;
   return visibleHoldingsColumns().map((c) => {
-    if (c.key === 'type') return `<td>${maskCol('type', '现金')}</td>`;
-    if (c.key === 'symbol') return `<td>${maskCol('symbol', 'CASH')}</td>`;
-    if (c.key === 'name') return `<td>${maskCol('name', '现金')}</td>`;
+    const cell = (content) => `<td data-label="${c.label}">${maskCol(c.key, content)}</td>`;
+    if (c.key === 'type' || c.key === 'name') return cell('现金');
+    if (c.key === 'symbol') return cell('CASH');
     if (c.key === 'position') {
-      return `<td>${maskCol('position', `${fmtUsd(state.cashUsd)} · ${fmtCny(state.cashCny)}`)}</td>`;
+      return cell(`${fmtUsd(state.cashUsd)} · ${fmtCny(state.cashCny)}`);
     }
-    if (c.key === 'cost') return `<td>${maskCol('cost', `折合 ${fmtUsd(cashEq)}`)}</td>`;
-    if (c.key === 'weight') return `<td>${maskCol('weight', fmtPct(cashPct))}</td>`;
-    return `<td>${maskCol(c.key, '—')}</td>`;
+    if (c.key === 'cost') return cell(`折合 ${fmtUsd(cashEq)}`);
+    if (c.key === 'weight') return cell(fmtPct(cashPct));
+    return cell('—');
   }).join('');
 }
 

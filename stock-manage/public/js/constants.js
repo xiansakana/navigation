@@ -12,7 +12,6 @@ export const HOLDINGS_COLUMNS = [
   { key: 'dailyPnlPct', label: '当日盈亏比例' },
   { key: 'position', label: '持仓' },
   { key: 'weight', label: '仓位 / 占比' },
-  { key: 'target', label: '1y目标价' },
   { key: 'optinfo', label: '期权信息' },
   { key: 'signal', label: '打分' },
   { key: 'actions', label: '操作' }
