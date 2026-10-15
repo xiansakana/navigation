@@ -1277,10 +1277,11 @@ select:focus {
   padding: 10px 5px;
   white-space: normal;
   overflow-wrap: anywhere;
-  vertical-align: top;
+  text-align: center;
+  vertical-align: middle;
 }
 #holdings-table .sm-holding-name { line-height: 1.5; }
-#holdings-table .sm-symbol-drag { max-width: 100%; flex-wrap: wrap; }
+#holdings-table .sm-symbol-drag { max-width: 100%; flex-wrap: wrap; justify-content: center; }
 #holdings-table .sm-symbol-drag strong { min-width: 0; }
 #holdings-table .sm-cell-select { width: 100%; min-width: 0; padding: 4px 2px; }
 #holdings-table .btn.link { white-space: normal; padding: 4px 2px; }
@@ -1290,6 +1291,7 @@ select:focus {
   #holdings-table tbody tr {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: center;
     gap: 8px 16px;
     padding: 14px 12px;
     border-bottom: 1px solid var(--border);
@@ -1299,7 +1301,7 @@ select:focus {
     min-width: 0;
     padding: 0;
     border: 0;
-    text-align: left;
+    text-align: center;
   }
   #holdings-table tbody td::before {
     content: attr(data-label);
