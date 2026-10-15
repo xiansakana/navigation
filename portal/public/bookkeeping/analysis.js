@@ -38,7 +38,7 @@
         svg+='<polyline points="'+points.map((p,i)=>x(i)+','+y(p[line.key])).join(' ')+'" fill="none" stroke="'+line.color+'" stroke-width="2.5"/>';
         svg+=points.map((p,i)=>{
           if(!granularity && i%Math.max(1,Math.ceil(points.length/60))!==0 && i!==points.length-1)return '';
-          const title=p.date+' '+line.label+' '+money(p[line.key],p.currency);
+          const title=p.date+' '+line.label+' '+money(p[line.key],p.currency)+(p.source==='ledger'?' · 账单反推':p.source==='valuation'?' · 估值快照':p.source==='carried'?' · 沿用 '+p.asOf+' 观测':'');
           return '<circle cx="'+x(i)+'" cy="'+y(p[line.key])+'" r="4.5" fill="'+line.color+'"'+(granularity?' tabindex="0" role="button" aria-label="'+esc(title+'，查看账单')+'"'+attr(period(p,granularity,line.key==='income'?'income':line.key==='expense'?'expense':'cumulative')):'')+'><title>'+esc(title)+'</title></circle>';
         }).join('');
       }
@@ -62,8 +62,8 @@
       const assets=analysis.asset;
       $('asset-overview').classList.toggle('hidden',!assets);if(!assets){$('asset-overview-charts').innerHTML='';}
       if(assets) {
-        $('asset-overview-note').textContent=assets.note+(assets.currentOnly?'':' 反推使用全部关联账单，再按所选日期范围截取；账本、分类等收支筛选不改变反推基础。');
-        $('asset-overview-charts').innerHTML=assets.currentOnly?'<p class="bk-muted">证券账户当前估值已联动；缺少逐日估值快照，暂不生成历史净值曲线。</p>':assets.missingValuations?.length?'<p class="bk-empty">请补齐证券行情后查看资产合计。</p>':assets.missingCurrencies.length?'<p class="bk-empty">缺少 '+esc(assets.missingCurrencies.join('、'))+' 汇率，暂不能反推 CNY 资产走势。</p>':(assets.points.length?chart(assets.points,[{key:'balance',label:'反推净资产',color:'#d89812'}],'CNY 等效总资产走势')+'<p class="bk-muted">以当前资产余额为反推锚点，所选历史范围期末可能不同；'+assets.estimatedTransfers+' 笔跨币种转账按等值估算，'+assets.unlinkedEntries+' 笔未关联账户记录按总资产变化估算。</p>':'<p class="bk-empty">暂无计入总资产的账户</p>');
+        $('asset-overview-note').textContent=assets.note+(assets.currentOnly || assets.historyMode==='hybrid'?'':' 反推使用全部关联账单，再按所选日期范围截取；账本、分类等收支筛选不改变反推基础。');
+        $('asset-overview-charts').innerHTML=assets.currentOnly?'<p class="bk-muted">证券账户当前估值已联动；缺少逐日估值快照，暂不生成历史净值曲线。</p>':assets.missingValuations?.length?'<p class="bk-empty">请补齐证券行情后查看资产合计。</p>':assets.missingCurrencies.length?'<p class="bk-empty">缺少 '+esc(assets.missingCurrencies.join('、'))+' 汇率，暂不能反推 CNY 资产走势。</p>':(assets.points.length?chart(assets.points,[{key:'balance',label:assets.historyMode==='hybrid'?'历史账面／估值净资产':'反推净资产',color:'#d89812'}],'CNY 等效总资产走势')+(assets.historyMode==='hybrid'?'':'<p class="bk-muted">以当前资产余额为反推锚点，所选历史范围期末可能不同；'+assets.estimatedTransfers+' 笔跨币种转账按等值估算，'+assets.unlinkedEntries+' 笔未关联账户记录按总资产变化估算。</p>'):'<p class="bk-empty">暂无计入总资产的账户</p>');
       }
     }
     return {render,attr,query:()=>focus,clearFocus,drill};

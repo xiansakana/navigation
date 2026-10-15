@@ -2,6 +2,7 @@ import { createQqBookkeeping, internalQqAuthorized } from './bookkeeping-qq.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
 import http from 'node:http';
 import { getDatabase } from '../../shared/db/index.js';
+import { startAssetHistory } from './bookkeeping-asset-history.js';
 import { startMediaCleanup } from './blog-media-cleanup.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -679,6 +680,7 @@ var port = config.server?.port || 8080;
 
 server.listen(port, host, function() {
     startMediaCleanup(getDatabase());
+    startAssetHistory(getDatabase());
     resumeVideoJobs(getDatabase(), config);
     startThumbnailWorker(getDatabase());
     console.log('服务导航门户已启动: http://' + (host === '0.0.0.0' ? '127.0.0.1' : host) + ':' + port);

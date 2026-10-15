@@ -105,9 +105,9 @@
     const incomplete=state.accounts.filter(a=>a.included && a.balance==null);
     let metrics=incomplete.length?metric('当前 CNY 净资产','—','待补齐证券行情：'+incomplete.map(a=>a.name).join('、')):missing.length?metric('CNY 净资产','—','待获取汇率：'+missing.join('、')):metric('当前 CNY 净资产',m(Object.entries(totals).reduce((n,[c,t])=>n+(t.assets-t.debt)*rates[c],0)),'按当前汇率折算');
     if(period) {
-      metrics+=metric('范围期初净资产',m(period.opening),'截至 '+period.openingAsOf+' 日末 · 历史反推');
-      metrics+=metric('范围期末净资产',m(period.closing),'截至 '+period.end+' 日末 · 历史反推');
-      metrics+=metric('范围内资产变化',(period.change>0?'+ ':'')+m(period.change),period.start+' ～ '+period.end+' · 期末 − 期初，含余额调整',period.change>0?'bk-income':period.change<0?'bk-expense':'');
+      metrics+=metric('范围期初净资产',m(period.opening),'截至 '+period.openingAsOf+' 日末 · '+(asset.historyMode==='hybrid'?'反推／估值快照':'历史反推'));
+      metrics+=metric('范围期末净资产',m(period.closing),'截至 '+period.end+' 日末 · '+(asset.historyMode==='hybrid'?'反推／估值快照':'历史反推'));
+      metrics+=metric('范围内资产变化',(period.change>0?'+ ':'')+m(period.change),period.start+' ～ '+period.end+' · 期末 − 期初，含余额调整'+(asset.historyMode==='hybrid'?'及估值变化':''),period.change>0?'bk-income':period.change<0?'bk-expense':'');
     } else if(asset)metrics+=metric('范围内资产变化','—',asset.missingCurrencies.length?'缺少历史汇率，暂无法计算':asset.missingValuations?.length?'证券行情待补齐，暂不汇总部分资产':'所选范围暂无可反推的资产数据');
     $('assets-summary').innerHTML = metrics || metric('净资产',m(0),'新增账户，建立资产基准');
     const grouped = {};

@@ -2,6 +2,7 @@ import { createQqBookkeeping } from './bookkeeping-qq.js';
 import { parseCoordinates, resolveAddress } from './blog-address.js';
 import crypto from 'node:crypto';
 import { historicalFx } from './bookkeeping-historical-fx.js';
+import { createAssetHistory, assetDate } from './bookkeeping-asset-history.js';
 import { analyzeBookkeeping } from './bookkeeping-analysis.js';
 import { accountLedger } from './bookkeeping-ledger.js';
 import { getDatabase } from '../../shared/db/index.js';
@@ -61,7 +62,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
     if (route === '/fx' && method === 'GET') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
     if (route === '/fx/refresh' && method === 'POST') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
     if (route === '/state' && method === 'GET') {
-      const history=historicalFx(getDatabase()), allOriginal=store.entries(uid), permittedAccounts=canBookkeep(session,'accounts:view')?publicAccounts(store.accounts(uid),session):null;
+      const history=historicalFx(getDatabase()), allOriginal=store.entries(uid), ownedAccounts=store.accounts(uid), permittedAccounts=canBookkeep(session,'accounts:view')?publicAccounts(ownedAccounts,session):null;
       const destinations=allOriginal.filter(e=>e.toAccountId && e.toAmount!=null).map(e=>({...e,currency:permittedAccounts?.find(a=>a.id===e.toAccountId)?.currency||'CNY'}));
       const ledgerAccount=permittedAccounts?.find(a=>a.id===url.searchParams.get('accountId'));
       const ledgerQuotes=ledgerAccount?allOriginal.filter(e=>e.accountId===ledgerAccount.id || e.toAccountId===ledgerAccount.id).map(e=>({...e,currency:ledgerAccount.currency})):[];
@@ -76,6 +77,11 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       for(const e of all){if(e.toAccountId){const a=accounts?.find(a=>a.id===e.toAccountId);if(a){e.toHistoricalRate=history.quote(a.currency,e.date.slice(0,10))?.rate||null;if(e.toAmount!=null && !e.toHistoricalRate)e.toFxMissing=a.currency;}}}
       const budgetMonth=url.searchParams.get('month'), budgetData=budgetMonth?analyzeBookkeeping(all.filter(e=>e.date.startsWith(budgetMonth)),all,null,settings,{month:budgetMonth},undefined,fx.rates):null;
       const calculation=analyzeBookkeeping(entries,all,canBookkeep(session,'analysis:view')?accounts:null,settings,Object.fromEntries(url.searchParams),undefined,fx.rates);
+      if (canBookkeep(session,'analysis:view') && accounts?.some(a=>a.included && a.balanceSource==='portfolio') && !accounts.some(a=>a.included && a.investment?.permissionMissing)) {
+        const historyStore=createAssetHistory(getDatabase());
+        historyStore.capture(uid,ownedAccounts,all,fx.rates);
+        calculation.asset=historyStore.read(uid,Object.fromEntries(url.searchParams),assetDate(Date.now())) || calculation.asset;
+      }
       return json(res, 200, { ok: true, equivalentSummary:calculation.equivalentSummary, conversionMissing:calculation.billing.missingCurrencies, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),
         budgetExpense: budgetData?(budgetData.billing.missingCurrencies.length?null:budgetData.equivalentSummary.totals.CNY?.expense||0):null,
         accounts: accounts || [], settings, fx,

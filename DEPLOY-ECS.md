@@ -117,3 +117,7 @@ http://<ECS公网IP>/
 # QQ 指令记账接收
 
 更新 portal 和 qq-bot 的同一目标提交后，执行 `node scripts/configure-qq-bookkeeping.mjs` 配置私有运行时文件，保留已有 HTTP 发送接口，新增 Token 鉴权的 NapCat WebSocket3001、array 消息格式和 qq-bot 接收开关。脚本不会绑定任何用户或发送通知，原配置备份在 `qq-bot/data/bookkeeping/` 和 NapCat 配置目录。重启 NapCat 与 qq-bot 后检查本机8787 `/health` 的 `bookkeeping.connected=true` 及原 QQ 在线状态；3001 仅通过现有 Docker `127.0.0.1` 映射访问，不开放公网端口。Portal 内部记账端点仅允许本机与通知服务 Token。
+
+## 记账资产历史与证券估值
+
+Portal 启动及每 5 分钟自动采集绑定证券账户用户的总资产，查看资产页面时也更新当天观测。首次采集将切换日前的账单与余额调整反推曲线冻结到共享 SQLite 的 bookkeeping_asset_baselines；之后按采集时账户范围、现金及最新可用证券行情，将每日最后一次完整 CNY 估值保存在 bookkeeping_asset_snapshots（均按 user_id 隔离）。无需额外任务或配置，部署 portal 即生效；SQLite 备份需包含这两张表。行情或汇率不完整时不写入部分估值，空缺日沿用上次观测并在页面说明；旧日期不使用新报价重算。切换日口径差额不认定为投资收益。
