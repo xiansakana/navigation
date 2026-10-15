@@ -79,7 +79,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       const calculation=analyzeBookkeeping(entries,all,canBookkeep(session,'analysis:view')?accounts:null,settings,Object.fromEntries(url.searchParams),undefined,fx.rates);
       if (canBookkeep(session,'analysis:view') && accounts?.some(a=>a.included && a.balanceSource==='portfolio') && !accounts.some(a=>a.included && a.investment?.permissionMissing)) {
         const historyStore=createAssetHistory(getDatabase());
-        historyStore.capture(uid,ownedAccounts,all,fx.rates);
+        historyStore.capture(uid,ownedAccounts,all,fx.rates,Date.now(),{snapshot:false});
         calculation.asset=historyStore.read(uid,Object.fromEntries(url.searchParams),assetDate(Date.now())) || calculation.asset;
       }
       return json(res, 200, { ok: true, equivalentSummary:calculation.equivalentSummary, conversionMissing:calculation.billing.missingCurrencies, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { createAssetHistory, assetDate, startAssetHistory } from './bookkeeping-asset-history.js';
+import { createAssetHistory, assetDate, startAssetHistory, nextAssetCapture } from './bookkeeping-asset-history.js';
 import { assetTrends } from './bookkeeping-analysis.js';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -96,7 +96,14 @@ test('state API restores owned linked asset history without exposing it to users
     };
     const allowed=await get('history-a',[...basic,'service:stock-manage:cash:view']);
     assert.equal(allowed.analysis.asset.historyMode,'hybrid');
-    assert.equal(allowed.analysis.asset.points.at(-1).balance,100);
+    assert.equal(allowed.accounts[0].balance,100);
+    assert.equal(allowed.analysis.asset.points.at(-1).balance,150);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM bookkeeping_asset_snapshots').get().n,0);
+    createAssetHistory(db).capture('history-a',store.accounts('history-a'),[],{CNY:1});
+    const saved=db.prepare('SELECT * FROM bookkeeping_asset_snapshots').get();
+    const refreshed=await get('history-a',[...basic,'service:stock-manage:cash:view']);
+    assert.equal(refreshed.analysis.asset.points.at(-1).balance,100);
+    assert.deepEqual(db.prepare('SELECT * FROM bookkeeping_asset_snapshots').get(),saved);
     const hidden=await get('history-a',basic);
     assert.equal(hidden.analysis.asset.historyMode,undefined);
     assert.deepEqual(hidden.analysis.asset.points,[]);
@@ -107,4 +114,35 @@ test('state API restores owned linked asset history without exposing it to users
     closeDatabase();if(prior==null)delete process.env.NAVIGATION_DB_PATH;else process.env.NAVIGATION_DB_PATH=prior;
     fs.rmSync(dir,{recursive:true,force:true});
   }
+});
+
+test('daily collector waits until Beijing 23:59 and saves once per day, including after restarts',async()=>{
+  const db=new Database(':memory:'),store=createBookkeepingStore(db);
+  const aid=store.saveAccount('daily',{name:'证券',currency:'CNY',balance:150});
+  const investmentId=saveInvestmentAccount(db,'daily',{name:'证券',currency:'CNY',bookkeepingId:aid,baselineCash:100});
+  let clock=Date.parse('2026-10-15T15:58:00Z'),refreshes=0,delay;
+  const config={clock:()=>clock,refresh:async()=>{refreshes++;},schedule:(_,ms)=>{delay=ms;return {unref(){}};},cancel(){}};
+  const worker=startAssetHistory(db,config);
+  try {
+    assert.equal(delay,60000);
+    await worker.collect();
+    assert.equal(refreshes,0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM bookkeeping_asset_snapshots').get().n,0);
+    clock+=60000;await worker.collect();
+    assert.equal(refreshes,1);
+    const first=db.prepare('SELECT * FROM bookkeeping_asset_snapshots').get();
+    assert.equal(first.date,'2026-10-15');assert.equal(first.balance,100);
+    saveInvestmentAccount(db,'daily',{baselineCash:200},investmentId);
+    clock+=30000;await worker.collect();
+    assert.equal(refreshes,1);
+    assert.deepEqual(db.prepare('SELECT * FROM bookkeeping_asset_snapshots').get(),first);
+    const restarted=startAssetHistory(db,config);
+    try {await restarted.collect();assert.equal(refreshes,1);} finally {restarted.stop();}
+    assert.equal(nextAssetCapture(clock),Date.parse('2026-10-16T15:59:00Z'));
+    clock=Date.parse('2026-10-16T10:00:00Z');await worker.collect();
+    assert.equal(refreshes,1);
+    clock=Date.parse('2026-10-16T15:59:00Z');await worker.collect();
+    assert.equal(refreshes,2);
+    assert.deepEqual(db.prepare('SELECT balance FROM bookkeeping_asset_snapshots ORDER BY date').all().map(r=>r.balance),[100,200]);
+  } finally {worker.stop();db.close();}
 });
