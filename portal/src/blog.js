@@ -19,7 +19,8 @@ export function blogAccess(session) {
     const permissions = session.permissions || [];
     const canPost = !session.isGuest && hasPermission(permissions, 'blog:post:edit');
     const canManage = !session.isGuest && hasPermission(permissions, 'blog:manage:edit');
-    return { canView: hasPermission(permissions, 'blog:feed:view') || canPost || canManage, canPost, canManage };
+    // Guests can read public posts; write operations still require an authenticated author.
+    return { canView: session.isGuest || hasPermission(permissions, 'blog:feed:view') || canPost || canManage, canPost, canManage };
 }
 
 export function validateContent(value, allowEmpty = false) {

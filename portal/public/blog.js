@@ -561,7 +561,7 @@
             var user = await response.json();
             if (!response.ok || !user.ok) throw new Error(user.error || '无法获取博客权限');
             var permissions = user.permissions || [];
-            var canView = permissions.includes('blog:feed:view') || (!user.isGuest
+            var canView = user.isGuest || permissions.includes('blog:feed:view') || (!user.isGuest
                 && (permissions.includes('blog:post:edit') || permissions.includes('blog:manage:edit')));
             if (!canView) return;
             section.classList.remove('hidden');

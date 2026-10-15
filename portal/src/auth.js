@@ -58,8 +58,12 @@ export function resolveLoggedInPermissions(rbac, user, config = {}) {
     if (!user || user.enabled === false) return [];
     var permissions = resolveUserPermissions(rbac, user);
     if (user.username === (config.auth?.guestUsername || 'guest')) return permissions;
-    // Every signed-in member owns a personal ledger. This grants no stock/admin access.
-    return Array.from(new Set(permissions.concat(SYSTEM_PERMISSIONS.filter(p => p.id.startsWith('bookkeeping:')).map(p => p.id))));
+    // Signed-in members own personal ledgers and may publish their own blog posts.
+    // These grants do not confer access to other users' data, stock, or admin features.
+    return Array.from(new Set(permissions.concat(
+        SYSTEM_PERMISSIONS.filter(p => p.id.startsWith('bookkeeping:')).map(p => p.id),
+        'blog:post:edit'
+    )));
 }
 
 export function resolveSessionUser(session, config) {
