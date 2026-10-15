@@ -4,7 +4,8 @@ import {
     authenticateUser,
     findUserByUsername,
     findUserById,
-    resolveUserPermissions
+    resolveUserPermissions,
+    SYSTEM_PERMISSIONS
 } from './rbac.js';
 
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -53,6 +54,14 @@ export function getSession(req, secret) {
     return { userId: subject, exp: exp };
 }
 
+export function resolveLoggedInPermissions(rbac, user, config = {}) {
+    if (!user || user.enabled === false) return [];
+    var permissions = resolveUserPermissions(rbac, user);
+    if (user.username === (config.auth?.guestUsername || 'guest')) return permissions;
+    // Every signed-in member owns a personal ledger. This grants no stock/admin access.
+    return Array.from(new Set(permissions.concat(SYSTEM_PERMISSIONS.filter(p => p.id.startsWith('bookkeeping:')).map(p => p.id))));
+}
+
 export function resolveSessionUser(session, config) {
     if (!session?.userId) return null;
     var rbac = loadRbac(config);
@@ -60,7 +69,7 @@ export function resolveSessionUser(session, config) {
     if (user && user.enabled !== false) {
         return {
             user: user,
-            permissions: resolveUserPermissions(rbac, user),
+            permissions: resolveLoggedInPermissions(rbac, user, config),
             rbac: rbac
         };
     }
@@ -68,7 +77,7 @@ export function resolveSessionUser(session, config) {
     if (legacy && legacy.enabled !== false) {
         return {
             user: legacy,
-            permissions: resolveUserPermissions(rbac, legacy),
+            permissions: resolveLoggedInPermissions(rbac, legacy, config),
             rbac: rbac
         };
     }
@@ -102,7 +111,7 @@ export function resolveRequestUser(req, config) {
                 username: ctx.user.username,
                 permissions: ctx.permissions,
                 rbac: ctx.rbac,
-                isGuest: false,
+                isGuest: ctx.user.username === (config.auth?.guestUsername || 'guest'),
                 session: session
             };
         }
