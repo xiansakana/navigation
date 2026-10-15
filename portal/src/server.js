@@ -166,7 +166,7 @@ function publicServices(userCtx, userAgent) {
     if (!userCtx) return [];
     var rbac = loadRbac(config);
     return getVisibleMenus(rbac, userCtx.permissions)
-        .filter(function(menu) { return menu.id !== 'menu_admin' && !(userCtx.isGuest && ['resources', 'bookkeeping'].includes(menu.serviceId)); })
+        .filter(function(menu) { return menu.id !== 'menu_admin' && !(userCtx.isGuest && menu.serviceId === 'bookkeeping'); })
         .map(function(menu) { return menuToService(menu, userAgent); });
 }
 
@@ -575,7 +575,7 @@ var server = http.createServer(async function(req, res) {
         res.setHeader('Cache-Control', 'no-store');
         if (!canViewResources(resourceSession)) {
             return sendError(req, res, url, 403, '无权查看资源管理', {
-                title: '无权访问资源管理', hint: '请登录具备资源管理查看权限的账号。'
+                title: '无权访问资源管理', hint: '资源管理需编辑权限，请联系管理员分配，或登录具备相应权限的账号。'
             });
         }
         return serveStatic(path.join(PUBLIC_DIR, 'resources', 'index.html'), res);

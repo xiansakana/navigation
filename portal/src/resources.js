@@ -11,7 +11,7 @@ const percent = (used, total) => total > 0 ? Math.min(100, Math.max(0, used / to
 const read = async (file) => { try { return await readFile(file, 'utf8'); } catch { return null; } };
 
 export function canViewResources(session) {
-  return !!session && !session.isGuest && hasPermission(session.permissions || [], 'service:resources:view');
+  return !!session && !session.isGuest && hasPermission(session.permissions || [], 'service:resources:edit');
 }
 
 export function parseMemory(text = '') {

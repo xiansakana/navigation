@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { canViewResources, parseMemory, parseNetwork, parseDiskIo, parsePm2Output, publicPm2, publicContainers, counterRate, createResourceMonitor, handleResourceApi } from './resources.js';
 import { resolveRoute } from './router.js';
-import { buildMenusFromServices, ensureGuestAccess } from './rbac.js';
+import { buildMenusFromServices, ensureGuestAccess, getVisibleMenus } from './rbac.js';
 
 test('resource home entry is built in without config edits or default guest grants', () => {
   const menu = buildMenusFromServices([], [{ id: 'menu_resources', enabled: false, sort: 20 }]).find((m) => m.id === 'menu_resources');
@@ -14,6 +14,12 @@ test('resource home entry is built in without config edits or default guest gran
   const data = { users: [], roles: [] };
   ensureGuestAccess(data, { services: [] });
   assert.equal(data.roles[0].permissions.includes('service:resources:view'), false);
+  assert.equal(data.roles[0].permissions.includes('service:resources:edit'), false);
+  const menus = buildMenusFromServices([]);
+  for (const permissions of [[], data.roles[0].permissions, ['service:resources:view'], ['*']]) {
+    assert.ok(getVisibleMenus({ menus }, permissions).some((m) => m.serviceId === 'resources'));
+  }
+  assert.ok(!getVisibleMenus({ menus: [menu] }, []).some((m) => m.serviceId === 'resources'));
 });
 
 test('resource API stays in Portal even when referred from a proxied app', () => {
@@ -21,15 +27,18 @@ test('resource API stays in Portal even when referred from a proxied app', () =>
   assert.equal(resolveRoute(services, '/api/resources/metrics', 'GET', '', { referer: 'https://test/napcat/' }).kind, 'portal-api');
 });
 
-test('resource access requires a logged-in user with the dedicated permission', async () => {
+test('resource access requires a logged-in user with edit permission', async () => {
   assert.equal(canViewResources({ isGuest: true, permissions: ['*'] }), false);
   assert.equal(canViewResources({ permissions: ['admin:access:view'] }), false);
-  assert.equal(canViewResources({ permissions: ['service:resources:view'] }), true);
+  assert.equal(canViewResources({ permissions: ['service:resources:view'] }), false);
+  assert.equal(canViewResources({ permissions: ['service:resources:edit'] }), true);
   let collected = false;
   const res = { setHeader(name, value) { assert.equal(value, name === 'Cache-Control' ? 'no-store' : 'GET'); } };
   const json = (_, status, body) => ({ status, body });
   const monitor = { async snapshot() { collected = true; throw new Error('SECRET-env-value'); } };
   assert.equal((await handleResourceApi({ method: 'GET' }, res, { permissions: [] }, monitor, json)).status, 403);
+  assert.equal((await handleResourceApi({ method: 'GET' }, res, { permissions: ['service:resources:view'] }, monitor, json)).status, 403);
+  assert.equal((await handleResourceApi({ method: 'GET' }, res, { isGuest: true, permissions: ['*'] }, monitor, json)).status, 403);
   assert.equal((await handleResourceApi({ method: 'POST' }, res, { permissions: ['*'] }, monitor, json)).status, 405);
   assert.equal(collected, false);
   const failure = await handleResourceApi({ method: 'GET' }, res, { permissions: ['*'] }, monitor, json);

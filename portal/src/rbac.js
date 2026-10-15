@@ -172,6 +172,7 @@ var SYSTEM_PERMISSIONS = [
     { id: 'bookkeeping:categories:view', name: '查看分类管理', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '分类管理'] },
     { id: 'bookkeeping:categories:edit', name: '新增、编辑、排序、停用和合并分类', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '分类管理'] },
     { id: 'service:resources:view', name: '查看资源管理', group: '资源管理', serviceId: 'resources', action: 'view', permissionPath: ['首页', '资源管理'] },
+    { id: 'service:resources:edit', name: '访问资源管理监控', group: '资源管理', serviceId: 'resources', action: 'edit', permissionPath: ['首页', '资源管理', '编辑'] },
     { id: 'blog:feed:view', name: '查看和搜索博客动态', group: '博客', serviceId: 'blog', feature: 'feed', action: 'view', permissionPath: ['首页', '博客'] },
     { id: 'blog:post:edit', name: '发布和编辑自己的博客（含可见范围、标签与富文本）', group: '博客', serviceId: 'blog', feature: 'post', action: 'edit', permissionPath: ['首页', '博客', '我的文章'] },
     { id: 'blog:manage:edit', name: '查看和管理所有博客（含私密及可见时间外动态）', group: '博客', serviceId: 'blog', feature: 'manage', action: 'edit', permissionPath: ['首页', '博客', '所有文章'] },
@@ -622,7 +623,8 @@ export function authenticateUser(data, username, password) {
 export function getVisibleMenus(data, userPerms) {
     return (data.menus || [])
         .filter(function(menu) { return menu.enabled !== false; })
-        .filter(function(menu) { return hasPermission(userPerms, menu.permission); })
+        // Resource management advertises its entry to everyone; page/API access still requires edit permission.
+        .filter(function(menu) { return menu.serviceId === 'resources' || hasPermission(userPerms, menu.permission); })
         .sort(function(a, b) { return (a.sort || 0) - (b.sort || 0); });
 }
 
