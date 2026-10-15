@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 
-const assets = new Map(['skeleton.css', 'skeleton.js', 'input-guard.js'].map((name) => [
-  name === 'input-guard.js' ? `/ui/${name}` : `/skeleton/${name}`,
+const assets = new Map(['skeleton.css', 'skeleton.js', 'input-guard.js', 'back-to-top.js'].map((name) => [
+  name.startsWith('skeleton.') ? `/skeleton/${name}` : `/ui/${name}`,
   { body: readFileSync(new URL(`./ui/${name}`, import.meta.url)), type: name.endsWith('.css') ? 'text/css' : 'text/javascript' }
 ]));
 

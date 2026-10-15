@@ -297,6 +297,9 @@ function injectNapcatTokenShim(html, token, mountPath) {
 function injectPortalShell(html, service) {
     if (!html.includes('<body')) return html;
     html = ensureViewportMeta(html);
+    if (!html.includes('/ui/back-to-top.js')) {
+        html = html.replace(/<\/head>/i, '<script defer src="/ui/back-to-top.js?v=1"></script></head>');
+    }
     if (!html.includes('/ui/input-guard.js')) {
         html = html.replace(/<\/head>/i, '<script src="/ui/input-guard.js?v=20261011-2"></script></head>');
     }
