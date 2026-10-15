@@ -1,7 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { getDatabase, closeDatabase } from '../../shared/db/index.js';
+import { loadRbacBlob } from '../../shared/db/rbac-store.js';
 
-import { ensureGuestAccess, canTestNotificationSlack, canWriteService, canManageBusinessNotification } from './rbac.js';
+import { ensureGuestAccess, syncRbacPermissions, canTestNotificationSlack, canWriteService, canManageBusinessNotification } from './rbac.js';
+
+test('sync persistently retires target and score permissions without removing custom permissions', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'navigation-rbac-retired-'));
+    const previousPath = process.env.NAVIGATION_DB_PATH;
+    process.env.NAVIGATION_DB_PATH = path.join(directory, 'test.db');
+    try {
+        const retired = ['service:stock-manage:col-target:view', 'service:stock-manage:col-signal:view', 'service:stock-manage:col-target:edit', 'service:stock-manage:col-signal:edit'];
+        const custom = 'custom:report:view';
+        const data = { permissions: retired.map(id => ({ id, name: id })).concat([{ id: custom, name: 'Custom' }]), roles: [{ id: 'custom', permissions: [...retired, custom, 'service:stock-manage:col-name:view'] }, { id: 'role_admin', permissions: ['*', ...retired] }], users: [], menus: [] };
+        const config = { services: [{ id: 'stock-manage', name: '股票管理' }], auth: { guestUsername: 'guest' } };
+        syncRbacPermissions(data, config);
+        const saved = loadRbacBlob(getDatabase());
+        assert.ok(saved.permissions.some(p => p.id === custom));
+        assert.deepEqual(saved.roles.find(r => r.id === 'custom').permissions, [custom, 'service:stock-manage:col-name:view']);
+        for (const id of retired) {
+            assert.ok(!saved.permissions.some(p => p.id === id));
+            assert.ok(saved.roles.every(r => !r.permissions.includes(id)));
+        }
+        const before = JSON.stringify(data);
+        syncRbacPermissions(data, config);
+        assert.equal(JSON.stringify(data), before);
+    } finally {
+        closeDatabase();
+        if (previousPath === undefined) delete process.env.NAVIGATION_DB_PATH;
+        else process.env.NAVIGATION_DB_PATH = previousPath;
+        if (path.dirname(directory) !== path.resolve(os.tmpdir())) throw new Error('Unexpected test directory');
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});
 
 test('sync preserves permissions saved for every existing role', function() {
     var data = {

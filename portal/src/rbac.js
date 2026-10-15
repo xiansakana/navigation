@@ -498,7 +498,7 @@ export function syncRbacPermissions(data, config) {
     var known = {};
     SYSTEM_PERMISSIONS.concat(servicePerms).concat(stockManagePerms).concat(qqqDipPerms).concat(notificationPerms).forEach(function(p) { known[p.id] = p; });
     (data.permissions || []).forEach(function(p) {
-        if (!known[p.id]) known[p.id] = p;
+        if (!known[p.id] && !isRetiredStockColumnPermission(p.id)) known[p.id] = p;
     });
     data.permissions = Object.keys(known).map(function(id) { return known[id]; });
     data.permissions = data.permissions.filter(function(p) {
@@ -509,7 +509,9 @@ export function syncRbacPermissions(data, config) {
     });
 
     (data.roles || []).forEach(function(role) {
-        role.permissions = migrateRolePermissions(role.permissions || []);
+        role.permissions = migrateRolePermissions(role.permissions || []).filter(function(id) {
+            return !isRetiredStockColumnPermission(id);
+        });
     });
 
     var overrideMap = {};
@@ -528,6 +530,10 @@ export function syncRbacPermissions(data, config) {
         saveRbac(data);
     }
     return data;
+}
+
+function isRetiredStockColumnPermission(id) {
+    return /^service:stock-manage:col-(target|signal):(view|edit)$/.test(id);
 }
 
 export function findUserByUsername(data, username) {
