@@ -623,8 +623,8 @@ export function authenticateUser(data, username, password) {
 export function getVisibleMenus(data, userPerms) {
     return (data.menus || [])
         .filter(function(menu) { return menu.enabled !== false; })
-        // Resource management advertises its entry to everyone; page/API access still requires edit permission.
-        .filter(function(menu) { return menu.serviceId === 'resources' || hasPermission(userPerms, menu.permission); })
+        // Advertise these entries to everyone; their pages and APIs enforce access separately.
+        .filter(function(menu) { return ['resources', 'bookkeeping'].includes(menu.serviceId) || hasPermission(userPerms, menu.permission); })
         .sort(function(a, b) { return (a.sort || 0) - (b.sort || 0); });
 }
 

@@ -166,7 +166,7 @@ function publicServices(userCtx, userAgent) {
     if (!userCtx) return [];
     var rbac = loadRbac(config);
     return getVisibleMenus(rbac, userCtx.permissions)
-        .filter(function(menu) { return menu.id !== 'menu_admin' && !(userCtx.isGuest && menu.serviceId === 'bookkeeping'); })
+        .filter(function(menu) { return menu.id !== 'menu_admin'; })
         .map(function(menu) { return menuToService(menu, userAgent); });
 }
 
@@ -582,10 +582,12 @@ var server = http.createServer(async function(req, res) {
     }
 
     if (['/bookkeeping', '/bookkeeping/', '/bookkeeping/index.html'].includes(path.posix.normalize(url.pathname))) {
-        var bookkeepingSession = requireAuth(req, res, { requireLogin: true });
+        var bookkeepingSession = requireAuth(req, res);
         if (!bookkeepingSession) return;
         res.setHeader('Cache-Control', 'no-store');
-        if (!canBookkeep(bookkeepingSession)) return sendError(req, res, url, 403, '无权访问记账模块');
+        if (!canBookkeep(bookkeepingSession)) return sendError(req, res, url, 403, '无权访问记账模块', {
+            title: '无权访问记账模块', hint: '请登录具备记账权限的账号；每个账号仅可访问自己的账本。'
+        });
         return serveStatic(path.join(PUBLIC_DIR, 'bookkeeping', 'index.html'), res);
     }
 

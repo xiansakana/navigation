@@ -9,6 +9,18 @@ import { canBookkeep, handleBookkeepingApi } from './bookkeeping.js';
 import { createBookkeepingStore } from './bookkeeping-store.js';
 import { getDatabase, closeDatabase } from '../../shared/db/index.js';
 
+test('bookkeeping entry is visible without granting access to its data', async () => {
+  const menus = buildMenusFromServices([]);
+  for (const permissions of [[], ['bookkeeping:view'], ['*']]) {
+    assert.ok(getVisibleMenus({ menus }, permissions).some(m => m.serviceId === 'bookkeeping'));
+  }
+  assert.ok(!getVisibleMenus({ menus: menus.map(m => ({ ...m, enabled: false })) }, []).length);
+  let collected = false;
+  await handleBookkeepingApi({ method: 'GET' }, { setHeader() {} }, new URL('http://localhost/api/bookkeeping/state'),
+    { userId: 'guest', isGuest: true, permissions: ['*'] }, (_, status) => { collected = true; assert.equal(status, 403); });
+  assert.ok(collected);
+});
+
 test('signed-in members get their own bookkeeping features even when registered with the guest role',()=>{
   const data={roles:[{id:'role_guest',permissions:['service:stock-manage:view']}],menus:buildMenusFromServices([])};
   const user={id:'member',username:'member',roleIds:['role_guest'],enabled:true};
