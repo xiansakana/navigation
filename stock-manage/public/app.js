@@ -230,11 +230,6 @@ function typeLabel(t) {
   return t.type;
 }
 
-function signalOptions(val) {
-  return ['', '买入', '持有', '卖出'].map((v) =>
-    `<option value="${v}" ${val === v ? 'selected' : ''}>${v || '—'}</option>`).join('');
-}
-
 function renderDashboard() {
   const el = $('#dashboard');
   $('#toggle-dashboard').checked = dashboardVisible;
@@ -425,8 +420,6 @@ function holdingsCellContent(h, key, ctx) {
       return maskCol('weight', fmtPct(h.weight));
     case 'optinfo':
       return maskCol('optinfo', optStr);
-    case 'signal':
-      return maskCol('signal', `<select class="sm-cell-select" data-meta="signal" data-symbol="${h.symbol}" ${can('meta', 'edit') ? '' : 'disabled'}>${signalOptions(h.signal)}</select>`);
     case 'actions':
       return maskCol('actions', can('row-trade', 'edit') ? `
         <button type="button" class="btn link" data-trade="buy" data-symbol="${h.symbol}" data-account="${h.accountId || ''}">买</button>
@@ -1360,22 +1353,6 @@ $('#holdings-body').addEventListener('click', async (e) => {
   }
   const histSym = e.target.closest('[data-history]')?.dataset.history;
   if (histSym) openTradeHistoryModal(histSym);
-});
-
-$('#holdings-body').addEventListener('change', async (e) => {
-  const el = e.target.closest('[data-meta]');
-  if (!el || !can('meta', 'edit')) return;
-  const symbol = el.dataset.symbol;
-  const field = el.dataset.meta;
-  const body = (field === 'target' || field === 'targetPrice')
-    ? { targetPrice: el.value === '' ? '' : Number(el.value) }
-    : { signal: el.value };
-  try {
-    await saveMeta(symbol, body);
-    toastOk('已保存');
-  } catch (err) {
-    toastErr(err.message);
-  }
 });
 
 async function init() {

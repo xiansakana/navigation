@@ -28,7 +28,6 @@ var STOCK_MANAGE_HOLDINGS_COLUMNS = [
     { key: 'position', name: '持仓' },
     { key: 'weight', name: '仓位 / 占比' },
     { key: 'optinfo', name: '期权信息' },
-    { key: 'signal', name: '打分' },
     { key: 'actions', name: '操作' }
 ];
 
@@ -67,7 +66,7 @@ var STOCK_MANAGE_FEATURES = [
     { feature: 'refresh', name: '刷新价格', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
     { feature: 'cash', name: '查看现金', action: 'view', permissionPath: ['持仓', '资金'] },
     { feature: 'cash', name: '编辑现金', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
-    { feature: 'meta', name: '编辑目标价/打分', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
+    { feature: 'meta', name: '编辑持仓分组', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
     { feature: 'row-trade', name: '行内买卖/记录', action: 'edit', permissionPath: ['持仓', '持仓操作'] }
 ].concat(STOCK_MANAGE_HOLDINGS_COLUMNS.map(function(col) {
     return {
