@@ -220,7 +220,7 @@ function applyPermissions() {
   $('#btn-add').hidden = !can('trade', 'edit');
   $('#btn-refresh').hidden = !can('refresh', 'edit');
   $('#btn-col-toggle').hidden = !can('columns');
-  $('#col-toggle-panel')?.classList.toggle('hidden', !can('columns'));
+  if (!can('columns')) $('#col-toggle-panel')?.classList.add('hidden');
 }
 
 function typeLabel(t) {
