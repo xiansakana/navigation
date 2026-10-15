@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { loadConfig, createStore } from '../src/storage.js';
+import { portfolioCliUserId } from '../../shared/portfolio-user.js';
 import { deriveHoldings } from '../src/trades.js';
 
 const config = loadConfig();
-const store = createStore(config);
+const store = createStore(config, { userId: portfolioCliUserId() });
 const data = store.read();
 const holdings = deriveHoldings(data.trades || []);
 const sample = holdings.find((h) => h.type === 'option')?.symbol || 'BULL270115C5';

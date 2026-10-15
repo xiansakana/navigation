@@ -1,5 +1,6 @@
 import { TRADE_ASSET_TYPES, tradeAssetType } from '../public/js/trade-asset-type.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
+import { portfolioIdentityMiddleware } from '../../shared/portfolio-user.js';
 import { configureQuoteNetwork } from '../../shared/quote-network.js';
 import express from 'express';
 import path from 'node:path';
@@ -61,6 +62,7 @@ app.use((req, res, next) => { if (!serveUiAsset(req, res)) next(); });
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 
 app.use(express.json({ limit: '2mb' }));
+app.use(portfolioIdentityMiddleware);
 
 function quantUserId(req) {
   const value = String(req.headers['x-portal-user-id'] || 'local').trim();

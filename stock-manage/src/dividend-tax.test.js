@@ -49,7 +49,7 @@ test('database writes enforce expense signs when callers bypass trade normalizat
   const db = new Database(':memory:');
   try {
     db.exec('CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT); CREATE TABLE trades(id TEXT PRIMARY KEY, data TEXT); CREATE TABLE quotes(symbol TEXT PRIMARY KEY, data TEXT); CREATE TABLE holdings_meta(symbol TEXT PRIMARY KEY, data TEXT);');
-    const store = createPortfolioStore(db);
+    const store = createPortfolioStore(db, 'test-user');
     store.write({ cashUsd: 100, cashCny: 0, trades: [{ id: '1', type: 'other', other_category: '股息税', total_amount: 5, currency: 'USD' }] });
     assert.equal(store.read().trades[0].total_amount, -5);
     assert.equal(store.read().cashUsd, 90);

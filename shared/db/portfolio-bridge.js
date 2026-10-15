@@ -1,5 +1,6 @@
 import { getDatabase, closeDatabase } from './connection.js';
-import { createPortfolioStore, DEFAULT_USD_CNY_RATE } from './portfolio-store.js';
+import { createPortfolioStore, DEFAULT_USD_CNY_RATE, legacyPortfolioOwner } from './portfolio-store.js';
+import { currentPortfolioUserId, requirePortfolioUserId } from '../portfolio-user.js';
 import {
   normalizeTrade,
   applyCashDelta,
@@ -8,19 +9,23 @@ import {
 
 let storeSingleton = null;
 let dbSingleton = null;
+let storeUserId = null;
 
-function metaApi(db) {
+function metaApi(db, userId) {
+  requirePortfolioUserId(userId);
   return {
-    get: db.prepare('SELECT value FROM meta WHERE key = ?'),
-    set: db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)')
+    get: { get: (key) => db.prepare('SELECT value FROM portfolio_user_meta WHERE user_id=? AND key=?').get(userId, key) },
+    set: { run: (key, value) => db.prepare('INSERT OR REPLACE INTO portfolio_user_meta(user_id,key,value) VALUES(?,?,?)').run(userId, key, value) }
   };
 }
 
 export function getPortfolioStore(options = {}) {
   const db = getDatabase({ dbPath: options.dbPath });
-  if (storeSingleton && dbSingleton === db) return storeSingleton;
+  const userId = requirePortfolioUserId(options.userId ?? currentPortfolioUserId() ?? legacyPortfolioOwner(db));
+  if (storeSingleton && dbSingleton === db && storeUserId === userId) return storeSingleton;
   dbSingleton = db;
-  storeSingleton = createPortfolioStore(db);
+  storeSingleton = createPortfolioStore(db, userId);
+  storeUserId = userId;
   return storeSingleton;
 }
 
@@ -31,8 +36,8 @@ export function resetPortfolioBridge() {
   closeDatabase();
 }
 
-function readFxMeta(db) {
-  const get = db.prepare('SELECT value FROM meta WHERE key = ?');
+function readFxMeta(db, userId) {
+  const get = metaApi(db, userId).get;
   const fxSource = get.get('fxSource')?.value || null;
   const fxUpdatedAt = get.get('fxUpdatedAt')?.value || null;
   return {
@@ -45,7 +50,7 @@ function readFxMeta(db) {
 export function getPortfolioCash(options = {}) {
   const store = getPortfolioStore(options);
   const data = store.read();
-  const fx = readFxMeta(dbSingleton);
+  const fx = readFxMeta(dbSingleton, store.userId);
   return {
     cashUsd: Number(data.cashUsd) || 0,
     cashCny: Number(data.cashCny) || 0,
@@ -65,7 +70,7 @@ export function setPortfolioCash(patch = {}, options = {}) {
   }
   store.write(data);
 
-  const meta = metaApi(dbSingleton);
+  const meta = metaApi(dbSingleton, store.userId);
   if (patch.fxSource !== undefined) {
     meta.set.run('fxSource', patch.fxSource == null ? '' : String(patch.fxSource));
   }
@@ -81,7 +86,7 @@ export function setPortfolioCash(patch = {}, options = {}) {
  */
 export function migrateDipCashOnce(dipCash = {}, options = {}) {
   const store = getPortfolioStore(options);
-  const meta = metaApi(dbSingleton);
+  const meta = metaApi(dbSingleton, store.userId);
   const flag = meta.get.get('dip_cash_migrated');
   if (flag?.value === '1') {
     return { migrated: false, cash: getPortfolioCash(options) };

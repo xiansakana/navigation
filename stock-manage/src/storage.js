@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { currentPortfolioUserId } from '../../shared/portfolio-user.js';
 import {
   getDatabase,
   resolveDbPath,
@@ -36,14 +37,18 @@ export function resolveDataPath(config) {
   return path.isAbsolute(p) ? p : path.join(ROOT, p);
 }
 
-export function createStore(config) {
+export function createStore(config, options = {}) {
   const legacyJsonPath = resolveDataPath(config);
   const dbPath = resolveDbPath(config.dbPath);
   const db = getDatabase({
     dbPath: dbPath,
     portfolioJsonPath: legacyJsonPath
   });
-  return createPortfolioStore(db);
+  if (options.userId != null) return createPortfolioStore(db, options.userId);
+  return {
+    read: () => createPortfolioStore(db, currentPortfolioUserId()).read(),
+    write: (data) => createPortfolioStore(db, currentPortfolioUserId()).write(data)
+  };
 }
 
 export { defaultPortfolioJsonPath };

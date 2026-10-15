@@ -3,9 +3,10 @@ import path from 'node:path';
 import { loadConfig, createStore } from '../src/storage.js';
 import { getDatabase, resolveDbPath } from '../../shared/db/index.js';
 import { normalizeDividendTaxTrade } from '../../shared/dividend-tax.js';
+import { portfolioCliUserId } from '../../shared/portfolio-user.js';
 
 const config = loadConfig();
-const store = createStore(config);
+const store = createStore(config, { userId: portfolioCliUserId() });
 const db = getDatabase({ dbPath: resolveDbPath(config.dbPath) });
 const find = () => store.read().trades.filter((t) => normalizeDividendTaxTrade(t) !== t);
 const changes = find();

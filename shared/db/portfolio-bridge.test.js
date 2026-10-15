@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { runWithPortfolioUser } from '../portfolio-user.js';
 import {
   resetPortfolioBridge,
   getPortfolioCash,
@@ -40,6 +41,20 @@ function hasSqliteBindings() {
 
 const HAS_SQLITE = hasSqliteBindings();
 
+test('cash, FX metadata and bridge trades stay with the selected user', { skip: !HAS_SQLITE }, () => {
+  withTempDb(() => {
+    setPortfolioCash({ cashUsd: 100, fxSource: 'a-source' }, { userId: 'a' });
+    setPortfolioCash({ cashUsd: 200, fxSource: 'b-source' }, { userId: 'b' });
+    appendTradesApplyCash([{ type: 'buy', symbol: 'AAPL', name: 'Apple', shares: 1, price: 10 }], { userId: 'a' });
+    assert.equal(getPortfolioCash({ userId: 'a' }).cashUsd, 90);
+    assert.equal(getPortfolioCash({ userId: 'b' }).cashUsd, 200);
+    assert.equal(getPortfolioCash({ userId: 'a' }).fxSource, 'a-source');
+    assert.equal(getPortfolioCash({ userId: 'b' }).fxSource, 'b-source');
+    assert.equal(getPortfolioStore({ userId: 'b' }).read().trades.length, 0);
+    assert.equal(getPortfolioCash().cashUsd, 0);
+  });
+});
+
 function withTempDb(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'portfolio-bridge-'));
   const dbPath = path.join(dir, 'navigation.db');
@@ -47,7 +62,7 @@ function withTempDb(fn) {
   process.env.NAVIGATION_DB_PATH = dbPath;
   resetPortfolioBridge();
   try {
-    return fn(dbPath);
+    return runWithPortfolioUser('test-user', () => fn(dbPath));
   } finally {
     resetPortfolioBridge();
     if (prev == null) delete process.env.NAVIGATION_DB_PATH;

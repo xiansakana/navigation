@@ -1,4 +1,7 @@
 import { serveUiAsset } from '../../shared/ui-assets.js';
+import { portfolioIdentityMiddleware, currentPortfolioUserId } from '../../shared/portfolio-user.js';
+import { legacyPortfolioOwner } from '../../shared/db/portfolio-store.js';
+import { getDatabase } from '../../shared/db/index.js';
 import { configureQuoteNetwork } from '../../shared/quote-network.js';
 import express from 'express';
 import path from 'node:path';
@@ -72,6 +75,16 @@ const app = express();
 app.use((req, res, next) => { if (!serveUiAsset(req, res)) next(); });
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
+app.use(portfolioIdentityMiddleware);
+app.use((req, res, next) => {
+  // The existing monitoring round/lots/notifications are a single-owner service.
+  // Until those are multi-user too, never expose them or their cash bridge to others.
+  if (req.path.startsWith('/api/') && req.path !== '/api/health'
+      && currentPortfolioUserId() !== legacyPortfolioOwner(getDatabase())) {
+    return res.status(403).json({ error: '该抄底监控属于原账户，暂不支持其他用户访问' });
+  }
+  next();
+});
 app.use(express.static(PUBLIC));
 
 function liveEval() {

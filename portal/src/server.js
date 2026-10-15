@@ -496,7 +496,7 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
     delete req.headers['x-portal-user-id'];
     delete req.headers['x-portal-username'];
     delete req.headers['x-portal-permissions'];
-    if (ctx.service.id === 'stock-manage' && proxySession) {
+    if (['stock-manage', 'qqq-dip'].includes(ctx.service.id) && proxySession) {
         req.headers['x-portal-user-id'] = String(proxySession.userId);
         req.headers['x-portal-username'] = String(proxySession.username || '');
         req.headers['x-portal-permissions'] = Buffer
