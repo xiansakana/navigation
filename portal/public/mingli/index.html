@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>命理 · 服务导航</title>
+  <script>(function(){try{var t=localStorage.getItem('portal-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+  <link rel="stylesheet" href="/portal.css"><link rel="stylesheet" href="/experience.css"><link rel="stylesheet" href="/mingli/style.css?v=1">
+  <script defer src="/ui/back-to-top.js?v=1"></script>
+</head>
+<body class="portal-experience has-navbar portal-layout-enabled">
+  <header class="navbar"><div class="navbar-inner">
+    <a class="navbar-brand" href="/"><span class="navbar-logo">⚡</span><span>服务导航</span></a><span class="navbar-title">命理</span>
+    <div class="navbar-actions"><button type="button" class="btn ghost navbar-layout-btn" aria-pressed="false"><span class="label">全宽</span></button><button class="btn ghost navbar-theme-btn" aria-label="切换主题"><span class="navbar-theme-icon">☀️</span><span class="label navbar-theme-label">日间</span></button></div>
+  </div></header>
+  <main class="ml-shell" data-layout-container>
+    <header class="ml-heading"><div><a href="/" class="ml-muted">← 我的服务</a><p class="ml-eyebrow">四时有序 · 记录有据</p><h1>命理研习</h1><p class="ml-muted">从一张命盘开始，积累自己的案例与观察。</p></div><span class="ml-badge">☯ 八字 · 案例</span></header>
+    <p id="status" class="ml-status" role="status" aria-live="polite"></p>
+    <p id="error" class="ml-error" role="alert" hidden></p>
+    <nav class="ml-tabs" aria-label="命理导航"><button id="chart-tab" class="active" aria-pressed="true">八字排盘</button><button id="cases-tab" hidden aria-pressed="false">我的案例</button></nav>
+    <section id="chart-view">
+      <div class="ml-workspace">
+        <aside class="ml-panel ml-input-panel">
+          <div class="ml-panel-heading"><h2>出生信息</h2><button type="button" id="new-case" class="btn ghost">新建</button></div>
+          <form id="birth-form">
+            <label>案例名称<input id="case-name" maxlength="80" placeholder="姓名或案例代号" autocomplete="off"></label>
+            <div class="ml-form-grid">
+              <label>历法<select id="calendar"><option value="solar">公历</option><option value="lunar">农历</option></select></label>
+              <label>性别（用于顺逆行）<select id="gender"><option value="1">男 · 乾造</option><option value="0">女 · 坤造</option></select></label>
+            </div>
+            <div class="ml-date-grid"><label>年<input id="year" type="number" min="1901" max="2099" required value="1990"></label><label>月<input id="month" type="number" min="1" max="12" required value="1"></label><label>日<input id="day" type="number" min="1" max="31" required value="1"></label></div>
+            <label id="leap-label" class="ml-check" hidden><input id="leapMonth" type="checkbox">农历闰月</label>
+            <div class="ml-form-grid"><label>时（0—23）<input id="hour" type="number" min="0" max="23" required value="12"></label><label>分<input id="minute" type="number" min="0" max="59" required value="0"></label></div>
+            <p class="ml-hint">请输入北京时间（UTC+8），历史夏令时需先减去 1 小时。时刻不详请先核实，不自动猜测。</p>
+            <details class="ml-settings"><summary>排盘规则与出生地</summary>
+              <label>出生地备注<input id="location" maxlength="100" placeholder="如：浙江杭州"></label>
+              <label>日柱换日<select id="sect"><option value="2">00:00 换日（晚子时仍属当日）</option><option value="1">23:00 换日（子初换日）</option></select></label>
+              <label>起运算法<select id="yunSect"><option value="1">传统时辰折算</option><option value="2">分钟折算</option></select></label>
+              <label class="ml-check"><input id="trueSolar" type="checkbox">使用真太阳时计算日柱、时柱</label>
+              <label>出生地经度（东正西负）<input id="longitude" type="number" min="-180" max="180" step="any" placeholder="如：120.155"></label>
+              <p class="ml-hint">真太阳时＝北京时间＋经度时差＋均时差（天文近似）。年、月柱与起运仍按实际出生瞬间和节气计算。</p>
+            </details>
+            <button id="calculate" type="submit" class="btn primary ml-wide" disabled>开始排盘</button>
+          </form>
+        </aside>
+        <div class="ml-results">
+          <div id="empty-chart" class="ml-panel ml-empty"><span class="ml-empty-icon">☯</span><h2>观四柱，记人生</h2><p class="ml-muted">填写出生信息后排盘，查看十神、藏干与大运流年。</p><p class="ml-hint">计算独立运行，不依赖第三方排盘接口。</p></div>
+          <div id="chart-result" hidden>
+            <article class="ml-panel"><div class="ml-panel-heading"><div><p class="ml-eyebrow" id="chart-kind"></p><h2 id="chart-title">八字命盘</h2></div><span id="day-master" class="ml-badge"></span></div><div id="birth-summary" class="ml-birth-summary"></div><div class="ml-table-scroll"><table id="pillars" class="ml-pillars"></table></div><div id="elements" class="ml-elements"></div><p class="ml-hint">五行仅统计四柱天干与地支本气的 8 个字，不含藏干权重，不代表旺衰或喜用神。</p></article>
+            <article class="ml-panel"><div class="ml-panel-heading"><h2>大运 · 流年</h2><span class="ml-muted">年龄按虚岁显示</span></div><p id="luck-summary" class="ml-muted"></p><div id="cycles" class="ml-cycles" aria-label="选择大运"></div><div id="years" class="ml-years" aria-label="选择流年"></div><h3 id="months-title">流月</h3><div id="months" class="ml-months"></div><p class="ml-hint">流年以立春划分，流月以十二节划分；月名为传统月序，并非公历月份。交运以起运时刻为准，年份表是年度概览。</p></article>
+            <article id="case-editor" class="ml-panel" hidden><div class="ml-panel-heading"><h2>案例记录</h2><span id="saved-at" class="ml-muted">尚未保存</span></div>
+              <label>标签（逗号分隔，最多 12 个）<input id="tags" maxlength="371" placeholder="如：学习、已核对、事业"></label>
+              <label>观察与事件笔记<textarea id="notes" rows="7" maxlength="20000" placeholder="记录事件日期、实际经历、推断与后续核验，保留观察依据。"></textarea></label>
+              <div class="ml-actions"><button id="save-case" class="btn primary" hidden>保存案例</button><button id="delete-case" class="btn ghost" hidden>删除案例</button></div>
+            </article>
+            <details class="ml-panel ml-rules"><summary>当前计算口径</summary><p id="rules" class="ml-muted"></p><p class="ml-hint">排盘用于传统文化学习与案例整理；本模块不生成吉凶结论。</p></details>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section id="cases-view" hidden><article class="ml-panel"><div class="ml-panel-heading"><div><h2>我的案例库</h2><p class="ml-muted">按当前登录账号独立保存，其他用户无法访问。</p></div><span id="case-count" class="ml-badge">0 个案例</span></div><form id="search-form" class="ml-search"><label>搜索案例<input type="search" id="search" maxlength="100" placeholder="名称、标签或笔记"></label><button class="btn ghost" type="submit">搜索</button></form><div id="case-list" class="ml-case-list"></div><button id="more-cases" class="btn ghost" hidden>加载更多</button></article></section>
+  </main>
+  <script src="/theme.js"></script><script src="/layout.js"></script><script src="/dialog.js"></script><script type="module" src="/mingli/app.js?v=1"></script>
+</body>
+</html>

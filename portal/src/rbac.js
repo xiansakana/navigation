@@ -158,6 +158,11 @@ function buildNotificationPermissions() {
 }
 
 var SYSTEM_PERMISSIONS = [
+    { id: 'mingli:view', name: '进入命理模块', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理'] },
+    { id: 'mingli:chart:calculate', name: '八字排盘', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '八字排盘'] },
+    { id: 'mingli:cases:view', name: '查看和搜索自己的案例', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '案例库'] },
+    { id: 'mingli:cases:edit', name: '保存案例和编辑笔记', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '保存案例'] },
+    { id: 'mingli:cases:delete', name: '删除自己的案例', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '删除案例'] },
     { id: 'bookkeeping:location:edit', name: '获取记账当前位置', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '明细与统计', '记一笔', '当前位置'] },
     { id: 'bookkeeping:qq:edit', name: '绑定 QQ 和使用指令记账', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', 'QQ记账'] },
     { id: 'bookkeeping:view', name: '查看记账明细与统计', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '明细与统计'] },
@@ -408,6 +413,10 @@ export function buildMenusFromServices(services, overrides) {
         enabled: true
     }, overrideMap.menu_admin || {}));
     menus.push(adminMenu);
+    menus.push(Object.assign({
+        id: 'menu_mingli', title: '命理', description: '八字排盘、大运流年与个人案例笔记',
+        icon: '☯', type: 'hub', serviceId: 'mingli', sort: 9960, enabled: true
+    }, overrideMap.menu_mingli || {}, { path: '/mingli/', permission: 'mingli:view', serviceId: 'mingli' }));
     menus.push(Object.assign({
         id: 'menu_bookkeeping', title: '记账', description: 'iCost 账单、收支统计与多币种资产账户',
         icon: '📒', type: 'hub', serviceId: 'bookkeeping', sort: 9970, enabled: true

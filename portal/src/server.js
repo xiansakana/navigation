@@ -48,6 +48,7 @@ import { handleBlogApi, resumeVideoJobs } from './blog.js';
 import { startThumbnailWorker } from './blog-media-process.js';
 import { createResourceMonitor, canViewResources, handleResourceApi } from './resources.js';
 import { canBookkeep, handleBookkeepingApi } from './bookkeeping.js';
+import { canMingli, handleMingliApi } from './mingli.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -172,6 +173,7 @@ function publicServices(userCtx, userAgent) {
 }
 
 async function handleApi(req, res, url, session) {
+    if (url.pathname.startsWith('/api/mingli/')) return handleMingliApi(req, res, url, session, json);
     if (url.pathname.startsWith('/api/bookkeeping/')) return handleBookkeepingApi(req, res, url, session, json);
     if (url.pathname === '/api/resources/metrics') {
         return handleResourceApi(req, res, session, resourceMonitor, json);
@@ -585,6 +587,16 @@ var server = http.createServer(async function(req, res) {
             });
         }
         return serveStatic(path.join(PUBLIC_DIR, 'resources', 'index.html'), res);
+    }
+
+    if (['/mingli', '/mingli/', '/mingli/index.html'].includes(path.posix.normalize(url.pathname))) {
+        var mingliSession = requireAuth(req, res);
+        if (!mingliSession) return;
+        res.setHeader('Cache-Control', 'no-store');
+        if (!canMingli(mingliSession)) return sendError(req, res, url, 403, '无权访问命理模块', {
+            title: '无权访问命理模块', hint: '请登录后访问；每个账号仅可查看自己的案例。'
+        });
+        return serveStatic(path.join(PUBLIC_DIR, 'mingli', 'index.html'), res);
     }
 
     if (['/bookkeeping', '/bookkeeping/', '/bookkeeping/index.html'].includes(path.posix.normalize(url.pathname))) {

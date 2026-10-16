@@ -24,6 +24,16 @@ ECS 服务导航与自托管应用（portal 统一入口 :80）。
 
 Torn 浏览器用户脚本在独立仓库 [xiansakana-torn-scripts](https://github.com/xiansakana/xiansakana-torn-scripts)。
 
+## 命理模块
+
+登录后从首页「命理」进入 `/mingli/`。模块沿用 Portal 主题与布局，不依赖第三方排盘 API。支持 1901—2099 年公历／农历（含闰月）输入、四柱、十神、藏干、纳音、旬空、八字五行字数、大运、流年与流月，以及个人案例的保存、搜索、编辑、删除、标签和事件笔记。
+
+时间统一输入北京时间（UTC+8），历史夏令时需手动换算。年柱以立春、月柱以十二节的精确时刻划分；日柱可选 00:00／23:00 换日，起运可选传统时辰／分钟折算。晚子时时干沿用 `lunar-javascript` 的子时口径。可选经度与天文均时差修正的真太阳时，仅用于日、时柱；年、月柱与起运保持实际时刻。大运年龄为虚岁，年度表不替代精确交运时刻。五行字数不代表旺衰或喜用神。
+
+历法引擎为 MIT 许可的 [lunar-javascript 1.7.7](https://github.com/6tail/lunar-javascript)。案例与计算快照保存于共享 SQLite 的 `mingli_cases` 表，包含计算版本和排盘口径，按 Portal `userId` 隔离，管理员也不能通过案例 API 读取他人的记录。普通登录成员默认获得个人命理权限（与个人记账相同），游客不可访问。权限目录在「首页 → 命理」下，页面与 API 均校验权限；跨站写入被拒绝。
+
+随 Portal 部署，无新增端口或配置；表在首次使用时自动创建，现有 SQLite 备份覆盖案例数据。验证：在 `portal/` 下执行 `node --test src/*.test.js`（Node 版本需与本地 `better-sqlite3` 二进制一致）。
+
 ## 部署
 
 见 [DEPLOY-ECS.md](./DEPLOY-ECS.md)。
