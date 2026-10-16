@@ -17,7 +17,19 @@
     var loading = document.getElementById('blog-loading');
     var shortcut = document.getElementById('blog-shortcut');
     var state = { userId: '', canPost: false, canManage: false, lastId: null, loading: false,
-        pending: [], posts: new Map(), editing: null, tag: '', tags: [], search: '', refreshPending: false };
+        pending: [], posts: new Map(), editing: null, tag: '', tags: [], search: '', refreshPending: false, preparing: 0 };
+
+    function acceptPastedImages(editorRoot, lockRoot, getTarget, render, allowed) {
+        window.bindBlogImagePaste(editorRoot, async function(files) {
+            if (state.saving || state.preparing || !allowed()) return;
+            var unlock = lockEditor(lockRoot); state.preparing++;
+            try {
+                await addFiles(files, 'image', getTarget(), render);
+                window.portalToast?.success('已添加 ' + files.length + ' 张图片，发布或保存时上传');
+            } finally { state.preparing--; unlock(); }
+        });
+    }
+    acceptPastedImages(input, composer, function() { return state.pending; }, renderComposerPreview, function() { return state.canPost; });
 
     async function request(path, options) {
         var response = await fetch('/api/blog/' + path, options || {});
@@ -331,6 +343,7 @@
     });
     composer.addEventListener('submit', async function(event) {
         event.preventDefault();
+        if (state.preparing) return;
         if (state.saving || state.editing) { window.portalToast?.warn('请先完成当前编辑或上传'); return; }
         if (richEditor.isEmpty() && !state.pending.length) { window.portalToast?.error('请输入博客内容或添加媒体'); return; }
         state.saving = true;
@@ -455,6 +468,8 @@
         editor.className = 'blog-edit-host';
         body.replaceWith(editor);
         state.editing.editor = window.createBlogEditor(editor, post);
+        var editingTarget = state.editing;
+        acceptPastedImages(editor, article, function() { return editingTarget.pending; }, function() { renderEditPreview(article); }, function() { return state.editing === editingTarget; });
         var editVisibility = document.createElement('div'); editor.after(editVisibility);
         state.editing.visibility = window.createBlogVisibility(editVisibility, post.visibility);
         article.querySelector('.blog-post-tags')?.remove();
@@ -491,6 +506,7 @@
     feed.addEventListener('click', async function(event) {
         var button = event.target.closest('button[data-action="save"], button[data-action="cancel"]');
         if (!button) return;
+        if (state.preparing) return;
         if (button.dataset.action === 'cancel') {
             release(state.editing.pending); state.editing.editor.destroy(); state.editing = null; return load(true);
         }

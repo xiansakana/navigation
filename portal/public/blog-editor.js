@@ -1,4 +1,16 @@
 (function() {
+  window.bindBlogImagePaste = function(root, onImages) {
+    root.addEventListener('paste', function(event) {
+      if (!event.target.closest('.blog-rich-editor') || !event.clipboardData) return;
+      var images = Array.from(event.clipboardData.items || []).filter(function(item) {
+        return item.kind === 'file' && item.type.startsWith('image/');
+      }).map(function(item) { return item.getAsFile(); }).filter(Boolean);
+      if (!images.length) images = Array.from(event.clipboardData.files || []).filter(function(file) { return file.type.startsWith('image/'); });
+      if (!images.length) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      Promise.resolve().then(function() { return onImages(images); }).catch(function(error) { window.portalToast?.error(error.message || '粘贴图片失败'); });
+    }, true);
+  };
   window.createBlogEditor = function(editor, post) { return window.createUnifiedBlogEditor(editor, post); };
 
   window.createBlogTags = function(root, initial, suggestions) {
