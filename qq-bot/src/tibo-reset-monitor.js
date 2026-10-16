@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import https from 'node:https';
+import { gunzipSync, inflateSync, brotliDecompressSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { sendMessage } from './napcat.js';
 
@@ -66,37 +67,66 @@ export function fetchText(url, options) {
     var current = new URL(url);
     if (current.protocol !== 'https:') return Promise.reject(new Error('推文源必须使用 HTTPS'));
     return new Promise(function(resolve, reject) {
+        var settled = false;
+        var timer;
+        var deadlineAt = options?.deadlineAt || Date.now() + (options?.timeoutMs || 30_000);
+        var remaining = Math.max(1, deadlineAt - Date.now());
+        function finish(error, value) {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (error) reject(error);
+            else resolve(value);
+        }
         var req = request(current, {
             family: 4,
-            timeout: 20_000,
-            headers: { 'User-Agent': 'navigation-notification-monitor/1.0' }
+            timeout: remaining,
+            headers: { 'User-Agent': 'navigation-notification-monitor/1.0', 'Accept-Encoding': 'gzip, deflate, br' }
         }, function(response) {
             if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
                 response.resume();
-                if ((options?.redirects || 0) >= 3) return reject(new Error('推文源重定向次数过多'));
+                if ((options?.redirects || 0) >= 3) return finish(new Error('推文源重定向次数过多'));
                 var next = new URL(response.headers.location, current);
-                fetchText(next, { request: request, redirects: (options?.redirects || 0) + 1 }).then(resolve, reject);
+                fetchText(next, { request: request, redirects: (options?.redirects || 0) + 1, deadlineAt: deadlineAt }).then(function(text) { finish(null, text); }, finish);
                 return;
             }
             if (response.statusCode !== 200) {
                 response.resume();
-                return reject(new Error(current.hostname + ' 返回 HTTP ' + response.statusCode));
+                return finish(new Error(current.hostname + ' 返回 HTTP ' + response.statusCode));
             }
             var chunks = [];
             var bytes = 0;
             response.on('data', function(chunk) {
                 bytes += chunk.length;
                 if (bytes > 5 * 1024 * 1024) {
-                    response.destroy(new Error('推文源响应过大'));
+                    var error = new Error('推文源响应过大');
+                    finish(error);
+                    response.destroy(error);
                     return;
                 }
                 chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
             });
-            response.on('end', function() { resolve(Buffer.concat(chunks).toString('utf8')); });
-            response.on('error', reject);
+            response.on('end', function() {
+                try {
+                    var body = Buffer.concat(chunks);
+                    var encoding = String(response.headers['content-encoding'] || 'identity').toLowerCase();
+                    var decoder = { gzip: gunzipSync, deflate: inflateSync, br: brotliDecompressSync }[encoding];
+                    if (decoder) body = decoder(body, { maxOutputLength: 5 * 1024 * 1024 });
+                    else if (encoding !== 'identity') throw new Error('不支持的推文压缩格式：' + encoding);
+                    finish(null, body.toString('utf8'));
+                } catch (error) { finish(error); }
+            });
+            response.on('error', finish);
+            response.on('aborted', function() { finish(new Error(current.hostname + ' 响应中断')); });
         });
-        req.on('timeout', function() { req.destroy(new Error(current.hostname + ' 连接超时')); });
-        req.on('error', reject);
+        function timeout() {
+            var error = new Error(current.hostname + ' 请求超时');
+            finish(error);
+            req.destroy(error);
+        }
+        timer = setTimeout(timeout, remaining);
+        req.on('timeout', timeout);
+        req.on('error', finish);
     });
 }
 

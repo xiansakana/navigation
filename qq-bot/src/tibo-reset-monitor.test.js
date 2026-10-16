@@ -2,7 +2,35 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
+import { gzipSync, deflateSync, brotliCompressSync } from 'node:zlib';
 import { classifyResetOpportunity, parseRss, deliverToChannels, fetchText } from './tibo-reset-monitor.js';
+
+test('tweet transport requests compression and decodes gzip, deflate and brotli feeds', async function() {
+    for (var [encoding, compress] of [['gzip', gzipSync], ['deflate', deflateSync], ['br', brotliCompressSync]]) {
+        var request = function(url, options, callback) {
+            assert.match(options.headers['Accept-Encoding'], /gzip/);
+            queueMicrotask(function() {
+                var response = Readable.from([compress(Buffer.from('{"tweets":[]}'))]);
+                response.statusCode = 200;
+                response.headers = { 'content-encoding': encoding };
+                callback(response);
+            });
+            return new EventEmitter();
+        };
+        assert.equal(await fetchText('https://feed.example/feed', { request }), '{"tweets":[]}');
+    }
+});
+
+test('tweet transport imposes an overall deadline even without socket timeout events', async function() {
+    var destroyed = false;
+    var request = function() {
+        var req = new EventEmitter();
+        req.destroy = function() { destroyed = true; };
+        return req;
+    };
+    await assert.rejects(fetchText('https://feed.example/feed', { request, timeoutMs: 20 }), /请求超时/);
+    assert.equal(destroyed, true);
+});
 
 test('Tibo delivers custom targets and resumes at the failed QQ target', async function() {
     var config = { monitors: { tiboReset: { channels: ['qq', 'slack'], qq: { useDefaultTarget: false, targets: [
