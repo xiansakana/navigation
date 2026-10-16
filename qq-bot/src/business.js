@@ -1,7 +1,7 @@
 import notifier from 'node-notifier';
 
 const SOURCES = {
-    stock: { origin: 'http://127.0.0.1:5001', path: '/api/notification-settings' },
+    stock: { origin: 'http://127.0.0.1:5001', path: '/api/internal/notification-settings' },
     undercut: { origin: 'http://127.0.0.1:8790', path: '/api/state' },
     company: { origin: 'http://127.0.0.1:8791', path: '/api/state' }
 };
@@ -37,9 +37,13 @@ function normalizeNotify(source, raw = {}, previous = {}) {
     return result;
 }
 
-async function sourceState(source, fetcher) {
+async function sourceState(source, fetcher, token) {
     const meta = SOURCES[source];
-    const response = await fetcher(meta.origin + meta.path, { signal: AbortSignal.timeout(6000) });
+    if (source === 'stock' && !token) throw new Error('未配置抄底通知服务认证 Token');
+    const response = await fetcher(meta.origin + meta.path, {
+        signal: AbortSignal.timeout(6000),
+        ...(source === 'stock' ? { headers: { Authorization: 'Bearer ' + token } } : {})
+    });
     const data = await response.json();
     if (!response.ok || data.ok === false) throw new Error(data.error || '监控服务不可用');
     return data;
@@ -55,7 +59,7 @@ export function createBusinessService(config, { fetcher = fetch, persist = () =>
 
     async function integration(source) {
         if (!SOURCES[source]) throw new Error('未知通知来源');
-        const data = await sourceState(source, fetcher);
+        const data = await sourceState(source, fetcher, config.server?.notifyToken);
         const legacy = source === 'stock' ? data.notify : data.config?.notify;
         if (!legacy || typeof legacy !== 'object') throw new Error('监控服务未返回旧提醒配置，已停止自动导入');
         const roster = source === 'stock' ? [] : (data.config?.[source]?.watchers || []);

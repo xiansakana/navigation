@@ -81,7 +81,9 @@ test('business integration API stores rules in the hub without writing the monit
     var calls = [];
     var adapter = async function(url, options) {
         calls.push({ url: url, options: options });
-        if (url.endsWith('/api/notification-settings')) {
+        if (url.endsWith('/api/internal/notification-settings')) {
+            assert.equal(options.headers.Authorization, 'Bearer notify-secret');
+            assert.equal(options.headers['x-portal-user-id'], undefined);
             return { ok: true, json: async function() { return { ok: true, notify: { qq: { enabled: true }, targets: [], events: {} }, monitor: { running: false } }; } };
         }
         if (url.endsWith('/api/state')) {

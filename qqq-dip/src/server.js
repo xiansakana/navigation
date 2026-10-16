@@ -11,6 +11,7 @@ import { createStore } from './store.js';
 import { createQuoteService } from './quotes.js';
 import { createMonitor } from './monitor.js';
 import { maskNotifyForClient } from './notify.js';
+import { createInternalNotificationSettingsHandler } from './notification-settings.js';
 import { marketStatus } from './market-hours.js';
 import { evaluate, resetRound } from './playbook.js';
 import { createDocService } from './docs.js';
@@ -75,6 +76,11 @@ const app = express();
 app.use((req, res, next) => { if (!serveUiAsset(req, res)) next(); });
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
+app.get('/api/internal/notification-settings', createInternalNotificationSettingsHandler({
+  getToken: () => config.notify.qq.token,
+  getNotify: () => store.getNotify(),
+  getStatus: () => monitor.status()
+}));
 app.use(portfolioIdentityMiddleware);
 app.use((req, res, next) => {
   // The existing monitoring round/lots/notifications are a single-owner service.

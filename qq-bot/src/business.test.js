@@ -12,8 +12,20 @@ function sourceFetch(url) {
     return Promise.resolve({ ok: true, json: async () => data });
 }
 
+test('stock integration uses service authentication without forwarding it to Torn services', async () => {
+    const calls = [];
+    const service = createBusinessService({ server: { notifyToken: 'service-token' } }, {
+        fetcher: async (url, options) => { calls.push({ url, options }); return sourceFetch(url); }
+    });
+    const integrations = await service.list();
+    assert.ok(integrations.every(item => item.ok));
+    assert.equal(calls[0].url, 'http://127.0.0.1:5001/api/internal/notification-settings');
+    assert.deepEqual(calls[0].options.headers, { Authorization: 'Bearer service-token' });
+    assert.ok(calls.slice(1).every(call => !call.options.headers));
+});
+
 test('imports legacy settings once and redacts monitoring secrets', async () => {
-    const config = {};
+    const config = { server: { notifyToken: 'test-service-token' } };
     const snapshots = [];
     const service = createBusinessService(config, { fetcher: sourceFetch, persist: value => snapshots.push(JSON.parse(JSON.stringify(value))), send: async () => {} });
     const list = await service.list();
@@ -27,7 +39,7 @@ test('imports legacy settings once and redacts monitoring secrets', async () => 
 });
 
 test('hub owns rules, targets, delivery and test regardless of old service settings', async () => {
-    const config = {};
+    const config = { server: { notifyToken: 'test-service-token' } };
     const sent = [];
     const service = createBusinessService(config, { fetcher: sourceFetch, persist: () => {},
         send: async (channel, body) => sent.push({ channel, body }), desktop: async () => {} });
