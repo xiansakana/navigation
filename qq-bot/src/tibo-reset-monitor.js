@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import https from 'node:https';
+import dns from 'node:dns';
 import { gunzipSync, inflateSync, brotliDecompressSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { sendMessage } from './napcat.js';
@@ -80,6 +81,9 @@ export function fetchText(url, options) {
         }
         var req = request(current, {
             family: 4,
+            ...(options?.lookup ? { lookup: options.lookup } : {}),
+            ...(options?.signal ? { signal: options.signal } : {}),
+            ...(options?.agent === false ? { agent: false } : {}),
             timeout: remaining,
             headers: { 'User-Agent': 'navigation-notification-monitor/1.0', 'Accept-Encoding': 'gzip, deflate, br' }
         }, function(response) {
@@ -87,7 +91,7 @@ export function fetchText(url, options) {
                 response.resume();
                 if ((options?.redirects || 0) >= 3) return finish(new Error('推文源重定向次数过多'));
                 var next = new URL(response.headers.location, current);
-                fetchText(next, { request: request, redirects: (options?.redirects || 0) + 1, deadlineAt: deadlineAt }).then(function(text) { finish(null, text); }, finish);
+                fetchText(next, { ...options, request: request, redirects: (options?.redirects || 0) + 1, deadlineAt: deadlineAt }).then(function(text) { finish(null, text); }, finish);
                 return;
             }
             if (response.statusCode !== 200) {
@@ -130,8 +134,44 @@ export function fetchText(url, options) {
     });
 }
 
+export async function fetchSourceText(url, { resolve = dns.promises.lookup, read = fetchText } = {}) {
+    var hostname = new URL(url).hostname;
+    var addresses = [];
+    var dnsTimer;
+    try {
+        var records = await Promise.race([
+            resolve(hostname, { family: 4, all: true }),
+            new Promise(function(_, reject) { dnsTimer = setTimeout(function() { reject(new Error('DNS 超时')); }, 2000); })
+        ]);
+        addresses = Array.from(new Set(records.map(function(record) { return record.address; }))).slice(0, 4);
+    } catch (_) { /* Fall back to the transport's normal DNS lookup. */ }
+    finally { clearTimeout(dnsTimer); }
+    var candidates = addresses.length ? addresses : [null];
+    var lastError;
+    for (var attempt = 0; attempt < 2; attempt++) {
+        var controller = new AbortController();
+        try {
+            return await Promise.any(candidates.map(function(address) {
+                return read(url, {
+                    signal: controller.signal,
+                    agent: false,
+                    ...(address ? { lookup: function(host, options, callback) {
+                        if (host === hostname) callback(null, address, 4);
+                        else dns.lookup(host, options, callback);
+                    } } : {})
+                });
+            }));
+        } catch (error) {
+            var errors = error.errors || [error];
+            lastError = new Error(Array.from(new Set(errors.map(function(item) { return item.message; }))).join('；'));
+            if (errors.some(function(item) { return /HTTP 4\d\d/.test(item.message); })) break;
+        } finally { controller.abort(); }
+    }
+    throw lastError;
+}
+
 async function fetchTweets(options) {
-    var results = await Promise.allSettled([fetchText(options.feedUrl), fetchText(options.rssUrl)]);
+    var results = await Promise.allSettled([fetchSourceText(options.feedUrl), fetchText(options.rssUrl)]);
     var tweets = [];
     var errors = [];
     if (results[0].status === 'fulfilled') {

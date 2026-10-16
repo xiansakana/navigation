@@ -3,7 +3,38 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import { gzipSync, deflateSync, brotliCompressSync } from 'node:zlib';
-import { classifyResetOpportunity, parseRss, deliverToChannels, fetchText } from './tibo-reset-monitor.js';
+import { classifyResetOpportunity, parseRss, deliverToChannels, fetchText, fetchSourceText } from './tibo-reset-monitor.js';
+
+test('feed source tries resolved addresses while keeping the original HTTPS hostname', async function() {
+    var signals = [];
+    var attempted = [];
+    var text = await fetchSourceText('https://feed.example/api/feed', {
+        resolve: async function() { return [{ address: '192.0.2.1' }, { address: '192.0.2.2' }]; },
+        read: async function(url, options) {
+            assert.equal(new URL(url).hostname, 'feed.example');
+            signals.push(options.signal);
+            var address;
+            options.lookup('feed.example', {}, function(error, value) { assert.equal(error, null); address = value; });
+            attempted.push(address);
+            if (address === '192.0.2.1') throw new Error('connection failed');
+            return 'feed';
+        }
+    });
+    assert.equal(text, 'feed');
+    assert.deepEqual(attempted, ['192.0.2.1', '192.0.2.2']);
+    assert.ok(signals.every(function(signal) { return signal.aborted; }));
+});
+
+test('feed retries network failure once but does not retry an HTTP 404', async function() {
+    for (var message of ['connection failed', 'feed.example 返回 HTTP 404']) {
+        var attempts = 0;
+        await assert.rejects(fetchSourceText('https://feed.example/api/feed', {
+            resolve: async function() { return [{ address: '192.0.2.1' }]; },
+            read: async function() { attempts++; throw new Error(message); }
+        }), new RegExp(message));
+        assert.equal(attempts, message.includes('404') ? 1 : 2);
+    }
+});
 
 test('tweet transport requests compression and decodes gzip, deflate and brotli feeds', async function() {
     for (var [encoding, compress] of [['gzip', gzipSync], ['deflate', deflateSync], ['br', brotliCompressSync]]) {
