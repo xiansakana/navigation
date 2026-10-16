@@ -10,7 +10,7 @@
       headers: { 'Content-Type': 'application/json' }
     }, options || {}));
     if (response.status === 401) {
-      location.href = '/login.html';
+      location.href = '/login/';
       throw new Error('请先登录');
     }
     var data = await response.json();

@@ -216,21 +216,21 @@ export function handleOAuthStart(providerId, req, res, config, secret) {
 export async function handleOAuthCallback(providerId, req, res, config, secret) {
     var setup = getProviderConfig(config, providerId);
     if (!setup) {
-        res.writeHead(302, { Location: '/login.html?error=' + encodeURIComponent('OAuth 未启用') });
+        res.writeHead(302, { Location: '/login/?error=' + encodeURIComponent('OAuth 未启用') });
         res.end();
         return;
     }
     var url = new URL(req.url, 'http://127.0.0.1');
     var err = url.searchParams.get('error');
     if (err) {
-        res.writeHead(302, { Location: '/login.html?error=' + encodeURIComponent(err) });
+        res.writeHead(302, { Location: '/login/?error=' + encodeURIComponent(err) });
         res.end();
         return;
     }
     var code = url.searchParams.get('code');
     var state = url.searchParams.get('state');
     if (!code || !state || !verifyStateCookie(req, providerId, state, secret)) {
-        res.writeHead(302, { Location: '/login.html?error=' + encodeURIComponent('OAuth 状态无效，请重试') });
+        res.writeHead(302, { Location: '/login/?error=' + encodeURIComponent('OAuth 状态无效，请重试') });
         res.end();
         return;
     }
@@ -250,7 +250,7 @@ export async function handleOAuthCallback(providerId, req, res, config, secret) 
         res.end();
     } catch (e) {
         res.writeHead(302, {
-            Location: '/login.html?error=' + encodeURIComponent(e.message || 'OAuth 登录失败'),
+            Location: '/login/?error=' + encodeURIComponent(e.message || 'OAuth 登录失败'),
             'Set-Cookie': clearStateCookie()
         });
         res.end();

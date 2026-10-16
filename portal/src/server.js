@@ -32,6 +32,7 @@ import {
 } from './rbac.js';
 import {
     resolveRoute,
+    canonicalPortalPagePath,
     resolveProxyContext,
     getServiceEntryHref,
     napcatCanonicalWebuiPath,
@@ -123,11 +124,11 @@ function requireAuth(req, res, options) {
     var opts = options || {};
     var ctx = resolveRequestUser(req, config);
     if (!ctx) {
-        redirect(res, '/login.html');
+        redirect(res, '/login/');
         return null;
     }
     if (opts.requireLogin && ctx.isGuest) {
-        redirect(res, '/login.html');
+        redirect(res, '/login/');
         return null;
     }
     return {
@@ -512,6 +513,11 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
 var server = http.createServer(async function(req, res) {
     if (serveUiAsset(req, res)) return;
     var url = new URL(req.url, 'http://127.0.0.1');
+    var canonicalPage = canonicalPortalPagePath(url.pathname);
+    if (canonicalPage && canonicalPage !== url.pathname) {
+        res.writeHead(308, { Location: canonicalPage + url.search });
+        return res.end();
+    }
     if (url.pathname === '/api/internal/bookkeeping/qq') {
         if (req.method !== 'POST' || !internalQqAuthorized(req)) return json(res, 403, {ok:false,error:'Forbidden'});
         try {
@@ -611,7 +617,7 @@ var server = http.createServer(async function(req, res) {
         return serveStatic(path.join(PUBLIC_DIR, 'dashboard.html'), res);
     }
 
-    if (url.pathname === '/admin' || url.pathname === '/admin.html') {
+    if (url.pathname === '/admin/') {
         var adminSession = requireAuth(req, res, { requireLogin: true });
         if (!adminSession) return;
         if (!canViewAdmin(adminSession.permissions)) {
@@ -620,7 +626,7 @@ var server = http.createServer(async function(req, res) {
         if (serveStatic(path.join(PUBLIC_DIR, 'admin.html'), res)) return;
     }
 
-    if (url.pathname === '/login' || url.pathname === '/login.html') {
+    if (url.pathname === '/login/') {
         var loginSession = getSession(req, getSessionSecret());
         if (loginSession && resolveSessionUser(loginSession, config)) {
             return redirect(res, '/');
@@ -689,7 +695,7 @@ server.listen(port, host, function() {
     if (host === '0.0.0.0' && port === 80) {
         console.log('外网访问: http://<公网IP>/');
     }
-    console.log('未登录访客默认使用 guest 账号权限；管理员可访问 /admin.html');
+    console.log('未登录访客默认使用 guest 账号权限；管理员可访问 /admin/');
 });
 
 process.on('SIGINT', function() { process.exit(0); });

@@ -335,7 +335,8 @@ function normalizeMenuPermission(menu) {
         menu.permission = serviceViewPermissionId(menu.serviceId);
         return menu;
     }
-    if (menu.id === 'menu_admin' || menu.path === '/admin.html') {
+    if (menu.id === 'menu_admin' || ['/admin', '/admin/', '/admin.html', '/admin/index.html'].includes(menu.path)) {
+        menu.path = '/admin/';
         menu.permission = 'admin:access:view';
         return menu;
     }
@@ -401,7 +402,7 @@ export function buildMenusFromServices(services, overrides) {
         title: '权限管理',
         description: '用户、角色、菜单与权限配置',
         icon: '🔐',
-        path: '/admin.html',
+        path: '/admin/',
         permission: 'admin:access:view',
         sort: 9990,
         enabled: true

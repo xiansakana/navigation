@@ -3,7 +3,7 @@ var state = { rbac: null, me: null };
 async function api(path, options) {
     var resp = await fetch('/api/' + path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, options || {}));
     if (resp.status === 401) {
-        location.href = '/login.html';
+        location.href = '/login/';
         throw new Error('未登录');
     }
     var data = await resp.json();

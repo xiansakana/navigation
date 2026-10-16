@@ -1,7 +1,7 @@
 async function api(path, options) {
     var resp = await fetch('/api/' + path, options || {});
     if (resp.status === 401) {
-        location.href = '/login.html';
+        location.href = '/login/';
         throw new Error('未登录');
     }
     var data = await resp.json();
@@ -48,7 +48,7 @@ document.getElementById('service-search').addEventListener('input', function(eve
 document.getElementById('logout').addEventListener('click', function() {
     var btn = document.getElementById('logout');
     if (btn.dataset.mode === 'login') {
-        location.href = '/login.html';
+        location.href = '/login/';
         return;
     }
     api('logout', { method: 'POST' }).finally(function() {

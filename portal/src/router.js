@@ -253,6 +253,13 @@ export function resolveProxyContext(services, reqUrl, opts) {
     return null;
 }
 
+/** Portal page aliases resolve before any upstream proxy. */
+export function canonicalPortalPagePath(pathname) {
+    if (['/login', '/login/', '/login.html', '/login/index.html'].includes(pathname)) return '/login/';
+    if (['/admin', '/admin/', '/admin.html', '/admin/index.html'].includes(pathname)) return '/admin/';
+    return null;
+}
+
 /**
  * 统一路由解析（HTTP 入口）
  * @returns {{ kind: 'portal-oauth'|'portal-api'|'proxy'|'not-found'|'pass', oauthProvider?: string, oauthAction?: string, service?: object, proxyUrl?: string }}
@@ -260,6 +267,8 @@ export function resolveProxyContext(services, reqUrl, opts) {
 export function resolveRoute(services, pathname, method, search, opts) {
     search = search || '';
     opts = opts || {};
+
+    if (canonicalPortalPagePath(pathname)) return { kind: 'pass' };
 
     if (method === 'GET' && (pathname === '/piclist/manage'
         || pathname === '/piclist/manage/'
