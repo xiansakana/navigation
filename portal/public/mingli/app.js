@@ -3,6 +3,8 @@ const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&
 const birthKeys = ['calendar', 'gender', 'year', 'month', 'day', 'hour', 'minute', 'sect', 'yunSect', 'leapMonth', 'trueSolar', 'longitude', 'location', 'recordedSolarTime'];
 let permissions = [], current = null, chart = null, dirty = false, busy = false, cycleIndex = 0, selectedYear = 0, caseOffset = 0;
 let pendingImport = null;
+let categoryData = { categories: [], total: 0, uncategorized: 0 };
+const selectedCases = new Set();
 const can = action => permissions.includes('*') || permissions.includes('mingli:' + action);
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
 function status(message = '') { $('status').textContent = message; }
@@ -30,6 +32,11 @@ function syncActions() {
   $('case-list').querySelectorAll('button').forEach(el => { el.disabled = busy; });
   $('birth-form').querySelectorAll('input,select').forEach(el => { el.disabled = busy; });
   $('tags').disabled = busy || !can('cases:edit'); $('notes').readOnly = busy || !can('cases:edit');
+  for (const id of ['category-filter', 'bulk-category', 'select-loaded', 'manage-categories']) $(id).disabled = busy;
+  $('case-category').disabled = busy || !can('cases:classify') || !can('categories:view');
+  $('move-cases').disabled = busy || !selectedCases.size;
+  $('category-manager').querySelectorAll('input,button').forEach(el => { el.disabled = busy; });
+  $('case-list').querySelectorAll('input[type=checkbox]').forEach(el => { el.disabled = busy; });
 }
 async function api(path, method = 'GET', data) {
   const response = await fetch('/api/mingli' + path, { method, headers: data ? { 'Content-Type': 'application/json' } : {}, body: data ? JSON.stringify(data) : undefined });
@@ -94,24 +101,56 @@ function renderCycles() {
 }
 async function loadCases(append = false) {
   if (!can('cases:view')) return;
+  if (!append) await loadCategories();
   const offset = append ? caseOffset : 0;
-  const result = await api('/cases?' + new URLSearchParams({ search: $('search').value, offset, limit: 30 }));
-  if (!append) $('case-list').replaceChildren();
+  const result = await api('/cases?' + new URLSearchParams({ search: $('search').value, categoryId: $('category-filter').value, offset, limit: 30 }));
+  if (!append) { $('case-list').replaceChildren(); selectedCases.clear(); }
   for (const item of result.cases) {
+    const entry = document.createElement('div'); entry.className = 'ml-case-entry';
     const button = document.createElement('button'); button.className = 'ml-case-card'; button.type = 'button'; button.dataset.case = item.id;
-    button.innerHTML = `<strong>${escape(item.name)}</strong><p class="ml-case-pillars">${item.pillars.map(escape).join(' · ')}</p><p>${item.birth.calendar === 'lunar' ? '农历' : '公历'} ${item.birth.year}-${item.birth.leapMonth ? '闰' : ''}${item.birth.month}-${item.birth.day} · ${item.birth.gender === 1 ? '男' : '女'}</p><p class="ml-muted">${escape(item.tags.join(' / ')) || '无标签'}</p><p class="ml-muted">${escape(item.notePreview)}</p><small>更新于 ${escape(new Date(item.updatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }))}</small>`;
-    $('case-list').append(button);
+    button.innerHTML = `<strong>${escape(item.name)}</strong><span class="ml-category-badge">${escape(item.categoryName || '未分类')}</span><p class="ml-case-pillars">${item.pillars.map(escape).join(' · ')}</p><p>${item.birth.calendar === 'lunar' ? '农历' : '公历'} ${item.birth.year}-${item.birth.leapMonth ? '闰' : ''}${item.birth.month}-${item.birth.day} · ${item.birth.gender === 1 ? '男' : '女'}</p><p class="ml-muted">标签：${escape(item.tags.join(' / ')) || '无'}</p><p class="ml-muted">${escape(item.notePreview)}</p><small>更新于 ${escape(new Date(item.updatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }))}</small>`;
+    entry.append(button);
+    if (can('cases:classify') && can('categories:view')) {
+      const check = document.createElement('input'); check.type = 'checkbox'; check.dataset.selectCase = item.id;
+      check.setAttribute('aria-label', '选择案例：' + item.name); check.className = 'ml-case-select'; entry.append(check);
+    }
+    $('case-list').append(entry);
   }
   caseOffset = offset + result.cases.length;
   $('case-count').textContent = `${result.total} 个案例`;
   $('more-cases').hidden = caseOffset >= result.total;
-  if (!result.total) $('case-list').textContent = $('search').value ? '没有找到匹配的案例。' : '还没有案例，先排一张命盘并保存。';
+  if (!result.total) $('case-list').textContent = $('search').value || $('category-filter').value ? '当前筛选没有匹配的案例。' : '还没有案例，先排一张命盘并保存。';
+  syncSelection();
+}
+function syncSelection() {
+  const checks = [...$('case-list').querySelectorAll('[data-select-case]')];
+  $('selection-count').textContent = `已选 ${selectedCases.size} 条`;
+  $('select-loaded').checked = !!checks.length && checks.every(c => selectedCases.has(c.dataset.selectCase));
+  $('select-loaded').indeterminate = !!selectedCases.size && !$('select-loaded').checked;
+  $('move-cases').disabled = busy || !selectedCases.size;
+}
+async function loadCategories() {
+  if (!can('categories:view')) return;
+  categoryData = await api('/categories');
+  const options = categoryData.categories.map(c => `<option value="${c.id}">${escape(c.name)}</option>`).join('');
+  for (const id of ['case-category', 'bulk-category', 'category-filter']) {
+    const previous = $(id).value;
+    $(id).innerHTML = id === 'category-filter'
+      ? `<option value="">全部分类（${categoryData.total}）</option><option value="uncategorized">未分类（${categoryData.uncategorized}）</option>` + categoryData.categories.map(c => `<option value="${c.id}">${escape(c.name)}（${c.count}）</option>`).join('')
+      : '<option value="">未分类</option>' + options;
+    $(id).value = [...$(id).options].some(o => o.value === previous) ? previous : '';
+  }
+  $('category-manager-list').innerHTML = categoryData.categories.length ? categoryData.categories.map(c => `<div class="ml-category-row" data-category="${c.id}"><label>分类名称：${escape(c.name)}<input value="${escape(c.name)}" maxlength="30" ${can('categories:edit') ? '' : 'readonly'}></label><span class="ml-muted">${c.count} 个案例</span>${can('categories:edit') ? '<button type="button" class="btn ghost" data-rename-category>保存名称</button><button type="button" class="btn ghost" data-delete-category>删除分类</button>' : ''}</div>`).join('') : '<p class="ml-muted">还没有分类，可以先新增一个。</p>';
 }
 function restore(item) {
   current = item; chart = item.chart;
   for (const k of birthKeys) { if (['leapMonth', 'trueSolar'].includes(k)) $(k).checked = item.birth[k]; else $(k).value = item.birth[k] ?? ''; }
   $('case-name').value = item.name; $('tags').value = item.tags.join('，'); $('notes').value = item.notes;
   $('use-recorded-clock').checked = !!item.birth.recordedSolarTime;
+  if (item.categoryId && ![...$('case-category').options].some(o => o.value === item.categoryId)) {
+    const option = document.createElement('option'); option.value = item.categoryId; option.textContent = item.categoryName || '当前分类'; $('case-category').append(option);
+  }
+  $('case-category').value = item.categoryId || '';
   syncCalendar(); renderChart(); dirty = false;
 }
 $('birth-form').addEventListener('submit', e => { e.preventDefault(); run(async () => {
@@ -129,6 +168,42 @@ $('birth-form').addEventListener('input', e => {
   syncCalendar();
 });
 for (const id of ['tags', 'notes']) $(id).addEventListener('input', () => { dirty = true; status(); });
+$('case-category').addEventListener('change', () => { dirty = true; status(); });
+$('category-filter').addEventListener('change', () => run(() => loadCases()));
+$('manage-categories').addEventListener('click', () => run(async () => { await loadCategories(); $('category-manager').hidden = !$('category-manager').hidden; }));
+$('close-categories').addEventListener('click', () => { $('category-manager').hidden = true; });
+$('category-create-form').addEventListener('submit', e => { e.preventDefault(); run(async () => {
+  await api('/categories', 'POST', { name: $('new-category-name').value }); $('new-category-name').value = '';
+  await loadCategories(); status('分类已新增。');
+}); });
+$('category-manager-list').addEventListener('click', e => {
+  const row = e.target.closest('[data-category]'); if (!row) return;
+  if (e.target.closest('[data-rename-category]')) run(async () => {
+    await api('/categories/' + row.dataset.category, 'PUT', { name: row.querySelector('input').value });
+    await loadCases(); status('分类名称已更新。');
+  });
+  if (e.target.closest('[data-delete-category]')) run(async () => {
+    const category = categoryData.categories.find(c => c.id === row.dataset.category);
+    if (!await window.portalDialog.confirm(`删除分类「${category.name}」？其中 ${category.count} 个案例将归入未分类，案例及笔记会保留。`, { title: '删除分类', danger: true })) return;
+    await api('/categories/' + category.id, 'DELETE');
+    if (current?.categoryId === category.id) { current.categoryId = null; $('case-category').value = ''; }
+    await loadCases(); status('分类已删除，案例已归入未分类。');
+  });
+});
+$('case-list').addEventListener('change', e => {
+  if (!e.target.matches('[data-select-case]')) return;
+  if (e.target.checked) selectedCases.add(e.target.dataset.selectCase); else selectedCases.delete(e.target.dataset.selectCase);
+  syncSelection();
+});
+$('select-loaded').addEventListener('change', () => {
+  $('case-list').querySelectorAll('[data-select-case]').forEach(c => { c.checked = $('select-loaded').checked; if (c.checked) selectedCases.add(c.dataset.selectCase); else selectedCases.delete(c.dataset.selectCase); });
+  syncSelection();
+});
+$('move-cases').addEventListener('click', () => run(async () => {
+  const result = await api('/cases/category', 'POST', { ids: [...selectedCases], categoryId: $('bulk-category').value });
+  if (current && selectedCases.has(current.id)) { current.categoryId = $('bulk-category').value || null; $('case-category').value = $('bulk-category').value; }
+  await loadCases(); status(`已移动 ${result.count} 个案例。`);
+}));
 $('cycles').addEventListener('click', e => { const b = e.target.closest('[data-cycle]'); if (b) { cycleIndex = Number(b.dataset.cycle); renderCycles(); } });
 $('years').addEventListener('click', e => { const b = e.target.closest('[data-year]'); if (b) { selectedYear = Number(b.dataset.year); renderCycles(); } });
 $('chart-tab').addEventListener('click', () => tab('chart'));
@@ -163,12 +238,14 @@ $('new-case').addEventListener('click', () => run(async () => {
   if (!await discard()) return;
   current = null; chart = null; $('birth-form').reset(); $('tags').value = ''; $('notes').value = ''; dirty = false;
   $('recordedSolarTime').value = '';
+  $('case-category').value = '';
   syncCalendar(); renderChart(); status('填写新案例的出生信息。');
 }));
 $('save-case').addEventListener('click', () => run(async () => {
   if (!chart) throw new Error('请先排盘');
   if (!$('case-name').value.trim()) { $('case-name').focus(); throw new Error('请填写案例名称后保存'); }
   const data = { name: $('case-name').value, birth: chart.input, tags: $('tags').value.split(/[,，]/).map(t => t.trim()).filter(Boolean), notes: $('notes').value };
+  if (can('cases:classify') && can('categories:view')) data.categoryId = $('case-category').value;
   const result = await api('/cases' + (current ? '/' + current.id : ''), current ? 'PUT' : 'POST', data);
   restore(result.case); status('案例已保存。');
 }));
@@ -184,5 +261,10 @@ run(async () => {
   if (!can('view')) throw new Error('当前账号没有命理模块权限');
   $('cases-tab').hidden = !can('cases:view'); $('save-case').hidden = !can('cases:edit');
   $('import-panel').hidden = !can('cases:import');
+  $('category-filter-label').hidden = !can('categories:view'); $('manage-categories').hidden = !can('categories:view');
+  $('category-create-form').hidden = !can('categories:edit');
+  $('case-category-label').hidden = !can('categories:view');
+  $('bulk-classify').hidden = !can('cases:classify') || !can('categories:view');
+  await loadCategories();
   syncCalendar(); status('出生时间按北京时间录入，案例仅当前账号可见。');
 });

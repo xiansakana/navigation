@@ -158,6 +158,9 @@ function buildNotificationPermissions() {
 }
 
 var SYSTEM_PERMISSIONS = [
+    { id: 'mingli:categories:view', name: '查看分类和分类筛选', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '案例库', '分类管理'] },
+    { id: 'mingli:categories:edit', name: '新增、重命名和删除分类', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '分类管理', '编辑分类'] },
+    { id: 'mingli:cases:classify', name: '设置和批量移动案例分类', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '设置分类'] },
     { id: 'mingli:cases:import', name: '预览并导入问真案例', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '导入案例'] },
     { id: 'mingli:view', name: '进入命理模块', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理'] },
     { id: 'mingli:chart:calculate', name: '八字排盘', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '八字排盘'] },

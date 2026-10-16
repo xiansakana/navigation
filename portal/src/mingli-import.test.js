@@ -55,6 +55,8 @@ test('import migrates an existing schema, is transactional, idempotent and user 
     assert.equal(preview.matched, 1); assert.equal(store.list('a').total, 0);
     const imported = store.importWenZhen('a', data, true); assert.equal(imported.imported, 1);
     const item = store.get('a', imported.ids[0]);
+    assert.equal(item.categoryName, '家人');
+    assert.equal(store.categories.list('a').categories[0].count, 1);
     assert.equal(item.source.key, id); assert.equal(item.source.notes.content, sample().sourceNotes.content);
     store.save('a', { ...item, birth: item.birth, name: '自己修改的名称', notes: '自己添加的笔记' }, item.id);
     const second = store.importWenZhen('a', data, true);
