@@ -106,6 +106,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, stageTimeo
         soxlEnabled: settings.soxlEnabled,
         round,
         rth,
+        sessionDate: lastMarketStatus.ymd,
         qqq: markets.QQQ,
         tqqq: markets.TQQQ,
         soxl: markets.SOXL,
@@ -121,6 +122,16 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, stageTimeo
         ev.suggestedContracts = [];
       }
       ev.buyPreview = buildBuyPreview(ev, ev.suggestedContracts);
+      // Persist observed peaks only, never pretend a suggested sale was filled.
+      for (const lot of ev.lots || []) {
+        const previous = lots.find((row) => row.id === lot.id);
+        if (store.saveLot && previous && (lot.holdingHigh > (Number(previous.holdingHigh) || 0)
+          || (lot.multiple >= 3 && !previous.reached3x) || (lot.multiple >= 5 && !previous.reached5x))) {
+          store.saveLot({ ...previous, holdingHigh: lot.holdingHigh,
+            reached3x: previous.reached3x || lot.multiple >= 3,
+            reached5x: previous.reached5x || lot.multiple >= 5 });
+        }
+      }
 
       const nextRound = applyRoundFromEval(round, ev, { sessionDate: lastMarketStatus.ymd });
       const fresh = newAlertKeys(ev, nextRound.firedAlerts || round.firedAlerts);

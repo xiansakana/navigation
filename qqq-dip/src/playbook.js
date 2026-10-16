@@ -1,4 +1,4 @@
-/** QQQ dip-playbook rules (手册速查 2026-09-08). Pure functions, no I/O. */
+/** QQQ dip-playbook rules. Pure functions, no I/O. */
 
 export const TIER_ORDER = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'R1', 'R2'];
 export const LEFT_TIERS = ['T1', 'T2', 'T3', 'T4'];
@@ -177,7 +177,7 @@ export function tierTriggerText(tierId) {
     T6: '−40%',
     T7: '−50%',
     R1: '已出现过 −22%；收盘站上 20 日线且收盘创 5 日新高',
-    R2: 'R1 后 15–20 日未破前低，或 −30% 之后的新 20 日线突破'
+    R2: 'R1 后至少 15 个已完成交易日未破前低，或 −30% 后新上穿 20 日线'
   };
   return map[tierId] || '';
 }
@@ -247,10 +247,10 @@ export function daysUntil(expiry, now = new Date()) {
   return Math.ceil((t - now.getTime()) / 86400000);
 }
 
-export function statsFromMarket(mkt) {
+export function statsFromMarket(mkt, referenceHigh = null) {
   const candles = Array.isArray(mkt?.candles) ? mkt.candles : [];
   const closes = candles.map((c) => c.c).filter(Number.isFinite);
-  const H = computeH(candles, 60);
+  const H = Number(referenceHigh) > 0 ? Number(referenceHigh) : computeH(candles, 60);
   const lastClose = closes.length ? closes[closes.length - 1] : (mkt?.close ?? mkt?.price ?? null);
   const price = Number.isFinite(mkt?.price) ? mkt.price : lastClose;
   const low = Number.isFinite(mkt?.low) ? mkt.low : price;
@@ -266,6 +266,14 @@ export function statsFromMarket(mkt) {
     changePercent: Number.isFinite(mkt?.changePercent) ? mkt.changePercent : null,
     sma20: sma(closes, 20),
     high5: maxClose(closes, 5),
+    previousClose: closes.at(-2) ?? null,
+    previousSma20: sma(closes.slice(0, -1), 20),
+    sessionDates: [...new Set(candles.filter((c) => Number.isFinite(c.t))
+      .map((c) => new Date(c.t * 1000).toISOString().slice(0, 10)))],
+    priorSwingLow: candles.slice(-21, -1).reduce((low, c) => Math.min(low,
+      Number.isFinite(c.l) ? c.l : Number.isFinite(c.c) ? c.c : Infinity), Infinity),
+    datedLows: candles.filter((c) => Number.isFinite(c.t) && Number.isFinite(c.l))
+      .map((c) => ({ date: new Date(c.t * 1000).toISOString().slice(0, 10), low: c.l })),
     drawdownClose: drawdownPct(lastClose, H),
     drawdownLive: drawdownPct(price, H)
   };
@@ -305,6 +313,9 @@ export function emptyRound() {
     id: null,
     variant: 'default',
     startedAt: null,
+    budgetBase: null,
+    referenceHighs: {},
+    r1SessionDate: null,
     firstT1At: null,
     hasSeenMinus22: false,
     hasSeenMinus30: false,
@@ -434,7 +445,7 @@ export function evaluateLot(lot, ctx) {
       if (multiple != null && multiple >= 5 && !lot.sold5x) {
         alerts.push({ code: 'deep-5x', event: 'takeProfit', action: '深虚值已 ≥5×：再卖原数量 25% 变现金，回到弹药 B' });
       }
-      if ((lot.sold5x || (multiple != null && multiple >= 5)) && holdingHigh > 0 && price <= holdingHigh * 0.6) {
+      if ((lot.reached5x || lot.sold5x || (multiple != null && multiple >= 5)) && holdingHigh > 0 && price <= holdingHigh * 0.6) {
         alerts.push({ code: 'deep-5x-dd40', event: 'takeProfit', action: '5 倍后从持有期高点回 40%：余下清掉变现金' });
       }
       if (monthsHeld >= 6 && !lot.cleared) {
@@ -504,8 +515,11 @@ function r2Confirmed(stats, round, rth) {
   if (!round.hasSeenMinus22 || round.r2Frozen) return false;
   if (!round.triggered?.R1 && !round.r1At) return false;
   const sessions = Number(round.r1Sessions) || 0;
-  const noNewLow = sessions >= 15 && sessions <= 40;
-  const post30Break = round.hasSeenMinus30 && Number.isFinite(stats.lastClose) && Number.isFinite(stats.sma20) && stats.lastClose > stats.sma20;
+  const noNewLow = sessions >= 15;
+  const post30Break = round.hasSeenMinus30 && Number.isFinite(stats.lastClose) && Number.isFinite(stats.sma20)
+    && Number.isFinite(stats.previousClose) && Number.isFinite(stats.previousSma20)
+    && stats.sessionDates.at(-1) > (round.r1SessionDate || round.triggered?.R1?.sessionDate || '9999-12-31')
+    && stats.previousClose <= stats.previousSma20 && stats.lastClose > stats.sma20;
   if (!rth && (noNewLow || post30Break)) return true;
   return noNewLow || post30Break;
 }
@@ -515,27 +529,43 @@ function fakeRightHit(stats, round) {
   const floor = Number(round.r1SwingLow) * 0.99;
   const low = Math.min(
     Number.isFinite(stats.low) ? stats.low : Infinity,
-    Number.isFinite(stats.lastClose) ? stats.lastClose : Infinity
+    Number.isFinite(stats.lastClose) ? stats.lastClose : Infinity,
+    ...(stats.datedLows || []).filter((row) => row.date > (round.r1SessionDate
+      || round.triggered?.R1?.sessionDate || '9999-12-31')).map((row) => row.low)
   );
   return Number.isFinite(low) && low < floor;
 }
 
 export function evaluate(input) {
-  const variant = input.variant === 'vBoost' ? 'vBoost' : 'default';
-  const B = computeAmmoB(input.cashUsd, input.cashCny, input.usdCnyRate);
-  const bags = bagCaps(B, variant);
+  const selectedVariant = input.round?.startedAt ? input.round.variant : input.variant;
+  const variant = selectedVariant === 'vBoost' ? 'vBoost' : 'default';
   const round = { ...emptyRound(), ...(input.round || {}) };
+  const availableCash = computeAmmoB(input.cashUsd, input.cashCny, input.usdCnyRate);
+  const spent = Object.values(round.executed || {}).reduce((sum, row) => sum + Math.max(0, Number(row.usd) || 0), 0);
+  // Legacy active rounds have no frozen base. Reconstruct once from cash + buys;
+  // do not silently shrink all later tiers after each actual cash deduction.
+  const B = round.budgetBase != null && Number.isFinite(Number(round.budgetBase)) && Number(round.budgetBase) >= 0
+    ? Number(round.budgetBase) : availableCash + spent;
+  const bags = bagCaps(B, variant);
   round.variant = variant;
   const rth = !!input.rth;
-  const qqq = statsFromMarket(input.qqq || {});
-  const tqqq = statsFromMarket(input.tqqq || {});
-  const soxl = statsFromMarket(input.soxl || {});
+  const qqqMarket = { ...(input.qqq || {}) };
+  if (rth && input.sessionDate && Array.isArray(qqqMarket.candles)) {
+    qqqMarket.candles = qqqMarket.candles.filter((c) => !Number.isFinite(c.t)
+      || new Date(c.t * 1000).toISOString().slice(0, 10) < input.sessionDate);
+  }
+  const qqq = statsFromMarket(qqqMarket, round.referenceHighs?.QQQ);
+  const tqqq = statsFromMarket(input.tqqq || {}, round.referenceHighs?.TQQQ);
+  const soxl = statsFromMarket(input.soxl || {}, round.referenceHighs?.SOXL);
   const spy = statsFromMarket(input.spy || {});
+  const r1Date = round.r1SessionDate || round.triggered?.R1?.sessionDate;
+  if (r1Date) round.r1Sessions = qqq.sessionDates.filter((date) => date > r1Date
+    && (!input.sessionDate || date < input.sessionDate || (!rth && date === input.sessionDate))).length;
   const vxnPrice = input.vxn?.stale ? NaN : Number(input.vxn?.price);
   const vxn = Number.isFinite(vxnPrice) ? vxnPrice : null;
 
   const recovered = shouldReset(qqq);
-  const hadRound = !!(round.hasSeenMinus22 || Object.keys(round.triggered || {}).length);
+  const hadRound = !!(round.startedAt || round.hasSeenMinus22 || Object.keys(round.triggered || {}).length || spent);
   const reset = recovered && hadRound;
   const alerts = [];
   if (reset) {
@@ -553,7 +583,7 @@ export function evaluate(input) {
   if (closeMinus22 || intraT4) round.hasSeenMinus22 = true;
   if (closeMinus30 || hitLive(qqq.price, qqq.H, 0.7)) round.hasSeenMinus30 = true;
 
-  const fakeRight = !reset && fakeRightHit(qqq, round);
+  const fakeRight = !reset && !round.fakeRight && fakeRightHit(qqq, round);
   if (fakeRight) {
     round.fakeRight = true;
     round.r2Frozen = true;
@@ -561,7 +591,7 @@ export function evaluate(input) {
       key: 'fakeRight',
       event: 'fakeRight',
       symbol: 'QQQ',
-      message: `假右侧：跌破 R1 前低 ${Number(round.r1SwingLow).toFixed(3)}（1% 容差）。清 R1 期权，正股留，R2 冻结，转等 T5 或新低后的新 R1。`
+      message: `假右侧：跌破 R1 前低 ${Number(round.r1SwingLow).toFixed(3)}（1% 容差）。检查并处理 R1 期权，正股留；本轮右侧冻结，仅等待未执行的危机档。`
     });
   }
 
@@ -756,6 +786,7 @@ export function evaluate(input) {
   };
   const evalBase = {
     B,
+    availableCash,
     bags,
     remaining,
     used,
@@ -972,6 +1003,11 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
       title: primary.title,
       reason: '当前推荐不可生成买入清单。'
     };
+  }
+  if ((Number.isFinite(ev.availableCash) && ev.availableCash + 0.01 < tier.usd)
+    || (Number.isFinite(ev.remaining?.[tier.bag]) && ev.remaining[tier.bag] + 0.01 < tier.usd)) {
+    return { available: false, title: '可用资金不足',
+      reason: '本轮预算不随现金缩水；当前现金或袋内余额不足本档预算，请先核对资金与实际成交，不自动借用其他袋。' };
   }
 
   const spot = Number(ev.qqq?.price);
@@ -1206,21 +1242,28 @@ export function globalProhibitions(tier, round) {
   return list;
 }
 
+export function resetRound(prev = {}, variant = prev.variant) {
+  return { ...emptyRound(), variant: variant === 'vBoost' ? 'vBoost' : 'default',
+    lastResetAt: new Date().toISOString(), firedAlerts: Object.fromEntries(
+      Object.entries(prev.firedAlerts || {}).filter(([key]) => key.startsWith('openSummary:'))) };
+}
+
 export function applyRoundFromEval(prev, ev, { sessionDate } = {}) {
   const next = { ...emptyRound(), ...(prev || {}) };
-  if (ev.reset) {
-    const keepOpen = Object.fromEntries(
-      Object.entries(next.firedAlerts || {}).filter(([k]) => k.startsWith('openSummary:'))
-    );
-    return {
-      ...emptyRound(),
-      variant: ev.variant,
-      lastResetAt: new Date().toISOString(),
-      executed: next.executed,
-      firedAlerts: keepOpen
-    };
-  }
+  if (ev.reset) return resetRound(next, ev.variant);
   next.variant = ev.variant;
+  const active = next.startedAt || Object.keys(next.executed || {}).length
+    || ev.tiers.some((tier) => tier.status === 'confirmed' || tier.status === 'intraday');
+  if (active) {
+    next.startedAt ||= new Date().toISOString();
+    next.budgetBase = ev.B;
+    next.referenceHighs = { ...next.referenceHighs };
+    for (const symbol of ['QQQ', 'TQQQ', 'SOXL']) {
+      const high = ev[symbol.toLowerCase()]?.H;
+      if (!(next.referenceHighs[symbol] > 0) && high > 0) next.referenceHighs[symbol] = high;
+    }
+  }
+  next.r1Sessions = ev.round.r1Sessions;
   next.hasSeenMinus22 = !!(next.hasSeenMinus22 || ev.round.hasSeenMinus22);
   next.hasSeenMinus30 = !!(next.hasSeenMinus30 || ev.round.hasSeenMinus30);
   if (ev.fakeRight) {
@@ -1235,7 +1278,8 @@ export function applyRoundFromEval(prev, ev, { sessionDate } = {}) {
       if (t.id === 'T1' && !next.firstT1At) next.firstT1At = new Date().toISOString();
       if (t.id === 'R1' && !next.r1At) {
         next.r1At = new Date().toISOString();
-        next.r1SwingLow = ev.qqq.low;
+        next.r1SessionDate = ev.qqq.sessionDates.at(-1) || sessionDate || null;
+        next.r1SwingLow = Number.isFinite(ev.qqq.priorSwingLow) ? ev.qqq.priorSwingLow : ev.qqq.low;
       }
     }
   });

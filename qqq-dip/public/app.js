@@ -294,7 +294,7 @@ function renderMarket() {
     line.hidden = true;
   }
   $('#monitor-hint').textContent = running
-    ? `监听中 · 已检查 ${state.monitor.checks || 0} 次。弹药与持仓现金互不影响。`
+    ? `监听中 · 已检查 ${state.monitor.checks || 0} 次。现金与持仓账本共享，执行登记会同步扣款。`
     : '规则来自 QQQ 抄底手册。不是投资建议。可点「手册速查」或「操作手册」预览完整文档。';
 }
 
@@ -322,7 +322,7 @@ function renderAmmo() {
       <input type="number" step="0.0001" id="cash-fx" value="${c.usdCnyRate ?? 7.2}">
       <div class="hint" id="fx-hint">${escapeHtml(fmtFxHint(c))}</div>
       <button type="button" class="btn link" id="btn-fx">立即刷新汇率</button></div>
-    <div class="sm-summary-card"><div class="label">弹药 B</div><div class="value">${maskMoney(fmtUsd(B))}</div>
+    <div class="sm-summary-card"><div class="label">本轮预算 B₀</div><div class="value">${maskMoney(fmtUsd(B))}</div>
       <div class="hint">${state.settings.variant === 'vBoost' ? 'V 型加强 55/20/25' : '默认 40/30/30'}</div></div>
     <div class="sm-summary-card"><div class="label">左侧剩余</div><div class="value">${maskMoney(fmtUsd(rem?.left))}</div>
       <div class="hint">袋 ${maskMoneyText(fmtUsd(bags?.left))}</div></div>

@@ -15,6 +15,129 @@ import {
   planTierCurrencySpend,
   CNY_EQUITY_PROXY
 } from './playbook.js';
+import { applyRoundFromEval, emptyRound } from './playbook.js';
+import { createDocService } from './docs.js';
+import { fileURLToPath } from 'node:url';
+
+test('both manuals render current execution guidance and internal document links', () => {
+  const docs = createDocService(fileURLToPath(new URL('../public', import.meta.url)));
+  for (const id of ['manual', 'cheatsheet']) {
+    const doc = docs.getDoc(id);
+    assert.match(doc.version, /^2026-10-16/);
+    assert.match(doc.html, /B₀/);
+    assert.match(doc.html, /本轮右侧冻结/);
+    assert.match(doc.html, /doc:/);
+  }
+});
+
+test('an incomplete current-session candle cannot confirm a close trigger', () => {
+  const ev = evaluate(roundInput({ rth: true, sessionDate: '2026-10-16',
+    qqq: { price: 88, low: 88, candles: [
+      { t: Date.UTC(2026, 9, 15) / 1000, h: 100, c: 99 },
+      { t: Date.UTC(2026, 9, 16) / 1000, h: 99, c: 88 }
+    ] } }));
+  assert.equal(ev.qqq.lastClose, 99);
+  assert.equal(ev.tiers.find((t) => t.id === 'T2').status, 'intraday');
+});
+
+function roundInput(overrides = {}) {
+  return { cashUsd: 100000, cashCny: 0, usdCnyRate: 7, vxn: { price: 30 },
+    qqq: { price: 88, low: 88, candles: [{ h: 100, c: 88 }] }, ...overrides };
+}
+
+test('zero budget remains frozen even if new cash arrives mid-round', () => {
+  const ev = evaluate(roundInput({ round: { startedAt: '2026-10-01', budgetBase: 0, referenceHighs: { QQQ: 100 } } }));
+  assert.equal(ev.B, 0);
+});
+
+test('missed historical low freezes right-side signals after reconnect', () => {
+  const ev = evaluate(roundInput({ round: { hasSeenMinus22: true, r1At: '2026-10-01', r1SessionDate: '2026-10-01', r1SwingLow: 75 },
+    qqq: { price: 88, low: 87, candles: [
+      { t: Date.UTC(2026, 9, 2) / 1000, h: 100, l: 70, c: 80 },
+      { t: Date.UTC(2026, 9, 5) / 1000, h: 89, l: 87, c: 88 }
+    ] } }));
+  assert.equal(ev.fakeRight, true);
+  assert.equal(ev.tiers.find((t) => t.id === 'R2').status, 'frozen');
+  const next = applyRoundFromEval(ev.round, ev);
+  const again = evaluate(roundInput({ round: next, qqq: { price: 60, low: 60, candles: [{ h: 100, c: 60 }] } }));
+  assert.equal(again.fakeRight, false);
+  assert.equal(again.round.r2Frozen, true);
+  assert.equal(again.buyPreview.available, true);
+});
+
+test('R1 records the signal candle date rather than the later polling date', () => {
+  const candles = Array.from({ length: 25 }, (_, i) => ({ t: Date.UTC(2026, 8, i + 1) / 1000, h: 100, l: 69, c: 70 + i / 10 }));
+  const round = { hasSeenMinus22: true, referenceHighs: { QQQ: 100 } };
+  const ev = evaluate(roundInput({ round, qqq: { price: 72.4, low: 72, candles } }));
+  const next = applyRoundFromEval(round, ev, { sessionDate: '2026-09-28' });
+  assert.equal(next.r1SessionDate, '2026-09-25');
+  assert.equal(next.r1SwingLow, 69);
+});
+
+test('round base, reference highs and allocation variant stay fixed after execution', () => {
+  const ev = evaluate(roundInput());
+  const round = applyRoundFromEval({}, ev);
+  assert.equal(round.budgetBase, 100000);
+  assert.equal(round.referenceHighs.QQQ, 100);
+  round.executed = { T1: { usd: 6000 } };
+  const next = evaluate(roundInput({ cashUsd: 94000, variant: 'vBoost', round,
+    qqq: { price: 75, low: 75, candles: [{ h: 80, c: 75 }] } }));
+  assert.equal(next.B, 100000);
+  assert.equal(next.availableCash, 94000);
+  assert.equal(next.qqq.H, 100);
+  assert.equal(next.variant, 'default');
+  assert.equal(next.tiers.find((t) => t.id === 'T2').usd, 8000);
+});
+
+test('legacy round base is reconstructed without double shrinking tier amounts', () => {
+  const ev = evaluate(roundInput({ cashUsd: 94000, round: { executed: { T1: { usd: 6000 } } } }));
+  assert.equal(ev.B, 100000);
+  assert.equal(applyRoundFromEval(ev.round, ev).budgetBase, 100000);
+});
+
+test('reset clears executions but keeps daily summary deduplication', () => {
+  const ev = evaluate(roundInput({ round: { ...emptyRound(), startedAt: '2026-10-01', budgetBase: 100000,
+    referenceHighs: { QQQ: 100 }, executed: { T1: { usd: 6000 } }, firedAlerts: { T1: 'x', 'openSummary:2026-10-01': 'x' } },
+    qqq: { price: 99, candles: [{ h: 99, c: 99 }] } }));
+  assert.equal(ev.reset, true);
+  const next = applyRoundFromEval(ev.round, ev);
+  assert.deepEqual(next.executed, {});
+  assert.equal(next.budgetBase, null);
+  assert.deepEqual(next.referenceHighs, {});
+  assert.deepEqual(next.firedAlerts, { 'openSummary:2026-10-01': 'x' });
+});
+
+test('R2 counts distinct completed candle dates, not polling ticks', () => {
+  const candles = Array.from({ length: 25 }, (_, i) => ({ t: Date.UTC(2026, 8, i + 1) / 1000, h: 81, l: 79, c: 80 }));
+  const input = roundInput({ sessionDate: '2026-09-25', rth: true,
+    round: { budgetBase: 100000, referenceHighs: { QQQ: 100 }, hasSeenMinus22: true,
+      r1At: '2026-09-09', r1SessionDate: '2026-09-09', r1SwingLow: 70 },
+    qqq: { candles, price: 80, low: 79 } });
+  const first = evaluate(input);
+  assert.equal(first.round.r1Sessions, 15);
+  assert.equal(first.tiers.find((t) => t.id === 'R2').status, 'confirmed');
+  assert.equal(evaluate({ ...input, round: first.round }).round.r1Sessions, 15);
+});
+
+test('standing above SMA20 is not a new post-crisis breakout', () => {
+  const ev = evaluate(roundInput({ round: { hasSeenMinus22: true, hasSeenMinus30: true, r1At: '2026-09-01', r1SwingLow: 60 },
+    qqq: { candles: Array.from({ length: 25 }, (_, i) => ({ h: 100, c: 70 + i })), price: 94, low: 93 } }));
+  assert.notEqual(ev.tiers.find((t) => t.id === 'R2').status, 'confirmed');
+});
+
+test('insufficient cash does not borrow other bags or shrink the frozen base', () => {
+  const ev = evaluate(roundInput({ cashUsd: 10, round: { budgetBase: 100000, referenceHighs: { QQQ: 100 } } }));
+  assert.equal(ev.B, 100000);
+  assert.equal(ev.buyPreview.available, false);
+  assert.match(ev.buyPreview.reason, /不足/);
+});
+
+test('observed five-times peak activates trailing exit without claiming a filled sale', () => {
+  const lot = evaluateLot({ type: 'call', otmClass: 'deep', cost: 1, holdingHigh: 6, reached5x: true },
+    { optionPrice: 3, spot: 100 });
+  assert.ok(lot.alerts.some((a) => a.code === 'deep-5x-dd40'));
+  assert.equal(lot.sold5x, undefined);
+});
 
 const H = 540.81;
 
@@ -27,7 +150,7 @@ test('tier trigger text matches 手册 §D 触发列', () => {
   assert.equal(tierTriggerText('T6'), '−40%');
   assert.equal(tierTriggerText('T7'), '−50%');
   assert.equal(tierTriggerText('R1'), '已出现过 −22%；收盘站上 20 日线且收盘创 5 日新高');
-  assert.equal(tierTriggerText('R2'), 'R1 后 15–20 日未破前低，或 −30% 之后的新 20 日线突破');
+  assert.equal(tierTriggerText('R2'), 'R1 后至少 15 个已完成交易日未破前低，或 −30% 后新上穿 20 日线');
 });
 
 test('T1–T4 trigger prices from 2025-02-19 high', () => {

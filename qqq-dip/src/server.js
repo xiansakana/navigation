@@ -12,7 +12,7 @@ import { createQuoteService } from './quotes.js';
 import { createMonitor } from './monitor.js';
 import { maskNotifyForClient } from './notify.js';
 import { marketStatus } from './market-hours.js';
-import { evaluate } from './playbook.js';
+import { evaluate, resetRound } from './playbook.js';
 import { createDocService } from './docs.js';
 import {
   legsToTradeInputs,
@@ -100,6 +100,7 @@ function liveEval() {
     soxlEnabled: settings.soxlEnabled,
     round: store.getRound(),
     rth: marketStatus().rth,
+    sessionDate: marketStatus().ymd,
     qqq: markets.QQQ,
     tqqq: markets.TQQQ,
     soxl: markets.SOXL,
@@ -372,19 +373,8 @@ app.delete('/api/lots/:id', (req, res) => {
 
 app.post('/api/round/reset', (_req, res) => {
   const prev = store.getRound();
-  store.setRound({
-    ...prev,
-    triggered: {},
-    firedAlerts: {},
-    hasSeenMinus22: false,
-    hasSeenMinus30: false,
-    r1At: null,
-    r1SwingLow: null,
-    r2Frozen: false,
-    fakeRight: false,
-    lastResetAt: new Date().toISOString()
-  });
-  store.addAction({ type: 'note', source: 'user', message: '手动重置本轮未触发档' });
+  store.setRound(resetRound(prev));
+  store.addAction({ type: 'note', source: 'user', message: '手动结束本轮，清空档位状态；保留真实持仓、现金和历史操作' });
   res.json({ ok: true, round: store.getRound(), evaluation: refreshEvaluation() });
 });
 
