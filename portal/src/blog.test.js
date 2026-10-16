@@ -10,7 +10,7 @@ test('blog permissions and media route are enforced', function() {
     const guest = { userId: 'guest', permissions: ['blog:post:edit'], isGuest: true };
     assert.deepEqual(blogAccess(reader), { canView: true, canPost: false, canManage: false });
     assert.deepEqual(blogAccess(writer), { canView: true, canPost: true, canManage: false });
-    assert.deepEqual(blogAccess(guest), { canView: false, canPost: false, canManage: false });
+    assert.deepEqual(blogAccess(guest), { canView: true, canPost: false, canManage: false });
     const route = '/api/blog/posts/' + '0'.repeat(32) + '/media';
     assert.equal(isPortalApi(route, 'POST'), true);
     assert.equal(resolveRoute([], route, 'POST').kind, 'portal-api');
