@@ -1,7 +1,16 @@
 import calendar from 'lunar-javascript';
 
 const { Solar, Lunar, LunarUtil } = calendar;
-export const ENGINE_VERSION = 'lunar-javascript@1.7.7/mingli-v1';
+export const ENGINE_VERSION = 'lunar-javascript@1.7.7/mingli-v2';
+
+function recordedClock(value) {
+  if (value == null || value === '') return null;
+  const text = String(value);
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:00$/.test(text)) throw new Error('原站真太阳时格式无效（需精确到分钟）');
+  const date = new Date(text.replace(' ', 'T') + 'Z');
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 19).replace('T', ' ') !== text) throw new Error('原站真太阳时日期无效');
+  return text;
+}
 
 function integer(value, min, max, label) {
   if (value === '' || value == null || !Number.isInteger(Number(value)) || Number(value) < min || Number(value) > max) {
@@ -22,6 +31,7 @@ export function normalizeBirth(raw) {
     yunSect: integer(raw.yunSect ?? 1, 1, 2, '起运规则'),
     leapMonth: raw.leapMonth === true,
     trueSolar: raw.trueSolar === true,
+    recordedSolarTime: recordedClock(raw.recordedSolarTime),
     longitude: null,
     location: String(raw.location ?? '').trim().slice(0, 100)
   };
@@ -32,6 +42,7 @@ export function normalizeBirth(raw) {
     if (!Number.isFinite(input.longitude) || input.longitude < -180 || input.longitude > 180) throw new Error('经度应在 -180 到 180 之间');
   }
   if (input.trueSolar && input.longitude == null) throw new Error('真太阳时需要出生地经度');
+  if (input.trueSolar && input.recordedSolarTime) throw new Error('原站真太阳时与经度修正只能选择一种');
   // All wall-clock inputs are UTC+08:00; never use the server's local timezone.
   if (input.calendar === 'solar') {
     const date = new Date(Date.UTC(input.year, input.month - 1, input.day));
@@ -40,6 +51,7 @@ export function normalizeBirth(raw) {
   try {
     const solar = birthSolar(input);
     if (solar.getYear() < 1901 || solar.getYear() > 2099) throw new Error();
+    if (input.recordedSolarTime && Math.abs(Date.parse(input.recordedSolarTime.replace(' ', 'T') + 'Z') - Date.parse(solar.toYmdHms().replace(' ', 'T') + 'Z')) > 86400000) throw new Error();
   } catch { throw new Error('日期不存在、闰月不匹配或转换后超出 1901—2099 年'); }
   return input;
 }
@@ -64,8 +76,10 @@ export function equationOfTime(julianDay) {
 export function calculateChart(raw) {
   const input = normalizeBirth(raw);
   const solar = birthSolar(input), lunar = solar.getLunar();
-  const correctionMinutes = input.trueSolar ? (input.longitude - 120) * 4 + equationOfTime(solar.getJulianDay() - 8 / 24) : 0;
-  const clock = Solar.fromJulianDay(solar.getJulianDay() + Math.round(correctionMinutes * 60) / 86400);
+  const recorded = input.recordedSolarTime ? Solar.fromYmdHms(...input.recordedSolarTime.match(/\d+/g).map(Number)) : null;
+  const correctionMinutes = recorded ? (recorded.getJulianDay() - solar.getJulianDay()) * 1440
+    : input.trueSolar ? (input.longitude - 120) * 4 + equationOfTime(solar.getJulianDay() - 8 / 24) : 0;
+  const clock = recorded || Solar.fromJulianDay(solar.getJulianDay() + Math.round(correctionMinutes * 60) / 86400);
   const civil = lunar.getEightChar(), adjusted = clock.getLunar().getEightChar();
   civil.setSect(input.sect); adjusted.setSect(input.sect);
   // Solar-term year/month and luck onset use the real instant. Only day/hour use the solar clock.

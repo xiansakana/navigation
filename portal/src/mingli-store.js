@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { calculateChart } from './mingli-chart.js';
+import { prepareWenZhenImport } from './mingli-import.js';
 
 export function createMingliStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS mingli_cases (
@@ -7,9 +8,12 @@ export function createMingliStore(db) {
     birth_json TEXT NOT NULL, chart_json TEXT NOT NULL, tags_json TEXT NOT NULL,
     notes TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
   ); CREATE INDEX IF NOT EXISTS mingli_cases_owner ON mingli_cases(user_id, updated_at DESC);`);
+  const columns = db.prepare('PRAGMA table_info(mingli_cases)').all().map(c => c.name);
+  for (const name of ['source_type', 'source_key', 'source_json']) if (!columns.includes(name)) db.exec('ALTER TABLE mingli_cases ADD COLUMN ' + name + ' TEXT');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS mingli_cases_source ON mingli_cases(user_id, source_type, source_key)');
   const read = row => row && ({ id: row.id, name: row.name, birth: JSON.parse(row.birth_json),
     chart: JSON.parse(row.chart_json), tags: JSON.parse(row.tags_json), notes: row.notes,
-    createdAt: row.created_at, updatedAt: row.updated_at });
+    createdAt: row.created_at, updatedAt: row.updated_at, source: row.source_json ? JSON.parse(row.source_json) : null });
   const get = (uid, id) => read(db.prepare('SELECT * FROM mingli_cases WHERE user_id = ? AND id = ?').get(uid, id));
   return {
     get,
@@ -19,7 +23,7 @@ export function createMingliStore(db) {
       const args = [uid, pattern, pattern, pattern];
       const total = db.prepare('SELECT count(*) AS count FROM mingli_cases WHERE ' + where).get(...args).count;
       const cases = db.prepare('SELECT * FROM mingli_cases WHERE ' + where + ' ORDER BY updated_at DESC, id LIMIT ? OFFSET ?').all(...args, limit, offset)
-        .map(read).map(({ chart, notes, ...item }) => ({ ...item, pillars: chart.pillars.map(p => p.ganZhi), notePreview: notes.slice(0, 120) }));
+        .map(read).map(({ chart, notes, source, ...item }) => ({ ...item, source: source ? { provider: source.provider, matched: source.matched } : null, pillars: chart.pillars.map(p => p.ganZhi), notePreview: notes.slice(0, 120) }));
       return { cases, total, offset, limit };
     },
     save(uid, raw, id = null) {
@@ -37,10 +41,33 @@ export function createMingliStore(db) {
           .run(name, JSON.stringify(chart.input), JSON.stringify(chart), JSON.stringify(tags), notes, now, uid, id);
       } else {
         id = crypto.randomBytes(16).toString('hex');
-        db.prepare('INSERT INTO mingli_cases VALUES (?,?,?,?,?,?,?,?,?)')
+        db.prepare('INSERT INTO mingli_cases (id,user_id,name,birth_json,chart_json,tags_json,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
           .run(id, uid, name, JSON.stringify(chart.input), JSON.stringify(chart), JSON.stringify(tags), notes, now, now);
       }
       return get(uid, id);
+    },
+    importWenZhen(uid, bundle, commit = false) {
+      const prepared = prepareWenZhenImport(bundle);
+      const exists = db.prepare('SELECT id FROM mingli_cases WHERE user_id=? AND source_type=? AND source_key=?');
+      const rows = prepared.rows.map(r => ({ ...r, duplicate: !!exists.get(uid, 'wenzhen', r.source.key) }));
+      const summary = { total: prepared.total, valid: rows.length, duplicates: rows.filter(r => r.duplicate).length,
+        matched: rows.filter(r => r.source.matched).length, mismatches: rows.filter(r => !r.source.matched).length, errors: prepared.errors };
+      if (!commit) return { ...summary, preview: rows.map(r => ({ name: r.name, solar: r.chart.solar, clock: r.chart.clock, gender: r.birth.gender, group: r.source.group,
+        originalPillars: r.source.originalPillars, pillars: r.chart.pillars.map(p => p.ganZhi).join(''), duplicate: r.duplicate, matched: r.source.matched })) };
+      if (prepared.errors.length) throw new Error('存在无效案例，请先修正文件后重新预览');
+      if (summary.mismatches) throw new Error('存在四柱不一致的案例，需人工核对后再导入');
+      let imported = 0;
+      const ids = [];
+      db.transaction(() => {
+        for (const row of rows) {
+          if (exists.get(uid, 'wenzhen', row.source.key)) continue;
+          const id = crypto.randomBytes(16).toString('hex'), now = new Date().toISOString();
+          db.prepare('INSERT INTO mingli_cases (id,user_id,name,birth_json,chart_json,tags_json,notes,created_at,updated_at,source_type,source_key,source_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+            .run(id, uid, row.name, JSON.stringify(row.birth), JSON.stringify(row.chart), JSON.stringify(row.tags), row.notes, now, now, 'wenzhen', row.source.key, JSON.stringify(row.source));
+          ids.push(id); imported++;
+        }
+      })();
+      return { ...summary, imported, duplicates: rows.length - imported, ids };
     },
     remove(uid, id) { return db.prepare('DELETE FROM mingli_cases WHERE user_id=? AND id=?').run(uid, id).changes > 0; }
   };

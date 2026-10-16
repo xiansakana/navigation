@@ -4,7 +4,7 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>命理 · 服务导航</title>
   <script>(function(){try{var t=localStorage.getItem('portal-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
-  <link rel="stylesheet" href="/portal.css"><link rel="stylesheet" href="/experience.css"><link rel="stylesheet" href="/mingli/style.css?v=1">
+  <link rel="stylesheet" href="/portal.css"><link rel="stylesheet" href="/experience.css"><link rel="stylesheet" href="/mingli/style.css?v=2">
   <script defer src="/ui/back-to-top.js?v=1"></script>
 </head>
 <body class="portal-experience has-navbar portal-layout-enabled">
@@ -36,6 +36,7 @@
               <label>日柱换日<select id="sect"><option value="2">00:00 换日（晚子时仍属当日）</option><option value="1">23:00 换日（子初换日）</option></select></label>
               <label>起运算法<select id="yunSect"><option value="1">传统时辰折算</option><option value="2">分钟折算</option></select></label>
               <label class="ml-check"><input id="trueSolar" type="checkbox">使用真太阳时计算日柱、时柱</label>
+              <div id="recorded-clock-settings" hidden><input type="hidden" id="recordedSolarTime"><label class="ml-check"><input id="use-recorded-clock" type="checkbox">沿用原站保存的真太阳时</label><p id="recorded-clock-label" class="ml-hint"></p></div>
               <label>出生地经度（东正西负）<input id="longitude" type="number" min="-180" max="180" step="any" placeholder="如：120.155"></label>
               <p class="ml-hint">真太阳时＝北京时间＋经度时差＋均时差（天文近似）。年、月柱与起运仍按实际出生瞬间和节气计算。</p>
             </details>
@@ -52,13 +53,14 @@
               <label>观察与事件笔记<textarea id="notes" rows="7" maxlength="20000" placeholder="记录事件日期、实际经历、推断与后续核验，保留观察依据。"></textarea></label>
               <div class="ml-actions"><button id="save-case" class="btn primary" hidden>保存案例</button><button id="delete-case" class="btn ghost" hidden>删除案例</button></div>
             </article>
+            <details id="source-record" class="ml-panel ml-rules" hidden><summary>原站记录与导入核对</summary><p id="source-summary" class="ml-muted"></p></details>
             <details class="ml-panel ml-rules"><summary>当前计算口径</summary><p id="rules" class="ml-muted"></p><p class="ml-hint">排盘用于传统文化学习与案例整理；本模块不生成吉凶结论。</p></details>
           </div>
         </div>
       </div>
     </section>
-    <section id="cases-view" hidden><article class="ml-panel"><div class="ml-panel-heading"><div><h2>我的案例库</h2><p class="ml-muted">按当前登录账号独立保存，其他用户无法访问。</p></div><span id="case-count" class="ml-badge">0 个案例</span></div><form id="search-form" class="ml-search"><label>搜索案例<input type="search" id="search" maxlength="100" placeholder="名称、标签或笔记"></label><button class="btn ghost" type="submit">搜索</button></form><div id="case-list" class="ml-case-list"></div><button id="more-cases" class="btn ghost" hidden>加载更多</button></article></section>
+    <section id="cases-view" hidden><article class="ml-panel"><div class="ml-panel-heading"><div><h2>我的案例库</h2><p class="ml-muted">按当前登录账号独立保存，其他用户无法访问。</p></div><span id="case-count" class="ml-badge">0 个案例</span></div><details id="import-panel" class="ml-settings" hidden><summary>导入问真案例</summary><p class="ml-hint">选择问真案例迁移 JSON 文件，先预览，再确认导入到当前账号。按原站案例 ID 去重，重复导入不覆盖已有案例或笔记。原站时间、分组、星标及四柱保留在来源记录中。</p><label>迁移文件（JSON，最大 2MB）<input id="import-file" type="file" accept=".json,application/json"></label><div id="import-preview" class="ml-hint" role="status"></div><button type="button" id="confirm-import" class="btn primary" hidden>确认导入案例</button></details><form id="search-form" class="ml-search"><label>搜索案例<input type="search" id="search" maxlength="100" placeholder="名称、标签或笔记"></label><button class="btn ghost" type="submit">搜索</button></form><div id="case-list" class="ml-case-list"></div><button id="more-cases" class="btn ghost" hidden>加载更多</button></article></section>
   </main>
-  <script src="/theme.js"></script><script src="/layout.js"></script><script src="/dialog.js"></script><script type="module" src="/mingli/app.js?v=1"></script>
+  <script src="/theme.js"></script><script src="/layout.js"></script><script src="/dialog.js"></script><script type="module" src="/mingli/app.js?v=2"></script>
 </body>
 </html>

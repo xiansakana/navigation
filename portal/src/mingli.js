@@ -7,11 +7,11 @@ export function canMingli(session, action = 'view') {
   return !!session?.userId && !session.isGuest && hasPermission(session.permissions || [], 'mingli:' + action);
 }
 
-async function body(req) {
+async function body(req, maxSize = 128 * 1024) {
   const chunks = []; let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 128 * 1024) throw new Error('请求超过 128KB');
+    if (size > maxSize) throw new Error('请求超过大小限制');
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
@@ -23,7 +23,8 @@ export async function handleMingliApi(req, res, url, session, json) {
   if (!canMingli(session)) return json(res, 403, { ok: false, error: '请登录并获取命理模块权限' });
   const route = url.pathname.slice('/api/mingli'.length), method = req.method;
   const match = /^\/cases\/([a-f0-9]{32})$/.exec(route);
-  const action = route === '/chart' && method === 'POST' ? 'chart:calculate'
+  const action = ['/import/preview', '/import/confirm'].includes(route) && method === 'POST' ? 'cases:import'
+    : route === '/chart' && method === 'POST' ? 'chart:calculate'
     : (route === '/cases' || match) && method === 'GET' ? 'cases:view'
       : (route === '/cases' && method === 'POST' || match && method === 'PUT') ? 'cases:edit'
         : match && method === 'DELETE' ? 'cases:delete' : null;
@@ -35,6 +36,10 @@ export async function handleMingliApi(req, res, url, session, json) {
   try {
     if (route === '/chart') return json(res, 200, { ok: true, chart: calculateChart(await body(req)) });
     const store = createMingliStore(getDatabase()), uid = session.userId;
+    if (action === 'cases:import') {
+      if (route === '/import/confirm' && !canMingli(session, 'cases:edit')) return json(res, 403, { ok: false, error: '保存导入案例需要案例编辑权限' });
+      return json(res, 200, { ok: true, ...store.importWenZhen(uid, await body(req, 2 * 1024 * 1024), route === '/import/confirm') });
+    }
     if (route === '/cases' && method === 'GET') {
       const page = key => Math.max(0, Math.floor(Number(url.searchParams.get(key)) || 0));
       return json(res, 200, { ok: true, ...store.list(uid, { search: url.searchParams.get('search') || '', offset: Math.min(100000, page('offset')), limit: Math.max(1, Math.min(100, page('limit') || 30)) }) });

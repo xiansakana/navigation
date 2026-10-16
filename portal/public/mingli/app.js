@@ -1,12 +1,21 @@
 const $ = id => document.getElementById(id);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
-const birthKeys = ['calendar', 'gender', 'year', 'month', 'day', 'hour', 'minute', 'sect', 'yunSect', 'leapMonth', 'trueSolar', 'longitude', 'location'];
+const birthKeys = ['calendar', 'gender', 'year', 'month', 'day', 'hour', 'minute', 'sect', 'yunSect', 'leapMonth', 'trueSolar', 'longitude', 'location', 'recordedSolarTime'];
 let permissions = [], current = null, chart = null, dirty = false, busy = false, cycleIndex = 0, selectedYear = 0, caseOffset = 0;
+let pendingImport = null;
 const can = action => permissions.includes('*') || permissions.includes('mingli:' + action);
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
 function status(message = '') { $('status').textContent = message; }
-function birth() { return Object.fromEntries(birthKeys.map(k => [k, ['leapMonth', 'trueSolar'].includes(k) ? $(k).checked : $(k).value])); }
-function syncCalendar() { $('leap-label').hidden = $('calendar').value !== 'lunar'; $('longitude').required = $('trueSolar').checked; }
+function birth() {
+  const value = Object.fromEntries(birthKeys.map(k => [k, ['leapMonth', 'trueSolar'].includes(k) ? $(k).checked : $(k).value]));
+  if (!$('use-recorded-clock').checked) value.recordedSolarTime = null;
+  return value;
+}
+function syncCalendar() {
+  $('leap-label').hidden = $('calendar').value !== 'lunar'; $('longitude').required = $('trueSolar').checked;
+  $('recorded-clock-settings').hidden = !$('recordedSolarTime').value;
+  $('recorded-clock-label').textContent = $('recordedSolarTime').value ? $('recordedSolarTime').value + '（来源参考时刻；修改出生日期或时间后自动停用）' : '';
+}
 function syncActions() {
   $('calculate').disabled = busy || !can('chart:calculate');
   $('save-case').disabled = busy || !chart || !can('cases:edit');
@@ -15,6 +24,8 @@ function syncActions() {
   $('new-case').disabled = busy;
   $('cases-tab').disabled = busy;
   $('more-cases').disabled = busy;
+  $('import-file').disabled = busy;
+  $('confirm-import').disabled = busy || !pendingImport || !can('cases:import') || !can('cases:edit');
   $('search-form').querySelector('button').disabled = busy;
   $('case-list').querySelectorAll('button').forEach(el => { el.disabled = busy; });
   $('birth-form').querySelectorAll('input,select').forEach(el => { el.disabled = busy; });
@@ -44,7 +55,7 @@ function renderChart() {
   $('chart-title').textContent = $('case-name').value.trim() || '未命名命盘';
   $('chart-kind').textContent = i.gender === 1 ? '乾造 · 男' : '坤造 · 女';
   $('day-master').textContent = '日主 ' + c.dayMaster;
-  $('birth-summary').innerHTML = `<div>公历 ${escape(c.solar)} · 北京时间</div><div>农历 ${escape(c.lunar)}${i.location ? ' · ' + escape(i.location) : ''}</div>${i.trueSolar ? `<div>真太阳时 ${escape(c.clock)}（修正 ${c.correctionMinutes > 0 ? '+' : ''}${c.correctionMinutes} 分钟）</div>` : ''}<div>前节 ${escape(c.previousJie.name)} ${escape(c.previousJie.time)} · 后节 ${escape(c.nextJie.name)} ${escape(c.nextJie.time)}</div>`;
+  $('birth-summary').innerHTML = `<div>公历 ${escape(c.solar)} · 北京时间</div><div>农历 ${escape(c.lunar)}${i.location ? ' · ' + escape(i.location) : ''}</div>${i.trueSolar || i.recordedSolarTime ? `<div>${i.recordedSolarTime ? '原站记录真太阳时' : '真太阳时'} ${escape(c.clock)}（修正 ${c.correctionMinutes > 0 ? '+' : ''}${c.correctionMinutes} 分钟）</div>` : ''}<div>前节 ${escape(c.previousJie.name)} ${escape(c.previousJie.time)} · 后节 ${escape(c.nextJie.name)} ${escape(c.nextJie.time)}</div>`;
   const element = (text, e) => `<span class="ml-element-${escape(e)}">${escape(text)}</span>`;
   const rows = [
     ['主星', p => escape(p.tenGod)],
@@ -63,7 +74,12 @@ function renderChart() {
   renderCycles();
   $('case-editor').hidden = !can('cases:edit') && !current;
   $('saved-at').textContent = current ? '已保存 · ' + new Date(current.updatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '尚未保存';
-  $('rules').textContent = `${c.engine}；立春时刻换年，十二节时刻换月；${i.sect === 1 ? '23:00' : '00:00'} 换日。晚子时时干沿用历法库的子时口径；${i.yunSect === 1 ? '传统时辰折算' : '分钟折算'}起运。时间均按 UTC+8 输入，不自动处理历史夏令时。${i.trueSolar ? '日时柱使用经度与均时差修正；年、月柱及交运按真实时刻。节气边界或时辰边界附近请核验原始出生记录。' : ''}`;
+  $('source-record').hidden = !current?.source;
+  if (current?.source) {
+    const s = current.source, o = s.original;
+    $('source-summary').textContent = `问真案例；原站分组：${s.group || '未分组'}；${o.star ? '已星标' : '未星标'}；原始公历：${o.solarTime}；原始农历：${o.lunarTime || '未记录'}；原站真太阳时：${o.sunTime}；原始四柱：${s.originalPillars}。导入时四柱${s.matched ? '逐柱一致' : '存在差异'}。来源 ID：${s.key}。后续编辑不会改写此来源快照。`;
+  }
+  $('rules').textContent = `${c.engine}；立春时刻换年，十二节时刻换月；${i.sect === 1 ? '23:00' : '00:00'} 换日。晚子时时干沿用历法库的子时口径；${i.yunSect === 1 ? '传统时辰折算' : '分钟折算'}起运。时间均按 UTC+8 输入，不自动处理历史夏令时。${i.recordedSolarTime ? '日时柱沿用原站保存的真太阳时；年、月柱及交运按原始北京时间。' : i.trueSolar ? '日时柱使用经度与均时差修正；年、月柱及交运按真实时刻。节气边界或时辰边界附近请核验原始出生记录。' : ''}`;
   syncActions();
 }
 function renderCycles() {
@@ -95,6 +111,7 @@ function restore(item) {
   current = item; chart = item.chart;
   for (const k of birthKeys) { if (['leapMonth', 'trueSolar'].includes(k)) $(k).checked = item.birth[k]; else $(k).value = item.birth[k] ?? ''; }
   $('case-name').value = item.name; $('tags').value = item.tags.join('，'); $('notes').value = item.notes;
+  $('use-recorded-clock').checked = !!item.birth.recordedSolarTime;
   syncCalendar(); renderChart(); dirty = false;
 }
 $('birth-form').addEventListener('submit', e => { e.preventDefault(); run(async () => {
@@ -104,6 +121,9 @@ $('birth-form').addEventListener('submit', e => { e.preventDefault(); run(async 
 }); });
 $('birth-form').addEventListener('input', e => {
   dirty = true; status();
+  if (['calendar', 'year', 'month', 'day', 'hour', 'minute', 'leapMonth'].includes(e.target.id)) { $('recordedSolarTime').value = ''; $('use-recorded-clock').checked = false; }
+  if (e.target.id === 'trueSolar' && $('trueSolar').checked) $('use-recorded-clock').checked = false;
+  if (e.target.id === 'use-recorded-clock' && $('use-recorded-clock').checked) $('trueSolar').checked = false;
   if (e.target.id !== 'case-name') { chart = null; renderChart(); }
   else $('chart-title').textContent = $('case-name').value.trim() || '未命名命盘';
   syncCalendar();
@@ -115,6 +135,26 @@ $('chart-tab').addEventListener('click', () => tab('chart'));
 $('cases-tab').addEventListener('click', () => run(async () => { await loadCases(); tab('cases'); status(); }));
 $('search-form').addEventListener('submit', e => { e.preventDefault(); run(() => loadCases()); });
 $('more-cases').addEventListener('click', () => run(() => loadCases(true)));
+$('import-file').addEventListener('change', () => run(async () => {
+  pendingImport = null; $('confirm-import').hidden = true; $('import-preview').textContent = '';
+  const file = $('import-file').files[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) throw new Error('迁移文件不能超过 2MB');
+  let bundle;
+  try { bundle = JSON.parse((await file.text()).replace(/^\uFEFF/, '')); } catch { throw new Error('文件不是合法 JSON'); }
+  $('import-preview').textContent = '正在解析并逐条核对四柱…';
+  const result = await api('/import/preview', 'POST', bundle);
+  $('import-preview').textContent = `共 ${result.total} 条，有效 ${result.valid} 条，重复 ${result.duplicates} 条；四柱一致 ${result.matched} 条，差异 ${result.mismatches} 条。${result.errors.map(e => `第 ${e.row} 条：${e.error}`).join('；')}`;
+  if (!result.errors.length && !result.mismatches) { pendingImport = bundle; $('confirm-import').hidden = false; }
+}));
+$('confirm-import').addEventListener('click', () => run(async () => {
+  if (!pendingImport) return;
+  status('正在导入案例…');
+  const result = await api('/import/confirm', 'POST', pendingImport);
+  pendingImport = null; $('confirm-import').hidden = true; $('import-file').value = '';
+  $('import-preview').textContent = `新增 ${result.imported} 条，跳过重复 ${result.duplicates} 条。`;
+  $('search').value = ''; await loadCases(); status('案例导入完成。');
+}));
 $('case-list').addEventListener('click', e => { const b = e.target.closest('[data-case]'); if (b) run(async () => {
   if (!await discard()) return;
   restore((await api('/cases/' + b.dataset.case)).case); tab('chart'); status('已打开案例。');
@@ -122,6 +162,7 @@ $('case-list').addEventListener('click', e => { const b = e.target.closest('[dat
 $('new-case').addEventListener('click', () => run(async () => {
   if (!await discard()) return;
   current = null; chart = null; $('birth-form').reset(); $('tags').value = ''; $('notes').value = ''; dirty = false;
+  $('recordedSolarTime').value = '';
   syncCalendar(); renderChart(); status('填写新案例的出生信息。');
 }));
 $('save-case').addEventListener('click', () => run(async () => {
@@ -142,5 +183,6 @@ run(async () => {
   permissions = me.permissions || [];
   if (!can('view')) throw new Error('当前账号没有命理模块权限');
   $('cases-tab').hidden = !can('cases:view'); $('save-case').hidden = !can('cases:edit');
+  $('import-panel').hidden = !can('cases:import');
   syncCalendar(); status('出生时间按北京时间录入，案例仅当前账号可见。');
 });

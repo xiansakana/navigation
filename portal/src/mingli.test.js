@@ -53,7 +53,7 @@ test('cases persist birth settings and chart snapshots, search literally and iso
     const payload = { name: '案例 A %_', birth: { ...birth, sect: 1 }, tags: ['已核对', '学习'], notes: '2026：核对出生记录。', userId: 'b' };
     const created = await call('/cases', 'POST', payload); assert.equal(created.status, 201);
     const id = created.result.case.id;
-    assert.equal(created.result.case.chart.engine, 'lunar-javascript@1.7.7/mingli-v1');
+    assert.equal(created.result.case.chart.engine, 'lunar-javascript@1.7.7/mingli-v2');
     assert.equal(created.result.case.birth.sect, 1);
     closeDatabase();
     assert.equal((await call('/cases/' + id)).result.case.notes, payload.notes);
@@ -74,6 +74,11 @@ test('cases persist birth settings and chart snapshots, search literally and iso
     assert.equal((await call('/cases/' + id, 'DELETE')).status, 200);
     assert.equal((await call('/cases/' + id)).status, 404);
     assert.equal((await call('/cases')).result.cases[0].id, other.result.case.id);
+    const importPermission = { userId: 'a', permissions: ['mingli:view', 'mingli:cases:import'] };
+    const onlyEdit = { userId: 'a', permissions: ['mingli:view', 'mingli:cases:edit'] };
+    assert.equal((await call('/import/preview', 'POST', {}, onlyEdit)).status, 403);
+    assert.equal((await call('/import/confirm', 'POST', {}, importPermission)).status, 403);
+    assert.equal((await call('/import/preview', 'POST', {}, member('a'))).status, 400);
   } finally {
     closeDatabase(); if (before == null) delete process.env.NAVIGATION_DB_PATH; else process.env.NAVIGATION_DB_PATH = before;
     fs.rmSync(dir, { recursive: true, force: true });
