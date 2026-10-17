@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { createConversationStore } from './codex-conversations.js';
+import { codexQqChunks } from './codex-text.js';
 import { validateAttachments, mergeAttachments } from './codex-media.js';
 
 export function createCodexStore(db) {
@@ -133,8 +134,7 @@ export function createCodexStore(db) {
       })();
     },
     reply(uid, qq, message, group = '', fullResult = false) {
-      const text = String(message).replace(/\[CQ:/gi, '［CQ:').slice(0, 10000);
-      for (let i = 0; i < text.length; i += 1500) db.prepare('INSERT INTO qq_codex_outbox(user_id,qq_id,message,created_at,group_id,full_result) VALUES(?,?,?,?,?,?)').run(uid, qq, text.slice(i, i + 1500), Date.now(), group, fullResult ? 1 : 0);
+      for (const text of codexQqChunks(message)) db.prepare('INSERT INTO qq_codex_outbox(user_id,qq_id,message,created_at,group_id,full_result) VALUES(?,?,?,?,?,?)').run(uid, qq, text, Date.now(), group, fullResult ? 1 : 0);
     },
     replyArtifact(uid, qq, artifact, group = '', sourceGroup = '') {
       db.prepare('INSERT INTO qq_codex_outbox(user_id,qq_id,message,created_at,group_id,full_result,artifact_json,source_group_id) VALUES(?,?,?,?,?,1,?,?)').run(uid,qq,'',Date.now(),group,JSON.stringify(artifact),sourceGroup);

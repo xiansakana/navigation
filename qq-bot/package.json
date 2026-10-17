@@ -9,10 +9,11 @@
   },
   "scripts": {
     "test:send": "node src/send-test.js",
-    "test": "node --test src/config.test.js src/server.test.js src/slack.test.js src/tibo-reset-monitor.test.js src/business.test.js src/bookkeeping.test.js src/codex.test.js src/codex-runner.test.js src/codex-usage.test.js src/codex-media.test.js src/codex-control.test.js",
+    "test": "node --test src/config.test.js src/server.test.js src/slack.test.js src/tibo-reset-monitor.test.js src/business.test.js src/bookkeeping.test.js src/codex.test.js src/codex-runner.test.js src/codex-usage.test.js src/codex-media.test.js src/codex-control.test.js src/codex-text.test.js",
     "start": "node src/server.js"
   },
   "dependencies": {
+    "marked": "15.0.12",
     "node-notifier": "^10.0.1",
     "nodemailer": "^9.1.1",
     "ws": "^8.22.0"

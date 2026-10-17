@@ -103,6 +103,8 @@ codex 新会话 navigation
 
 ## 部署与验证
 
+QQ 文字回复在进入发送队列前统一转换为纯文本：移除 Markdown 标题、加粗及代码围栏，保留代码原文和网址；链接显示为“文字（地址）”，表格按行转换为“列名：值”。长回复优先在换行处分段，避免拆开 emoji。自动完成回执与 `codex 结果` 重发共用此处理；任务结果和网页历史保留原始 Markdown。模型提示也会要求 QQ 回复使用纯文本。仅更新此格式处理时部署 `qq-bot` 即可，无数据库迁移或默认模型设置变更。
+
 按仓库流程推送、ECS干净拉取后，运行`bash scripts/ecs-update.sh --expected-sha <SHA> --only portal,qq-bot`。Portal包含新增权限定义。配置完成后重启qq-bot；不需要再部署一个工作器。
 
 本服务器初次启用可运行`node scripts/configure-qq-codex.mjs`：仅当默认私聊目标已绑定启用的Portal管理员时创建授权，先克隆并检查代码/AGENTS，再备份旧配置、写入私有配置；不自动猜测或绑定其他QQ，也不会发送消息。已经启用时拒绝覆盖现有配置。之后执行`pm2 restart qq-bot`。

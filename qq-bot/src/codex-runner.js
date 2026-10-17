@@ -92,10 +92,11 @@ export async function executeCodex(config, job, sessionId, { signal, media, onSe
   for (const file of media?.files || []) if (file.kind === 'image') args.push('--image',file.path);
   args.push('-');
   const env = { ...process.env, ...(config.proxyUrl ? { HTTPS_PROXY: config.proxyUrl, HTTP_PROXY: config.proxyUrl, ALL_PROXY: config.proxyUrl } : {}) };
+  const replyFormat = job.origin === 'web' ? '' : '\n\n回复格式：QQ 不支持 Markdown 渲染，最终回复请使用纯文本和清晰换行，避免 Markdown 标题、加粗、表格与链接语法；网址直接写出。保留代码中的原始字符。';
   try {
     const base = await syncProject(p, signal, { continuing: !!sessionId && job.prompt !== '__sync__' });
     if (job.prompt === '__sync__') return { result: '代码和所有已跟踪的 AGENTS.md 已同步。', commit: base };
-    await command(config.binary || 'codex', args, { cwd: p.directory, input: prompt + mediaPrompt, signal, env,
+    await command(config.binary || 'codex', args, { cwd: p.directory, input: prompt + replyFormat + mediaPrompt, signal, env,
       timeout: Math.max(60000, Math.min(4 * 3600000, Number(config.timeoutMs) || 2 * 3600000)), onEvent(event) {
         onProgress(event);
         if (event.type === 'thread.started' && /^[\w-]{1,100}$/.test(event.thread_id || '')) { session = event.thread_id; onSession(session); }
