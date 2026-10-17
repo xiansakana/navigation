@@ -1,8 +1,11 @@
+import { flowPillar, selectedFlow, shortGod } from './chart-presentation.js?v=1';
+
 const $ = id => document.getElementById(id);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 const birthKeys = ['calendar', 'gender', 'year', 'month', 'day', 'hour', 'minute', 'sect', 'yunSect', 'leapMonth', 'trueSolar', 'longitude', 'location', 'recordedSolarTime'];
 let permissions = [], current = null, chart = null, dirty = false, busy = false, cycleIndex = 0, selectedYear = 0, caseOffset = 0;
 let pendingImport = null;
+let readingLayout = false;
 let categoryData = { categories: [], total: 0, uncategorized: 0 };
 const selectedCases = new Set();
 const can = action => permissions.includes('*') || permissions.includes('mingli:' + action);
@@ -54,24 +57,21 @@ async function run(fn) {
 async function discard() { return !dirty || await window.portalDialog.confirm('当前修改尚未保存，确定离开当前案例吗？', { title: '未保存的修改' }); }
 function tab(name) {
   for (const t of ['chart', 'cases']) { $(t + '-view').hidden = t !== name; $(t + '-tab').classList.toggle('active', t === name); $(t + '-tab').setAttribute('aria-pressed', t === name ? 'true' : 'false'); }
+  document.querySelector('.ml-shell').classList.toggle('ml-reading', readingLayout && name === 'chart');
 }
 function renderChart() {
   $('empty-chart').hidden = !!chart; $('chart-result').hidden = !chart;
+  if (chart) readingLayout = true;
+  document.querySelector('.ml-workspace').classList.toggle('has-chart', readingLayout);
+  document.querySelector('.ml-shell').classList.toggle('ml-reading', readingLayout && !$('chart-view').hidden);
   if (!chart) return;
   const c = chart, i = c.input;
   $('chart-title').textContent = $('case-name').value.trim() || '未命名命盘';
   $('chart-kind').textContent = i.gender === 1 ? '乾造 · 男' : '坤造 · 女';
   $('day-master').textContent = '日主 ' + c.dayMaster;
-  $('birth-summary').innerHTML = `<div>公历 ${escape(c.solar)} · 北京时间</div><div>农历 ${escape(c.lunar)}${i.location ? ' · ' + escape(i.location) : ''}</div>${i.trueSolar || i.recordedSolarTime ? `<div>${i.recordedSolarTime ? '原站记录真太阳时' : '真太阳时'} ${escape(c.clock)}（修正 ${c.correctionMinutes > 0 ? '+' : ''}${c.correctionMinutes} 分钟）</div>` : ''}<div>前节 ${escape(c.previousJie.name)} ${escape(c.previousJie.time)} · 后节 ${escape(c.nextJie.name)} ${escape(c.nextJie.time)}</div>`;
-  const element = (text, e) => `<span class="ml-element-${escape(e)}">${escape(text)}</span>`;
-  const rows = [
-    ['主星', p => escape(p.tenGod)],
-    ['天干', p => `<span class="ml-character">${element(p.gan, p.elements[0])}</span>`],
-    ['地支', p => `<span class="ml-character">${element(p.zhi, p.elements[1])}</span>`],
-    ['藏干', p => p.hidden.map(h => `<span class="ml-hidden-stem">${element(h.gan, h.element)} <small>${escape(h.tenGod)}</small></span>`).join('')],
-    ['纳音', p => escape(p.naYin)], ['旬空', p => escape(p.xunKong)]
-  ];
-  $('pillars').innerHTML = `<caption class="ml-hint">四柱命盘</caption><thead><tr><th scope="col">四柱</th>${c.pillars.map(p => `<th scope="col">${p.label}</th>`).join('')}</tr></thead><tbody>${rows.map(([title, render]) => `<tr><th scope="row">${title}</th>${c.pillars.map(p => `<td>${render(p)}</td>`).join('')}</tr>`).join('')}</tbody>`;
+  $('birth-panel-caption').textContent = `${$('case-name').value.trim() || '未命名'} · ${c.solar.slice(0, 16)}`;
+  $('birth-summary').innerHTML = `<div>公历 ${escape(c.solar.slice(0, 16))} · 北京时间</div><div>农历 ${escape(c.lunar)}${i.location ? ' · ' + escape(i.location) : ''}</div>${i.trueSolar || i.recordedSolarTime ? `<div>${i.recordedSolarTime ? '原站真太阳时' : '真太阳时'} ${escape(c.clock.slice(0, 16))}（${c.correctionMinutes > 0 ? '+' : ''}${c.correctionMinutes} 分）</div>` : ''}`;
+  $('term-summary').textContent = `前节 ${c.previousJie.name} ${c.previousJie.time} · 后节 ${c.nextJie.name} ${c.nextJie.time}`;
   $('elements').innerHTML = Object.entries(c.elements).map(([e, count]) => `<span>${element(e, e)} <b>${count}</b></span>`).join('');
   const l = c.luck;
   $('luck-summary').textContent = `${l.forward ? '顺行' : '逆行'} · 出生后 ${l.years} 年 ${l.months} 月 ${l.days} 天 ${l.hours} 小时起运 · 交运 ${l.start}（北京时间）`;
@@ -89,15 +89,43 @@ function renderChart() {
   $('rules').textContent = `${c.engine}；立春时刻换年，十二节时刻换月；${i.sect === 1 ? '23:00' : '00:00'} 换日。晚子时时干沿用历法库的子时口径；${i.yunSect === 1 ? '传统时辰折算' : '分钟折算'}起运。时间均按 UTC+8 输入，不自动处理历史夏令时。${i.recordedSolarTime ? '日时柱沿用原站保存的真太阳时；年、月柱及交运按原始北京时间。' : i.trueSolar ? '日时柱使用经度与均时差修正；年、月柱及交运按真实时刻。节气边界或时辰边界附近请核验原始出生记录。' : ''}`;
   syncActions();
 }
+const element = (text, e) => `<span class="ml-element-${escape(e)}">${escape(text)}</span>`;
+function renderPillars(flow) {
+  const { columns } = flow;
+  const cellClass = p => p.flow ? 'ml-pillar-flow' : p.label === '日柱' ? 'ml-pillar-day' : '';
+  const rows = [
+    ['主星', p => escape(p.tenGod || '—')],
+    ['天干', p => p.gan ? `<span class="ml-character">${element(p.gan, p.elements[0])}</span>` : '—'],
+    ['地支', p => p.zhi ? `<span class="ml-character">${element(p.zhi, p.elements[1])}</span>` : '—'],
+    ['藏干', p => p.hidden?.map(h => `<span class="ml-hidden-stem">${element(h.gan + h.element, h.element)}</span>`).join('') || '—'],
+    ['副星', p => p.hidden?.map(h => `<span class="ml-hidden-stem">${escape(h.tenGod)}</span>`).join('') || '—'],
+    ['纳音', p => escape(p.naYin || '—')], ['旬空', p => escape(p.xunKong || '—')]
+  ];
+  $('pillars').innerHTML = `<caption class="ml-sr-only">四柱命盘与所选大运流年</caption><thead><tr><th scope="col">日期</th>${columns.map(p => `<th scope="col" class="${cellClass(p)}">${p.label}${p.caption ? `<small>${escape(p.caption)}</small>` : ''}</th>`).join('')}</tr></thead><tbody>${rows.map(([title, render]) => `<tr><th scope="row">${title}</th>${columns.map(p => `<td class="${cellClass(p)}">${render(p)}</td>`).join('')}</tr>`).join('')}</tbody>`;
+}
+function flowCharacters(ganZhi) {
+  const p = flowPillar(ganZhi, chart.dayMaster);
+  if (!p) return '<span class="ml-flow-character">童</span><span class="ml-flow-character">限</span>';
+  return `<span class="ml-flow-character">${element(p.gan, p.elements[0])}<small title="${p.tenGod}">${shortGod(p.tenGod)}</small></span><span class="ml-flow-character">${element(p.zhi, p.elements[1])}<small title="${p.hidden[0].tenGod}">${shortGod(p.hidden[0].tenGod)}</small></span>`;
+}
 function renderCycles() {
   const cycles = chart.luck.cycles;
-  $('cycles').innerHTML = cycles.map((d, index) => `<button type="button" data-cycle="${index}" aria-pressed="${index === cycleIndex}" class="${index === cycleIndex ? 'active' : ''}"><strong>${d.ganZhi}</strong><small>${d.startYear}—${d.endYear}</small><small>${d.startAge}—${d.endAge} 岁</small></button>`).join('');
-  const years = cycles[cycleIndex].years;
-  if (!years.some(y => y.year === selectedYear)) selectedYear = years[0].year;
-  $('years').innerHTML = years.map(y => `<button type="button" data-year="${y.year}" aria-pressed="${y.year === selectedYear}" class="${y.year === selectedYear ? 'active' : ''}"><small>${y.year} · ${y.age} 岁</small>${y.ganZhi}</button>`).join('');
-  const y = years.find(y => y.year === selectedYear);
-  $('months-title').textContent = `${y.year} ${y.ganZhi} · 流月`;
-  $('months').innerHTML = y.months.map(m => `<span><small>${m.label}</small>${m.ganZhi}</span>`).join('');
+  const flow = selectedFlow(chart, cycleIndex, selectedYear);
+  cycleIndex = flow.cycleIndex; selectedYear = flow.year.year;
+  $('cycles').innerHTML = cycles.map((d, index) => `<button type="button" data-cycle="${index}" aria-label="${d.startYear}年起 ${d.ganZhi}大运 ${d.startAge}至${d.endAge}岁" aria-pressed="${index === cycleIndex}" class="${index === cycleIndex ? 'active' : ''}"><small>${d.startYear}</small><small>${d.startAge}岁起</small>${flowCharacters(d.ganZhi)}</button>`).join('');
+  $('years').innerHTML = flow.cycle.years.map(y => `<button type="button" data-year="${y.year}" aria-label="${y.year}年 ${y.ganZhi}流年 ${y.age}岁" aria-pressed="${y.year === selectedYear}" class="${y.year === selectedYear ? 'active' : ''}"><small>${y.year}</small><small>${y.age}岁</small>${flowCharacters(y.ganZhi)}</button>`).join('');
+  $('months-title').textContent = '流月';
+  $('months').innerHTML = flow.year.months.map(m => `<div class="ml-flow-month"><small>${escape(m.label)}</small>${flowCharacters(m.ganZhi)}</div>`).join('');
+  $('flow-selection').textContent = `${flow.year.year} ${flow.year.ganZhi}流年 · ${flow.year.age}岁 · ${flow.cycle.ganZhi}${flow.cycle.index ? '大运' : ''}`;
+  renderPillars(flow);
+  requestAnimationFrame(() => {
+    for (const id of ['cycles', 'years']) {
+      const track = $(id), active = track.querySelector('.active');
+      if (!active || !track.clientWidth) continue;
+      const cell = active.getBoundingClientRect(), viewport = track.getBoundingClientRect();
+      if (cell.left < viewport.left || cell.right > viewport.right) track.scrollLeft += cell.left - viewport.left - (track.clientWidth - cell.width) / 2;
+    }
+  });
 }
 async function loadCases(append = false) {
   if (!can('cases:view')) return;
@@ -152,11 +180,12 @@ function restore(item) {
   }
   $('case-category').value = item.categoryId || '';
   syncCalendar(); renderChart(); dirty = false;
+  $('birth-panel').open = false;
 }
 $('birth-form').addEventListener('submit', e => { e.preventDefault(); run(async () => {
   status('正在排盘…');
   const result = await api('/chart', 'POST', birth()); chart = result.chart; dirty = true;
-  renderChart(); status('排盘完成，可保存为自己的案例。');
+  renderChart(); $('birth-panel').open = false; status('排盘完成，可保存为自己的案例。');
 }); });
 $('birth-form').addEventListener('input', e => {
   dirty = true; status();
@@ -236,7 +265,8 @@ $('case-list').addEventListener('click', e => { const b = e.target.closest('[dat
 }); });
 $('new-case').addEventListener('click', () => run(async () => {
   if (!await discard()) return;
-  current = null; chart = null; $('birth-form').reset(); $('tags').value = ''; $('notes').value = ''; dirty = false;
+  current = null; chart = null; readingLayout = false; $('birth-form').reset(); $('tags').value = ''; $('notes').value = ''; dirty = false;
+  $('birth-panel').open = true; $('birth-panel-caption').textContent = '填写后开始排盘';
   $('recordedSolarTime').value = '';
   $('case-category').value = '';
   syncCalendar(); renderChart(); status('填写新案例的出生信息。');

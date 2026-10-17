@@ -4,7 +4,7 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>命理 · 服务导航</title>
   <script>(function(){try{var t=localStorage.getItem('portal-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
-  <link rel="stylesheet" href="/portal.css"><link rel="stylesheet" href="/experience.css"><link rel="stylesheet" href="/mingli/style.css?v=3">
+  <link rel="stylesheet" href="/portal.css"><link rel="stylesheet" href="/experience.css"><link rel="stylesheet" href="/mingli/style.css?v=4">
   <script defer src="/ui/back-to-top.js?v=1"></script>
 </head>
 <body class="portal-experience has-navbar portal-layout-enabled">
@@ -19,7 +19,7 @@
     <nav class="ml-tabs" aria-label="命理导航"><button id="chart-tab" class="active" aria-pressed="true">八字排盘</button><button id="cases-tab" hidden aria-pressed="false">我的案例</button></nav>
     <section id="chart-view">
       <div class="ml-workspace">
-        <aside class="ml-panel ml-input-panel">
+        <details id="birth-panel" class="ml-panel ml-input-panel" open><summary><span>出生信息与排盘设置</span><span id="birth-panel-caption" class="ml-muted">填写后开始排盘</span></summary>
           <div class="ml-panel-heading"><h2>出生信息</h2><button type="button" id="new-case" class="btn ghost">新建</button></div>
           <form id="birth-form">
             <label>案例名称<input id="case-name" maxlength="80" placeholder="姓名或案例代号" autocomplete="off"></label>
@@ -42,12 +42,12 @@
             </details>
             <button id="calculate" type="submit" class="btn primary ml-wide" disabled>开始排盘</button>
           </form>
-        </aside>
+        </details>
         <div class="ml-results">
           <div id="empty-chart" class="ml-panel ml-empty"><span class="ml-empty-icon">☯</span><h2>观四柱，记人生</h2><p class="ml-muted">填写出生信息后排盘，查看十神、藏干与大运流年。</p><p class="ml-hint">计算独立运行，不依赖第三方排盘接口。</p></div>
           <div id="chart-result" hidden>
-            <article class="ml-panel"><div class="ml-panel-heading"><div><p class="ml-eyebrow" id="chart-kind"></p><h2 id="chart-title">八字命盘</h2></div><span id="day-master" class="ml-badge"></span></div><div id="birth-summary" class="ml-birth-summary"></div><div class="ml-table-scroll"><table id="pillars" class="ml-pillars"></table></div><div id="elements" class="ml-elements"></div><p class="ml-hint">五行仅统计四柱天干与地支本气的 8 个字，不含藏干权重，不代表旺衰或喜用神。</p></article>
-            <article class="ml-panel"><div class="ml-panel-heading"><h2>大运 · 流年</h2><span class="ml-muted">年龄按虚岁显示</span></div><p id="luck-summary" class="ml-muted"></p><div id="cycles" class="ml-cycles" aria-label="选择大运"></div><div id="years" class="ml-years" aria-label="选择流年"></div><h3 id="months-title">流月</h3><div id="months" class="ml-months"></div><p class="ml-hint">流年以立春划分，流月以十二节划分；月名为传统月序，并非公历月份。交运以起运时刻为准，年份表是年度概览。</p></article>
+            <article class="ml-panel ml-natal-panel"><div class="ml-panel-heading"><div><p class="ml-eyebrow" id="chart-kind"></p><h2 id="chart-title">八字命盘</h2></div><span id="day-master" class="ml-badge"></span></div><div id="birth-summary" class="ml-birth-summary"></div><div class="ml-table-scroll"><table id="pillars" class="ml-pillars"></table></div><details class="ml-chart-notes"><summary>节气与五行统计</summary><p id="term-summary" class="ml-hint"></p><div id="elements" class="ml-elements"></div><p class="ml-hint">五行仅统计四柱天干与地支本气的 8 个字，不含藏干权重，不代表旺衰或喜用神。</p></details></article>
+            <article class="ml-panel ml-luck-panel"><div class="ml-panel-heading"><h2>大运 · 流年</h2><span class="ml-muted">虚岁 · 横向滑动查看</span></div><p id="luck-summary" class="ml-muted"></p><p id="flow-selection" class="ml-flow-selection" aria-live="polite"></p><div class="ml-flow-row"><h3>大运</h3><div id="cycles" class="ml-flow-track" aria-label="选择大运"></div></div><div class="ml-flow-row"><h3>流年</h3><div id="years" class="ml-flow-track" aria-label="选择流年"></div></div><div class="ml-flow-row"><h3 id="months-title">流月</h3><div id="months" class="ml-flow-track" aria-label="流月"></div></div><p class="ml-hint ml-flow-footnote">点选岁运，对照左侧命盘。流年以立春、流月以十二节划分；交运以起运时刻为准。</p></article>
             <article id="case-editor" class="ml-panel" hidden><div class="ml-panel-heading"><h2>案例记录</h2><span id="saved-at" class="ml-muted">尚未保存</span></div>
               <label id="case-category-label" hidden>案例分类<select id="case-category"><option value="">未分类</option></select></label><label>标签（逗号分隔，最多 12 个）<input id="tags" maxlength="371" placeholder="如：学习、已核对、事业"></label>
               <label>观察与事件笔记<textarea id="notes" rows="7" maxlength="20000" placeholder="记录事件日期、实际经历、推断与后续核验，保留观察依据。"></textarea></label>
@@ -61,6 +61,6 @@
     </section>
     <section id="cases-view" hidden><article class="ml-panel"><div class="ml-panel-heading"><div><h2>我的案例库</h2><p class="ml-muted">按当前登录账号独立保存，其他用户无法访问。</p></div><span id="case-count" class="ml-badge">0 个案例</span></div><div class="ml-category-toolbar"><label id="category-filter-label" hidden>案例分类<select id="category-filter"><option value="">全部分类</option></select></label><button type="button" id="manage-categories" class="btn ghost" hidden>分类管理</button></div><section id="category-manager" class="ml-category-manager" hidden><div class="ml-panel-heading"><h3>分类管理</h3><button type="button" id="close-categories" class="btn ghost">收起</button></div><p class="ml-hint">分类与标签独立。重命名同步更新案例分类；删除分类后案例归入未分类，原站来源快照保留。</p><form id="category-create-form" class="ml-search" hidden><label>新分类名称<input id="new-category-name" maxlength="30" required placeholder="如：客户、待核对"></label><button type="submit" class="btn primary">新增分类</button></form><div id="category-manager-list"></div></section><div id="bulk-classify" class="ml-bulk" hidden><label class="ml-check"><input id="select-loaded" type="checkbox">选择已加载案例</label><span id="selection-count" class="ml-muted">已选 0 条</span><label>移动到<select id="bulk-category"><option value="">未分类</option></select></label><button type="button" id="move-cases" class="btn ghost" disabled>移动所选案例</button></div><details id="import-panel" class="ml-settings" hidden><summary>导入问真案例</summary><p class="ml-hint">选择问真案例迁移 JSON 文件，先预览，再确认导入到当前账号。按原站案例 ID 去重，重复导入不覆盖已有案例或笔记。原站时间、分组、星标及四柱保留在来源记录中。</p><label>迁移文件（JSON，最大 2MB）<input id="import-file" type="file" accept=".json,application/json"></label><div id="import-preview" class="ml-hint" role="status"></div><button type="button" id="confirm-import" class="btn primary" hidden>确认导入案例</button></details><form id="search-form" class="ml-search"><label>搜索案例<input type="search" id="search" maxlength="100" placeholder="名称、标签或笔记"></label><button class="btn ghost" type="submit">搜索</button></form><div id="case-list" class="ml-case-list"></div><button id="more-cases" class="btn ghost" hidden>加载更多</button></article></section>
   </main>
-  <script src="/theme.js"></script><script src="/layout.js"></script><script src="/dialog.js"></script><script type="module" src="/mingli/app.js?v=3"></script>
+  <script src="/theme.js"></script><script src="/layout.js"></script><script src="/dialog.js"></script><script type="module" src="/mingli/app.js?v=4"></script>
 </body>
 </html>
