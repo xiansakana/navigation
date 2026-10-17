@@ -1,0 +1,24 @@
+[Unit]
+Description=Navigation 115 original video storage
+After=network-online.target navigation-115-open.service
+Wants=network-online.target navigation-115-open.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/navigation
+ExecStart=/usr/bin/node /opt/navigation/scripts/knowledge-storage-worker.mjs
+Environment=KNOWLEDGE_STORAGE_CONFIG=/opt/navigation/portal/data/knowledge-storage.json
+Restart=on-failure
+RestartSec=15
+UMask=0077
+Nice=10
+CPUQuota=40%
+MemoryMax=256M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/navigation/data /opt/navigation/portal/data/knowledge
+
+[Install]
+WantedBy=multi-user.target

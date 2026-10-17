@@ -17,6 +17,7 @@ async function api(route, options = {}) {
 const send = (route, method, data = {}) => api(route, { method, body: JSON.stringify(data) });
 async function settings() {
   state.settings = await api('/settings');
+  text('storage-policy', state.settings.storage?.provider === '115' ? '原视频保存至115，上传和处理期间使用临时缓存。' : '原视频保存在服务器。');
   $('backend').value = state.settings.backend;
   $('backend').disabled = !can('settings:edit');
   const worker = state.settings.worker, c = worker.capabilities;
@@ -30,7 +31,7 @@ function renderList() {
   if (!state.documents.length) { const p = document.createElement('p'); p.className = 'kb-hint'; p.textContent = '还没有符合条件的内容。上传视频后会出现在这里。'; list.append(p); }
   for (const d of state.documents) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'kb-document' + (state.current?.id === d.id ? ' active' : '');
-    button.innerHTML = `<strong>${escape(d.title)}</strong><small>${escape(d.topic || '未分类')} · ${escape(d.stage)}${d.status === 'processing' ? ' ' + d.progress + '%' : ''}</small><p>${escape(d.preview || d.originalName)}</p>`;
+    button.innerHTML = `<strong>${escape(d.title)}</strong><small>${escape(d.topic || '未分类')} · ${escape(d.storage?.provider === '115' && d.storage.state !== 'ready' ? ({ waiting: '等待上传', pending: '等待保存至115', uploading: '正在保存至115', verifying: '校验原视频', verified: '清理临时原片', failed: '115保存待重试' })[d.storage.state] || d.stage : d.stage)}${d.status === 'processing' ? ' ' + d.progress + '%' : ''}</small><p>${escape(d.preview || d.originalName)}</p>`;
     button.addEventListener('click', () => open(d.id).catch(error)); list.append(button);
   }
   show('more', state.documents.length < state.total);
@@ -52,8 +53,15 @@ function tab(name) {
     button.setAttribute('aria-pressed', String(button.dataset.tab === name)); show(button.dataset.tab + '-view', button.dataset.tab === name && !state.editing);
   }
 }
+function renderStorage(d) {
+  const source = d.storage || { provider: 'local', state: 'local' };
+  const labels = { waiting: '等待视频上传', pending: '等待保存至115', uploading: '正在保存至115', verifying: '正在校验115原视频', verified: '115校验通过，正在清理临时原片', ready: '原视频已保存至115 · ECS原片已清理', failed: source.error || '115保存失败，临时原片已保留' };
+  text('storage-status', source.provider === '115' ? labels[source.state] || '正在保存至115' : '原视频保存在服务器');
+  show('storage-retry', source.state === 'failed' && can('storage:edit'));
+}
 function renderDocument(d) {
   state.current = d; state.editing = false; show('empty', false); show('detail', true); show('edit-form', false); show('tabs', true);
+  renderStorage(d);
   text('document-title', d.title);
   text('document-meta', `${d.topic || '未分类'} · ${time(d.duration)} · ${d.originalName} · ${d.backend === 'codex' ? 'Codex CLI' : '兼容 API'} · ${new Date(d.updatedAt).toLocaleString('zh-CN')}`);
   $('document-tags').innerHTML = d.tags.map(t => '<span>' + escape(t) + '</span>').join('');
@@ -94,7 +102,7 @@ async function open(id, quiet = false) {
   if (!quiet && state.editing && !window.confirm('当前编辑还未保存，放弃修改并打开其他笔记？')) return;
   const d = (await api('/documents/' + id)).document;
   if (quiet && state.current?.id !== id) return;
-  if (quiet && d.revision === state.current?.revision && d.status === state.current?.status) { state.current = d; text('job-status', d.error || d.stage + (d.status === 'processing' ? ' · ' + d.progress + '%' : '')); return; }
+  if (quiet && d.revision === state.current?.revision && d.status === state.current?.status) { state.current = d; renderStorage(d); text('job-status', d.error || d.stage + (d.status === 'processing' ? ' · ' + d.progress + '%' : '')); return; }
   renderDocument(d);
 }
 async function upload(event) {
@@ -129,7 +137,7 @@ async function upload(event) {
       const progress = Math.round((i + 1) / count * 100); $('upload-progress').value = progress; text('upload-status', `正在上传 ${progress}%`);
     }
     await send('/documents/' + item.id + '/complete', 'POST'); state.resume = null;
-    text('message', '视频已保存，工作器将按队列生成笔记。'); text('upload-status', '上传完成'); show('upload-panel', false); $('upload-form').reset();
+    text('message', state.settings.storage?.provider === '115' ? '上传完成，保存至115并校验后将自动生成笔记。' : '视频已保存，工作器将按队列生成笔记。'); text('upload-status', '上传完成'); show('upload-panel', false); $('upload-form').reset();
     await load(); await open(item.id);
   } catch (e) { error(e); text('upload-status', '上传未完成，可重新提交继续上传。'); await load().catch(() => {}); }
   finally { state.uploading = false; $('upload-submit').disabled = false; }
@@ -144,8 +152,8 @@ async function boot() {
     if (document.hidden || state.uploading) return;
     try {
       await settings();
-      if (can('notes:view') && state.documents.some(d => ['queued', 'processing', 'uploading'].includes(d.status))) await load();
-      if (!state.editing && state.current && ['queued', 'processing'].includes(state.current.status)) await open(state.current.id, true);
+      if (can('notes:view') && state.documents.some(d => ['queued', 'processing', 'uploading'].includes(d.status) || d.storage?.provider === '115' && d.storage.state !== 'ready')) await load();
+      if (!state.editing && state.current && (['queued', 'processing'].includes(state.current.status) || state.current.storage?.provider === '115' && state.current.storage.state !== 'ready')) await open(state.current.id, true);
     } catch { /* Keep existing content during temporary connection loss. */ }
   }, 5000);
 }
@@ -163,6 +171,7 @@ $('worker-token').onclick = async () => {
   try { const result = await send('/worker-token', 'POST'); $('new-token').value = result.token; show('token-result', true); await settings(); } catch (e) { error(e); }
 };
 $('tabs').onclick = event => { const button = event.target.closest('[data-tab]'); if (button) tab(button.dataset.tab); };
+$('storage-retry').onclick = async () => { try { await send('/documents/' + state.current.id + '/storage-retry', 'POST'); await open(state.current.id, true); await load(); } catch (e) { error(e); } };
 $('retry').onclick = async () => { try { await send('/documents/' + state.current.id + '/retry', 'POST', { backend: state.settings.backend }); await open(state.current.id); await load(); } catch (e) { error(e); } };
 $('resume-upload').onclick = () => { state.resume = state.current; $('upload-title').value = state.current.title; text('upload-heading', '继续上传：' + state.current.title); show('upload-panel', true); $('video-file').click(); };
 $('delete').onclick = async () => {

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createSourceStore } from './knowledge-source-store.js';
 
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
@@ -38,17 +39,18 @@ export function createKnowledgeStore(db) {
     CREATE TABLE IF NOT EXISTS knowledge_workers(user_id TEXT PRIMARY KEY,token_hash TEXT NOT NULL,last_seen TEXT,
       label TEXT NOT NULL DEFAULT '',capabilities_json TEXT NOT NULL DEFAULT '{}');`);
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'fingerprint')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''");
+  const sources = createSourceStore(db);
   const getRow = (uid, key) => db.prepare('SELECT * FROM knowledge_documents WHERE user_id=? AND id=?').get(uid, key);
   const read = row => row && ({ id: row.id, title: row.title, topic: row.topic, tags: JSON.parse(row.tags_json), sourceUrl: row.source_url,
     originalName: row.original_name, bytes: row.byte_size, mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, status: row.status,
     stage: row.stage, progress: row.progress, error: row.error, duration: row.duration, language: row.language, notes: row.notes,
     transcript: JSON.parse(row.transcript_json), frames: JSON.parse(row.frames_json), provenance: JSON.parse(row.provenance_json),
-    revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at });
-  const get = (uid, key) => read(getRow(uid, key));
+    storage: sources.public(row.user_id, row.id), revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at });
+  const get = (uid, key) => { const row = getRow(uid, key); return row && row.status !== 'deleting' ? read(row) : null; };
   const expire = uid => db.prepare("UPDATE knowledge_documents SET status='failed',stage='处理已中断',error='工作器超过15分钟未响应，请检查本机工作器后重试',lease=NULL,updated_at=? WHERE user_id=? AND status='processing' AND heartbeat<?")
     .run(now(), uid, new Date(Date.now() - 15 * 60000).toISOString());
   return {
-    get, getRow, expire,
+    get, getRow, expire, sources,
     settings(uid) { return { backend: db.prepare('SELECT backend FROM knowledge_settings WHERE user_id=?').get(uid)?.backend || 'codex' }; },
     saveSettings(uid, backend) {
       backendName(backend);
@@ -78,7 +80,7 @@ export function createKnowledgeStore(db) {
     list(uid, { search = '', topic = '', status = '', offset = 0, limit = 30, includeTranscript = true } = {}) {
       expire(uid);
       const pattern = '%' + String(search).slice(0, 120).replace(/[!%_]/g, '!$&') + '%';
-      let where = "user_id=? AND (title LIKE ? ESCAPE '!' OR notes LIKE ? ESCAPE '!' OR tags_json LIKE ? ESCAPE '!'" + (includeTranscript ? " OR transcript_json LIKE ? ESCAPE '!'" : '') + ')';
+      let where = "user_id=? AND status<>'deleting' AND (title LIKE ? ESCAPE '!' OR notes LIKE ? ESCAPE '!' OR tags_json LIKE ? ESCAPE '!'" + (includeTranscript ? " OR transcript_json LIKE ? ESCAPE '!'" : '') + ')';
       const args = [uid, pattern, pattern, pattern, ...(includeTranscript ? [pattern] : [])];
       if (topic) { where += ' AND topic=?'; args.push(String(topic).slice(0, 60)); }
       if (status) { where += ' AND status=?'; args.push(status); }
@@ -119,18 +121,22 @@ export function createKnowledgeStore(db) {
       db.prepare('UPDATE knowledge_documents SET progress=?,updated_at=? WHERE id=? AND user_id=?').run(Math.floor(uploaded / getRow(uid, key).byte_size * 100), now(), key, uid);
     },
     enqueue(uid, key) {
-      return db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待工作器',progress=0,error='',updated_at=? WHERE user_id=? AND id=? AND status='uploading'").run(now(), uid, key).changes > 0;
+      return db.transaction(() => {
+        const changed = db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待工作器',progress=0,error='',updated_at=? WHERE user_id=? AND id=? AND status='uploading'").run(now(), uid, key).changes > 0;
+        if (changed) sources.enqueue(uid, key);
+        return changed;
+      })();
     },
     claim(uid, backends) {
       expire(uid);
       return db.transaction(() => {
         if (db.prepare("SELECT 1 FROM knowledge_documents WHERE user_id=? AND status='processing'").get(uid)) return null;
-        const candidates = db.prepare("SELECT * FROM knowledge_documents WHERE user_id=? AND status='queued' ORDER BY created_at,id").all(uid);
+        const candidates = db.prepare("SELECT * FROM knowledge_documents WHERE user_id=? AND status='queued' AND NOT EXISTS (SELECT 1 FROM knowledge_sources s WHERE s.document_id=knowledge_documents.id AND s.state<>'ready') ORDER BY created_at,id").all(uid);
         const row = candidates.find(r => backends.includes(r.backend));
         if (!row) return null;
         const lease = crypto.randomBytes(24).toString('hex'), time = now();
         db.prepare("UPDATE knowledge_documents SET status='processing',stage='读取视频',progress=1,lease=?,heartbeat=?,updated_at=?,attempt=attempt+1 WHERE id=? AND status='queued'").run(lease, time, time, row.id);
-        return { ...get(uid, row.id), lease };
+        return { ...get(uid, row.id), sourceSha256: sources.get(uid, row.id)?.sha256 || '', lease };
       })();
     },
     leased(uid, key, lease) {
@@ -171,6 +177,7 @@ export function createKnowledgeStore(db) {
     remove(uid, key) {
       return db.transaction(() => {
         if (!getRow(uid, key)) return false;
+        sources.remove(uid, key);
         db.prepare('DELETE FROM knowledge_parts WHERE document_id=?').run(key);
         return db.prepare('DELETE FROM knowledge_documents WHERE user_id=? AND id=?').run(uid, key).changes > 0;
       })();

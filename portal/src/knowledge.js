@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { getDatabase } from '../../shared/db/index.js';
+import { storageConfig, sourcePath, proxySource } from './knowledge-storage.js';
 import { hasPermission } from './rbac.js';
 import { createKnowledgeStore, CHUNK_BYTES, MAX_VIDEO_BYTES } from './knowledge-store.js';
 
@@ -52,6 +53,11 @@ function stream(req, res, file, type, attachment = '') {
   const input = fs.createReadStream(file, { start, end });
   input.on('error', () => res.destroy()); res.on('close', () => input.destroy()); input.pipe(res);
 }
+async function serveSource(req, res, store, uid, id) {
+  const source = store.sources.get(uid, id), item = store.get(uid, id);
+  if (source && ['ready', 'verified'].includes(source.state)) return proxySource(req, res, uid, source, item.mimeType);
+  return stream(req, res, path.join(knowledgeDirectory(id), 'source'), item.mimeType);
+}
 export function validateKnowledgeResult(raw) {
   if (!raw || typeof raw !== 'object' || !Number.isFinite(raw.duration) || raw.duration <= 0 || raw.duration > 14400) throw new Error('视频时长无效或超过4小时');
   if (typeof raw.notes !== 'string' || raw.notes.trim().length < 40 || raw.notes.length > 500000) throw new Error('总结为空或过长');
@@ -95,7 +101,7 @@ export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = 
     const [, id, action] = match, lease = req.headers['x-knowledge-lease'];
     return await lock(id, async () => {
       if (!store.leased(uid, id, lease)) return json(res, 409, { ok: false, error: '任务已删除、过期或由其他工作器领取' });
-      if (action === 'source' && method === 'GET') return stream(req, res, path.join(knowledgeDirectory(id), 'source'), store.get(uid, id).mimeType);
+      if (action === 'source' && method === 'GET') return serveSource(req, res, store, uid, id);
       if (action === 'progress' && method === 'POST') {
         const input = await body(req, 4096); store.progress(uid, id, lease, input.stage, input.progress); return json(res, 200, { ok: true });
       }
@@ -120,12 +126,12 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
   res.setHeader('Cache-Control', 'no-store');
   if (!canKnowledge(session)) return json(res, 403, { ok: false, error: '请登录并获取知识库权限' });
   const route = url.pathname.slice('/api/knowledge'.length), method = req.method;
-  const document = /^\/documents\/([a-f0-9]{32})(?:\/(parts|complete|retry|source|export|frames)(?:\/([a-z0-9.-]+))?)?$/.exec(route);
+  const document = /^\/documents\/([a-f0-9]{32})(?:\/(parts|complete|retry|storage-retry|source|export|frames)(?:\/([a-z0-9.-]+))?)?$/.exec(route);
   const action = route === '/settings' ? method === 'GET' ? 'view' : 'settings:edit'
     : route === '/worker-token' && method === 'POST' ? 'worker:edit'
       : route === '/documents' ? method === 'GET' ? 'view' : 'upload:edit'
         : document ? method === 'GET' ? document[2] === 'export' ? 'export:view' : 'view'
-          : method === 'DELETE' ? 'delete:edit' : document[2] === 'retry' ? 'process:edit'
+          : method === 'DELETE' ? 'delete:edit' : document[2] === 'storage-retry' ? 'storage:edit' : document[2] === 'retry' ? 'process:edit'
             : document[2] ? 'upload:edit' : 'notes:edit' : null;
   if (!action) return json(res, 404, { ok: false, error: '知识库接口不存在' });
   if (!canKnowledge(session, action)) return json(res, 403, { ok: false, error: '无权执行此知识库操作' });
@@ -135,7 +141,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
   const store = createKnowledgeStore(getDatabase()), uid = session.userId;
   const visible = d => d && ({ ...d, transcript: canKnowledge(session, 'transcript:view') ? d.transcript : [], frames: canKnowledge(session, 'frames:view') ? d.frames : [] });
   try {
-    if (route === '/settings' && method === 'GET') return json(res, 200, { ok: true, ...store.settings(uid), worker: store.worker(uid), chunkBytes: CHUNK_BYTES, maxBytes: MAX_VIDEO_BYTES });
+    if (route === '/settings' && method === 'GET') return json(res, 200, { ok: true, ...store.settings(uid), storage: { provider: storageConfig(uid) ? '115' : 'local' }, worker: store.worker(uid), chunkBytes: CHUNK_BYTES, maxBytes: MAX_VIDEO_BYTES });
     if (route === '/settings' && method === 'PUT') return json(res, 200, { ok: true, ...store.saveSettings(uid, (await body(req, 4096)).backend) });
     if (route === '/worker-token' && method === 'POST') return json(res, 200, { ok: true, token: store.rotateToken(uid) });
     if (route === '/documents' && method === 'GET') return json(res, 200, { ok: true, ...store.list(uid, {
@@ -148,8 +154,10 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
       if (!canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '上传视频还需生成笔记权限' });
       await fsp.mkdir(root(), { recursive: true, mode: 0o700 });
       const disk = await fsp.statfs(root());
-      if (Number(input.bytes) * 2 + 256 * 1024 * 1024 > disk.bavail * disk.bsize) throw new Error('服务器可用空间不足');
+      if (Number(input.bytes) * 3 + 5 * 1024 ** 3 + getDatabase().prepare("SELECT coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE status='uploading'").get().bytes * 2 > disk.bavail * disk.bsize) throw new Error('服务器可用空间不足');
+      const config = storageConfig(uid);
       const item = store.create(uid, input);
+      if (config) { store.sources.add(uid, item.id, sourcePath(config, uid, item)); item.storage = store.sources.public(uid, item.id); }
       try { await fsp.mkdir(knowledgeDirectory(item.id), { recursive: true, mode: 0o700 }); }
       catch (e) { store.remove(uid, item.id); throw e; }
       return json(res, 201, { ok: true, document: item, chunkBytes: CHUNK_BYTES });
@@ -167,6 +175,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
         return json(res, 200, { ok: true, document: visible(store.edit(uid, id, await body(req))) });
       }
       if (!operation && method === 'DELETE') {
+        if (store.sources.deleting(uid, id)) return json(res, 200, { ok: true });
         store.remove(uid, id);
         await fsp.rm(directory, { recursive: true, force: true });
         return json(res, 200, { ok: true });
@@ -201,7 +210,11 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
         if (!store.retry(uid, id, input.backend || store.settings(uid).backend)) return json(res, 409, { ok: false, error: '仅失败任务可以重试' });
         return json(res, 202, { ok: true, document: store.get(uid, id) });
       }
-      if (operation === 'source' && method === 'GET') return stream(req, res, path.join(directory, 'source'), item.mimeType);
+      if (operation === 'storage-retry' && method === 'POST') {
+        if (!store.sources.retry(uid, id)) return json(res, 409, { ok: false, error: '仅保存失败的视频可以重试' });
+        return json(res, 202, { ok: true, document: visible(store.get(uid, id)) });
+      }
+      if (operation === 'source' && method === 'GET') return serveSource(req, res, store, uid, id);
       if (operation === 'frames' && method === 'GET' && item.frames.some(f => f.name === part)) return stream(req, res, path.join(directory, part), 'image/jpeg');
       if (operation === 'export' && method === 'GET') {
         const text = `# ${item.title}\n\n来源：${item.sourceUrl || item.originalName}\n生成后端：${item.provenance.backend || item.backend} / ${item.provenance.model || '未生成'}\n\n${item.notes}\n`;

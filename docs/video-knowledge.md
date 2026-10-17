@@ -111,11 +111,31 @@ pm2 start scripts/knowledge-worker.mjs --name knowledge-worker -- portal/knowled
 
 ## 存储与部署
 
-共享SQLite：`knowledge_documents`、`knowledge_parts`、`knowledge_settings`、`knowledge_workers`，均按 Portal 用户隔离。表在首次访问创建，不需要单独手工SQL迁移。
+共享SQLite：`knowledge_documents`、`knowledge_parts`、`knowledge_settings`、`knowledge_workers`、`knowledge_sources`，均按 Portal 用户隔离。表在首次访问创建，不需要单独手工SQL迁移。
 
-服务端文件：`portal/data/knowledge/<32位文档ID>/`。工作器临时缓存默认 `portal/data/knowledge-worker/`。SQLite备份只包含文本和索引，**完整备份还必须包含服务端视频/截图目录**；工作器临时目录无需作为知识库备份。
+服务端文件：`portal/data/knowledge/<32位文档ID>/`。工作器临时缓存默认 `portal/data/knowledge-worker/`。SQLite备份包含文本和索引，完整备份还必须包含截图目录和实际原视频存储（启用115后为网盘目录）；工作器临时目录无需作为知识库备份。
 
-本次部署只需 `portal`。Nginx更新由现有 `scripts/sync-blog-upload-nginx.py` 管理，增加 `/api/knowledge/` 的20MB请求上限和流式代理，覆盖4MB分片及18MB以内的结果包；合并视频保留在服务器。常规部署仍遵守推送、ECS拉取及`--expected-sha`校验流程。
+本次部署只需 `portal`，并单独安装/重启两个工作器服务。Nginx更新由现有 `scripts/sync-blog-upload-nginx.py` 管理，增加 `/api/knowledge/` 的20MB请求上限和流式代理，覆盖4MB分片及18MB以内的结果包。常规部署仍遵守推送、ECS拉取及`--expected-sha`校验流程。
+
+### 115原视频存储
+
+通过仅监听回环地址的 OpenList v4.2.7「115 Open」驱动接入用户授权的115账号，独立于已有AList挂载。授权和刷新由OpenList维护；不要把刷新令牌或管理令牌放入代码、日志或浏览器。参考[驱动文档](https://doc.oplist.org/guide/drivers/115_open)及[官方上传实现](https://github.com/OpenListTeam/OpenList/blob/v4.2.7/drivers/115_open/driver.go)。
+
+创建私有 `portal/data/knowledge-storage.json`（权限600），也可用 `KNOWLEDGE_STORAGE_CONFIG` 指定：
+
+```json
+{"users":{"Portal用户ID":{"baseUrl":"http://127.0.0.1:15244","token":"OpenList私有管理令牌","rootPath":"/115/Navigation-Knowledge"}}}
+```
+
+这是服务端凭据配置；任务状态、归档索引和归属均保存在共享SQLite。只为绑定的Portal账号启用115，其他账号保持原有存储，避免把他人视频上传到同一个私人网盘。原片路径为配置根目录/账号哈希/文档ID/source.mp4（或webm/mov）。不要直接重命名网盘目录或删除原片，操作应通过知识库完成。
+
+准备私有配置与回环OpenList服务后，安装 `scripts/knowledge-storage-worker.service.example` 为systemd服务并启用。先部署代码，再运行 `node scripts/knowledge-storage-worker.mjs --migrate`，将已配置账号的已有原片加入归档队列；不会重新生成笔记。OpenList服务也需开机启用。检查 `systemctl status navigation-115-open knowledge-storage-worker knowledge-worker`。
+
+上传流程：4MB分片可续传 → ECS合并临时原片 → 后台上传115 → 从115完整下载并比对字节数和SHA256 → 记录校验检查点 → 删除ECS原片 → 总结工作器领取任务。ECS仍承接上传、校验和转写期间的临时空间，上传检查至少保留5GB系统余量。115云端上传失败后会重新发送完整文件；工作器下载支持Range续传及完整哈希验证。已经提取素材的重试复用素材，提取成功后清理工作器原片缓存。
+
+归档任务独立于总结任务，15秒心跳，失联2分钟可重新领取；失败最多自动尝试5次并退避，页面提供独立权限的手动重试。远端已有同一路径时先复核，避免重启产生重复文件。校验不一致或网盘不可用时保留本地临时原片，停止进入总结队列。已校验检查点支持重启恢复清理。
+
+回看通过原有受鉴权接口流式代理115，支持Range拖动；浏览器得不到管理令牌、对象路径或签名下载URL。删除先持久化待删除状态并从列表隐藏，再由存储工作器清理115对应文档目录、本地截图和数据库记录；失败保留清理状态重试。正在归档的原片需等当前任务结束后删除。达到自动重试上限的删除任务可通过运维检查 `knowledge_sources` 的 `deleting` 状态处理，不会静默遗忘远端文件。
 
 ## 验证
 

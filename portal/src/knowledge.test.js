@@ -64,6 +64,23 @@ test('knowledge routes, per-action permissions, default member grants and guest 
   });
 });
 
+test('115 source status is private to owner and archive retry enforces its own permission', async () => fixture(async ({ call, store }) => {
+  const item = store.create('a', upload());
+  store.sources.add('a', item.id, '/115/private/object', 'pending');
+  const source = store.sources.claim();
+  store.sources.update(source, { state: 'failed', error: 'safe error' }); store.sources.release(source);
+  const route = '/documents/' + item.id;
+  assert.equal((await call(route, { session: member('b') })).status, 404);
+  const publicDocument = (await call(route)).payload.document;
+  assert.equal(publicDocument.storage.provider, '115');
+  assert.ok(!JSON.stringify(publicDocument).includes('/115/private'));
+  assert.equal((await call(route + '/storage-retry', { method: 'POST', session: { userId: 'a', permissions: ['knowledge:view', 'knowledge:upload:edit'] } })).status, 403);
+  assert.equal((await call(route + '/storage-retry', { method: 'POST', session: member('b') })).status, 404);
+  assert.equal((await call(route + '/storage-retry', { method: 'POST' })).status, 202);
+  assert.equal(store.sources.get('a', item.id).state, 'pending');
+  assert.equal((await call(route + '/storage-retry', { method: 'POST' })).status, 409);
+}));
+
 test('upload, range playback, durable jobs, owner isolation, worker leases, edits and deletion', async () => fixture(async ({ call, store, db }) => {
   const created = await call('/documents', { method: 'POST', data: upload({ userId: 'b', bytes: CHUNK_BYTES + 24 }) });
   assert.equal(created.status, 201); const id = created.payload.document.id;

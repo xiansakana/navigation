@@ -3,8 +3,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Readable, Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
+import { downloadVideo } from '../portal/src/knowledge-download.js';
 import { runProcess, summarizeVideo, modelConfiguration } from '../portal/src/knowledge-model.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -22,9 +21,9 @@ const python = config.python || (process.platform === 'win32' ? 'python.exe' : '
 let stopped = false, activeController = null;
 for (const event of ['SIGINT', 'SIGTERM']) process.on(event, () => { stopped = true; activeController?.abort(); });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function request(route, { data, method, lease, signal, raw = false } = {}) {
+async function request(route, { data, method, lease, signal, raw = false, headers = {} } = {}) {
   const response = await fetch(new URL('/api/knowledge/worker' + route, portal), { method: method || (data === undefined ? 'GET' : 'POST'), redirect: 'error',
-    headers: { Authorization: 'Bearer ' + token, ...(lease ? { 'X-Knowledge-Lease': lease } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    headers: { ...headers, Authorization: 'Bearer ' + token, ...(lease ? { 'X-Knowledge-Lease': lease } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body: data === undefined ? undefined : JSON.stringify(data), signal: AbortSignal.any([AbortSignal.timeout(raw ? 900000 : 60000), ...(signal ? [signal] : [])]) });
   if (!response.ok) {
     const error = new Error('Portal 返回 HTTP ' + response.status);
@@ -51,15 +50,7 @@ async function capabilities() {
   return result;
 }
 async function download(job, directory, signal) {
-  const target = path.join(directory, 'source');
-  if (fs.existsSync(target) && fs.statSync(target).size === job.bytes) return target;
-  const response = await request('/jobs/' + job.id + '/source', { lease: job.lease, raw: true, signal });
-  let count = 0;
-  const limiter = new Transform({ transform(chunk, _, callback) { count += chunk.length; callback(count > job.bytes ? new Error('视频超过声明大小') : null, chunk); } });
-  await pipeline(Readable.fromWeb(response.body), limiter, fs.createWriteStream(target + '.tmp'), { signal });
-  if (count !== job.bytes) throw new Error('视频下载不完整');
-  await fsp.rename(target + '.tmp', target);
-  return target;
+  return downloadVideo(job, path.join(directory, 'source'), range => request('/jobs/' + job.id + '/source', { lease: job.lease, raw: true, signal, headers: range ? { Range: range } : {} }), signal);
 }
 async function processJob(job) {
   if (!/^[a-f0-9]{32}$/.test(job.id) || !Number.isSafeInteger(job.bytes) || job.bytes > 1024 ** 3) throw new Error('服务器任务格式无效');
@@ -85,8 +76,9 @@ async function processJob(job) {
   }, 20000);
   try {
     console.log(new Date().toISOString(), '领取任务', job.id, job.backend);
-    const input = await download(job, directory, signal), evidenceFile = path.join(directory, 'evidence.json');
+    const evidenceFile = path.join(directory, 'evidence.json');
     if (!fs.existsSync(evidenceFile)) {
+      const input = await download(job, directory, signal);
       const args = [path.join(repo, 'portal/workers/video_evidence.py'), '--input', input, '--output', directory,
         '--ffmpeg', config.ffmpeg || 'ffmpeg', '--model', config.asr?.model || 'small', '--device', config.asr?.device || 'cpu',
         '--threads', String(config.asr?.threads || 2)];
@@ -100,6 +92,7 @@ async function processJob(job) {
           } catch { /* Library diagnostics are not protocol messages. */ }
         } });
     }
+    if (job.storage?.provider === '115' && job.storage.state === 'ready') await fsp.rm(path.join(directory, 'source'), { force: true });
     const evidence = JSON.parse(await fsp.readFile(evidenceFile, 'utf8'));
     const summary = await summarizeVideo(config, job, evidence, directory, update, signal);
     const frames = [];
