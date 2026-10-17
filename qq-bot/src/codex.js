@@ -2,6 +2,7 @@ import { getDatabase, loadRbacBlob } from '../../shared/db/index.js';
 import { hasPermission, resolveUserPermissions } from '../../portal/src/rbac.js';
 import { createCodexStore } from './codex-store.js';
 import { executeCodex, projectConfig } from './codex-runner.js';
+import { isUsageQuery } from './codex-usage.js';
 
 export function codexEvent(event) {
   if (!event || event.post_type !== 'message' || !['private', 'group'].includes(event.message_type) || String(event.user_id) === String(event.self_id) || !Array.isArray(event.message)) return null;
@@ -20,7 +21,7 @@ export function authorizedCodexUser(config, qq, db) {
   if (!account || account.enabled === false || account.username === 'guest' || !hasPermission(resolveUserPermissions(rbac, account), 'qq-codex:execute')) return null;
   return user;
 }
-const help = 'QQ Codex（私聊 / 授权群中@机器人）\ncodex 项目：列出可用项目\ncodex navigation 你的任务：执行任务\ncodex 你的任务：使用默认项目\ncodex 状态：查看当前及最近结果\ncodex 结果：重新读取最近完整结果\ncodex 停止：停止自己的任务\ncodex 同步 [项目]：从Git同步代码和AGENTS.md\ncodex 新会话 [项目]：开始独立的新会话\n群号和结果发送方式可在通知管理的QQ Codex区域配置。群聊会话与私聊隔离。代码通过Git同步，会话仅在QQ端保留。任务结果返回Git提交；电脑 git pull --ff-only 即可取回代码。';
+const help = 'QQ Codex（私聊 / 授权群中@机器人）\ncodex 项目：列出可用项目\ncodex navigation 你的任务：执行任务\ncodex 你的任务：使用默认项目\ncodex 状态：查看当前及最近结果\ncodex 额度：查询5小时、周剩余额度和北京时间重置时间\ncodex 结果：重新读取最近完整结果\ncodex 停止：停止自己的任务\ncodex 同步 [项目]：从Git同步代码和AGENTS.md\ncodex 新会话 [项目]：开始独立的新会话\n群号和结果发送方式可在通知管理的QQ Codex区域配置。群聊会话与私聊隔离。代码通过Git同步，会话仅在QQ端保留。任务结果返回Git提交；电脑 git pull --ff-only 即可取回代码。';
 
 export function createCodexService({ getConfig, send, store: injectedStore, authorize, execute = executeCodex, log = console }) {
   let store = injectedStore, timer, controller, busy = false, delivering = false, stopped = true;
@@ -65,6 +66,7 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
           if (!names.includes(project)) throw new Error('项目不存在或未授权');
           projectConfig(config, project);
           if (!prompt || prompt.length > 20000) throw new Error('请输入1—20000字的任务');
+          if (isUsageQuery(prompt)) prompt = '__usage__';
           const id = s.enqueue(user.userId, event.qqId, event.key, project, prompt, group);
           reply('已接收 Codex ' + id.slice(0, 8) + ' · ' + project + '\n任务在后台执行，可发送 codex 状态 或 codex 停止。');
         }

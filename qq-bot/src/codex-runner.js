@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { readCodexUsage, formatCodexUsage } from './codex-usage.js';
 
 export function runCommand(binary, args, { cwd, input, signal, timeout = 120000, env = process.env, onEvent } = {}) {
   return new Promise((resolve, reject) => {
@@ -69,7 +70,8 @@ export async function syncProject(p, signal, { continuing = false } = {}) {
   await fs.access(path.join(p.directory, 'AGENTS.md'));
   return git(['rev-parse', 'HEAD']);
 }
-export async function executeCodex(config, job, sessionId, { signal, onSession = () => {}, command = runCommand } = {}) {
+export async function executeCodex(config, job, sessionId, { signal, onSession = () => {}, command = runCommand, readUsage = readCodexUsage } = {}) {
+  if (job.prompt === '__usage__') return { result: formatCodexUsage(await readUsage(config, { signal })) };
   const p = projectConfig(config, job.project);
   let session = sessionId || '', result = '', turnCompleted = false;
   const prompt = `你通过 QQ 为已授权的项目所有者执行任务。本会话与用户电脑上的会话独立。\n工作区：${p.directory}；Git远端分支：${p.branch}。先阅读并遵守工作区 AGENTS.md 和相关子目录指令。\n这里是本任务的开发检出；生产检出 /opt/navigation 不作为编辑目录。除非本条用户任务明确要求部署，不部署或重启生产服务。\n修改完成后执行相关测试，按仓库规则提交并推送当前分支；不要重置、强推或覆盖并发提交。不要提交登录凭据、配置秘密、数据库、上传文件或运行缓存。\n若任务失败或被取消，保留已有修改。最终用中文说明结果、测试和 Git 提交。不要通过其他渠道发送消息，由 QQ 入口转发最终回复。\n\n用户任务：\n${job.prompt}`;

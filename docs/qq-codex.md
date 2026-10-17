@@ -14,6 +14,7 @@ codex 项目
 codex navigation 检查知识库的最近修改，运行相关测试并修复问题
 codex 继续上一项任务
 codex 状态
+codex 额度
 codex 结果
 codex 停止
 codex 同步 navigation
@@ -21,6 +22,8 @@ codex 新会话 navigation
 ```
 
 新会话不会删除已有代码。任务按队列逐个执行，最多5个等待或执行中的任务。回复较长时分段发送，`codex 结果`可以重新读取最近结果。QQ回执失败会退避重试；极端情况下发送后落库前中断可能出现重复回执，但同一入站事件不会重复创建任务。
+
+`codex 额度`（也支持 `codex 用量`、`codex /status` 或 `codex 还剩多少周额度和5h额度，啥时候重置`）通过服务器已登录的 Codex CLI App Server `account/rateLimits/read` 实时查询，不调用模型、不拉取或推送Git、不改变原QQ会话。可指定项目，例如 `codex navigation 额度`。查询沿用任务队列、权限和结果投递设置；有任务执行时需等待，`codex 结果`可重读查询结果。返回5小时及周额度的剩余百分比和北京时间重置时间，多额度池分别展示；接口未返回的窗口标为“未提供”。查询的是QQ服务器账号，不保证与电脑登录账号相同。仅查询，不兑换或重置额度。接口文档：[Codex App Server](https://learn.chatgpt.com/docs/app-server#6-rate-limits-chatgpt)。
 
 ## 通知管理中的群聊配置
 
