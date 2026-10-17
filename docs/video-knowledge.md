@@ -85,6 +85,19 @@ pm2 start scripts/knowledge-worker.mjs --name knowledge-worker -- portal/knowled
 
 首次运行语音模型可能需要下载。`asr.model` 可以填已下载的 CTranslate2 模型目录；`asr.modelCache` 可固定缓存目录。未安装转写依赖、CLI未登录或API未配置时，工作器只报告状态，不领取不具备条件的任务。状态中的“可用”是安装/登录或配置检查，模型网络在实际任务中验证。
 
+### ECS 后台运行与 CordCloud 代理
+
+无桌面服务器可使用 CordCloud 官方提供的 Clash 通用订阅配合 Mihomo 核心，按[官方 systemd 文档](https://wiki.metacubex.one/startup/service/)运行。当前部署使用已核验发布包 SHA256 的 Mihomo v1.19.32；没有安装图形客户端。订阅、节点口令和 Codex 登录缓存均为运行时私有文件，不进入 Git。
+
+- `cordcloud-proxy.service` 开机启动；HTTP/SOCKS 混合端口为 `127.0.0.1:17890`，管理端口为 `127.0.0.1:19090`，管理接口另有随机密钥。未开放公网端口、TUN或全局系统路由。
+- 代理配置位于 `/etc/cordcloud-proxy/config.yaml`，仅 root 与服务组可读；包含本次从官方订阅取得的节点快照。供应商变更节点后，需要重新取得订阅并更新此文件，随后重启代理。
+- root 可使用 `codex-via-proxy` 启动已登录的 CLI；它读取 `/root/.config/cordcloud-proxy.env`，只影响本次进程。工作器使用私有配置中的 `codex.proxyUrl`。
+- ECS 工作器私有配置位于 `/etc/knowledge-worker/config.json`，任务缓存和预下载模型位于 `/var/lib/knowledge-worker/`。配置中的令牌须来自对应用户的知识库页面；更换网页令牌后同步更新此文件。
+- Python 3.11 与独立虚拟环境用于 CPU 转写，线程数为1。`scripts/knowledge-worker.service.example` 给出了开机服务及CPU/内存限制；配置、模型和目录准备好后，再将其安装为 `/etc/systemd/system/knowledge-worker.service` 并启用。服务在 Portal 以外运行，单独重启不会重启网站。
+- 同一账号的工作器共享队列，同一时间只领取一个任务。本机 GPU 与服务器同时在线时，下一个任务由先领取者处理；并不自动优先 GPU。
+
+运维检查：`systemctl status cordcloud-proxy knowledge-worker`；工作器日志为 `journalctl -u knowledge-worker`。代理是否在线与 CLI 是否登录需要分别验证；本次已通过服务器代理执行真实 CLI 短提示。
+
 ## 权限、隐私与恢复
 
 - 所有 `knowledge:*` 权限目录位于「首页 → 知识库」。普通登录用户默认拥有自己的知识库权限；游客禁止访问。

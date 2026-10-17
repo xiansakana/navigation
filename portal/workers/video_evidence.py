@@ -22,6 +22,16 @@ def command(args):
         raise RuntimeError('FFmpeg 处理失败：' + p.stderr.decode('utf8', errors='replace')[-800:])
 
 
+def append_segment(transcript, start, end, text, duration):
+    end = min(end, duration)
+    if not text.strip() or transcript and end <= transcript[-1]['end']:
+        return
+    if transcript:
+        start = max(start, transcript[-1]['end'])
+    if start < end:
+        transcript.append({'start': round(start, 3), 'end': round(end, 3), 'text': text.strip()})
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', required=True)
@@ -121,13 +131,11 @@ def main():
                 detected = info.language
                 for segment in segments:
                     absolute_start, absolute_end = offset + segment.start, offset + segment.end
-                    if not segment.text.strip() or transcript and absolute_start < transcript[-1]['end']:
-                        continue
-                    transcript.append({'start': round(absolute_start, 3), 'end': round(min(absolute_end, duration), 3), 'text': segment.text.strip()})
+                    append_segment(transcript, absolute_start, absolute_end, segment.text, duration)
                     emit('语音转写', 18 + min(45, int(absolute_end / duration * 45)))
                 if start + len(audio) >= total:
                     break
-                start += 16000 * 598  # two-second overlap; discard already covered segments
+                start += 16000 * 598  # overlap: skip fully covered segments, retain new speech
         audio_path.unlink(missing_ok=True)
         if not transcript:
             warnings.append('未识别到有效语音；笔记仅能依据抽取画面。')

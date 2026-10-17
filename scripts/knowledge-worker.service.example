@@ -1,0 +1,24 @@
+[Unit]
+Description=Navigation video knowledge worker
+After=network-online.target cordcloud-proxy.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/navigation
+ExecStart=/usr/bin/node /opt/navigation/scripts/knowledge-worker.mjs /etc/knowledge-worker/config.json
+Restart=on-failure
+RestartSec=15
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/root
+Nice=10
+CPUQuota=80%
+MemoryHigh=900M
+MemoryMax=1200M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/knowledge-worker /root/.codex
+
+[Install]
+WantedBy=multi-user.target
