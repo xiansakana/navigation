@@ -105,7 +105,7 @@ export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = 
       if (action === 'complete' && method === 'POST') {
         const result = validateKnowledgeResult(await body(req, 18 * 1024 * 1024));
         const directory = knowledgeDirectory(id);
-        await fsp.mkdir(directory, { recursive: true });
+        await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
         for (const f of result.frames) await fsp.writeFile(path.join(directory, f.name), f.data);
         result.frames = result.frames.map(({ data, ...f }) => f);
         if (!store.finish(uid, id, lease, result)) return json(res, 409, { ok: false, error: '任务已过期' });
@@ -146,11 +146,11 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
     if (route === '/documents' && method === 'POST') {
       const input = await body(req, 8192);
       if (!canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '上传视频还需生成笔记权限' });
-      await fsp.mkdir(root(), { recursive: true });
+      await fsp.mkdir(root(), { recursive: true, mode: 0o700 });
       const disk = await fsp.statfs(root());
       if (Number(input.bytes) * 2 + 256 * 1024 * 1024 > disk.bavail * disk.bsize) throw new Error('服务器可用空间不足');
       const item = store.create(uid, input);
-      try { await fsp.mkdir(knowledgeDirectory(item.id), { recursive: true }); }
+      try { await fsp.mkdir(knowledgeDirectory(item.id), { recursive: true, mode: 0o700 }); }
       catch (e) { store.remove(uid, item.id); throw e; }
       return json(res, 201, { ok: true, document: item, chunkBytes: CHUNK_BYTES });
     }

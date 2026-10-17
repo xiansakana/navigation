@@ -17,7 +17,7 @@ if (portal.username || portal.password || portal.search || portal.hash || portal
 const token = process.env.KNOWLEDGE_WORKER_TOKEN || config.token;
 if (!/^nkw_[a-f0-9]{64}$/.test(token || '')) throw new Error('工作器凭据无效，请在知识库设置中生成');
 const workRoot = path.resolve(config.workDir || path.join(repo, 'portal/data/knowledge-worker'));
-await fsp.mkdir(workRoot, { recursive: true });
+await fsp.mkdir(workRoot, { recursive: true, mode: 0o700 });
 const python = config.python || (process.platform === 'win32' ? 'python.exe' : 'python3');
 let stopped = false, activeController = null;
 for (const event of ['SIGINT', 'SIGTERM']) process.on(event, () => { stopped = true; activeController?.abort(); });
@@ -64,7 +64,7 @@ async function download(job, directory, signal) {
 async function processJob(job) {
   if (!/^[a-f0-9]{32}$/.test(job.id) || !Number.isSafeInteger(job.bytes) || job.bytes > 1024 ** 3) throw new Error('服务器任务格式无效');
   const directory = path.join(workRoot, job.id);
-  await fsp.mkdir(directory, { recursive: true });
+  await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
   activeController = new AbortController();
   const { signal } = activeController;
   let state = { stage: '下载视频', progress: 2 }, lastProgress = 0;
