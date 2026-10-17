@@ -7,10 +7,19 @@ export function createSourceStore(db) {
     verified_at TEXT,error TEXT NOT NULL DEFAULT '',attempts INTEGER NOT NULL DEFAULT 0,
     lease TEXT,heartbeat INTEGER NOT NULL DEFAULT 0,next_retry INTEGER NOT NULL DEFAULT 0);
     CREATE INDEX IF NOT EXISTS knowledge_source_queue ON knowledge_sources(state,next_retry);`);
+  const columns = new Set(db.prepare('PRAGMA table_info(knowledge_sources)').all().map(c => c.name));
+  for (const column of ['upload_started_at', 'upload_ms', 'verification_started_at', 'verification_ms']) {
+    if (!columns.has(column)) db.exec(`ALTER TABLE knowledge_sources ADD COLUMN ${column} INTEGER NOT NULL DEFAULT 0`);
+  }
   const get = (uid, id) => db.prepare('SELECT * FROM knowledge_sources WHERE user_id=? AND document_id=?').get(uid, id);
   return {
     get,
-    public(uid, id) { const s = get(uid, id); return s ? { provider: '115', state: s.state, error: s.error, verifiedAt: s.verified_at } : { provider: 'local', state: 'local' }; },
+    public(uid, id) {
+      const s = get(uid, id);
+      return s ? { provider: '115', state: s.state, error: s.error, verifiedAt: s.verified_at,
+        timings: { uploadMs: s.state === 'uploading' && s.upload_started_at ? Date.now() - s.upload_started_at : s.upload_ms,
+          verificationMs: s.state === 'verifying' && s.verification_started_at ? Date.now() - s.verification_started_at : s.verification_ms } } : { provider: 'local', state: 'local' };
+    },
     add(uid, id, objectPath, state = 'waiting') { db.prepare('INSERT OR IGNORE INTO knowledge_sources(document_id,user_id,object_path,state) VALUES (?,?,?,?)').run(id, uid, objectPath, state); },
     enqueue(uid, id) { db.prepare("UPDATE knowledge_sources SET state='pending' WHERE user_id=? AND document_id=? AND state='waiting'").run(uid, id); },
     retry(uid, id) { return db.prepare("UPDATE knowledge_sources SET state='pending',attempts=0,next_retry=0,error='' WHERE user_id=? AND document_id=? AND state='failed'").run(uid, id).changes > 0; },
@@ -37,7 +46,7 @@ export function createSourceStore(db) {
       })();
     },
     update(s, values) {
-      const allowed = ['state', 'sha1', 'sha256', 'verified_at', 'error', 'next_retry'];
+      const allowed = ['state', 'sha1', 'sha256', 'verified_at', 'error', 'next_retry', 'upload_started_at', 'upload_ms', 'verification_started_at', 'verification_ms'];
       const entries = Object.entries(values).filter(([key]) => allowed.includes(key));
       return db.prepare('UPDATE knowledge_sources SET heartbeat=?' + entries.map(([key]) => ',' + key + '=?').join('') + ' WHERE document_id=? AND lease=?')
         .run(Date.now(), ...entries.map(([, value]) => value), s.document_id, s.lease).changes > 0;

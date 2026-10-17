@@ -167,6 +167,9 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
     }
     if (!document) return json(res, 405, { ok: false, error: '不支持此请求方法' });
     const [, id, operation, part] = document;
+    // Receive concurrent chunk bodies before the document mutation lock. File commits,
+    // completion and deletion remain serialized so no upload can recreate deleted data.
+    const partData = operation === 'parts' && method === 'PUT' ? await bytes(req, CHUNK_BYTES) : null;
     return await lock(id, async () => {
       store.expire(uid);
       const item = store.get(uid, id);
@@ -187,7 +190,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
       if (operation === 'parts' && method === 'PUT') {
         const number = Number(part), count = Math.ceil(item.bytes / CHUNK_BYTES);
         if (item.status !== 'uploading' || !Number.isInteger(number) || number < 1 || number > count) throw new Error('分片编号或上传状态无效');
-        const data = await bytes(req, CHUNK_BYTES);
+        const data = partData;
         if (data.length !== (number === count ? item.bytes - (number - 1) * CHUNK_BYTES : CHUNK_BYTES)) throw new Error('分片大小不符');
         if (number === 1 && !(item.mimeType === 'video/webm' ? data.subarray(0, 4).equals(Buffer.from([26, 69, 223, 163])) : data.toString('ascii', 4, 8) === 'ftyp')) throw new Error('视频内容与格式不符');
         const temp = path.join(directory, 'part-' + number + '.' + crypto.randomBytes(6).toString('hex'));

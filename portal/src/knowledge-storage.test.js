@@ -80,7 +80,10 @@ test('streamed upload requires full SHA256 verification before local cleanup; re
   s = store.sources.claim(); await archiveSource(storage, store.sources, s, file); store.sources.release(s);
   assert.equal(uploads(), 1); await assert.rejects(fs.access(file));
   const source = store.sources.get('owner', item.id); assert.equal(source.state, 'ready'); assert.ok(source.verified_at);
-  assert.deepEqual(Object.keys(store.get('owner', item.id).storage).sort(), ['error', 'provider', 'state', 'verifiedAt']);
+  assert.deepEqual(Object.keys(store.get('owner', item.id).storage).sort(), ['error', 'provider', 'state', 'timings', 'verifiedAt']);
+  assert.ok(source.upload_started_at > 0 && source.verification_started_at > 0);
+  assert.ok(source.upload_ms >= 0 && source.verification_ms >= 0);
+  assert.deepEqual(store.get('owner', item.id).storage.timings, { uploadMs: source.upload_ms, verificationMs: source.verification_ms });
 }));
 
 test('verified checkpoint recovers cleanup after process restart without original', async () => fixture(async ({ store, item, file, data, storage, remote }) => {

@@ -36,7 +36,7 @@ async function fixture(fn) {
     const payload = response.headers.get('content-type')?.includes('json') ? await response.json() : Buffer.from(await response.arrayBuffer());
     return { status: response.status, payload, headers: response.headers };
   };
-  try { await fn({ call, store: createKnowledgeStore(getDatabase()), db: getDatabase(), root }); }
+  try { await fn({ call, store: createKnowledgeStore(getDatabase()), db: getDatabase(), root, origin, server }); }
   finally {
     await new Promise(resolve => server.close(resolve)); closeDatabase();
     for (const [key, value] of [['NAVIGATION_DB_PATH', previous.db], ['KNOWLEDGE_DATA_DIR', previous.dir]]) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
@@ -139,6 +139,24 @@ test('expired and revoked worker leases cannot overwrite retried or deleted docu
   assert.equal(store.progress('a', d.id, current.lease, '迟到进度', 80), false);
   const token = store.rotateToken('revoked');
   assert.equal((await call('/worker/heartbeat', { method: 'POST', data: {}, token })).status, 403);
+}));
+
+test('a slow chunk body does not block another chunk and merged playback remains byte-identical', async () => fixture(async ({ call, origin, server }) => {
+  const created = await call('/documents', { method: 'POST', data: upload({ bytes: CHUNK_BYTES + 24 }) });
+  assert.equal(created.status, 201);
+  const route = '/documents/' + created.payload.document.id, data = video(CHUNK_BYTES + 24);
+  const arrived = new Promise(resolve => server.once('request', req => req.once('data', resolve)));
+  const slow = http.request(origin + '/api/knowledge' + route + '/parts/1', { method: 'PUT', headers: { 'Content-Length': CHUNK_BYTES } });
+  const completed = new Promise((resolve, reject) => { slow.on('response', res => { res.resume(); res.on('end', () => resolve(res.statusCode)); }); slow.on('error', reject); });
+  slow.write(data.subarray(0, 8));
+  await arrived;
+  try {
+    const second = await fetch(origin + '/api/knowledge' + route + '/parts/2', { method: 'PUT', body: data.subarray(CHUNK_BYTES), signal: AbortSignal.timeout(3000) });
+    assert.equal(second.status, 200); await second.arrayBuffer();
+  } finally { slow.end(data.subarray(8, CHUNK_BYTES)); }
+  assert.equal(await completed, 200);
+  assert.equal((await call(route + '/complete', { method: 'POST', data: {} })).status, 202);
+  assert.deepEqual((await call(route + '/source')).payload, data);
 }));
 
 test('GPU heartbeat reserves queued work, CPU fallback resumes after 90 seconds without taking active leases', async () => fixture(async ({ store, db, call }) => {

@@ -1,3 +1,4 @@
+import { uploadParts } from './upload.js?v=1';
 const $ = id => document.getElementById(id);
 const state = { permissions: [], documents: [], current: null, settings: null, editing: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
@@ -57,6 +58,12 @@ function renderStorage(d) {
   const source = d.storage || { provider: 'local', state: 'local' };
   const labels = { waiting: '等待视频上传', pending: '等待保存至115', uploading: '正在保存至115', verifying: '正在校验115原视频', verified: '115校验通过，正在清理临时原片', ready: '原视频已保存至115 · ECS原片已清理', failed: source.error || '115保存失败，临时原片已保留' };
   text('storage-status', source.provider === '115' ? labels[source.state] || '正在保存至115' : '原视频保存在服务器');
+  if (source.timings) {
+    const durations = [];
+    if (source.timings.uploadMs > 0) durations.push(`保存至115${source.state === 'uploading' ? '已用' : '用时'} ${time(source.timings.uploadMs / 1000)}`);
+    if (source.timings.verificationMs > 0) durations.push(`完整性校验${source.state === 'verifying' ? '已用' : '用时'} ${time(source.timings.verificationMs / 1000)}`);
+    if (durations.length) text('storage-status', $('storage-status').textContent + ' · ' + durations.join(' · '));
+  }
   show('storage-retry', source.state === 'failed' && can('storage:edit'));
 }
 function renderDocument(d) {
@@ -111,6 +118,7 @@ async function upload(event) {
   const file = $('video-file').files[0]; if (!file) return;
   if (file.size > state.settings.maxBytes) return error(new Error('视频超过1GB限制'));
   state.uploading = true; $('upload-submit').disabled = true; show('upload-progress', true);
+  $('upload-progress').value = 0; text('upload-status', '正在检查文件和续传进度…');
   try {
     const stamp = new Blob([file.slice(0, 1048576), file.slice(Math.max(0, file.size - 1048576)), String(file.size)]);
     const fingerprint = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await stamp.arrayBuffer()))].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -123,21 +131,17 @@ async function upload(event) {
         bytes: file.size, mimeType, fingerprint, originalName: file.name, backend: state.settings.backend });
       item = result.document; state.resume = item;
     }
-    const { parts, chunkBytes } = await api('/documents/' + item.id + '/parts'), done = new Set(parts.map(p => p.part));
-    const count = Math.ceil(file.size / chunkBytes);
-    for (let i = 0; i < count; i++) {
-      if (!done.has(i + 1)) {
-        let last;
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try { await api(`/documents/${item.id}/parts/${i + 1}`, { method: 'PUT', body: file.slice(i * chunkBytes, Math.min(file.size, (i + 1) * chunkBytes)), headers: { 'Content-Type': 'application/octet-stream' } }); last = null; break; }
-          catch (e) { last = e; }
-        }
-        if (last) throw last;
-      }
-      const progress = Math.round((i + 1) / count * 100); $('upload-progress').value = progress; text('upload-status', `正在上传 ${progress}%`);
-    }
+    const { parts, chunkBytes } = await api('/documents/' + item.id + '/parts');
+    const transfer = await uploadParts({ file, parts, chunkBytes, url: `/api/knowledge/documents/${item.id}/parts/`, onProgress(p) {
+      const progress = Math.min(99, Math.floor(p.loaded / p.total * 100));
+      $('upload-progress').value = progress;
+      text('upload-status', `上传到服务器 ${progress}% · ${(p.speed / 1024 ** 2).toFixed(2)} MB/s · ${p.remaining === null ? '正在测算剩余时间' : p.loaded === p.total ? '等待服务器确认' : '预计剩余 ' + time(Math.ceil(p.remaining))} · 已用 ${time(p.elapsed)}`);
+    } });
+    text('upload-status', '分片已传完，正在合并视频…');
+    const mergeStarted = performance.now();
     await send('/documents/' + item.id + '/complete', 'POST'); state.resume = null;
-    text('message', state.settings.storage?.provider === '115' ? '上传完成，保存至115并校验后将自动生成笔记。' : '视频已保存，工作器将按队列生成笔记。'); text('upload-status', '上传完成'); show('upload-panel', false); $('upload-form').reset();
+    const elapsed = `本次上传用时 ${time(transfer.elapsedMs / 1000)}，合并用时 ${time((performance.now() - mergeStarted) / 1000)}。`;
+    text('message', elapsed + (state.settings.storage?.provider === '115' ? '接下来保存至115并校验，之后自动生成笔记。' : '视频已保存，工作器将按队列生成笔记。')); $('upload-progress').value = 100; text('upload-status', '上传完成'); show('upload-panel', false); $('upload-form').reset();
     await load(); await open(item.id);
   } catch (e) { error(e); text('upload-status', '上传未完成，可重新提交继续上传。'); await load().catch(() => {}); }
   finally { state.uploading = false; $('upload-submit').disabled = false; }
