@@ -2,6 +2,12 @@ var businessState = {};
 var businessNames = { stock: '股票管理 · 抄底提醒', undercut: 'Torn · 压价提醒', company: 'Torn · 公司申请' };
 var businessEventNames = { openSummary: '开盘摘要', takeProfit: '止盈', fakeRight: '假右侧', reset: '高点重置', T4_intraday: 'T4 盘中限价', sleeveTqqq: 'TQQQ 袖仓', sleeveSoxl: 'SOXL 袖仓' };
 
+function bizUpdateGroupSuggestions(item) {
+    var targets = !item.ok ? [] : item.id === 'stock' ? item.notify?.targets || []
+        : (item.watchers || []).flatMap(function(watcher) { return watcher.notify?.qq?.targets || []; });
+    updateQqGroupSuggestions(item.id, businessNames[item.id], targets);
+}
+
 function bizCard(item) {
     var id = item.id;
     var qq = id === 'stock' ? item.notify?.qq || {} : item.notify?.qq || {};
@@ -66,7 +72,7 @@ async function bizLoad() {
     byId('business-refresh').disabled = true;
     try {
         var data = await api('api/integrations');
-        data.integrations.forEach(function(item) { businessState[item.id] = item; });
+        data.integrations.forEach(function(item) { businessState[item.id] = item; bizUpdateGroupSuggestions(item); });
         bizRender();
     } catch (err) { byId('business-grid').textContent = '业务提醒读取失败：' + err.message; }
     finally { byId('business-refresh').disabled = false; }
@@ -103,6 +109,7 @@ byId('business-grid').addEventListener('click', async function(event) {
                 : { notify: item.notify, watchers: item.watchers.map(function(w) { return { id: w.id, notify: w.notify }; }) };
             var saved = await api('api/integrations/' + item.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
             businessState[item.id] = saved.integration;
+            bizUpdateGroupSuggestions(saved.integration);
             bizRender();
             toast('提醒配置已保存');
         } else if (action === 'test-stock' || action === 'test-watcher') {

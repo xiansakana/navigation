@@ -31,6 +31,22 @@
 .biz-actions { justify-content:flex-end; flex-wrap:wrap; margin-top:17px; }
 .biz-hint { margin-top:12px; }
 .biz-error { color:var(--red); }
+.codex-card h2 { margin:4px 0 8px; font-size:19px; }
+.codex-groups-head { display:flex; align-items:center; gap:12px; margin-top:20px; }
+.codex-groups-head h3 { margin:0; font-size:15px; }
+.codex-groups-head .biz-hint { margin:0; }
+.codex-group-options { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:10px; margin-top:14px; }
+.codex-group-option { display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--status-bg); cursor:pointer; min-width:0; }
+.codex-group-option:has(input:checked) { border-color:var(--accent); }
+.codex-group-option input { width:auto; margin:4px 0 0; flex-shrink:0; }
+.codex-group-option span { display:grid; gap:4px; min-width:0; }
+.codex-group-option strong { color:var(--text); font-size:14px; }
+.codex-group-option small { color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+.codex-group-add { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:16px 0; }
+.codex-group-add label { font-size:13px; color:var(--label); }
+.codex-group-add input { flex:1 1 160px; width:auto; min-width:0; max-width:260px; }
+.codex-group-add .test-btn { width:auto; margin:0; }
+.codex-reply small { color:var(--muted); line-height:1.6; }
 .business-loading { grid-column:1/-1; display:flex; align-items:center; gap:10px; padding:26px; border:1px solid var(--line); border-radius:12px; color:var(--muted); }
 .business-spinner { width:17px; height:17px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:biz-spin .7s linear infinite; }
 @keyframes biz-spin { to { transform:rotate(360deg); } }

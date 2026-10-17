@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>通知管理</title>
-    <link rel="stylesheet" href="style.css?v=qq-codex-groups1">
-    <link rel="stylesheet" href="integrations.css?v=tibo-targets1">
+    <link rel="stylesheet" href="style.css?v=qq-codex-group-picker2">
+    <link rel="stylesheet" href="integrations.css?v=qq-codex-group-picker2">
     <link rel="stylesheet" href="/skeleton/skeleton.css?v=2">
     <script src="/ui/input-guard.js?v=20261011-2"></script>
   <script defer src="/ui/back-to-top.js?v=1"></script>
@@ -57,13 +57,14 @@
             </div>
         </section>
 
-        <section class="channel-card" id="codex-settings" aria-labelledby="codex-heading" hidden>
-            <div class="channel-head"><div><span class="eyebrow">QQ CODEX</span><h2 id="codex-heading">QQ Codex 群聊</h2><p id="codex-status"></p></div></div>
-            <p>在允许的群中，@机器人并发送 <code>codex navigation 任务内容</code>。只有已授权的发送人可以执行。</p>
-            <div class="form-grid">
-                <label>允许的群号（每行一个）<textarea id="codex-groups" rows="4" placeholder="填写群号，最多20个；留空关闭群聊" disabled></textarea></label>
-                <label>完整结果发送到<select id="codex-group-reply" disabled><option value="private">私聊发起人（群内仅回复任务状态）</option><option value="group">原群，并 @发起人</option></select><small>发送到原群时，群内成员均可看到完整结果。群聊与私聊会话独立。</small></label>
-            </div>
+        <section class="business-card codex-card" id="codex-settings" aria-labelledby="codex-heading" hidden>
+            <div class="business-card-head"><div><span class="eyebrow">QQ CODEX</span><h2 id="codex-heading">QQ Codex 群聊</h2><p id="codex-status"></p></div></div>
+            <p class="biz-hint">在选中的群里 @机器人并发送 <code>codex navigation 任务内容</code>，只有已授权的发送人可以执行。</p>
+            <div class="codex-groups-head"><h3>允许的群聊</h3><span id="codex-group-count" class="biz-hint" aria-live="polite"></span></div>
+            <p class="biz-hint">直接勾选其他通知已保存的群号，相同群号只显示一次。新增通知群不会自动授权；取消全部选择可关闭群聊入口。</p>
+            <div id="codex-groups" class="codex-group-options" role="group" aria-label="允许的群聊"></div>
+            <div class="codex-group-add"><label for="codex-new-group">其他群号</label><input id="codex-new-group" inputmode="numeric" maxlength="20" placeholder="填写其他群号" disabled><button id="codex-add-group" class="test-btn compact" type="button" disabled>添加群聊</button></div>
+            <div class="form-grid codex-reply"><label>完整结果发送到<select id="codex-group-reply" disabled><option value="private">私聊发起人（群内仅回复任务状态）</option><option value="group">原群，并 @发起人</option></select><small>发送到原群时，群内成员均可看到完整结果。群聊与私聊会话独立。</small></label></div>
             <div class="config-actions"><span id="codex-save-state" role="status">正在读取配置…</span><button id="codex-save" class="save-btn" type="button" disabled>保存群聊配置</button></div>
         </section>
 
@@ -133,9 +134,9 @@
     </main>
     <div class="toast" id="toast" hidden></div>
     <script src="/skeleton/skeleton.js?v=1"></script>
-    <script src="qq-targets.js?v=tibo-targets1"></script>
-    <script src="app.js?v=qq-codex-groups1"></script>
-    <script src="integrations.js?v=skeleton-20261004"></script>
-    <script src="codex.js?v=1"></script>
+    <script src="qq-targets.js?v=qq-codex-group-picker2"></script>
+    <script src="app.js?v=qq-codex-group-picker2"></script>
+    <script src="integrations.js?v=qq-codex-group-picker2"></script>
+    <script src="codex.js?v=qq-codex-group-picker2"></script>
 </body>
 </html>

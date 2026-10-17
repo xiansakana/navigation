@@ -28,6 +28,7 @@ function updateTargetFields() {
 function fill(data) {
     currentConfig = data.config;
     var config = data.config;
+    updateQqConfigGroupSuggestions(config);
     byId('qq-enabled').checked = !!config.channels.qq.enabled;
     byId('qq-base-url').value = config.napcat.baseUrl || '';
     byId('qq-token').placeholder = config.napcat.hasAccessToken ? '已设置，留空则保持原值' : '尚未设置';
@@ -210,6 +211,7 @@ byId('save').addEventListener('click', async function() {
         byId('smtp-pass').value = '';
         byId('slack-webhook-url').value = '';
         currentConfig = data.config;
+        updateQqConfigGroupSuggestions(data.config);
         renderStatus(data.channels || []);
         byId('save-state').textContent = '渠道配置已保存';
         toast('通知渠道配置已保存');
@@ -224,6 +226,7 @@ byId('monitor-save').addEventListener('click', async function() {
     try {
         var data = await api('api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(monitorPayload()) });
         currentConfig = data.config;
+        updateQqConfigGroupSuggestions(data.config);
         await loadMonitor();
         byId('monitor-save-state').textContent = '监听配置已保存';
         toast('Tibo 监听配置已保存');

@@ -25,3 +25,32 @@ function bizReadTargets(container) {
         return result;
     });
 }
+
+var qqGroupSuggestionSources = new Map();
+
+function updateQqGroupSuggestions(key, label, targets) {
+    qqGroupSuggestionSources.set(key, {
+        label: label,
+        groups: Array.from(new Set((targets || []).filter(function(target) {
+            return target.type !== 'private' && /^\d{5,20}$/.test(String(target.groupId || '').trim());
+        }).map(function(target) { return String(target.groupId).trim(); })))
+    });
+    document.dispatchEvent(new Event('notification-qq-groups-changed'));
+}
+
+function getQqGroupSuggestions() {
+    var groups = new Map();
+    qqGroupSuggestionSources.forEach(function(source) {
+        source.groups.forEach(function(groupId) {
+            if (!groups.has(groupId)) groups.set(groupId, { groupId: groupId, sources: [] });
+            if (!groups.get(groupId).sources.includes(source.label)) groups.get(groupId).sources.push(source.label);
+        });
+    });
+    return Array.from(groups.values());
+}
+
+function updateQqConfigGroupSuggestions(config) {
+    updateQqGroupSuggestions('default', 'QQ 默认目标', [config.defaultTarget || {}]);
+    var tibo = config.monitors?.tiboReset?.qq;
+    updateQqGroupSuggestions('tibo', 'Tibo 重置监听', tibo?.useDefaultTarget === false ? tibo.targets : []);
+}
