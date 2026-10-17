@@ -94,7 +94,7 @@ export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = 
     if (route === '/claim' && method === 'POST') {
       const raw = await body(req, 4096);
       const backends = Array.isArray(raw.backends) ? raw.backends.filter(b => ['codex', 'openai'].includes(b)) : [];
-      return json(res, 200, { ok: true, job: store.claim(uid, backends) });
+      return json(res, 200, { ok: true, job: store.claim(uid, backends, typeof raw.workerId === 'string' ? raw.workerId : '') });
     }
     const match = /^\/jobs\/([a-f0-9]{32})\/(source|progress|complete|fail)$/.exec(route);
     if (!match) return json(res, 404, { ok: false, error: '工作器接口不存在' });

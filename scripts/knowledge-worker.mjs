@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { downloadVideo } from '../portal/src/knowledge-download.js';
@@ -18,6 +19,7 @@ if (!/^nkw_[a-f0-9]{64}$/.test(token || '')) throw new Error('工作器凭据无
 const workRoot = path.resolve(config.workDir || path.join(repo, 'portal/data/knowledge-worker'));
 await fsp.mkdir(workRoot, { recursive: true, mode: 0o700 });
 const python = config.python || (process.platform === 'win32' ? 'python.exe' : 'python3');
+const workerId = crypto.createHash('sha256').update(os.hostname() + ':' + configPath).digest('hex').slice(0, 32);
 let stopped = false, activeController = null;
 for (const event of ['SIGINT', 'SIGTERM']) process.on(event, () => { stopped = true; activeController?.abort(); });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -34,9 +36,9 @@ async function request(route, { data, method, lease, signal, raw = false, header
 async function capabilities() {
   const result = {};
   try {
-    await runProcess(python, ['-c', 'import faster_whisper, av; from PIL import Image'], { timeout: 20000 });
+    const device = (await runProcess(python, [path.join(repo, 'portal/workers/video_runtime.py'), config.asr?.device || 'cpu'], { timeout: 20000 })).trim();
     await runProcess(config.ffmpeg || 'ffmpeg', ['-version'], { timeout: 10000 });
-    result.media = { ready: true, model: config.asr?.model || 'small', detail: config.asr?.device || 'cpu' };
+    result.media = { ready: true, model: config.asr?.model || 'small', detail: device };
   } catch { result.media = { ready: false, detail: '请检查 Python 转写依赖和 FFmpeg 路径' }; }
   try {
     const binary = config.codex?.binary || (process.platform === 'win32' ? 'codex.exe' : 'codex');
@@ -70,7 +72,7 @@ async function processJob(job) {
     heartbeatBusy = true;
     try {
       await request('/jobs/' + job.id + '/progress', { data: state, lease: job.lease, signal });
-      await request('/heartbeat', { data: { label: config.label || os.hostname(), capabilities: cachedCapabilities }, signal });
+      await request('/heartbeat', { data: { workerId, label: config.label || os.hostname(), capabilities: cachedCapabilities }, signal });
     } catch (e) { if ([401, 409].includes(e.status)) activeController?.abort(); }
     finally { heartbeatBusy = false; }
   }, 20000);
@@ -118,9 +120,9 @@ console.log('知识库工作器已启动：', portal.origin, '配置：', config
 while (!stopped) {
   try {
     if (Date.now() - checkedAt > 60000) { cachedCapabilities = await capabilities(); checkedAt = Date.now(); }
-    await request('/heartbeat', { data: { label: config.label || os.hostname(), capabilities: cachedCapabilities } });
+    await request('/heartbeat', { data: { workerId, label: config.label || os.hostname(), capabilities: cachedCapabilities } });
     const backends = cachedCapabilities.media?.ready ? ['codex', 'openai'].filter(b => cachedCapabilities[b]?.ready) : [];
-    const { job } = await request('/claim', { data: { backends } });
+    const { job } = await request('/claim', { data: { backends, workerId } });
     if (job) await processJob(job);
     else await sleep(5000);
   } catch (e) {

@@ -38,7 +38,9 @@ export function createKnowledgeStore(db) {
       PRIMARY KEY(document_id,part));
     CREATE TABLE IF NOT EXISTS knowledge_settings(user_id TEXT PRIMARY KEY,backend TEXT NOT NULL DEFAULT 'codex');
     CREATE TABLE IF NOT EXISTS knowledge_workers(user_id TEXT PRIMARY KEY,token_hash TEXT NOT NULL,last_seen TEXT,
-      label TEXT NOT NULL DEFAULT '',capabilities_json TEXT NOT NULL DEFAULT '{}');`);
+      label TEXT NOT NULL DEFAULT '',capabilities_json TEXT NOT NULL DEFAULT '{}');
+    CREATE TABLE IF NOT EXISTS knowledge_worker_instances(user_id TEXT NOT NULL,worker_id TEXT NOT NULL,
+      last_seen TEXT NOT NULL,label TEXT NOT NULL,capabilities_json TEXT NOT NULL,PRIMARY KEY(user_id,worker_id));`);
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'fingerprint')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''");
   const sources = createSourceStore(db);
   const getRow = (uid, key) => db.prepare('SELECT * FROM knowledge_documents WHERE user_id=? AND id=?').get(uid, key);
@@ -50,6 +52,9 @@ export function createKnowledgeStore(db) {
   const get = (uid, key) => { const row = getRow(uid, key); return row && row.status !== 'deleting' ? read(row) : null; };
   const expire = uid => db.prepare("UPDATE knowledge_documents SET status='failed',stage='处理已中断',error='工作器超过15分钟未响应，请检查本机工作器后重试',lease=NULL,updated_at=? WHERE user_id=? AND status='processing' AND heartbeat<?")
     .run(now(), uid, new Date(Date.now() - 15 * 60000).toISOString());
+  const onlineWorkers = uid => db.prepare('SELECT worker_id,label,last_seen,capabilities_json FROM knowledge_worker_instances WHERE user_id=? AND last_seen>?')
+    .all(uid, new Date(Date.now() - 90000).toISOString())
+    .map(r => ({ id: r.worker_id, label: r.label, lastSeen: r.last_seen, capabilities: JSON.parse(r.capabilities_json) }));
   return {
     get, getRow, expire, sources,
     settings(uid) { return { backend: db.prepare('SELECT backend FROM knowledge_settings WHERE user_id=?').get(uid)?.backend || 'codex' }; },
@@ -60,12 +65,16 @@ export function createKnowledgeStore(db) {
     },
     worker(uid) {
       const row = db.prepare('SELECT last_seen,label,capabilities_json FROM knowledge_workers WHERE user_id=?').get(uid);
+      const workers = onlineWorkers(uid);
+      const preferred = workers.find(w => w.capabilities.media?.ready && w.capabilities.media.detail === 'cuda' && w.capabilities[this.settings(uid).backend]?.ready) || workers[0];
       return row ? { configured: true, online: !!row.last_seen && Date.now() - Date.parse(row.last_seen) < 90000,
-        lastSeen: row.last_seen, label: row.label, capabilities: JSON.parse(row.capabilities_json) } : { configured: false, online: false, capabilities: {} };
+        lastSeen: preferred?.lastSeen || row.last_seen, label: preferred?.label || row.label,
+        capabilities: preferred?.capabilities || JSON.parse(row.capabilities_json), workers, scheduling: 'gpu-first' } : { configured: false, online: false, capabilities: {} };
     },
     rotateToken(uid) {
       const token = 'nkw_' + crypto.randomBytes(32).toString('hex');
       db.prepare("INSERT INTO knowledge_workers(user_id,token_hash) VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET token_hash=excluded.token_hash,last_seen=NULL,capabilities_json='{}'").run(uid, hashToken(token));
+      db.prepare('DELETE FROM knowledge_worker_instances WHERE user_id=?').run(uid);
       db.prepare("UPDATE knowledge_documents SET status='failed',stage='工作器凭据已更换',error='请使用新凭据连接工作器后重试',lease=NULL,updated_at=? WHERE user_id=? AND status='processing'").run(now(), uid);
       return token;
     },
@@ -77,6 +86,10 @@ export function createKnowledgeStore(db) {
         capabilities[key] = { ready: c.ready === true, model: String(c.model || '').slice(0, 120), detail: String(c.detail || '').slice(0, 160) };
       }
       db.prepare('UPDATE knowledge_workers SET last_seen=?,label=?,capabilities_json=? WHERE user_id=?').run(now(), String(raw.label || '').slice(0, 80), JSON.stringify(capabilities), uid);
+      const workerId = /^[\w-]{1,80}$/.test(raw.workerId || '') ? raw.workerId : 'legacy-' + hashToken(String(raw.label || '')).slice(0, 24);
+      db.prepare('INSERT INTO knowledge_worker_instances(user_id,worker_id,last_seen,label,capabilities_json) VALUES (?,?,?,?,?) ON CONFLICT(user_id,worker_id) DO UPDATE SET last_seen=excluded.last_seen,label=excluded.label,capabilities_json=excluded.capabilities_json')
+        .run(uid, workerId, now(), String(raw.label || '').slice(0, 80), JSON.stringify(capabilities));
+      db.prepare('DELETE FROM knowledge_worker_instances WHERE user_id=? AND last_seen<?').run(uid, new Date(Date.now() - 7 * 86400000).toISOString());
     },
     list(uid, { search = '', topic = '', status = '', offset = 0, limit = 30, includeTranscript = true } = {}) {
       expire(uid);
@@ -128,17 +141,20 @@ export function createKnowledgeStore(db) {
         return changed;
       })();
     },
-    claim(uid, backends) {
+    claim(uid, backends, workerId = '') {
       expire(uid);
       return db.transaction(() => {
         if (db.prepare("SELECT 1 FROM knowledge_documents WHERE user_id=? AND status='processing'").get(uid)) return null;
         const candidates = db.prepare("SELECT * FROM knowledge_documents WHERE user_id=? AND status='queued' AND NOT EXISTS (SELECT 1 FROM knowledge_sources s WHERE s.document_id=knowledge_documents.id AND s.state<>'ready') ORDER BY created_at,id").all(uid);
-        const row = candidates.find(r => backends.includes(r.backend));
+        const workers = onlineWorkers(uid);
+        const gpuWorkers = workers.filter(w => w.capabilities.media?.ready && w.capabilities.media.detail === 'cuda');
+        const row = candidates.find(r => backends.includes(r.backend) &&
+          (!gpuWorkers.some(w => w.capabilities[r.backend]?.ready) || gpuWorkers.some(w => w.id === workerId && w.capabilities[r.backend]?.ready)));
         if (!row) return null;
         const lease = crypto.randomBytes(24).toString('hex'), time = now();
         db.prepare("UPDATE knowledge_documents SET status='processing',stage='读取视频',progress=1,lease=?,heartbeat=?,updated_at=?,attempt=attempt+1 WHERE id=? AND status='queued'").run(lease, time, time, row.id);
         return { ...get(uid, row.id), sourceSha256: sources.get(uid, row.id)?.sha256 || '', lease };
-      })();
+      }).immediate();
     },
     leased(uid, key, lease) {
       expire(uid);

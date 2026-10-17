@@ -50,11 +50,8 @@ def main():
     from PIL import Image, ImageChops, ImageStat
     from faster_whisper import WhisperModel, BatchedInferencePipeline
     import ctranslate2
-    handles = []
-    if os.name == 'nt':
-        for directory in (pathlib.Path(sys.prefix) / 'Lib/site-packages/nvidia').glob('*/bin'):
-            os.environ['PATH'] = str(directory) + os.pathsep + os.environ.get('PATH', '')
-            handles.append(os.add_dll_directory(str(directory)))
+    from video_runtime import prepare_cuda
+    handles = prepare_cuda()
     out = pathlib.Path(args.output).resolve()
     out.mkdir(parents=True, exist_ok=True)
     input_file = str(pathlib.Path(args.input).resolve())

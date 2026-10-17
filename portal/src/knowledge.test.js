@@ -141,6 +141,40 @@ test('expired and revoked worker leases cannot overwrite retried or deleted docu
   assert.equal((await call('/worker/heartbeat', { method: 'POST', data: {}, token })).status, 403);
 }));
 
+test('GPU heartbeat reserves queued work, CPU fallback resumes after 90 seconds without taking active leases', async () => fixture(async ({ store, db, call }) => {
+  const token = store.rotateToken('a');
+  const caps = device => ({ media: { ready: true, detail: device }, codex: { ready: true }, openai: { ready: false } });
+  await call('/worker/heartbeat', { method: 'POST', token, data: { workerId: 'gpu', label: '本机 GPU', capabilities: caps('cuda') } });
+  await call('/worker/heartbeat', { method: 'POST', token, data: { workerId: 'cpu', label: 'ECS', capabilities: caps('cpu') } });
+  assert.equal(store.worker('a').label, '本机 GPU');
+  assert.equal(store.worker('a').workers.length, 2);
+  const d = store.create('a', upload()); store.enqueue('a', d.id);
+  assert.equal(store.claim('a', ['codex'], 'cpu'), null);
+  assert.equal(store.claim('a', ['codex']), null, 'old CPU clients also yield to the GPU');
+  const claimed = await call('/worker/claim', { method: 'POST', token, data: { workerId: 'gpu', backends: ['codex'] } });
+  assert.equal(claimed.payload.job.id, d.id);
+  db.prepare('UPDATE knowledge_worker_instances SET last_seen=? WHERE worker_id=?').run(new Date(Date.now() - 91000).toISOString(), 'gpu');
+  assert.equal(store.claim('a', ['codex'], 'cpu'), null, 'an active lease is never transferred');
+  assert.ok(store.finish('a', d.id, claimed.payload.job.lease, result()));
+  const next = store.create('a', upload()); store.enqueue('a', next.id);
+  assert.equal(store.claim('a', ['codex'], 'cpu').id, next.id);
+  store.rotateToken('a');
+  assert.equal(store.worker('a').workers.length, 0);
+}));
+
+test('GPU priority respects account isolation, readiness and backend compatibility', async () => fixture(async ({ store }) => {
+  store.rotateToken('a'); store.rotateToken('b');
+  store.heartbeatWorker('a', { workerId: 'gpu', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } });
+  const other = store.create('b', upload()); store.enqueue('b', other.id);
+  assert.equal(store.claim('b', ['codex'], 'cpu').id, other.id);
+  const api = store.create('a', upload({ backend: 'openai' })); store.enqueue('a', api.id);
+  assert.equal(store.claim('a', ['openai'], 'cpu').id, api.id, 'GPU without this backend cannot reserve it');
+  store.rotateToken('a');
+  store.heartbeatWorker('a', { workerId: 'gpu', capabilities: { media: { ready: false, detail: 'cuda' }, codex: { ready: true } } });
+  const d = store.create('a', upload()); store.enqueue('a', d.id);
+  assert.equal(store.claim('a', ['codex'], 'cpu').id, d.id, 'an unhealthy GPU does not block CPU');
+}));
+
 test('validation rejects bad formats, excessive video sizes and fabricated timestamps', () => {
   assert.throws(() => validateKnowledgeResult(result({ transcript: [{ start: -1, end: 2, text: 'x' }] })));
   assert.throws(() => validateKnowledgeResult(result({ transcript: [{ start: 4, end: 95, text: 'x' }] })));

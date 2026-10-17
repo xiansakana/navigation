@@ -94,7 +94,8 @@ pm2 start scripts/knowledge-worker.mjs --name knowledge-worker -- portal/knowled
 - root 可使用 `codex-via-proxy` 启动已登录的 CLI；它读取 `/root/.config/cordcloud-proxy.env`，只影响本次进程。工作器使用私有配置中的 `codex.proxyUrl`。
 - ECS 工作器私有配置位于 `/etc/knowledge-worker/config.json`，任务缓存和预下载模型位于 `/var/lib/knowledge-worker/`。配置中的令牌须来自对应用户的知识库页面；更换网页令牌后同步更新此文件。
 - Python 3.11 与独立虚拟环境用于 CPU 转写，线程数为1。`scripts/knowledge-worker.service.example` 给出了开机服务及CPU/内存限制；配置、模型和目录准备好后，再将其安装为 `/etc/systemd/system/knowledge-worker.service` 并启用。服务在 Portal 以外运行，单独重启不会重启网站。
-- 同一账号的工作器共享队列，同一时间只领取一个任务。本机 GPU 与服务器同时在线时，下一个任务由先领取者处理；并不自动优先 GPU。
+- 同一账号的工作器共享队列，同一时间只领取一个任务。每台工作器分别记录身份和心跳；最近90秒有健康 CUDA 工作器在线且支持任务的总结后端时，CPU工作器让出该任务。GPU离线超过90秒后，ECS可领取后续任务。已经开始的任务继续使用原租约，不迁移或重复执行；处理中断仍按15分钟租约超时提示失败并允许重试。
+- Windows 本机使用 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-knowledge-worker.ps1` 注册当前用户登录启动任务，并立即隐藏启动。无需密码，使用当前用户的私有工作器配置与CLI登录；退出后15秒重试，同一用户会话用互斥锁防重复。每日运行日志位于 `%LOCALAPPDATA%/Navigation/knowledge-worker/`。通过任务计划程序停止/禁用 `Navigation Knowledge GPU Worker` 可关闭自动启动。CUDA配置用 `asr.device: "cuda"`；健康检查会验证CUDA设备与Windows推理库，可用时才优先调度。
 
 运维检查：`systemctl status cordcloud-proxy knowledge-worker`；工作器日志为 `journalctl -u knowledge-worker`。代理是否在线与 CLI 是否登录需要分别验证；本次已通过服务器代理执行真实 CLI 短提示。
 

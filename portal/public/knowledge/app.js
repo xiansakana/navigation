@@ -21,7 +21,7 @@ async function settings() {
   $('backend').value = state.settings.backend;
   $('backend').disabled = !can('settings:edit');
   const worker = state.settings.worker, c = worker.capabilities;
-  text('worker-status', worker.online ? `${worker.label || '工作器'} · 在线` : worker.configured ? '工作器离线，等待连接。已上传的任务会保留在队列中。' : '尚未连接工作器。生成个人凭据后，可在服务器或本机启动处理。');
+  text('worker-status', worker.online ? `${worker.label || '工作器'} · 在线${worker.scheduling === 'gpu-first' ? ' · GPU 优先，离线后由服务器接手后续任务' : ''}` : worker.configured ? '工作器离线，等待连接。已上传的任务会保留在队列中。' : '尚未连接工作器。生成个人凭据后，可在服务器或本机启动处理。');
   const info = c[state.settings.backend];
   text('backend-description', info ? `${info.ready ? '可用' : '尚不可用'} · ${info.model || info.detail || ''}` : '选择总结方式后，由已连接工作器执行。');
 }
