@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex CLI · 服务导航</title>
+  <script>try{var t=localStorage.getItem('portal-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;}catch(e){}</script>
+  <link rel="stylesheet" href="/portal.css"><link rel="stylesheet" href="/experience.css"><link rel="stylesheet" href="/codex-cli/style.css?v=1">
+  <script src="/ui/input-guard.js"></script><script defer src="/ui/back-to-top.js"></script>
+</head>
+<body class="portal-experience has-navbar portal-layout-enabled">
+  <header class="navbar"><div class="navbar-inner"><a class="navbar-brand" href="/"><span class="navbar-logo">⚡</span><span>服务导航</span></a><nav class="navbar-nav"><span class="navbar-title">Codex CLI</span></nav><div class="navbar-actions"><button type="button" class="btn ghost navbar-layout-btn" aria-pressed="false"><span class="label">全宽</span></button><button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题"><span class="navbar-theme-icon">☀️</span><span class="label navbar-theme-label">日间</span></button></div></div></header>
+  <main class="codex-shell" data-layout-container>
+    <header class="codex-heading"><div><a class="back" href="/">← 我的服务</a><p class="eyebrow">SERVER / CODEX</p><h1>Codex CLI</h1><p class="muted">管理服务器上的 Codex，让网页设置与 QQ 任务保持一致。</p></div><button id="refresh" class="btn ghost" type="button">刷新状态</button></header>
+    <p id="message" class="notice" role="status" aria-live="polite">正在连接服务器 Codex…</p>
+    <section class="summary" aria-label="Codex运行状态">
+      <article class="metric"><span>CLI 版本</span><strong id="cli-version">—</strong></article>
+      <article class="metric"><span>服务器账户</span><strong id="account">—</strong><small id="account-detail"></small></article>
+      <article class="metric"><span>服务器默认模型</span><strong id="default-summary">—</strong><small id="default-effort"></small></article>
+      <article class="metric"><span>QQ 入口默认模型</span><strong id="qq-summary">—</strong><small id="qq-detail"></small></article>
+    </section>
+    <div class="config-grid">
+      <section class="panel"><div class="section-heading"><span class="section-number">01</span><div><h2>服务器默认设置</h2><p>写入服务器 Codex 用户配置，对后续继承默认值的任务生效。</p></div></div>
+        <form id="server-form"><fieldset id="server-fields" disabled><label for="server-model">默认模型</label><select id="server-model" required></select><label for="server-effort">推理强度</label><select id="server-effort"></select><p class="hint">可选项来自当前登录账号。保存时保留其他 CLI 配置；正在执行的任务不受影响。</p><button id="save-server" type="submit" class="btn primary" hidden>保存服务器默认设置</button></fieldset></form>
+        <p id="server-readonly" class="hint" hidden>你有查看权限，保存服务器默认设置需要单独授权。</p><p id="override-notice" class="hint"></p>
+        <div class="safety"><span>CLI 沙箱 <b id="sandbox">—</b></span><span>审批策略 <b id="approval">—</b></span></div>
+      </section>
+      <section class="panel"><div class="section-heading"><span class="section-number">02</span><div><h2>我的 QQ 设置</h2><p>与 QQ 指令共用设置，只影响你在所选会话中的后续任务。</p></div></div>
+        <p id="qq-unavailable" class="hint" hidden>当前账号尚未配置 QQ Codex 执行权限。</p>
+        <form id="runtime-form"><label for="scope">会话</label><select id="scope"><option value="">我的 QQ 私聊</option></select><fieldset id="runtime-fields" disabled><label for="runtime-model">模型</label><select id="runtime-model"></select><label for="runtime-effort">推理强度</label><select id="runtime-effort"></select><p id="effective" class="effective">实际运行设置：—</p><button id="save-runtime" type="submit" class="btn primary" hidden>保存此会话设置</button></fieldset></form>
+        <div class="command-help"><p>也可以在 QQ 中切换</p><code>codex 模型</code><code>codex 模型 模型ID</code><code>codex 强度 强度值</code><small>强度值使用列表中的英文名称。发送「默认」恢复继承；切换模型会清除原强度覆盖。</small></div>
+      </section>
+    </div>
+    <section id="usage-panel" class="panel usage-panel" hidden><div class="section-heading"><span class="section-number">03</span><div><h2>账户额度</h2><p>服务器当前登录账号的实时额度，重置时间使用北京时间。</p></div></div><pre id="usage">正在读取额度…</pre></section>
+    <footer id="updated" class="muted"></footer>
+  </main>
+  <script src="/theme.js"></script><script src="/layout.js"></script><script src="/codex-cli/app.js?v=1"></script>
+</body>
+</html>

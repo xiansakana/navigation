@@ -15,12 +15,12 @@ import { SYSTEM_PERMISSIONS } from '../../portal/src/rbac.js';
 const Database = createRequire(new URL('../../portal/package.json', import.meta.url))('better-sqlite3');
 const event = text => ({post_type:'message',message_type:'private',user_id:12345678,self_id:22222222,message_id:42,message:[{type:'text',data:{text}}]});
 const groupEvent = (text, group = '33333333', id = 42) => ({...event(text),message_type:'group',group_id:group,message_id:id,message:[{type:'at',data:{qq:'22222222'}},...event(text).message]});
-function fixture(execute) {
+function fixture(execute,extra={}) {
   const db = new Database(':memory:'), store = createCodexStore(db), sent = [];
   const config = normalizeConfig({codex:{enabled:true,defaultProject:'navigation',projects:{navigation:{directory:path.resolve(os.tmpdir(),'codex-test'),remote:'git@example.com:repo.git'}}}});
   const user = {userId:'u1',qqId:'12345678',projects:['navigation']};
   let allowed = true;
-  const service = createCodexService({getConfig:()=>config,store,authorize:qq=>allowed&&qq===user.qqId?user:null,prepareMedia:async()=>undefined,send:async(c,target,text)=>{sent.push({target,text});},execute});
+  const service = createCodexService({getConfig:()=>config,store,authorize:qq=>allowed&&qq===user.qqId?user:null,prepareMedia:async()=>undefined,send:async(c,target,text)=>{sent.push({target,text});},execute,...extra});
   return {db,store,config,service,sent,revoke:()=>{allowed=false;},close:()=>{service.stop();db.close();}};
 }
 
@@ -54,6 +54,27 @@ test('private provisioning is not exposed or writable through public notificatio
   assert.equal(publicConfig(c).codex,undefined);
   assert.deepEqual(applyPublicConfig(c,{codex:{enabled:false,allowedUsers:[{userId:'attacker'}]}}).codex,c.codex);
   assert.deepEqual(SYSTEM_PERMISSIONS.find(p=>p.id==='qq-codex:execute').permissionPath,['首页','通知管理','QQ Codex','执行任务']);
+});
+
+test('QQ model controls validate live options, serialize with tasks, snapshot settings and isolate groups',async()=>{
+  const catalog={models:[{id:'model-a',efforts:['low','high'],defaultEffort:'low',inputModalities:['text','image']},{id:'model-b',efforts:['medium','max'],defaultEffort:'medium',inputModalities:['text']}],defaults:{model:'model-a',effort:'high'}};
+  const seen=[];let queries=0;
+  const f=fixture(async(c,j)=>{seen.push(JSON.parse(j.runtime_json));return {result:'done'};},{readCatalog:async()=>{queries++;await new Promise(resolve=>setImmediate(resolve));return catalog;}});
+  try{
+    await Promise.all([f.service.receive(event('codex 模型 model-b')),f.service.receive({...event('codex first task'),message_id:43})]);
+    assert.deepEqual(f.store.runtime('u1'),{model:'model-b',effort:''});
+    await f.service.receive({...event('codex 强度 max'),message_id:44});
+    await f.service.receive({...event('codex second task'),message_id:45});
+    await f.service.receive({...event('codex 强度 high'),message_id:46});
+    assert.equal(f.store.runtime('u1').effort,'max');
+    f.store.saveSettings('u1',{groups:['33333333'],groupReply:'private'});
+    await f.service.receive(groupEvent('codex 模型 model-a','33333333',47));
+    assert.equal(f.store.runtime('u1','33333333').model,'model-a');assert.equal(f.store.runtime('u1').model,'model-b');
+    f.service.start();await f.service.tick();await f.service.tick();
+    assert.deepEqual(seen,[{model:'model-b',effort:''},{model:'model-b',effort:'max'}]);
+    assert.equal(queries,4);
+    await f.service.receive({...event('codex 模型 默认'),message_id:48});assert.deepEqual(f.store.runtime('u1'),{model:'',effort:''});
+  }finally{f.close();}
 });
 
 test('quota commands and natural questions are deduplicated and preserve the model session',async()=>{

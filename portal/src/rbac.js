@@ -158,6 +158,12 @@ function buildNotificationPermissions() {
 }
 
 var SYSTEM_PERMISSIONS = [
+    ...[
+        ['view','进入Codex CLI模块',[],'view'],
+        ['usage:view','查看服务器账户额度',['账户与额度'],'view'],
+        ['settings:edit','保存服务器Codex默认设置',['服务器默认设置','保存'],'edit'],
+        ['runtime:edit','保存自己的QQ模型和强度',['我的QQ设置','保存'],'edit']
+    ].map(([id,name,parts,action])=>({id:'codex-cli:'+id,name,group:'Codex CLI',serviceId:'codex-cli',action,permissionPath:['首页','Codex CLI',...parts]})),
     { id: 'qq-codex:settings:view', name: '查看自己的QQ Codex群聊设置', group: '通知管理', serviceId: NOTIFICATIONS_SERVICE_ID, action: 'view', permissionPath: ['首页', '通知管理', 'QQ Codex'] },
     { id: 'qq-codex:settings:edit', name: '配置自己的QQ Codex群聊', group: '通知管理', serviceId: NOTIFICATIONS_SERVICE_ID, action: 'edit', permissionPath: ['首页', '通知管理', 'QQ Codex', '保存群聊配置'] },
     { id: 'qq-codex:execute', name: '通过QQ执行Codex任务', group: '通知管理', serviceId: NOTIFICATIONS_SERVICE_ID, action: 'edit', permissionPath: ['首页', '通知管理', 'QQ Codex', '执行任务'] },
@@ -361,6 +367,7 @@ function ensureGuestAccess(data, config) {
 
 function normalizeMenuPermission(menu) {
     if (!menu) return menu;
+    if (menu.serviceId === 'codex-cli') { menu.permission = 'codex-cli:view'; return menu; }
     if (menu.serviceId) {
         menu.permission = serviceViewPermissionId(menu.serviceId);
         return menu;
@@ -438,6 +445,7 @@ export function buildMenusFromServices(services, overrides) {
         enabled: true
     }, overrideMap.menu_admin || {}));
     menus.push(adminMenu);
+    menus.push(Object.assign({id:'menu_codex-cli',title:'Codex CLI',description:'服务器Codex状态、账户额度、默认模型与QQ会话设置',icon:'⌘',type:'hub',sort:9940,enabled:true},overrideMap['menu_codex-cli'] || {},{path:'/codex-cli/',permission:'codex-cli:view',serviceId:'codex-cli'}));
     menus.push(Object.assign({
         id: 'menu_knowledge', title: '知识库', description: '上传视频，积累可检索的完整学习笔记',
         icon: '📚', type: 'hub', serviceId: 'knowledge', sort: 9950, enabled: true

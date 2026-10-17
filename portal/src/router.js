@@ -27,7 +27,7 @@ export function siyuanEntryPath(userAgent) {
 
 /** Portal 保留命名空间：即使未在 isPortalApi 注册，也不进入反代 */
 export var PORTAL_API_NAMESPACES = new Set([
-    'oauth', 'login', 'me', 'services', 'menus', 'logout', 'admin', 'piclist', 'blog', 'resources', 'bookkeeping', 'mingli', 'knowledge', 'qq-codex'
+    'oauth', 'login', 'me', 'services', 'menus', 'logout', 'admin', 'piclist', 'blog', 'resources', 'bookkeeping', 'mingli', 'knowledge', 'qq-codex', 'codex-cli'
 ]);
 
 /** 思源 /api/{ns} 命名空间（与 kernel/api/router.go 同步） */
@@ -151,6 +151,7 @@ function refererFromService(referer, servicePath) {
 
 /** Portal 自有 HTTP API（method + path）；新增接口只需在此登记 */
 export function isPortalApi(pathname, method) {
+    if (pathname.startsWith('/api/codex-cli/')) return true;
     if (pathname.startsWith('/api/bookkeeping/')) return true;
     if (pathname.startsWith('/api/mingli/')) return true;
     if (pathname.startsWith('/api/knowledge/')) return true;
@@ -258,6 +259,7 @@ export function resolveProxyContext(services, reqUrl, opts) {
 
 /** Portal page aliases resolve before any upstream proxy. */
 export function canonicalPortalPagePath(pathname) {
+    if (['/codex-cli', '/codex-cli/', '/codex-cli/index.html'].includes(pathname)) return '/codex-cli/';
     if (['/knowledge', '/knowledge/', '/knowledge/index.html'].includes(pathname)) return '/knowledge/';
     if (['/mingli', '/mingli/', '/mingli/index.html'].includes(pathname)) return '/mingli/';
     if (['/login', '/login/', '/login.html', '/login/index.html'].includes(pathname)) return '/login/';

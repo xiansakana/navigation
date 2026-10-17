@@ -3,6 +3,7 @@ import { hasPermission, resolveUserPermissions } from '../../portal/src/rbac.js'
 import { createCodexStore } from './codex-store.js';
 import { executeCodex, projectConfig } from './codex-runner.js';
 import { isUsageQuery } from './codex-usage.js';
+import { readCodexCatalog, resolveRuntime, validateRuntime } from './codex-control.js';
 import { attachmentSegments, validateAttachments, mergeAttachments, prepareCodexMedia, sendCodexArtifact } from './codex-media.js';
 
 export function codexEvent(event) {
@@ -27,21 +28,22 @@ export function authorizedCodexUser(config, qq, db) {
   if (!account || account.enabled === false || account.username === 'guest' || !hasPermission(resolveUserPermissions(rbac, account), 'qq-codex:execute')) return null;
   return user;
 }
-const help = 'QQ Codex（私聊 / 授权群中@机器人）\ncodex 项目：列出可用项目\n先发图片/文件，再发codex处理要求；也可图片与指令同发。\ncodex 附件 / codex 清空附件：查看或清空待处理附件\ncodex navigation 你的任务：执行任务\ncodex 你的任务：使用默认项目\ncodex 状态：查看当前及最近结果\ncodex 额度：查询5小时、周剩余额度和北京时间重置时间\ncodex 结果：重新读取最近完整结果\ncodex 停止：停止自己的任务\ncodex 同步 [项目]：从Git同步代码和AGENTS.md\ncodex 新会话 [项目]：开始独立的新会话\n群号和结果发送方式可在通知管理的QQ Codex区域配置。群聊会话与私聊隔离。代码通过Git同步，会话仅在QQ端保留。任务结果返回Git提交；电脑 git pull --ff-only 即可取回代码。';
+const help = 'QQ Codex（私聊 / 授权群中@机器人）\ncodex 项目：列出可用项目\ncodex 模型 [模型ID/默认]：查看或切换模型\ncodex 强度 [强度值/默认]：查看或切换推理强度\n先发图片/文件，再发codex处理要求；也可图片与指令同发。\ncodex 附件 / codex 清空附件：查看或清空待处理附件\ncodex navigation 你的任务：执行任务\ncodex 你的任务：使用默认项目\ncodex 状态：查看当前及最近结果\ncodex 额度：查询5小时、周剩余额度和北京时间重置时间\ncodex 结果：重新读取最近完整结果\ncodex 停止：停止自己的任务\ncodex 同步 [项目]：从Git同步代码和AGENTS.md\ncodex 新会话 [项目]：开始独立的新会话\n群号和结果发送方式可在通知管理的QQ Codex区域配置。群聊会话与私聊隔离。代码通过Git同步，会话仅在QQ端保留。任务结果返回Git提交；电脑 git pull --ff-only 即可取回代码。';
 
-export function createCodexService({ getConfig, send, store: injectedStore, authorize, execute = executeCodex, prepareMedia = prepareCodexMedia, sendArtifact = sendCodexArtifact, log = console }) {
+export function createCodexService({ getConfig, send, store: injectedStore, authorize, execute = executeCodex, readCatalog = readCodexCatalog, prepareMedia = prepareCodexMedia, sendArtifact = sendCodexArtifact, log = console }) {
   let store = injectedStore, timer, controller, busy = false, delivering = false, stopped = true;
+  const receivers=new Map();
   const settings = () => getConfig().codex || {};
   const storage = () => store ||= createCodexStore(getDatabase());
   const userFor = qq => authorize ? authorize(qq) : authorizedCodexUser(settings(), qq, getDatabase());
-  async function receive(raw) {
+  async function receiveEvent(raw) {
     const event = codexEvent(raw), config = settings();
     if (!event || !config.enabled || !getConfig().channels?.qq?.enabled) return false;
     const user = userFor(event.qqId);
     if (!user) return true;
     const s = storage(), group = event.groupId;
     if (group && !s.settings(user.userId).groups.includes(group)) return true;
-    return s.transaction(() => {
+    const outcome = s.transaction(() => {
       if (!s.event(event.key)) return true;
       const reply = message => s.reply(user.userId, event.qqId, message, group);
       try {
@@ -54,6 +56,10 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
         else if (!text || ['帮助', 'help'].includes(text)) reply(help);
         else if (text === '附件') reply('待处理附件：\n' + (s.attachments(user.userId,group).map(f=>f.name).join('\n') || '无'));
         else if (text === '清空附件') { s.clearAttachments(user.userId,group); reply('已清空当前会话的待处理附件。'); }
+        else if (/^(模型(?:列表)?|强度)(?:\s+\S+)?$/.test(text)) {
+          if(event.attachments.length)throw new Error('模型设置指令请单独发送，附件可先单独上传。');
+          return {control:text};
+        }
         else if (text === '项目') reply('可用项目：' + names.join('、') + '\n默认项目：' + (config.defaultProject || names[0] || '未配置'));
         else if (text === '状态') {
           const rows = s.active(user.userId, group);
@@ -89,6 +95,35 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
       } catch (e) { reply(e.message); }
       return true;
     });
+    if(outcome?.control){
+      try{
+        const catalog=await readCatalog(config),[command,value]=outcome.control.split(/\s+/);
+        const fresh=userFor(event.qqId);
+        if(!settings().enabled||!getConfig().channels?.qq?.enabled||!fresh||fresh.userId!==user.userId||group&&!s.settings(user.userId).groups.includes(group))return true;
+        const previous=s.runtime(user.userId,group);
+        let next=previous;
+        if(value){
+          const chosen=['默认','default','自动'].includes(value)?'':value;
+          next=validateRuntime(command==='强度'?{...previous,effort:chosen}:{model:chosen,effort:''},catalog,{partial:true,defaultModel:config.model || catalog.defaults.model});
+          // Validate the inherited server/QQ defaults too, before persisting an unusable combination.
+          resolveRuntime(config,next,catalog);s.saveRuntime(user.userId,group,next);
+        }
+        const effective=resolveRuntime(config,next,catalog),selected=catalog.models.find(m=>m.id===effective.model);
+        const message=[`${value?'已保存，后续任务生效。':'当前设置：'}\n模型：${effective.model}${next.model?'':'（继承服务器默认）'}\n推理强度：${effective.effort || '模型默认'}`,
+          command==='强度'?'可选强度：'+selected.efforts.join('、'):'可用模型：\n'+catalog.models.map(m=>m.id).join('\n'),
+          '切换：codex 模型 模型ID / codex 强度 强度值；发送 默认 可恢复继承。\n设置只影响你在当前私聊或群聊的后续任务，不改变执行中或已排队任务的会话设置。'].join('\n');
+        s.reply(user.userId,event.qqId,message,group);
+      }catch(error){s.reply(user.userId,event.qqId,error.message,group);}
+      return true;
+    }
+    return outcome;
+  }
+  function receive(raw){
+    const event=codexEvent(raw);if(!event)return Promise.resolve(false);
+    const key=event.qqId+':'+event.groupId;
+    const pending=(receivers.get(key)||Promise.resolve()).catch(()=>{}).then(()=>receiveEvent(raw));
+    receivers.set(key,pending);
+    return pending.finally(()=>{if(receivers.get(key)===pending)receivers.delete(key);});
   }
   async function deliver() {
     if (delivering || !settings().enabled || !getConfig().channels?.qq?.enabled) return;
@@ -124,7 +159,7 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
         } catch { controller?.abort(); }
       }, 1000);
       const media = ['__usage__','__sync__'].includes(job.prompt) ? undefined : await prepareMedia(settings(),job,getConfig().napcat,{signal:controller.signal});
-      const result = await execute(settings(), job, s.session(job.user_id, job.project, job.group_id || ''), { signal: controller.signal, media, onSession: value => { session = value; s.captureSession(job, value); } });
+      const result = await execute(settings(), job, s.session(job.user_id, job.project, job.group_id || ''), { signal: controller.signal, media, onRuntime: value => s.recordRuntime(job,value), onSession: value => { session = value; s.captureSession(job, value); } });
       s.finish(job, { state: 'succeeded', ...result });
     } catch (e) {
       if (job) storage().finish(job, { state: controller?.signal.aborted ? 'cancelled' : 'failed', result: e.message, sessionId: e.sessionId || session });

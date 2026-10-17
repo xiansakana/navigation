@@ -80,3 +80,13 @@ test('new and resumed image tasks receive CLI vision input and export files outs
     assert.equal(result.sessionId,session || 'new-session');
   }
 }));
+
+test('queued runtime selection becomes explicit CLI flags after resume and rejects unsupported effort',async()=>fixture(async({p})=>{
+  const catalog={models:[{id:'model-b',efforts:['medium','max'],defaultEffort:'medium',inputModalities:['text']}],defaults:{model:'model-b',effort:'medium'}};
+  const job={project:'navigation',prompt:'check',runtime_json:JSON.stringify({model:'model-b',effort:'max'})};
+  await executeCodex({projects:{navigation:p}},job,'existing-session',{readCatalog:async()=>catalog,command:async(binary,args,options)=>{
+    assert.ok(args.indexOf('-m')>args.indexOf('resume'));assert.equal(args[args.indexOf('-m')+1],'model-b');assert.ok(args.includes('model_reasoning_effort="max"'));
+    options.onEvent({type:'item.completed',item:{type:'agent_message',text:'done'}});options.onEvent({type:'turn.completed'});
+  }});
+  await assert.rejects(executeCodex({projects:{navigation:p}},{...job,runtime_json:JSON.stringify({model:'model-b',effort:'high'})},'',{readCatalog:async()=>catalog}),/不适用/);
+}));

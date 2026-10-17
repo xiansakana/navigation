@@ -51,6 +51,7 @@ import { canBookkeep, handleBookkeepingApi } from './bookkeeping.js';
 import { canMingli, handleMingliApi } from './mingli.js';
 import { canKnowledge, handleKnowledgeApi, handleKnowledgeWorkerApi } from './knowledge.js';
 import { handleQqCodexApi } from './qq-codex.js';
+import { handleCodexCliApi, canCodexCli } from './codex-cli.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -175,6 +176,7 @@ function publicServices(userCtx, userAgent) {
 }
 
 async function handleApi(req, res, url, session) {
+    if (url.pathname.startsWith('/api/codex-cli/')) return handleCodexCliApi(req,res,url,session,json);
     if (url.pathname.startsWith('/api/qq-codex/')) return handleQqCodexApi(req, res, url, session, json);
     if (url.pathname.startsWith('/api/knowledge/')) return handleKnowledgeApi(req, res, url, session, json);
     if (url.pathname.startsWith('/api/mingli/')) return handleMingliApi(req, res, url, session, json);
@@ -626,6 +628,15 @@ var server = http.createServer(async function(req, res) {
             title: '无权访问记账模块', hint: '请登录具备记账权限的账号；每个账号仅可访问自己的账本。'
         });
         return serveStatic(path.join(PUBLIC_DIR, 'bookkeeping', 'index.html'), res);
+    }
+
+    if (url.pathname === '/codex-cli' || url.pathname.startsWith('/codex-cli/')) {
+        var codexSession = requireAuth(req,res,{requireLogin:true});
+        if (!codexSession) return;
+        if (!canCodexCli(codexSession)) return sendError(req,res,url,403,'无权访问Codex CLI模块');
+        var codexFile = url.pathname.replace(/^\/codex-cli\/?/,'') || 'index.html';
+        if (!['index.html','app.js','style.css'].includes(codexFile)) return json(res,404,{ok:false,error:'Not Found'});
+        return serveStatic(path.join(PUBLIC_DIR,'codex-cli',codexFile),res);
     }
 
     var hubPath = '/torn-toolbox';
