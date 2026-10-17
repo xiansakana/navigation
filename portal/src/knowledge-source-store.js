@@ -28,7 +28,7 @@ export function createSourceStore(db) {
       return db.transaction(() => {
         const time = Date.now();
         const s = db.prepare(`SELECT s.*,d.byte_size,d.original_name FROM knowledge_sources s JOIN knowledge_documents d ON d.id=s.document_id AND d.user_id=s.user_id
-          WHERE s.state IN ('pending','uploading','verifying','verified','failed','deleting') AND s.attempts<5 AND s.next_retry<=?
+          WHERE s.state IN ('pending','uploading','verifying','verified','failed','deleting') AND (s.attempts<5 OR s.state IN ('uploading','verifying','verified')) AND s.next_retry<=?
           AND (s.lease IS NULL OR s.heartbeat<?) ORDER BY s.state='deleting' DESC,s.rowid LIMIT 1`).get(time, time - 120000);
         if (!s) return null;
         const lease = crypto.randomBytes(24).toString('hex');

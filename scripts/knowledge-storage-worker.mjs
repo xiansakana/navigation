@@ -35,9 +35,9 @@ while (!stopped) {
       await archiveSource(storage, sources, s, path.join(knowledgeDirectory(s.document_id), 'source'));
       console.log('115归档校验完成，本地原片已清理', s.document_id);
     }
-  } catch {
+  } catch (e) {
     sources.update(s, { state: s.state === 'deleting' ? 'deleting' : 'failed',
       error: '115保存失败，临时原片已保留；系统会自动重试，也可手动重试', next_retry: Date.now() + Math.min(3600000, 30000 * 2 ** s.attempts) });
-    console.error('115任务失败，已保留恢复状态', s.document_id);
+    console.error('115任务失败，已保留恢复状态', s.document_id, e.message);
   } finally { clearInterval(heartbeat); sources.release(s); }
 }

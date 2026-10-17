@@ -38,7 +38,15 @@ async function fixture(fn) {
       uploads++; remote.set(key, body);
     } else {
       const input = JSON.parse(body.toString());
-      if (req.url === '/api/fs/list') payload = { content: [...remote.keys()].map(key => ({ name: path.posix.basename(key), size: remote.get(key).length })) };
+      if (req.url === '/api/fs/list') {
+        const entries = new Map();
+        for (const [key, value] of remote) {
+          if (!key.startsWith(input.path + '/')) continue;
+          const relative = key.slice(input.path.length + 1), name = relative.split('/')[0];
+          entries.set(name, { name, size: value.length, is_dir: relative.includes('/') });
+        }
+        payload = { content: [...entries.values()] };
+      }
       if (req.url === '/api/fs/get') payload = { raw_url: `http://127.0.0.1:${server.address().port}/raw` };
       if (req.url === '/api/fs/remove') { if (failDelete) { res.end(JSON.stringify({ code: 500, message: 'private diagnostic' })); return; } remote.clear(); }
     }
@@ -112,7 +120,25 @@ test('source object names cannot escape owner or document directories', () => {
   const config = { rootPath: '/115/Library' }, doc = { id: 'a'.repeat(32), mimeType: 'video/mp4', originalName: '../../other.mp4' };
   assert.match(sourcePath(config, 'owner', doc), /^\/115\/Library\/[a-f0-9]{24}\/[a-f0-9]{32}\/source.mp4$/);
   assert.notEqual(sourcePath(config, 'owner', doc), sourcePath(config, 'other', doc));
+  const storage = new OpenListStorage(config);
+  assert.throws(() => storage.validatePath('/115/Library/../../other'), /路径无效/);
 });
+
+test('failed cloud deletion keeps object and can retry without broad directory removal', async () => fixture(async ({ store, item, storage, remote, data, failDelete }) => {
+  const source = store.sources.get('owner', item.id); remote.set(source.object_path, data);
+  failDelete(true); await assert.rejects(storage.remove(source.object_path), /115暂时不可用/); assert.equal(remote.size, 1);
+  failDelete(false); await storage.remove(source.object_path); assert.equal(remote.size, 0);
+  await storage.remove(source.object_path); assert.equal(remote.size, 0);
+}));
+
+test('interrupted download leaves reusable bytes and handles servers ignoring Range', async () => fixture(async ({ root, data, item }) => {
+  const target = path.join(root, 'interrupted'), split = 13007;
+  const job = { ...item, sourceSha256: crypto.createHash('sha256').update(data).digest('hex') };
+  await assert.rejects(downloadVideo(job, target, async () => new Response(data.subarray(0, split))), /下载不完整/);
+  assert.equal((await fs.stat(target + '.tmp')).size, split);
+  await downloadVideo(job, target, async range => { assert.equal(range, 'bytes=' + split + '-'); return new Response(data); });
+  assert.deepEqual(await fs.readFile(target), data);
+}));
 
 test('authenticated proxy preserves byte ranges and never exposes cloud credentials or redirects', async () => fixture(async ({ root, config, store, item, remote, data }) => {
   const previous = process.env.KNOWLEDGE_STORAGE_CONFIG;

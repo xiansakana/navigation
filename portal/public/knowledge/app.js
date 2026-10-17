@@ -152,7 +152,7 @@ async function boot() {
     if (document.hidden || state.uploading) return;
     try {
       await settings();
-      if (can('notes:view') && state.documents.some(d => ['queued', 'processing', 'uploading'].includes(d.status) || d.storage?.provider === '115' && d.storage.state !== 'ready')) await load();
+      if (can('notes:view') && (state.current?.storage?.provider === '115' && state.current.storage.state !== 'ready' || state.documents.some(d => ['queued', 'processing', 'uploading'].includes(d.status) || d.storage?.provider === '115' && d.storage.state !== 'ready'))) await load();
       if (!state.editing && state.current && (['queued', 'processing'].includes(state.current.status) || state.current.storage?.provider === '115' && state.current.storage.state !== 'ready')) await open(state.current.id, true);
     } catch { /* Keep existing content during temporary connection loss. */ }
   }, 5000);

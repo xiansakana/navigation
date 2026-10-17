@@ -156,8 +156,11 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
       const disk = await fsp.statfs(root());
       if (Number(input.bytes) * 3 + 5 * 1024 ** 3 + getDatabase().prepare("SELECT coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE status='uploading'").get().bytes * 2 > disk.bavail * disk.bsize) throw new Error('服务器可用空间不足');
       const config = storageConfig(uid);
-      const item = store.create(uid, input);
-      if (config) { store.sources.add(uid, item.id, sourcePath(config, uid, item)); item.storage = store.sources.public(uid, item.id); }
+      const item = getDatabase().transaction(() => {
+        const created = store.create(uid, input);
+        if (config) { store.sources.add(uid, created.id, sourcePath(config, uid, created)); created.storage = store.sources.public(uid, created.id); }
+        return created;
+      })();
       try { await fsp.mkdir(knowledgeDirectory(item.id), { recursive: true, mode: 0o700 }); }
       catch (e) { store.remove(uid, item.id); throw e; }
       return json(res, 201, { ok: true, document: item, chunkBytes: CHUNK_BYTES });
