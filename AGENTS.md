@@ -49,6 +49,13 @@ Use two-space indentation, semicolons, single quotes, and ES modules for JavaScr
 
 Tests use Node's built-in `node:test` and `node:assert/strict`. Name files `*.test.js` and place them beside the implementation. Add regression coverage for API fallbacks, persistence, calculations, and permission-sensitive behavior. Run the complete service test command before submitting changes; UI changes should also receive browser verification.
 
+## Shared Page Layout and Full-Width Verification
+
+- Every new or changed Portal module page with a full-width control must use the shared layout contract: `body.portal-layout-enabled`, a main `[data-layout-container]`, `.navbar-layout-btn`, and the shared `portal.css` and `layout.js`. Proxied pages must use the Portal shell's shared layout behavior.
+- Full-width mode must remove width limits from both the main content and navbar. Ensure later module/theme styles and media queries cannot restore a `max-width` cap. Keep button text and `aria-pressed` synchronized, including buttons with plain text and those containing `.label`.
+- Verify actual rendered widths in a browser wider than the page's normal maximum: record the content and navbar widths before and after clicking, confirm both fill the available width in full-width mode, confirm toggling back restores the original width, and confirm a reload preserves the saved choice. A changed class, active button, or saved preference alone is not proof that the layout works.
+- Include every new or affected module in the browser checks; do not validate only established pages. Restore the user's prior layout preference after verification. When changing shared layout assets, update cache versions in Portal pages and proxy injection together.
+
 ## Authorization & User Data
 
 Every new page, menu, tab, or action button must define a permission in `portal/src/rbac.js` with a `permissionPath` matching its menu/page hierarchy. Enforce it in browser and API; hiding controls alone is insufficient. Persist user-specific feature data in shared SQLite keyed by the authenticated Portal `userId`. Do not use global JSON files or browser storage for multi-user state.
