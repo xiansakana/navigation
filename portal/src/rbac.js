@@ -158,6 +158,7 @@ function buildNotificationPermissions() {
 }
 
 var SYSTEM_PERMISSIONS = [
+    { id: 'qq-codex:execute', name: '通过QQ执行Codex任务', group: '通知管理', serviceId: NOTIFICATIONS_SERVICE_ID, action: 'edit', permissionPath: ['首页', '通知管理', 'QQ Codex', '执行任务'] },
     ...[
         ['view', '进入和检索自己的知识库', []],
         ['notes:view', '查看和搜索自己的学习笔记', ['笔记']],

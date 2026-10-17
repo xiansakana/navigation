@@ -15,7 +15,8 @@ async function callNapCat(baseUrl, accessToken, action, params) {
     const resp = await fetch(url, {
         method: 'POST',
         headers: buildHeaders(accessToken),
-        body: JSON.stringify(params)
+        body: JSON.stringify(params),
+        signal: AbortSignal.timeout(15000)
     });
 
     let data;

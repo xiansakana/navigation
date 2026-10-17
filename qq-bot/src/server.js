@@ -1,4 +1,5 @@
 import { createQqCommandReceiver } from './bookkeeping.js';
+import { createCodexService } from './codex.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
 /**
  * 通知管理服务。
@@ -128,7 +129,10 @@ export function createNotificationServer(initialConfig, options) {
             return sendThrough(currentConfig, channel, { ...target, message: message }, options);
         }
     }) : null;
-    var receiver = createQqCommandReceiver({getConfig:()=>config,request:options?.bookkeepingFetch || fetch,
+    var codex = createCodexService({getConfig:()=>config,
+        send:(c,target,message)=>(options?.sendQq || sendMessage)(c.napcat,target,message)});
+    if(options?.startMonitors)codex.start();
+    var receiver = createQqCommandReceiver({getConfig:()=>config,request:options?.bookkeepingFetch || fetch,onEvent:codex.receive,
         send:(c,event,message)=>(options?.sendQq || sendMessage)(c.napcat,{type:event.type,userId:event.qqId,groupId:event.groupId,atUserId:event.type==='group'?event.qqId:undefined},message)});
     if(options?.startMonitors)receiver.start();
     var server = http.createServer(async function(req, res) {
@@ -136,7 +140,7 @@ export function createNotificationServer(initialConfig, options) {
         var url = new URL(req.url, 'http://127.0.0.1');
         try {
             if (req.method === 'GET' && url.pathname === '/health') {
-                return json(res, 200, { ok: true, channels: channelStatus(config), bookkeeping:receiver.status() });
+                return json(res, 200, { ok: true, channels: channelStatus(config), bookkeeping:receiver.status(), codex:codex.status() });
             }
             if (req.method === 'GET' && url.pathname === '/api/config') {
                 return json(res, 200, { ok: true, config: publicConfig(config), channels: channelStatus(config) });
@@ -205,7 +209,8 @@ export function createNotificationServer(initialConfig, options) {
             return json(res, 400, { ok: false, error: err.message });
         }
     });
-    server.on('close',()=>receiver.stop());
+    server.on('close',()=>{receiver.stop();codex.stop();});
+    server.codexService = codex;
     server.bookkeepingReceiver = receiver;
     server.tiboResetMonitor = monitor;
     return server;
@@ -216,6 +221,11 @@ async function main() {
     var host = config.server.host || '127.0.0.1';
     var port = config.server.port || 8787;
     var server = createNotificationServer(config, { startMonitors: true });
+    for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
+        server.codexService.stop(); server.bookkeepingReceiver.stop(); server.close();
+        const wait = setInterval(() => {if(!server.codexService.status().running){clearInterval(wait);process.exit(0);}},100);
+        setTimeout(()=>process.exit(1),10000).unref();
+    });
     startLoginWatchdog(config);
     server.listen(port, host, function() {
         console.log('通知管理服务已启动: http://' + host + ':' + port);

@@ -1,5 +1,7 @@
 # 通知管理服务
 
+支持 QQ Codex 移动入口：授权所有者可私聊 `codex 帮助`、`codex navigation 任务内容`，使用服务器上已登录的CLI执行开发任务。代码和`AGENTS.md`通过Git同步，会话仅保留在QQ端。配置、指令和部署见 [QQ Codex](../docs/qq-codex.md)。
+
 支持 QQ 指令记账：NapCat WebSocket 上报消息，qq-bot 转交 Portal 专用内部接口，按发送人绑定的账号和权限入账。私聊与群聊均支持；群聊需要真正 @机器人，并由发送人在记账页“QQ记账”中允许该群。绑定码仅在私聊使用，群回执不展示金额与余额。详细指令、去重及部署说明见 [记账模块](../docs/bookkeeping.md#qq-指令记账)。
 
 集中管理 QQ、邮件和 Slack 通知渠道。QQ 通过 [NapCat](https://napneko.github.io/) 发送私聊/群消息，邮件通过 SMTP 发送，Slack 通过 Incoming Webhook 发送到指定频道，并在每条 Slack 消息中提醒该频道所有成员（`@channel`）。Portal 首页的“通知管理”卡片可进入配置页面。

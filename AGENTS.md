@@ -1,5 +1,11 @@
 # Repository Guidelines
 
+## Workspace Interaction Preferences
+
+- Do not create or use Codex Canvas (`.canvas.tsx`) artifacts.
+- For charts, dashboards, or interactive presentations, prefer inline conversation visualizations; otherwise use ordinary workspace files and summarize in chat.
+- Do not link Canvas source files as deliverables.
+
 ## Project Structure & Module Organization
 
 This repository contains several independently deployed Node.js services:

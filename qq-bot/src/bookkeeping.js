@@ -18,7 +18,7 @@ export function qqCommandEvent(event) {
     ...(event.message.find(s=>s.type==='reply')?{replyMessageId:String(event.message.find(s=>s.type==='reply').data?.id)}:{})};
 }
 
-export function createQqCommandReceiver({ getConfig, send, request=fetch, Socket=WebSocket, log=console } ) {
+export function createQqCommandReceiver({ getConfig, send, request=fetch, Socket=WebSocket, log=console, onEvent } ) {
   let socket, timer, heartbeat, stopped=true, connected=false, lastError='', lastMessageAt=null;
   const pending=new Set();
   const limits=new Map();
@@ -28,6 +28,10 @@ export function createQqCommandReceiver({ getConfig, send, request=fetch, Socket
     const data=await r.json();if(!r.ok || !data.ok)throw new Error(data.error || '记账服务暂时不可用');return data;
   }
   async function receive(event) {
+    if (onEvent) {
+      try { if (await onEvent(event)) return; }
+      catch { log.error('QQ Codex指令接收失败'); return; }
+    }
     const command=qqCommandEvent(event);if(!command)return;
     const c=getConfig();if(!c.bookkeeping?.enabled || !c.channels.qq.enabled)return;
     const key=[command.selfId,command.type,command.groupId,command.qqId,command.messageId].join(':');if(pending.has(key))return;
@@ -49,8 +53,8 @@ export function createQqCommandReceiver({ getConfig, send, request=fetch, Socket
   function connect() {
     if(stopped)return;
     const c=getConfig();
-    if(!c.bookkeeping?.enabled)return;
-    if(!c.server.notifyToken || !c.napcat.accessToken){lastError='接收记账指令需要配置通知 Token 和 NapCat Token';return;}
+    if(!c.bookkeeping?.enabled && !c.codex?.enabled)return;
+    if(!c.napcat.accessToken || c.bookkeeping?.enabled && !c.server.notifyToken){lastError='接收指令需要 NapCat Token；记账还需要通知 Token';return;}
     try {
       socket=new Socket(c.bookkeeping.wsUrl || 'ws://127.0.0.1:3001',{headers:{Authorization:'Bearer '+c.napcat.accessToken},maxPayload:1024*1024});
       socket.on('open',()=>{connected=true;lastError='';let alive=true;

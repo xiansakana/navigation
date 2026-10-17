@@ -123,3 +123,8 @@ http://<ECS公网IP>/
 ## 记账资产历史与证券估值
 
 Portal 每天北京时间 23:59 自动采集一次绑定证券账户用户的总资产；在当天 23:59 后启动会检查并补采尚未保存的当日快照。查看页面仅初始化历史反推基准，不写入或覆盖估值快照，当前资产仍读取最新估值。首次采集将切换日前的账单与余额调整反推曲线冻结到共享 SQLite 的 bookkeeping_asset_baselines；之后按采集时账户范围、现金及最新可用证券行情，将每日定时采集的完整 CNY 估值保存在 bookkeeping_asset_snapshots（均按 user_id 隔离）。无需额外任务或配置，部署 portal 即生效；SQLite 备份需包含这两张表。行情或汇率不完整时不写入部分估值，空缺日沿用上次观测并在页面说明；旧日期不使用新报价重算。切换日口径差额不认定为投资收益。
+
+
+### QQ Codex 移动入口
+
+新增入口时只部署 `portal,qq-bot`，并按 [QQ Codex](docs/qq-codex.md) 在服务器私有配置中绑定所有者、QQ与项目。代码开发使用 `/var/lib/qq-codex/projects/` 下的独立Git检出，生产 `/opt/navigation` 保持原有部署流程。`AGENTS.md` 随Git同步；不复制CLI会话或登录凭据到仓库。

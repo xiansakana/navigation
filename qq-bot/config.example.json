@@ -7,7 +7,11 @@
       "intervalMs": 60000,
       "failBeforeRestart": 2,
       "cooldownMs": 600000,
-      "restartCommand": ["docker", "restart", "napcat"]
+      "restartCommand": [
+        "docker",
+        "restart",
+        "napcat"
+      ]
     }
   },
   "defaultTarget": {
@@ -40,7 +44,9 @@
     "tiboReset": {
       "enabled": false,
       "intervalMinutes": 5,
-      "channels": ["qq"],
+      "channels": [
+        "qq"
+      ],
       "feedUrl": "https://codex-reset.com/api/feed",
       "rssUrl": "https://x.noodl3.net/thsottiaux/rss"
     }
@@ -49,5 +55,19 @@
     "host": "127.0.0.1",
     "port": 8787,
     "notifyToken": "change-me-to-a-long-random-string"
+  },
+  "codex": {
+    "enabled": false,
+    "binary": "codex",
+    "defaultProject": "navigation",
+    "sandbox": "workspace-write",
+    "allowedUsers": [],
+    "projects": {
+      "navigation": {
+        "directory": "/var/lib/qq-codex/projects/navigation",
+        "remote": "git@github.com:YOUR_ACCOUNT/navigation.git",
+        "branch": "main"
+      }
+    }
   }
 }
