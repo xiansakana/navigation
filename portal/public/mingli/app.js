@@ -1,4 +1,5 @@
 import { flowPillar, selectedFlow, shortGod } from './chart-presentation.js?v=1';
+import { createCaseFilters } from './case-filters.js?v=1';
 
 const $ = id => document.getElementById(id);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
@@ -6,6 +7,8 @@ const birthKeys = ['calendar', 'gender', 'year', 'month', 'day', 'hour', 'minute
 let permissions = [], current = null, chart = null, dirty = false, busy = false, cycleIndex = 0, selectedYear = 0, caseOffset = 0;
 let pendingImport = null;
 let readingLayout = false;
+let caseQuery = null;
+const advancedFilters = createCaseFilters(action => run(() => action(() => loadCases())));
 let categoryData = { categories: [], total: 0, uncategorized: 0 };
 const selectedCases = new Set();
 const can = action => permissions.includes('*') || permissions.includes('mingli:' + action);
@@ -22,6 +25,7 @@ function syncCalendar() {
   $('recorded-clock-label').textContent = $('recordedSolarTime').value ? $('recordedSolarTime').value + '（来源参考时刻；修改出生日期或时间后自动停用）' : '';
 }
 function syncActions() {
+  advancedFilters.busy(busy);
   $('calculate').disabled = busy || !can('chart:calculate');
   $('save-case').disabled = busy || !chart || !can('cases:edit');
   $('delete-case').hidden = !current || !can('cases:delete');
@@ -131,7 +135,9 @@ async function loadCases(append = false) {
   if (!can('cases:view')) return;
   if (!append) await loadCategories();
   const offset = append ? caseOffset : 0;
-  const result = await api('/cases?' + new URLSearchParams({ search: $('search').value, categoryId: $('category-filter').value, offset, limit: 30 }));
+  const query = append && caseQuery ? caseQuery : { search: $('search').value, categoryId: $('category-filter').value, filters: JSON.stringify(advancedFilters.value()) };
+  const result = await api('/cases?' + new URLSearchParams({ ...query, offset, limit: 30 }));
+  caseQuery = query;
   if (!append) { $('case-list').replaceChildren(); selectedCases.clear(); }
   for (const item of result.cases) {
     const entry = document.createElement('div'); entry.className = 'ml-case-entry';
@@ -147,7 +153,8 @@ async function loadCases(append = false) {
   caseOffset = offset + result.cases.length;
   $('case-count').textContent = `${result.total} 个案例`;
   $('more-cases').hidden = caseOffset >= result.total;
-  if (!result.total) $('case-list').textContent = $('search').value || $('category-filter').value ? '当前筛选没有匹配的案例。' : '还没有案例，先排一张命盘并保存。';
+  if (!result.total) $('case-list').textContent = query.search || query.categoryId || query.filters !== '{}' ? '当前筛选没有匹配的案例。' : '还没有案例，先排一张命盘并保存。';
+  advancedFilters.describe(query.search, query.categoryId);
   syncSelection();
 }
 function syncSelection() {
@@ -290,6 +297,7 @@ run(async () => {
   permissions = me.permissions || [];
   if (!can('view')) throw new Error('当前账号没有命理模块权限');
   $('cases-tab').hidden = !can('cases:view'); $('save-case').hidden = !can('cases:edit');
+  advancedFilters.show(can('cases:view') && can('cases:filter'));
   $('import-panel').hidden = !can('cases:import');
   $('category-filter-label').hidden = !can('categories:view'); $('manage-categories').hidden = !can('categories:view');
   $('category-create-form').hidden = !can('categories:edit');

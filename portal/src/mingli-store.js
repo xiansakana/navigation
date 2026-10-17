@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { calculateChart } from './mingli-chart.js';
 import { prepareWenZhenImport } from './mingli-import.js';
 import { createMingliCategories } from './mingli-categories.js';
+import { caseFilterSql } from './mingli-filters.js';
 
 export function createMingliStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS mingli_cases (
@@ -21,7 +22,7 @@ export function createMingliStore(db) {
   const get = (uid, id) => read(db.prepare(selectCases + ' WHERE user_id = ? AND id = ?').get(uid, id));
   return {
     get, categories,
-    list(uid, { search = '', categoryId = '', offset = 0, limit = 30 } = {}) {
+    list(uid, { search = '', categoryId = '', filters = {}, offset = 0, limit = 30 } = {}) {
       const pattern = '%' + String(search).slice(0, 100).replace(/[!%_]/g, '!$&') + '%';
       let where = "user_id = ? AND (name LIKE ? ESCAPE '!' OR notes LIKE ? ESCAPE '!' OR tags_json LIKE ? ESCAPE '!')";
       const args = [uid, pattern, pattern, pattern];
@@ -30,6 +31,9 @@ export function createMingliStore(db) {
         if (!/^[a-f0-9]{32}$/.test(categoryId)) throw new Error('分类筛选无效');
         where += ' AND category_id=?'; args.push(categoryId);
       }
+      const advanced = caseFilterSql(filters);
+      for (const clause of advanced.clauses) where += ' AND (' + clause + ')';
+      args.push(...advanced.args);
       const total = db.prepare('SELECT count(*) AS count FROM mingli_cases WHERE ' + where).get(...args).count;
       const cases = db.prepare(selectCases + ' WHERE ' + where + ' ORDER BY updated_at DESC, id LIMIT ? OFFSET ?').all(...args, limit, offset)
         .map(read).map(({ chart, notes, source, ...item }) => ({ ...item, source: source ? { provider: source.provider, matched: source.matched } : null, pillars: chart.pillars.map(p => p.ganZhi), notePreview: notes.slice(0, 120) }));

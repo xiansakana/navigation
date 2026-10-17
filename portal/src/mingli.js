@@ -2,6 +2,7 @@ import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
 import { calculateChart } from './mingli-chart.js';
 import { createMingliStore } from './mingli-store.js';
+import { parseCaseFilters } from './mingli-filters.js';
 
 export function canMingli(session, action = 'view') {
   return !!session?.userId && !session.isGuest && hasPermission(session.permissions || [], 'mingli:' + action);
@@ -54,8 +55,10 @@ export async function handleMingliApi(req, res, url, session, json) {
       return json(res, 200, { ok: true, ...store.importWenZhen(uid, await body(req, 2 * 1024 * 1024), route === '/import/confirm') });
     }
     if (route === '/cases' && method === 'GET') {
+      const filters = parseCaseFilters(url.searchParams.get('filters'));
+      if (Object.keys(filters).length && !canMingli(session, 'cases:filter')) return json(res, 403, { ok: false, error: '无权使用案例高级筛选' });
       const page = key => Math.max(0, Math.floor(Number(url.searchParams.get(key)) || 0));
-      return json(res, 200, { ok: true, ...store.list(uid, { search: url.searchParams.get('search') || '', categoryId: url.searchParams.get('categoryId') || '', offset: Math.min(100000, page('offset')), limit: Math.max(1, Math.min(100, page('limit') || 30)) }) });
+      return json(res, 200, { ok: true, ...store.list(uid, { search: url.searchParams.get('search') || '', categoryId: url.searchParams.get('categoryId') || '', filters, offset: Math.min(100000, page('offset')), limit: Math.max(1, Math.min(100, page('limit') || 30)) }) });
     }
     let item;
     if (route === '/cases' && method === 'POST' || match && method === 'PUT') {

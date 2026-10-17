@@ -4,7 +4,7 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>命理 · 服务导航</title>
   <script>(function(){try{var t=localStorage.getItem('portal-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
-  <link rel="stylesheet" href="/portal.css"><link rel="stylesheet" href="/experience.css"><link rel="stylesheet" href="/mingli/style.css?v=4">
+  <link rel="stylesheet" href="/portal.css"><link rel="stylesheet" href="/experience.css"><link rel="stylesheet" href="/mingli/style.css?v=5">
   <script defer src="/ui/back-to-top.js?v=1"></script>
 </head>
 <body class="portal-experience has-navbar portal-layout-enabled">
@@ -61,6 +61,6 @@
     </section>
     <section id="cases-view" hidden><article class="ml-panel"><div class="ml-panel-heading"><div><h2>我的案例库</h2><p class="ml-muted">按当前登录账号独立保存，其他用户无法访问。</p></div><span id="case-count" class="ml-badge">0 个案例</span></div><div class="ml-category-toolbar"><label id="category-filter-label" hidden>案例分类<select id="category-filter"><option value="">全部分类</option></select></label><button type="button" id="manage-categories" class="btn ghost" hidden>分类管理</button></div><section id="category-manager" class="ml-category-manager" hidden><div class="ml-panel-heading"><h3>分类管理</h3><button type="button" id="close-categories" class="btn ghost">收起</button></div><p class="ml-hint">分类与标签独立。重命名同步更新案例分类；删除分类后案例归入未分类，原站来源快照保留。</p><form id="category-create-form" class="ml-search" hidden><label>新分类名称<input id="new-category-name" maxlength="30" required placeholder="如：客户、待核对"></label><button type="submit" class="btn primary">新增分类</button></form><div id="category-manager-list"></div></section><div id="bulk-classify" class="ml-bulk" hidden><label class="ml-check"><input id="select-loaded" type="checkbox">选择已加载案例</label><span id="selection-count" class="ml-muted">已选 0 条</span><label>移动到<select id="bulk-category"><option value="">未分类</option></select></label><button type="button" id="move-cases" class="btn ghost" disabled>移动所选案例</button></div><details id="import-panel" class="ml-settings" hidden><summary>导入问真案例</summary><p class="ml-hint">选择问真案例迁移 JSON 文件，先预览，再确认导入到当前账号。按原站案例 ID 去重，重复导入不覆盖已有案例或笔记。原站时间、分组、星标及四柱保留在来源记录中。</p><label>迁移文件（JSON，最大 2MB）<input id="import-file" type="file" accept=".json,application/json"></label><div id="import-preview" class="ml-hint" role="status"></div><button type="button" id="confirm-import" class="btn primary" hidden>确认导入案例</button></details><form id="search-form" class="ml-search"><label>搜索案例<input type="search" id="search" maxlength="100" placeholder="名称、标签或笔记"></label><button class="btn ghost" type="submit">搜索</button></form><div id="case-list" class="ml-case-list"></div><button id="more-cases" class="btn ghost" hidden>加载更多</button></article></section>
   </main>
-  <script src="/theme.js"></script><script src="/layout.js"></script><script src="/dialog.js"></script><script type="module" src="/mingli/app.js?v=4"></script>
+  <script src="/theme.js"></script><script src="/layout.js"></script><script src="/dialog.js"></script><script type="module" src="/mingli/app.js?v=5"></script>
 </body>
 </html>

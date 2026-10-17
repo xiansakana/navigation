@@ -183,6 +183,7 @@ var SYSTEM_PERMISSIONS = [
     { id: 'mingli:view', name: '进入命理模块', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理'] },
     { id: 'mingli:chart:calculate', name: '八字排盘', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '八字排盘'] },
     { id: 'mingli:cases:view', name: '查看和搜索自己的案例', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '案例库'] },
+    { id: 'mingli:cases:filter', name: '高级筛选自己的案例', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '案例库', '高级筛选'] },
     { id: 'mingli:cases:edit', name: '保存案例和编辑笔记', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '保存案例'] },
     { id: 'mingli:cases:delete', name: '删除自己的案例', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '删除案例'] },
     { id: 'bookkeeping:location:edit', name: '获取记账当前位置', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '明细与统计', '记一笔', '当前位置'] },
