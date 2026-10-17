@@ -158,6 +158,20 @@ function buildNotificationPermissions() {
 }
 
 var SYSTEM_PERMISSIONS = [
+    ...[
+        ['view', '进入和检索自己的知识库', []],
+        ['notes:view', '查看和搜索自己的学习笔记', ['笔记']],
+        ['source:view', '回看自己的原视频', ['笔记', '原视频']],
+        ['transcript:view', '查看和搜索时间线转写', ['笔记', '时间线转写']],
+        ['frames:view', '查看关键画面', ['笔记', '关键画面']],
+        ['upload:edit', '上传视频和继续上传', ['上传视频']],
+        ['process:edit', '生成笔记和重试失败任务', ['生成笔记']],
+        ['notes:edit', '编辑标题、分类、标签和笔记', ['笔记', '编辑']],
+        ['delete:edit', '删除自己的视频和笔记', ['笔记', '删除']],
+        ['export:view', '导出自己的 Markdown 笔记', ['笔记', '导出']],
+        ['settings:edit', '切换默认总结后端', ['设置', '总结后端']],
+        ['worker:edit', '生成或轮换个人工作器凭据', ['设置', '工作器']]
+    ].map(([action, name, parts]) => ({ id: 'knowledge:' + action, name, group: '知识库', serviceId: 'knowledge', action: action.endsWith(':edit') ? 'edit' : 'view', permissionPath: ['首页', '知识库', ...parts] })),
     { id: 'mingli:categories:view', name: '查看分类和分类筛选', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '案例库', '分类管理'] },
     { id: 'mingli:categories:edit', name: '新增、重命名和删除分类', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '分类管理', '编辑分类'] },
     { id: 'mingli:cases:classify', name: '设置和批量移动案例分类', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '设置分类'] },
@@ -417,6 +431,10 @@ export function buildMenusFromServices(services, overrides) {
         enabled: true
     }, overrideMap.menu_admin || {}));
     menus.push(adminMenu);
+    menus.push(Object.assign({
+        id: 'menu_knowledge', title: '知识库', description: '上传视频，积累可检索的完整学习笔记',
+        icon: '📚', type: 'hub', serviceId: 'knowledge', sort: 9950, enabled: true
+    }, overrideMap.menu_knowledge || {}, { path: '/knowledge/', permission: 'knowledge:view', serviceId: 'knowledge' }));
     menus.push(Object.assign({
         id: 'menu_mingli', title: '命理', description: '八字排盘、大运流年与个人案例笔记',
         icon: '☯', type: 'hub', serviceId: 'mingli', sort: 9960, enabled: true

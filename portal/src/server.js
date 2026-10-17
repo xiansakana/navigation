@@ -49,6 +49,7 @@ import { startThumbnailWorker } from './blog-media-process.js';
 import { createResourceMonitor, canViewResources, handleResourceApi } from './resources.js';
 import { canBookkeep, handleBookkeepingApi } from './bookkeeping.js';
 import { canMingli, handleMingliApi } from './mingli.js';
+import { canKnowledge, handleKnowledgeApi, handleKnowledgeWorkerApi } from './knowledge.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -173,6 +174,7 @@ function publicServices(userCtx, userAgent) {
 }
 
 async function handleApi(req, res, url, session) {
+    if (url.pathname.startsWith('/api/knowledge/')) return handleKnowledgeApi(req, res, url, session, json);
     if (url.pathname.startsWith('/api/mingli/')) return handleMingliApi(req, res, url, session, json);
     if (url.pathname.startsWith('/api/bookkeeping/')) return handleBookkeepingApi(req, res, url, session, json);
     if (url.pathname === '/api/resources/metrics') {
@@ -520,6 +522,13 @@ var server = http.createServer(async function(req, res) {
         res.writeHead(308, { Location: canonicalPage + url.search });
         return res.end();
     }
+    if (url.pathname.startsWith('/api/knowledge/worker/')) {
+        return handleKnowledgeWorkerApi(req, res, url, json, uid => {
+            const ctx = resolveSessionUser({ userId: uid }, config);
+            const s = ctx && { userId: uid, permissions: ctx.permissions, isGuest: ctx.user.username === (config.auth?.guestUsername || 'guest') };
+            return canKnowledge(s) && canKnowledge(s, 'process:edit') && canKnowledge(s, 'worker:edit');
+        });
+    }
     if (url.pathname === '/api/internal/bookkeeping/qq') {
         if (req.method !== 'POST' || !internalQqAuthorized(req)) return json(res, 403, {ok:false,error:'Forbidden'});
         try {
@@ -587,6 +596,14 @@ var server = http.createServer(async function(req, res) {
             });
         }
         return serveStatic(path.join(PUBLIC_DIR, 'resources', 'index.html'), res);
+    }
+
+    if (['/knowledge', '/knowledge/', '/knowledge/index.html'].includes(path.posix.normalize(url.pathname))) {
+        const knowledgeSession = requireAuth(req, res);
+        if (!knowledgeSession) return;
+        res.setHeader('Cache-Control', 'no-store');
+        if (!canKnowledge(knowledgeSession)) return sendError(req, res, url, 403, '请登录具备知识库权限的账号', { title: '无权访问知识库' });
+        return serveStatic(path.join(PUBLIC_DIR, 'knowledge', 'index.html'), res);
     }
 
     if (['/mingli', '/mingli/', '/mingli/index.html'].includes(path.posix.normalize(url.pathname))) {

@@ -103,6 +103,8 @@ Deploy Key 需加到 **navigation** 仓库（可与 torn-scripts 共用同一密
 
 ## 六、添加非 Torn 服务
 
+视频知识库随 Portal 部署，入口 `/knowledge/`，无新增公网端口。`scripts/sync-blog-upload-nginx.py` 同时维护其分片/工作器结果上传路由。Portal只接收文件和持久化队列；如需在ECS执行转写和总结，另行按 [工作器说明](docs/video-knowledge.md) 安装Python>=3.10、语音依赖和Codex CLI，使用该账号私有凭据启动 `knowledge-worker`。本机工作器也可处理同一站点任务。不要在常规Portal更新中自动安装模型或启动CPU密集任务；备份须额外包含 `portal/data/knowledge/` 的视频和截图。
+
 在 `portal/config.json` 的 `services` 增加卡片；新服务放在本仓库根目录（与 `qq-bot` 平级），独立端口 + pm2，仅 portal :80 对外。
 
 ---

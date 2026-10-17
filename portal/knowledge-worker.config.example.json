@@ -1,0 +1,17 @@
+{
+  "portalUrl": "http://127.0.0.1:8080",
+  "token": "在知识库的工作器设置中生成",
+  "label": "我的视频工作器",
+  "workDir": "",
+  "python": "python3",
+  "ffmpeg": "ffmpeg",
+  "asr": { "model": "small", "device": "cpu", "threads": 2, "language": "", "modelCache": "" },
+  "codex": { "binary": "codex", "model": "", "proxyUrl": "" },
+  "openai": {
+    "baseUrl": "https://api.openai.com/v1",
+    "model": "",
+    "apiKeyEnv": "KNOWLEDGE_API_KEY",
+    "vision": true,
+    "maxTokensParameter": "max_completion_tokens"
+  }
+}

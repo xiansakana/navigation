@@ -2,6 +2,7 @@
 **/__pycache__/
 **/*.log
 **/config.json
+**/knowledge-worker.config.json
 **/config.undercut.json
 **/config.company.json
 .DS_Store

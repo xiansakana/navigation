@@ -63,6 +63,7 @@ export function resolveLoggedInPermissions(rbac, user, config = {}) {
     return Array.from(new Set(permissions.concat(
         SYSTEM_PERMISSIONS.filter(p => p.id.startsWith('bookkeeping:')).map(p => p.id),
         SYSTEM_PERMISSIONS.filter(p => p.id.startsWith('mingli:')).map(p => p.id),
+        SYSTEM_PERMISSIONS.filter(p => p.id.startsWith('knowledge:')).map(p => p.id),
         'blog:post:edit'
     )));
 }

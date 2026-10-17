@@ -24,6 +24,21 @@ BLOCK = r'''    # BEGIN navigation blog media upload
     }
     # END navigation blog media upload
 '''
+BLOCK = BLOCK.replace('    # END navigation blog media upload', r'''    location ^~ /api/knowledge/ {
+        client_max_body_size 20m;
+        client_body_timeout 3600s;
+        proxy_request_buffering off;
+        proxy_pass http://127.0.0.1:80;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_send_timeout 3600s;
+        proxy_read_timeout 3600s;
+        proxy_buffering off;
+    }
+    # END navigation blog media upload''')
 
 
 def patch(text):
