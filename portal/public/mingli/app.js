@@ -1,5 +1,6 @@
 import { flowPillar, selectedFlow, shortGod } from './chart-presentation.js?v=1';
-import { createCaseFilters } from './case-filters.js?v=1';
+import { createCaseFilters } from './case-filters.js?v=2';
+import { createKnowledgeCases } from './knowledge-cases.js?v=1';
 
 const $ = id => document.getElementById(id);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
@@ -9,6 +10,7 @@ let pendingImport = null;
 let readingLayout = false;
 let caseQuery = null;
 const advancedFilters = createCaseFilters(action => run(() => action(() => loadCases())));
+const knowledgeCases = createKnowledgeCases({ run, api, tab });
 let categoryData = { categories: [], total: 0, uncategorized: 0 };
 const selectedCases = new Set();
 const can = action => permissions.includes('*') || permissions.includes('mingli:' + action);
@@ -25,6 +27,7 @@ function syncCalendar() {
   $('recorded-clock-label').textContent = $('recordedSolarTime').value ? $('recordedSolarTime').value + '（来源参考时刻；修改出生日期或时间后自动停用）' : '';
 }
 function syncActions() {
+  knowledgeCases.busy(busy);
   advancedFilters.busy(busy);
   $('calculate').disabled = busy || !can('chart:calculate');
   $('save-case').disabled = busy || !chart || !can('cases:edit');
@@ -60,7 +63,7 @@ async function run(fn) {
 }
 async function discard() { return !dirty || await window.portalDialog.confirm('当前修改尚未保存，确定离开当前案例吗？', { title: '未保存的修改' }); }
 function tab(name) {
-  for (const t of ['chart', 'cases']) { $(t + '-view').hidden = t !== name; $(t + '-tab').classList.toggle('active', t === name); $(t + '-tab').setAttribute('aria-pressed', t === name ? 'true' : 'false'); }
+  for (const t of ['chart', 'cases', 'knowledge']) { $(t + '-view').hidden = t !== name; $(t + '-tab').classList.toggle('active', t === name); $(t + '-tab').setAttribute('aria-pressed', t === name ? 'true' : 'false'); }
   document.querySelector('.ml-shell').classList.toggle('ml-reading', readingLayout && name === 'chart');
 }
 function renderChart() {
@@ -295,6 +298,7 @@ run(async () => {
   const response = await fetch('/api/me'); const me = await response.json();
   if (!response.ok || !me.ok || me.isGuest) throw new Error('请先登录后使用命理模块');
   permissions = me.permissions || [];
+  knowledgeCases.permissions(permissions);
   if (!can('view')) throw new Error('当前账号没有命理模块权限');
   $('cases-tab').hidden = !can('cases:view'); $('save-case').hidden = !can('cases:edit');
   advancedFilters.show(can('cases:view') && can('cases:filter'));

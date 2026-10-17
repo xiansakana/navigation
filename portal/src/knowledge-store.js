@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { createSourceStore } from './knowledge-source-store.js';
+import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
 
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
@@ -152,9 +153,12 @@ export function createKnowledgeStore(db) {
     },
     finish(uid, key, lease, result) {
       if (!this.leased(uid, key, lease)) return false;
-      db.prepare("UPDATE knowledge_documents SET status='ready',stage='笔记已生成',progress=100,error='',duration=?,language=?,notes=?,transcript_json=?,frames_json=?,provenance_json=?,revision=revision+1,lease=NULL,updated_at=? WHERE user_id=? AND id=? AND lease=?")
-        .run(result.duration, result.language, result.notes, JSON.stringify(result.transcript), JSON.stringify(result.frames), JSON.stringify(result.provenance), now(), uid, key, lease);
-      return true;
+      return db.transaction(() => {
+        db.prepare("UPDATE knowledge_documents SET status='ready',stage='笔记已生成',progress=100,error='',duration=?,language=?,notes=?,transcript_json=?,frames_json=?,provenance_json=?,revision=revision+1,lease=NULL,updated_at=? WHERE user_id=? AND id=? AND lease=?")
+          .run(result.duration, result.language, result.notes, JSON.stringify(result.transcript), JSON.stringify(result.frames), JSON.stringify(result.provenance), now(), uid, key, lease);
+        createKnowledgeCaseStore(db).syncDocument(getRow(uid, key));
+        return true;
+      })();
     },
     fail(uid, key, lease, error) {
       if (!this.leased(uid, key, lease)) return false;
@@ -169,14 +173,18 @@ export function createKnowledgeStore(db) {
       if (!previous) return null;
       const m = metadata(raw), notes = String(raw.notes ?? previous.notes);
       if (notes.length > 500000) throw new Error('笔记不超过50万字');
-      const result = db.prepare('UPDATE knowledge_documents SET title=?,topic=?,tags_json=?,source_url=?,notes=?,revision=revision+1,updated_at=? WHERE user_id=? AND id=? AND revision=?')
-        .run(m.title, m.topic, JSON.stringify(m.tags), m.sourceUrl, notes, now(), uid, key, Number(raw.revision));
-      if (!result.changes) { const e = new Error('笔记已更新，请重新打开后再保存'); e.status = 409; throw e; }
-      return get(uid, key);
+      return db.transaction(() => {
+        const result = db.prepare('UPDATE knowledge_documents SET title=?,topic=?,tags_json=?,source_url=?,notes=?,revision=revision+1,updated_at=? WHERE user_id=? AND id=? AND revision=?')
+          .run(m.title, m.topic, JSON.stringify(m.tags), m.sourceUrl, notes, now(), uid, key, Number(raw.revision));
+        if (!result.changes) { const e = new Error('笔记已更新，请重新打开后再保存'); e.status = 409; throw e; }
+        createKnowledgeCaseStore(db).syncDocument(getRow(uid, key));
+        return get(uid, key);
+      })();
     },
     remove(uid, key) {
       return db.transaction(() => {
         if (!getRow(uid, key)) return false;
+        createKnowledgeCaseStore(db).removeDocument(uid, key);
         sources.remove(uid, key);
         db.prepare('DELETE FROM knowledge_parts WHERE document_id=?').run(key);
         return db.prepare('DELETE FROM knowledge_documents WHERE user_id=? AND id=?').run(uid, key).changes > 0;

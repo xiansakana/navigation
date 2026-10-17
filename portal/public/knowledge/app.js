@@ -147,7 +147,15 @@ async function boot() {
   const me = await meResponse.json(); state.permissions = me.permissions || [];
   if (me.isGuest || !can('view')) throw new Error('请登录具备知识库权限的账号');
   show('upload-toggle', can('upload:edit') && can('process:edit')); show('worker-token', can('worker:edit'));
-  await settings(); if (can('notes:view')) await load();
+  await settings();
+  if (can('notes:view')) {
+    await load();
+    const documentId = new URL(location.href).searchParams.get('document');
+    if (documentId && /^[a-f0-9]{32}$/.test(documentId)) {
+      await open(documentId);
+      if (/^#kb-heading-\d+$/.test(location.hash)) document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: 'start' });
+    }
+  }
   setInterval(async () => {
     if (document.hidden || state.uploading) return;
     try {

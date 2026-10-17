@@ -1,9 +1,9 @@
 import { STEMS, BRANCHES, PILLARS, RELATIONS } from './filter-options.js?v=1';
 
-const $ = id => document.getElementById(id);
-export function createCaseFilters(onApply) {
+export function createCaseFilters(onApply, { prefix = '', anchor = 'search-form', search = 'search', category = 'category-filter', basicFields = ['gender', 'location', 'solarFrom', 'solarTo', 'notes'] } = {}) {
+  const $ = id => document.getElementById(({ 'search-form': anchor, search, 'category-filter': category })[id] || prefix + id);
   const panel = document.createElement('details');
-  panel.id = 'advanced-filters'; panel.className = 'ml-advanced'; panel.hidden = true;
+  panel.id = prefix + 'advanced-filters'; panel.className = 'ml-advanced'; panel.hidden = true;
   const options = chars => '<option value="">不限</option>' + [...chars].map(c => `<option>${c}</option>`).join('');
   panel.innerHTML = `<summary>高级筛选 <span id="advanced-count" class="ml-muted">未启用</span></summary>
     <form id="advanced-form"><fieldset id="advanced-fields"><legend class="ml-sr-only">案例高级筛选条件</legend>
@@ -22,15 +22,18 @@ export function createCaseFilters(onApply) {
       <div class="ml-filter-relations">${RELATIONS.map(([id, label, , values]) => `<fieldset><legend>${label}</legend><div class="ml-filter-chips">${values.map(v => `<label><input type="checkbox" name="relations" value="${id}:${v}"><span>${v}</span></label>`).join('')}</div></fieldset>`).join('')}</div>
       <div class="ml-actions"><button class="btn primary" type="submit">应用筛选</button><button id="reset-advanced" class="btn ghost" type="button">清空高级条件</button></div>
     </fieldset></form>`;
+  for (const el of panel.querySelectorAll('[id]')) el.id = prefix + el.id;
   $('search-form').after(panel);
-  const summary = document.createElement('div'); summary.id = 'filter-summary'; summary.className = 'ml-filter-summary'; summary.hidden = true;
+  const summary = document.createElement('div'); summary.id = prefix + 'filter-summary'; summary.className = 'ml-filter-summary'; summary.hidden = true;
   summary.innerHTML = '<p id="filter-description"></p><button id="clear-case-filters" class="btn ghost" type="button">清空全部筛选</button>';
+  for (const el of summary.querySelectorAll('[id]')) el.id = prefix + el.id;
   panel.after(summary);
+  for (const key of ['gender', 'location', 'solarFrom', 'solarTo', 'notes']) if (!basicFields.includes(key)) $('filter-' + key).closest('label').hidden = true;
   let applied = {}, descriptions = [];
   const form = $('advanced-form');
   const collect = () => {
     const f = {}, text = [];
-    for (const key of ['gender', 'location', 'solarFrom', 'solarTo', 'notes']) {
+    for (const key of basicFields) {
       const value = $('filter-' + key).value.trim();
       if (value) { f[key] = value; text.push(({ gender: '性别：' + (value === '1' ? '男' : '女'), location: '地区：' + value, solarFrom: '公历起：' + value, solarTo: '公历止：' + value, notes: value === 'yes' ? '有笔记' : '无笔记' })[key]); }
     }

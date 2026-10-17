@@ -3,6 +3,8 @@ import { hasPermission } from './rbac.js';
 import { calculateChart } from './mingli-chart.js';
 import { createMingliStore } from './mingli-store.js';
 import { parseCaseFilters } from './mingli-filters.js';
+import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
+import { canKnowledge } from './knowledge.js';
 
 export function canMingli(session, action = 'view') {
   return !!session?.userId && !session.isGuest && hasPermission(session.permissions || [], 'mingli:' + action);
@@ -25,7 +27,9 @@ export async function handleMingliApi(req, res, url, session, json) {
   const route = url.pathname.slice('/api/mingli'.length), method = req.method;
   const match = /^\/cases\/([a-f0-9]{32})$/.exec(route);
   const category = /^\/categories\/([a-f0-9]{32})$/.exec(route);
-  const action = route === '/cases/category' && method === 'POST' ? 'cases:classify'
+  const knowledgeCase = /^\/knowledge-cases\/([a-f0-9]{32})$/.exec(route);
+  const action = (route === '/knowledge-cases' || knowledgeCase) && method === 'GET' ? 'knowledge:view'
+    : route === '/cases/category' && method === 'POST' ? 'cases:classify'
     : route === '/categories' && method === 'GET' ? 'categories:view'
       : (route === '/categories' && method === 'POST' || category && ['PUT', 'DELETE'].includes(method)) ? 'categories:edit'
     : ['/import/preview', '/import/confirm'].includes(route) && method === 'POST' ? 'cases:import'
@@ -35,10 +39,19 @@ export async function handleMingliApi(req, res, url, session, json) {
         : match && method === 'DELETE' ? 'cases:delete' : null;
   if (!action) return json(res, 404, { ok: false, error: '命理接口不存在' });
   if (!canMingli(session, action)) return json(res, 403, { ok: false, error: '无权执行此命理操作' });
+  if (action === 'knowledge:view' && (!canKnowledge(session) || !canKnowledge(session, 'notes:view'))) return json(res, 403, { ok: false, error: '知识库案例还需要知识库及笔记查看权限' });
   if (method !== 'GET' && (req.headers['sec-fetch-site'] === 'cross-site' || req.headers.origin && !['http://' + req.headers.host, 'https://' + req.headers.host].includes(req.headers.origin))) {
     return json(res, 403, { ok: false, error: '不允许跨站写入' });
   }
   try {
+    if (action === 'knowledge:view') {
+      const store = createKnowledgeCaseStore(getDatabase()), uid = session.userId;
+      if (knowledgeCase) { const item = store.get(uid, knowledgeCase[1]); return json(res, item ? 200 : 404, item ? { ok: true, case: item } : { ok: false, error: '知识库案例不存在' }); }
+      const filters = parseCaseFilters(url.searchParams.get('filters'));
+      if (Object.keys(filters).length && !canMingli(session, 'knowledge:filter')) return json(res, 403, { ok: false, error: '无权使用知识库案例高级筛选' });
+      return json(res, 200, { ok: true, ...store.list(uid, { search: url.searchParams.get('search') || '', documentId: url.searchParams.get('documentId') || '', filters,
+        offset: Math.min(100000, Math.max(0, Math.floor(Number(url.searchParams.get('offset')) || 0))), limit: Math.max(1, Math.min(100, Math.floor(Number(url.searchParams.get('limit')) || 30))) }) });
+    }
     if (route === '/chart') return json(res, 200, { ok: true, chart: calculateChart(await body(req)) });
     const store = createMingliStore(getDatabase()), uid = session.userId;
     if (route === '/categories' && method === 'GET') return json(res, 200, { ok: true, ...store.categories.list(uid) });
