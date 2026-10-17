@@ -49,6 +49,28 @@ test('queue is deduplicated durably, respects whitelist and resumes only its own
   } finally {f.close();}
 });
 
+test('web conversations share the serial queue, resume their own thread, persist progress and never send QQ receipts',async()=>{
+  let allowed=true;const sessions=[];
+  const f=fixture(async(c,j,session,options)=>{
+    sessions.push(session);options.onSession('web-thread');options.onProgress({type:'turn.started'});
+    options.onProgress({type:'item.completed',item:{type:'agent_message',text:'进行中'}});
+    return {result:'网页完成',sessionId:'web-thread'};
+  },{authorizeWeb:()=>allowed});
+  try {
+    const c=f.store.conversations,conversation=c.create('u1','navigation');
+    f.store.enqueue('u1','12345678','paused-qq','navigation','QQ waits while transport is disabled');
+    const enqueue=()=>c.enqueue('u1','12345678',conversation.id,{prompt:'web task',runtime:{model:'test',effort:'low'},requestId:'request-'+String(sessions.length)});
+    f.config.channels.qq.enabled=false; // Web execution is independent of QQ transport.
+    enqueue();f.service.start();await f.service.tick();
+    assert.equal(c.jobs('u1',conversation.id)[0].state,'succeeded');assert.equal(c.jobs('u1',conversation.id)[0].progress.length,2);
+    assert.equal(f.store.pendingReply(),undefined);assert.equal(f.store.session('u1','navigation'),undefined);
+    enqueue();await f.service.tick();assert.deepEqual(sessions,['','web-thread']);
+    enqueue();allowed=false;await f.service.tick();assert.equal(sessions.length,2);assert.equal(c.jobs('u1',conversation.id)[2].state,'failed');
+    await f.service.deliver();assert.equal(f.sent.length,0);
+    assert.equal(f.store.active('u1')[0].state,'queued');
+  } finally {f.close();}
+});
+
 test('private provisioning is not exposed or writable through public notification config',()=>{
   const c=normalizeConfig({codex:{enabled:true,binary:'/private/bin',allowedUsers:[{userId:'u',qqId:'12345678'}],projects:{private:{remote:'secret'}}}});
   assert.equal(publicConfig(c).codex,undefined);

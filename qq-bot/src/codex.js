@@ -28,14 +28,25 @@ export function authorizedCodexUser(config, qq, db) {
   if (!account || account.enabled === false || account.username === 'guest' || !hasPermission(resolveUserPermissions(rbac, account), 'qq-codex:execute')) return null;
   return user;
 }
-const help = 'QQ Codex（私聊 / 授权群中@机器人）\ncodex 项目：列出可用项目\ncodex 模型 [模型ID/默认]：查看或切换模型\ncodex 强度 [强度值/默认]：查看或切换推理强度\n先发图片/文件，再发codex处理要求；也可图片与指令同发。\ncodex 附件 / codex 清空附件：查看或清空待处理附件\ncodex navigation 你的任务：执行任务\ncodex 你的任务：使用默认项目\ncodex 状态：查看当前及最近结果\ncodex 额度：查询5小时、周剩余额度和北京时间重置时间\ncodex 结果：重新读取最近完整结果\ncodex 停止：停止自己的任务\ncodex 同步 [项目]：从Git同步代码和AGENTS.md\ncodex 新会话 [项目]：开始独立的新会话\n群号和结果发送方式可在通知管理的QQ Codex区域配置。群聊会话与私聊隔离。代码通过Git同步，会话仅在QQ端保留。任务结果返回Git提交；电脑 git pull --ff-only 即可取回代码。';
+const help = 'QQ Codex（私聊 / 授权群中@机器人）\ncodex 项目：列出可用项目\ncodex 模型 [模型ID/默认]：查看或切换模型\ncodex 强度 [强度值/默认]：查看或切换推理强度\n先发图片/文件，再发codex处理要求；也可图片与指令同发。\ncodex 附件 / codex 清空附件：查看或清空待处理附件\ncodex navigation 你的任务：执行任务\ncodex 你的任务：使用默认项目\ncodex 状态：查看当前及最近结果\ncodex 额度：查询5小时、周剩余额度和北京时间重置时间\ncodex 结果：重新读取最近完整结果\ncodex 停止：停止自己的任务\ncodex 同步 [项目]：从Git同步代码和AGENTS.md\ncodex 新会话 [项目]：开始独立的新会话\n群号和结果发送方式可在通知管理的QQ Codex区域配置。群聊会话与私聊隔离。代码通过Git同步，自己的会话可在Navigation的Codex CLI工作台查看和续聊。任务结果返回Git提交；电脑 git pull --ff-only 即可取回代码。';
 
-export function createCodexService({ getConfig, send, store: injectedStore, authorize, execute = executeCodex, readCatalog = readCodexCatalog, prepareMedia = prepareCodexMedia, sendArtifact = sendCodexArtifact, log = console }) {
+export function createCodexService({ getConfig, send, store: injectedStore, authorize, authorizeWeb, execute = executeCodex, readCatalog = readCodexCatalog, prepareMedia = prepareCodexMedia, sendArtifact = sendCodexArtifact, log = console }) {
   let store = injectedStore, timer, controller, busy = false, delivering = false, stopped = true;
   const receivers=new Map();
   const settings = () => getConfig().codex || {};
   const storage = () => store ||= createCodexStore(getDatabase());
   const userFor = qq => authorize ? authorize(qq) : authorizedCodexUser(settings(), qq, getDatabase());
+  function jobUser(job) {
+    const user=userFor(job.qq_id);
+    if(job.origin!=='web')return getConfig().channels?.qq?.enabled ? user : null;
+    const conversation=storage().conversations.get(job.user_id,job.conversation_id);
+    const rbac=authorizeWeb ? null : loadRbacBlob(getDatabase()),account=rbac?.users?.find(u=>u.id===job.user_id);
+    const permissions=account ? resolveUserPermissions(rbac,account) : [];
+    const webAllowed=authorizeWeb ? authorizeWeb(job) : account&&account.enabled!==false&&['codex-cli:view','codex-cli:sessions:view','codex-cli:messages:send'].every(p=>hasPermission(permissions,p));
+    if(!conversation || conversation.archived || conversation.group_id&&!storage().settings(job.user_id).groups.includes(conversation.group_id)
+      || !webAllowed)return null;
+    return user;
+  }
   async function receiveEvent(raw) {
     const event = codexEvent(raw), config = settings();
     if (!event || !config.enabled || !getConfig().channels?.qq?.enabled) return false;
@@ -144,22 +155,23 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
     } finally { delivering = false; }
   }
   async function tick() {
-    if (busy || stopped || !settings().enabled || !getConfig().channels?.qq?.enabled) return;
+    if (busy || stopped || !settings().enabled) return;
     busy = true;
     let job, session = '', heartbeat;
     try {
-      const s = storage(); job = s.claim(); if (!job) return;
-      const user = userFor(job.qq_id);
+      const s = storage(); job = s.claim({includeQQ:!!getConfig().channels?.qq?.enabled}); if (!job) return;
+      const user = jobUser(job);
       if (!user || user.userId !== job.user_id || !user.projects?.includes(job.project) || job.group_id && !s.settings(job.user_id).groups.includes(job.group_id)) throw new Error('账号或项目授权已撤销');
       controller = new AbortController();
       heartbeat = setInterval(() => {
         try {
-          const u = userFor(job.qq_id);
-          if (!s.touch(job.id) || s.cancelled(job.id) || !settings().enabled || !getConfig().channels?.qq?.enabled || !u || u.userId !== job.user_id || !u.projects?.includes(job.project) || job.group_id && !s.settings(job.user_id).groups.includes(job.group_id)) controller?.abort();
+          const u = jobUser(job);
+          if (!s.touch(job.id) || s.cancelled(job.id) || !settings().enabled || !u || u.userId !== job.user_id || !u.projects?.includes(job.project) || job.group_id && !s.settings(job.user_id).groups.includes(job.group_id)) controller?.abort();
         } catch { controller?.abort(); }
       }, 1000);
-      const media = ['__usage__','__sync__'].includes(job.prompt) ? undefined : await prepareMedia(settings(),job,getConfig().napcat,{signal:controller.signal});
-      const result = await execute(settings(), job, s.session(job.user_id, job.project, job.group_id || ''), { signal: controller.signal, media, onRuntime: value => s.recordRuntime(job,value), onSession: value => { session = value; s.captureSession(job, value); } });
+      const media = job.origin==='web' || ['__usage__','__sync__'].includes(job.prompt) ? undefined : await prepareMedia(settings(),job,getConfig().napcat,{signal:controller.signal});
+      const sessionId=job.origin==='web' ? s.conversations.get(job.user_id,job.conversation_id)?.session_id : s.session(job.user_id, job.project, job.group_id || '');
+      const result = await execute(settings(), job, sessionId, { signal: controller.signal, media, onProgress: event => s.conversations.progress(job,event), onRuntime: value => s.recordRuntime(job,value), onSession: value => { session = value; s.captureSession(job, value); } });
       s.finish(job, { state: 'succeeded', ...result });
     } catch (e) {
       if (job) storage().finish(job, { state: controller?.signal.aborted ? 'cancelled' : 'failed', result: e.message, sessionId: e.sessionId || session });

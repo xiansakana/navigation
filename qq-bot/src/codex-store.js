@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createConversationStore } from './codex-conversations.js';
 import { validateAttachments, mergeAttachments } from './codex-media.js';
 
 export function createCodexStore(db) {
@@ -18,13 +19,17 @@ export function createCodexStore(db) {
     ['qq_codex_outbox', 'group_id', "TEXT NOT NULL DEFAULT ''"], ['qq_codex_outbox', 'full_result', 'INTEGER NOT NULL DEFAULT 0'],
     ['qq_codex_jobs', 'attachments_json', "TEXT NOT NULL DEFAULT '[]'"], ['qq_codex_jobs', 'artifacts_json', "TEXT NOT NULL DEFAULT '[]'"],
     ['qq_codex_jobs', 'runtime_json', "TEXT NOT NULL DEFAULT '{}'"],
+    ['qq_codex_jobs', 'origin', "TEXT NOT NULL DEFAULT 'qq'"], ['qq_codex_jobs', 'conversation_id', "TEXT NOT NULL DEFAULT ''"],
     ['qq_codex_outbox', 'artifact_json', "TEXT NOT NULL DEFAULT ''"], ['qq_codex_outbox', 'source_group_id', "TEXT NOT NULL DEFAULT ''"]
   ]) if (!db.prepare('PRAGMA table_info(' + table + ')').all().some(c => c.name === column)) db.exec('ALTER TABLE ' + table + ' ADD COLUMN ' + column + ' ' + definition); }).immediate();
   db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_settings(user_id TEXT PRIMARY KEY,groups_json TEXT NOT NULL DEFAULT '[]',group_reply TEXT NOT NULL DEFAULT 'private');
     CREATE TABLE IF NOT EXISTS qq_codex_group_sessions(user_id TEXT NOT NULL,project TEXT NOT NULL,group_id TEXT NOT NULL,session_id TEXT NOT NULL,PRIMARY KEY(user_id,project,group_id));`);
   db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_pending_files(user_id TEXT NOT NULL,group_id TEXT NOT NULL,attachments_json TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(user_id,group_id));`);
   db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_runtime_preferences(user_id TEXT NOT NULL,group_id TEXT NOT NULL,model TEXT NOT NULL DEFAULT '',effort TEXT NOT NULL DEFAULT '',updated_at INTEGER NOT NULL,PRIMARY KEY(user_id,group_id));`);
+  const conversations=createConversationStore(db);
+  db.exec('CREATE INDEX IF NOT EXISTS qq_codex_conversation_jobs ON qq_codex_jobs(user_id,conversation_id,created_at)');
   return {
+    conversations,
     runtime(uid,group='') { const row=db.prepare('SELECT model,effort FROM qq_codex_runtime_preferences WHERE user_id=? AND group_id=?').get(uid,group);return row || {model:'',effort:''}; },
     saveRuntime(uid,group,values) {
       if(!values||typeof values.model!=='string'||typeof values.effort!=='string'||values.model.length>120||values.effort.length>24)throw new Error('模型设置格式无效');
@@ -68,25 +73,25 @@ export function createCodexStore(db) {
         return id;
       })();
     },
-    claim() {
+    claim({includeQQ=true}={}) {
       return db.transaction(() => {
         const stale = db.prepare("SELECT * FROM qq_codex_jobs WHERE state='running' AND heartbeat<?").all(Date.now() - 120000);
         for (const job of stale) this.finish(job, { state: 'failed', result: '执行进程已中断，未自动重做。修改和提交保留在开发目录，请先查看状态。' });
         if (db.prepare("SELECT 1 FROM qq_codex_jobs WHERE state='running'").get()) return null;
-        const job = db.prepare("SELECT * FROM qq_codex_jobs WHERE state='queued' ORDER BY created_at,rowid LIMIT 1").get();
+        const job = db.prepare("SELECT * FROM qq_codex_jobs WHERE state='queued'"+(includeQQ?'':" AND origin='web'")+" ORDER BY created_at,rowid LIMIT 1").get();
         if (!job) return null;
         db.prepare("UPDATE qq_codex_jobs SET state='running',heartbeat=? WHERE id=? AND state='queued'").run(Date.now(), job.id);
         return job;
       })();
     },
-    active(uid, group = '') { return db.prepare("SELECT id,project,state,created_at,commit_sha,runtime_json FROM qq_codex_jobs WHERE user_id=? AND group_id=? ORDER BY state IN ('queued','running') DESC,created_at DESC,rowid DESC LIMIT 5").all(uid, group); },
-    latestResult(uid, group = '') { return db.prepare("SELECT result FROM qq_codex_jobs WHERE user_id=? AND group_id=? AND result<>'' ORDER BY created_at DESC,rowid DESC LIMIT 1").get(uid, group)?.result; },
-    latestArtifacts(uid, group = '') { const row = db.prepare("SELECT artifacts_json FROM qq_codex_jobs WHERE user_id=? AND group_id=? AND result<>'' ORDER BY created_at DESC,rowid DESC LIMIT 1").get(uid,group); return row ? JSON.parse(row.artifacts_json) : []; },
+    active(uid, group = '') { return db.prepare("SELECT id,project,state,created_at,commit_sha,runtime_json FROM qq_codex_jobs WHERE user_id=? AND group_id=? AND origin='qq' ORDER BY state IN ('queued','running') DESC,created_at DESC,rowid DESC LIMIT 5").all(uid, group); },
+    latestResult(uid, group = '') { return db.prepare("SELECT result FROM qq_codex_jobs WHERE user_id=? AND group_id=? AND origin='qq' AND result<>'' ORDER BY created_at DESC,rowid DESC LIMIT 1").get(uid, group)?.result; },
+    latestArtifacts(uid, group = '') { const row = db.prepare("SELECT artifacts_json FROM qq_codex_jobs WHERE user_id=? AND group_id=? AND origin='qq' AND result<>'' ORDER BY created_at DESC,rowid DESC LIMIT 1").get(uid,group); return row ? JSON.parse(row.artifacts_json) : []; },
     touch(id) { return db.prepare("UPDATE qq_codex_jobs SET heartbeat=? WHERE id=? AND state='running'").run(Date.now(), id).changes > 0; },
     cancelled(id) { return !!db.prepare('SELECT cancel FROM qq_codex_jobs WHERE id=?').get(id)?.cancel; },
     cancel(uid, group = '') {
       return db.transaction(() => {
-        const jobs = db.prepare("SELECT * FROM qq_codex_jobs WHERE user_id=? AND group_id=? AND state IN ('queued','running')").all(uid, group);
+        const jobs = db.prepare("SELECT * FROM qq_codex_jobs WHERE user_id=? AND group_id=? AND origin='qq' AND state IN ('queued','running')").all(uid, group);
         for (const job of jobs) {
           if (job.state === 'queued') this.finish(job, { state: 'cancelled', result: '已取消排队任务' });
           else db.prepare('UPDATE qq_codex_jobs SET cancel=1 WHERE id=? AND user_id=?').run(job.id, uid);
@@ -102,7 +107,8 @@ export function createCodexStore(db) {
     captureSession(job, value) {
       db.transaction(() => {
         if (!db.prepare("UPDATE qq_codex_jobs SET session_id=? WHERE id=? AND user_id=? AND state='running'").run(value, job.id, job.user_id).changes) return;
-        this.saveSession(job.user_id, job.project, job.group_id || '', value);
+        if(job.origin!=='web')this.saveSession(job.user_id, job.project, job.group_id || '', value);
+        conversations.capture(job,value);
       })();
     },
     reset(uid, project, group = '') {
@@ -114,8 +120,10 @@ export function createCodexStore(db) {
       return db.transaction(() => {
         if (!db.prepare("UPDATE qq_codex_jobs SET state=?,result=?,session_id=?,commit_sha=?,finished_at=? WHERE id=? AND state IN ('queued','running')")
           .run(state, result.slice(0, 24000), sessionId, commit, Date.now(), job.id).changes) return;
-        if (sessionId) this.saveSession(job.user_id, job.project, job.group_id || '', sessionId);
+        if (sessionId && job.origin!=='web') this.saveSession(job.user_id, job.project, job.group_id || '', sessionId);
+        if(sessionId)conversations.capture(job,sessionId);
         db.prepare('UPDATE qq_codex_jobs SET artifacts_json=? WHERE id=?').run(JSON.stringify(artifacts),job.id);
+        if(job.origin==='web')return;
         const summary = `Codex ${job.id.slice(0, 8)} · ${job.project} · ${{ succeeded: '完成', failed: '失败', cancelled: '已停止' }[state]}`;
         const settings = this.settings(job.user_id), allowed = job.group_id && settings.groups.includes(job.group_id);
         const toGroup = allowed && job.reply_mode === 'group' && settings.groupReply === 'group';

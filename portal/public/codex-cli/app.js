@@ -31,6 +31,7 @@
     if(loading)return;loading=true;$('refresh').disabled=true;message('正在读取服务器状态…');
     try{
       state=await api('status');
+      document.dispatchEvent(new CustomEvent('codex-status',{detail:state}));
       $('cli-version').textContent=state.cliVersion;
       $('account').textContent=state.account.loggedIn?'已登录':'未登录';$('account-detail').textContent=[state.account.type,state.account.planType].filter(Boolean).join(' · ');
       $('default-summary').textContent=state.defaults.model;$('default-effort').textContent='推理强度 · '+(state.defaults.effort || '模型默认');

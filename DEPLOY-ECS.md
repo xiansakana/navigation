@@ -130,3 +130,7 @@ Portal 每天北京时间 23:59 自动采集一次绑定证券账户用户的总
 新增入口时只部署 `portal,qq-bot`，并按 [QQ Codex](docs/qq-codex.md) 在服务器私有配置中绑定所有者、QQ与项目。代码开发使用 `/var/lib/qq-codex/projects/` 下的独立Git检出，生产 `/opt/navigation` 保持原有部署流程。`AGENTS.md` 随Git同步；不复制CLI会话或登录凭据到仓库。
 
 Codex CLI 管理模块及QQ模型/强度设置也更新 `portal,qq-bot`，入口 `/codex-cli/`，无需新增进程或公网端口。两个服务必须使用同一服务器账号与 `CODEX_HOME`，复用qq-bot私有配置的CLI路径和代理；网页只读白名单字段，默认模型/强度通过官方App Server原子写入该服务器账号的Codex用户配置。备份此次涉及的 `qq_codex_*` 表及服务器私有Codex配置；不必为了此次迁移复制整个共享行情数据库。启动时自动新增QQ会话模型偏好表和任务运行设置字段；既有会话、群设置及附件保留。新模块权限由Portal注册，不向普通用户或游客自动开放。
+
+会话工作台同样部署 `portal,qq-bot`。迁移自动新增 `codex_conversations`、`codex_job_progress` 以及任务 `origin`、`conversation_id` 字段；备份范围需包含这两张表（如已存在）和 `qq_codex_*`、`rbac_snapshot`。工作台仅导入当前用户在本应用中已有的 QQ 任务历史，不枚举服务器全部 CLI 会话。项目或群授权撤销后立即停止展示与续接，执行中也会重新校验权限。网页与 QQ 共用串行队列，但网页任务不写 QQ 回执，也不覆盖 QQ 当前会话。QQ 开关关闭时，已授权的网页执行仍可运行；Codex 总开关会同时暂停两个入口。
+
+工作台支持新建、续聊、模型/强度选择、查看执行记录、停止、重命名和归档；消息、任务状态及进度存入共享 SQLite，页面每3秒读取最新状态，关闭页面不终止后台任务。发送请求使用唯一请求标识避免网络重试重复执行。`codex-cli:sessions:view/create/manage`、`codex-cli:messages:send`、`codex-cli:tasks:stop` 分别控制相关界面与 API，执行仍需私有项目授权及 `qq-codex:execute`。前端模型选择仅作用于本次发送，不改服务器或 QQ 默认配置。

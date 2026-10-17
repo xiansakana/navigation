@@ -5,12 +5,13 @@ import { createCodexStore } from '../../qq-bot/src/codex-store.js';
 import { readCodexCatalog, readCodexStatus, writeCodexDefaults, resolveRuntime, validateRuntime } from '../../qq-bot/src/codex-control.js';
 import { readCodexUsage, formatCodexUsage } from '../../qq-bot/src/codex-usage.js';
 import { hasPermission } from './rbac.js';
+import { handleCodexConversationsApi } from './codex-conversations.js';
 
 export const canCodexCli=session=>!!session?.userId&&!session.isGuest&&hasPermission(session.permissions || [],'codex-cli:view');
 export function codexServerSetup(uid){
   let raw;try{raw=JSON.parse(fs.readFileSync(process.env.QQ_CODEX_CONFIG || fileURLToPath(new URL('../../qq-bot/config.json',import.meta.url)),'utf8'));}catch{throw new Error('服务器Codex入口配置不可用，请检查私有配置');}
   const user=raw.codex?.allowedUsers?.find(u=>u.userId===uid);
-  return {config:raw.codex || {},configured:!!user,enabled:!!raw.codex?.enabled,projects:user?.projects || []};
+  return {config:raw.codex || {},qqId:String(user?.qqId || ''),configured:!!user,enabled:!!raw.codex?.enabled,projects:user?.projects || []};
 }
 async function readBody(req){
   let size=0;const chunks=[];
@@ -21,6 +22,7 @@ export async function handleCodexCliApi(req,res,url,session,json,dependencies={}
   res.setHeader('Cache-Control','no-store');
   const can=permission=>!!session?.userId&&!session.isGuest&&hasPermission(session.permissions || [],permission);
   if(!canCodexCli(session))return json(res,403,{ok:false,error:'无权访问Codex CLI模块'});
+  if(url.pathname.startsWith('/api/codex-cli/conversations'))return handleCodexConversationsApi(req,res,url,session,json,{setup:codexServerSetup,...dependencies});
   const routes=['/api/codex-cli/status','/api/codex-cli/usage','/api/codex-cli/settings','/api/codex-cli/runtime'];
   if(!routes.includes(url.pathname))return json(res,404,{ok:false,error:'接口不存在'});
   const write=req.method==='PUT';

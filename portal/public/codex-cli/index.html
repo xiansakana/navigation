@@ -6,10 +6,32 @@
   <script>try{var t=localStorage.getItem('portal-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;}catch(e){}</script>
   <link rel="stylesheet" href="/portal.css?v=layout-20261018"><link rel="stylesheet" href="/experience.css"><link rel="stylesheet" href="/codex-cli/style.css?v=1">
   <script src="/ui/input-guard.js"></script><script defer src="/ui/back-to-top.js"></script>
-</head>
+<link rel="stylesheet" href="/codex-cli/chat.css?v=1"></head>
 <body class="portal-experience has-navbar portal-layout-enabled">
   <header class="navbar"><div class="navbar-inner"><a class="navbar-brand" href="/"><span class="navbar-logo">⚡</span><span>服务导航</span></a><nav class="navbar-nav"><span class="navbar-title">Codex CLI</span></nav><div class="navbar-actions"><button type="button" class="btn ghost navbar-layout-btn" aria-pressed="false"><span class="label">全宽</span></button><button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题"><span class="navbar-theme-icon">☀️</span><span class="label navbar-theme-label">日间</span></button></div></div></header>
-  <main class="codex-shell" data-layout-container>
+  <nav class="codex-tabs" aria-label="Codex模块"><button id="workspace-tab" class="active" type="button" aria-pressed="true">会话工作台</button><button id="settings-tab" type="button" aria-pressed="false">服务器与 QQ 设置</button></nav>
+  <section id="workspace" class="workspace" data-layout-container aria-label="会话工作台">
+    <aside class="session-sidebar">
+      <div class="sidebar-heading"><div><span class="eyebrow">CODEX WORKSPACE</span><h1>我的会话</h1></div><button id="new-chat" class="btn primary" type="button" hidden>＋ 新建</button></div>
+      <label class="sr-only" for="session-search">搜索会话</label><input id="session-search" type="search" placeholder="搜索标题或项目…" maxlength="100">
+      <label class="archive-filter"><input id="show-archived" type="checkbox">显示已归档</label>
+      <p id="sessions-notice" class="hint" role="status">正在读取会话…</p><div id="sessions" class="session-list" aria-label="我的会话列表"></div>
+      <div class="sidebar-footer">网页与 QQ 会话统一展示<br>仅显示当前账号获授权的项目</div>
+    </aside>
+    <div class="chat-main">
+      <header class="chat-heading"><div><h2 id="chat-title">开始一次新对话</h2><p id="chat-meta">与 Codex 讨论问题，或交给它完成项目任务。</p></div><div class="chat-actions"><button id="rename-chat" class="btn ghost" type="button" hidden>重命名</button><button id="archive-chat" class="btn ghost" type="button" hidden>归档</button></div></header>
+      <p id="chat-notice" class="chat-notice" role="status" aria-live="polite"></p>
+      <div id="chat-scroll" class="chat-scroll"><div id="messages" class="messages"><div class="chat-empty"><span class="empty-icon">⌘</span><h3>从想法到完成</h3><p>新建会话选择项目，发送问题或任务。<br>执行过程、回复和 Git 提交都会保留在这里。</p></div></div></div>
+      <form id="chat-form" class="composer">
+        <div class="composer-options"><label for="chat-model">模型</label><select id="chat-model" disabled><option value="">服务器默认</option></select><label for="chat-effort">强度</label><select id="chat-effort" disabled><option value="">默认</option></select><span id="task-state"></span></div>
+        <label class="sr-only" for="chat-prompt">给 Codex 的消息</label><textarea id="chat-prompt" maxlength="20000" rows="3" placeholder="描述你的问题或任务…" disabled></textarea>
+        <div class="composer-footer"><small>Enter 发送 · Shift+Enter 换行 · 关闭页面后任务继续执行</small><button id="stop-chat" type="button" class="btn ghost" hidden>停止任务</button><button id="send-chat" type="submit" class="btn primary" disabled>发送 ↑</button></div>
+      </form>
+    </div>
+  </section>
+  <dialog id="new-dialog" class="chat-dialog"><form id="new-form"><h2>新建会话</h2><p class="hint">选择已授权的项目，Codex 将使用该项目的开发工作区。</p><label for="new-project">项目</label><select id="new-project" required></select><div class="dialog-actions"><button id="cancel-new" class="btn ghost" type="button">取消</button><button id="create-chat" class="btn primary" type="submit">创建会话</button></div></form></dialog>
+  <dialog id="rename-dialog" class="chat-dialog"><form id="rename-form"><h2>重命名会话</h2><label for="new-title">会话标题</label><input id="new-title" maxlength="80" required><div class="dialog-actions"><button id="cancel-rename" class="btn ghost" type="button">取消</button><button id="save-title" class="btn primary" type="submit">保存</button></div></form></dialog>
+  <main id="settings-view" class="codex-shell" data-layout-container hidden>
     <header class="codex-heading"><div><a class="back" href="/">← 我的服务</a><p class="eyebrow">SERVER / CODEX</p><h1>Codex CLI</h1><p class="muted">管理服务器上的 Codex，让网页设置与 QQ 任务保持一致。</p></div><button id="refresh" class="btn ghost" type="button">刷新状态</button></header>
     <p id="message" class="notice" role="status" aria-live="polite">正在连接服务器 Codex…</p>
     <section class="summary" aria-label="Codex运行状态">
@@ -33,6 +55,6 @@
     <section id="usage-panel" class="panel usage-panel" hidden><div class="section-heading"><span class="section-number">03</span><div><h2>账户额度</h2><p>服务器当前登录账号的实时额度，重置时间使用北京时间。</p></div></div><pre id="usage">正在读取额度…</pre></section>
     <footer id="updated" class="muted"></footer>
   </main>
-  <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script><script src="/codex-cli/app.js?v=1"></script>
+  <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script><script src="/vendor/marked.js"></script><script src="/vendor/purify.js"></script><script src="/codex-cli/chat.js?v=1"></script><script src="/codex-cli/app.js?v=2"></script>
 </body>
 </html>
