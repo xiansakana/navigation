@@ -20,15 +20,15 @@ function fixture(execute) {
   const config = normalizeConfig({codex:{enabled:true,defaultProject:'navigation',projects:{navigation:{directory:path.resolve(os.tmpdir(),'codex-test'),remote:'git@example.com:repo.git'}}}});
   const user = {userId:'u1',qqId:'12345678',projects:['navigation']};
   let allowed = true;
-  const service = createCodexService({getConfig:()=>config,store,authorize:qq=>allowed&&qq===user.qqId?user:null,send:async(c,target,text)=>{sent.push({target,text});},execute});
+  const service = createCodexService({getConfig:()=>config,store,authorize:qq=>allowed&&qq===user.qqId?user:null,prepareMedia:async()=>undefined,send:async(c,target,text)=>{sent.push({target,text});},execute});
   return {db,store,config,service,sent,revoke:()=>{allowed=false;},close:()=>{service.stop();db.close();}};
 }
 
-test('QQ Codex accepts explicit private text only; group, self, attachments and ordinary chats cannot execute',()=>{
+test('QQ Codex accepts explicit commands and attachment staging; self, unsupported media and ordinary chats cannot execute',()=>{
   assert.equal(codexEvent(event('hello')),null);
   assert.equal(codexEvent({...event('codex test'),message_type:'group'}),null);
   assert.equal(codexEvent({...event('codex test'),user_id:22222222}),null);
-  assert.equal(codexEvent({...event('codex test'),message:[...event('codex test').message,{type:'image',data:{}}]}),null);
+  assert.equal(codexEvent({...event('codex test'),message:[...event('codex test').message,{type:'video',data:{}}]}),null);
   assert.equal(codexEvent({...event('codex test'),message:'codex test'}),null);
   assert.equal(codexEvent(event('/codex navigation test')).text,'navigation test');
   assert.equal(codexEvent(event('codex test\nnext')).text,'test\nnext');

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test:send": "node src/send-test.js",
-    "test": "node --test src/config.test.js src/server.test.js src/slack.test.js src/tibo-reset-monitor.test.js src/business.test.js src/bookkeeping.test.js src/codex.test.js src/codex-runner.test.js src/codex-usage.test.js",
+    "test": "node --test src/config.test.js src/server.test.js src/slack.test.js src/tibo-reset-monitor.test.js src/business.test.js src/bookkeeping.test.js src/codex.test.js src/codex-runner.test.js src/codex-usage.test.js src/codex-media.test.js",
     "start": "node src/server.js"
   },
   "dependencies": {

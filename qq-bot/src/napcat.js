@@ -10,21 +10,29 @@ function buildHeaders(accessToken) {
     return headers;
 }
 
-async function callNapCat(baseUrl, accessToken, action, params) {
+export async function callNapCat(baseUrl, accessToken, action, params, { signal, timeout = 15000, maxResponseBytes } = {}) {
     const url = baseUrl.replace(/\/$/, '') + '/' + action;
     const resp = await fetch(url, {
         method: 'POST',
         headers: buildHeaders(accessToken),
         body: JSON.stringify(params),
-        signal: AbortSignal.timeout(15000)
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout)
     });
 
-    let data;
-    try {
-        data = await resp.json();
-    } catch {
-        data = { raw: await resp.text() };
-    }
+    let data, raw;
+    if (maxResponseBytes) {
+        const reader = resp.body.getReader(), chunks = []; let size = 0;
+        try {
+            for (;;) {
+                const part = await reader.read(); if (part.done) break;
+                size += part.value.byteLength;
+                if (size > maxResponseBytes) { await reader.cancel(); throw new Error('NapCat 文件响应超过大小限制'); }
+                chunks.push(Buffer.from(part.value));
+            }
+        } finally { reader.releaseLock(); }
+        raw = Buffer.concat(chunks).toString('utf8');
+    } else raw = await resp.text();
+    try { data = JSON.parse(raw); } catch { data = { raw }; }
 
     if (!resp.ok) {
         const msg = data.message || data.wording || data.raw || resp.statusText;

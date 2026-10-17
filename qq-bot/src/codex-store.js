@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { validateAttachments, mergeAttachments } from './codex-media.js';
 
 export function createCodexStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_jobs (
@@ -14,10 +15,13 @@ export function createCodexStore(db) {
       message TEXT NOT NULL,created_at INTEGER NOT NULL,next_attempt INTEGER NOT NULL DEFAULT 0);`);
   db.transaction(() => { for (const [table, column, definition] of [
     ['qq_codex_jobs', 'group_id', "TEXT NOT NULL DEFAULT ''"], ['qq_codex_jobs', 'reply_mode', "TEXT NOT NULL DEFAULT 'private'"],
-    ['qq_codex_outbox', 'group_id', "TEXT NOT NULL DEFAULT ''"], ['qq_codex_outbox', 'full_result', 'INTEGER NOT NULL DEFAULT 0']
+    ['qq_codex_outbox', 'group_id', "TEXT NOT NULL DEFAULT ''"], ['qq_codex_outbox', 'full_result', 'INTEGER NOT NULL DEFAULT 0'],
+    ['qq_codex_jobs', 'attachments_json', "TEXT NOT NULL DEFAULT '[]'"], ['qq_codex_jobs', 'artifacts_json', "TEXT NOT NULL DEFAULT '[]'"],
+    ['qq_codex_outbox', 'artifact_json', "TEXT NOT NULL DEFAULT ''"], ['qq_codex_outbox', 'source_group_id', "TEXT NOT NULL DEFAULT ''"]
   ]) if (!db.prepare('PRAGMA table_info(' + table + ')').all().some(c => c.name === column)) db.exec('ALTER TABLE ' + table + ' ADD COLUMN ' + column + ' ' + definition); }).immediate();
   db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_settings(user_id TEXT PRIMARY KEY,groups_json TEXT NOT NULL DEFAULT '[]',group_reply TEXT NOT NULL DEFAULT 'private');
     CREATE TABLE IF NOT EXISTS qq_codex_group_sessions(user_id TEXT NOT NULL,project TEXT NOT NULL,group_id TEXT NOT NULL,session_id TEXT NOT NULL,PRIMARY KEY(user_id,project,group_id));`);
+  db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_pending_files(user_id TEXT NOT NULL,group_id TEXT NOT NULL,attachments_json TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(user_id,group_id));`);
   return {
     settings(uid) {
       const row = db.prepare('SELECT * FROM qq_codex_settings WHERE user_id=?').get(uid);
@@ -31,16 +35,27 @@ export function createCodexStore(db) {
       return this.settings(uid);
     },
     transaction(fn) { return db.transaction(fn)(); },
+    attachments(uid, group = '') {
+      const row = db.prepare('SELECT * FROM qq_codex_pending_files WHERE user_id=? AND group_id=? AND created_at>?').get(uid,group,Date.now() - 30 * 60000);
+      return row ? JSON.parse(row.attachments_json) : [];
+    },
+    stageAttachments(uid, group, items) {
+      const all = mergeAttachments(this.attachments(uid,group),items);
+      db.prepare('INSERT INTO qq_codex_pending_files VALUES(?,?,?,?) ON CONFLICT(user_id,group_id) DO UPDATE SET attachments_json=excluded.attachments_json,created_at=excluded.created_at').run(uid,group,JSON.stringify(all),Date.now());
+      return all;
+    },
+    clearAttachments(uid, group = '') { db.prepare('DELETE FROM qq_codex_pending_files WHERE user_id=? AND group_id=?').run(uid,group); },
     event(key) {
       if (db.prepare('SELECT 1 FROM qq_codex_jobs WHERE event_key=?').get(key)) return false;
       db.prepare('DELETE FROM qq_codex_events WHERE created_at<?').run(Date.now() - 7 * 86400000);
       return db.prepare('INSERT OR IGNORE INTO qq_codex_events VALUES(?,?)').run(key, Date.now()).changes > 0;
     },
-    enqueue(uid, qq, key, project, prompt, group = '') {
+    enqueue(uid, qq, key, project, prompt, group = '', attachments = []) {
       return db.transaction(() => {
         if (db.prepare("SELECT count(*) AS n FROM qq_codex_jobs WHERE state IN ('queued','running')").get().n >= 5) throw new Error('队列已满，请稍后再试');
         const id = crypto.randomBytes(8).toString('hex');
         db.prepare('INSERT INTO qq_codex_jobs(id,user_id,qq_id,event_key,project,prompt,created_at,group_id,reply_mode) VALUES(?,?,?,?,?,?,?,?,?)').run(id, uid, qq, key, project, prompt, Date.now(), group, this.settings(uid).groupReply);
+        db.prepare('UPDATE qq_codex_jobs SET attachments_json=? WHERE id=?').run(JSON.stringify(validateAttachments(attachments)),id);
         return id;
       })();
     },
@@ -57,6 +72,7 @@ export function createCodexStore(db) {
     },
     active(uid, group = '') { return db.prepare("SELECT id,project,state,created_at,commit_sha FROM qq_codex_jobs WHERE user_id=? AND group_id=? ORDER BY state IN ('queued','running') DESC,created_at DESC,rowid DESC LIMIT 5").all(uid, group); },
     latestResult(uid, group = '') { return db.prepare("SELECT result FROM qq_codex_jobs WHERE user_id=? AND group_id=? AND result<>'' ORDER BY created_at DESC,rowid DESC LIMIT 1").get(uid, group)?.result; },
+    latestArtifacts(uid, group = '') { const row = db.prepare("SELECT artifacts_json FROM qq_codex_jobs WHERE user_id=? AND group_id=? AND result<>'' ORDER BY created_at DESC,rowid DESC LIMIT 1").get(uid,group); return row ? JSON.parse(row.artifacts_json) : []; },
     touch(id) { return db.prepare("UPDATE qq_codex_jobs SET heartbeat=? WHERE id=? AND state='running'").run(Date.now(), id).changes > 0; },
     cancelled(id) { return !!db.prepare('SELECT cancel FROM qq_codex_jobs WHERE id=?').get(id)?.cancel; },
     cancel(uid, group = '') {
@@ -81,24 +97,30 @@ export function createCodexStore(db) {
       })();
     },
     reset(uid, project, group = '') {
+      this.clearAttachments(uid,group);
       if (group) db.prepare('DELETE FROM qq_codex_group_sessions WHERE user_id=? AND project=? AND group_id=?').run(uid, project, group);
       else db.prepare('DELETE FROM qq_codex_sessions WHERE user_id=? AND project=?').run(uid, project);
     },
-    finish(job, { state, result, sessionId = job.session_id || '', commit = '' }) {
+    finish(job, { state, result, sessionId = job.session_id || '', commit = '', artifacts = [] }) {
       return db.transaction(() => {
         if (!db.prepare("UPDATE qq_codex_jobs SET state=?,result=?,session_id=?,commit_sha=?,finished_at=? WHERE id=? AND state IN ('queued','running')")
           .run(state, result.slice(0, 24000), sessionId, commit, Date.now(), job.id).changes) return;
         if (sessionId) this.saveSession(job.user_id, job.project, job.group_id || '', sessionId);
+        db.prepare('UPDATE qq_codex_jobs SET artifacts_json=? WHERE id=?').run(JSON.stringify(artifacts),job.id);
         const summary = `Codex ${job.id.slice(0, 8)} · ${job.project} · ${{ succeeded: '完成', failed: '失败', cancelled: '已停止' }[state]}`;
         const settings = this.settings(job.user_id), allowed = job.group_id && settings.groups.includes(job.group_id);
         const toGroup = allowed && job.reply_mode === 'group' && settings.groupReply === 'group';
         this.reply(job.user_id, job.qq_id, `${summary}\n${commit ? 'Git: ' + commit.slice(0, 12) + '\n' : ''}${result}`, toGroup ? job.group_id : '', true);
+        for (const artifact of artifacts) this.replyArtifact(job.user_id,job.qq_id,artifact,toGroup ? job.group_id : '',job.group_id || '');
         if (allowed && !toGroup) this.reply(job.user_id, job.qq_id, summary + '\n完整结果将通过私聊发送给发起人。', job.group_id);
       })();
     },
     reply(uid, qq, message, group = '', fullResult = false) {
       const text = String(message).replace(/\[CQ:/gi, '［CQ:').slice(0, 10000);
       for (let i = 0; i < text.length; i += 1500) db.prepare('INSERT INTO qq_codex_outbox(user_id,qq_id,message,created_at,group_id,full_result) VALUES(?,?,?,?,?,?)').run(uid, qq, text.slice(i, i + 1500), Date.now(), group, fullResult ? 1 : 0);
+    },
+    replyArtifact(uid, qq, artifact, group = '', sourceGroup = '') {
+      db.prepare('INSERT INTO qq_codex_outbox(user_id,qq_id,message,created_at,group_id,full_result,artifact_json,source_group_id) VALUES(?,?,?,?,?,1,?,?)').run(uid,qq,'',Date.now(),group,JSON.stringify(artifact),sourceGroup);
     },
     pendingReply() { return db.prepare('SELECT * FROM qq_codex_outbox WHERE next_attempt<=? ORDER BY id LIMIT 1').get(Date.now()); },
     delivered(id) { db.prepare('DELETE FROM qq_codex_outbox WHERE id=?').run(id); },

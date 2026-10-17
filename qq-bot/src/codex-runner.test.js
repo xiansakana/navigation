@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { runCommand, syncProject, executeCodex } from './codex-runner.js';
+import { prepareCodexMedia } from './codex-media.js';
 
 async function fixture(fn) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'qq-codex-git-')),remote=path.join(root,'remote.git'),local=path.join(root,'local'),directory=path.join(root,'worker');
@@ -56,4 +57,26 @@ test('incomplete model output never reports success or discards uncommitted edit
   }}),e=>{assert.equal(e.sessionId,'resume-this');return /完整结果/.test(e.message);});
   assert.equal(await fs.readFile(path.join(directory,'unfinished.txt'),'utf8'),'preserve');
   assert.ok(await run(directory,['status','--porcelain']));
+}));
+
+test('new and resumed image tasks receive CLI vision input and export files outside Git',async()=>fixture(async({p,root,run,directory})=>{
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lx8AAAAASUVORK5CYII=','base64');
+  const config={projects:{navigation:p},mediaDirectory:path.join(root,'media')};
+  for(const [index,session] of [undefined,'previous-session'].entries()){
+    const job={id:(index?'1':'0')+'123456789abcdef',user_id:'owner',project:'navigation',prompt:'分析图片并返回CSV',attachments_json:JSON.stringify([{kind:'image',id:'qq-image',name:'screen.png',size:png.length}])};
+    const media=await prepareCodexMedia(config,job,{}, {api:async()=>({data:{url:'https://files.qq.com/image'}}),download:async()=>png});
+    const result=await executeCodex(config,job,session,{media,command:async(binary,args,options)=>{
+      assert.equal(args.includes('resume'),!!session);
+      assert.equal(args[args.indexOf('--image')+1],media.files[0].path);
+      assert.equal(args[args.indexOf('--add-dir')+1],media.root);
+      if(session)assert.ok(args.indexOf('--image')>args.indexOf('resume'));
+      assert.match(options.input,/输入附件/);assert.ok(options.input.includes(media.output));
+      await fs.writeFile(path.join(media.output,'analysis.csv'),'item,value\nresult,1\n');
+      options.onEvent({type:'thread.started',thread_id:session || 'new-session'});
+      options.onEvent({type:'item.completed',item:{type:'agent_message',text:'已生成CSV'}});options.onEvent({type:'turn.completed'});
+    }});
+    assert.equal(result.artifacts.length,1);assert.equal(result.artifacts[0].name,'analysis.csv');
+    assert.equal(await run(directory,['status','--porcelain']),'');
+    assert.equal(result.sessionId,session || 'new-session');
+  }
 }));
