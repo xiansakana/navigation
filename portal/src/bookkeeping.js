@@ -110,6 +110,13 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
     if (archive && method === 'POST') { store.archiveAccount(uid,archive[1],(await body(req)).archived); return json(res,200,{ok:true}); }
     if (route === '/entries' && method === 'POST') return json(res, 201, { ok: true, id: store.saveEntry(uid, await body(req)) });
     const entry = /^\/entries\/([a-f0-9]{32})$/.exec(route);
+    if (entry && method === 'GET') {
+      const found=store.entries(uid).find(e=>e.id===entry[1]);
+      if(!found)return json(res,404,{ok:false,error:'账单不存在'});
+      const history=historicalFx(getDatabase());await history.ensure([found]);
+      const detail=history.enrich(found);delete detail.balanceCheckpoint;
+      return json(res,200,{ok:true,entry:detail});
+    }
     if (entry && method === 'PUT') return json(res, 200, { ok: true, id: store.saveEntry(uid, await body(req), entry[1]) });
     if (entry && method === 'DELETE') { store.removeEntry(uid, entry[1]); return json(res, 200, { ok: true }); }
     if (route === '/accounts' && method === 'POST') return json(res, 201, { ok: true, id: store.saveAccount(uid, await body(req)) });

@@ -119,6 +119,10 @@
   const periods = window.createBookkeepingPeriods({ $, load, clearFocus:()=>analysis.clearFocus(), save:value=>{periodSave=periodSave.then(()=>write('/preferences',value,'PUT')).catch(e=>{$('error').textContent='日期筛选保存失败：'+e.message;$('error').classList.remove('hidden');});} });
   const analysis = window.createBookkeepingAnalysis({ $, esc, m, money, can, load, tab, getState:()=>state, periods });
   const management = window.createBookkeepingManagement({ $, esc, can, api, write, load, field, select, options, getState:()=>state, openEditor });
+  const details = window.createBookkeepingDetails({ $, esc, m, can, api, getState:()=>state, tab, openEditor, remove:async item=>{
+    if(!window.confirm('删除这条账单？新账单会撤销对账户余额的影响。'))return false;
+    await api('/entries/'+item.id,{method:'DELETE'});await load();return true;
+  } });
   async function load(append = false) {
     const seq = ++loadSequence; $('error').classList.add('hidden');
     try {
@@ -135,9 +139,9 @@
   }
   function tab(name) {
     activeTab = name;
-    document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active',b.dataset.tab===name));
+    document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active',b.dataset.tab===(name==='entry-detail'?'entries':name)));
     document.querySelectorAll('.bk-view').forEach(v => v.classList.toggle('hidden',v.id!==name+'-view'));
-    $('filters').classList.toggle('hidden',['accounts','catalog'].includes(name));$('period-selector').classList.toggle('hidden',name==='catalog');
+    $('filters').classList.toggle('hidden',['accounts','catalog','entry-detail'].includes(name));$('period-selector').classList.toggle('hidden',['catalog','entry-detail'].includes(name));
   }
   function field(name, label, value = '', extra = '') { return '<label>' + esc(label) + '<input name="' + name + '" value="' + esc(value) + '" ' + extra + '></label>'; }
   function select(name, label, values, selected = '', empty = null) { return '<label>' + esc(label) + '<select name="' + name + '" aria-label="' + esc(label) + '">' + options(values,selected,empty) + '</select></label>'; }
@@ -147,13 +151,14 @@
     return list;
   };
   let locationCapture=null;
-  function openEditor(mode, item = {}) {
+  function openEditor(mode, item = {}, detailGroup = null) {
     locationCapture?.cancel(); locationCapture=null;
-    editing = { mode, item }; $('editor-error').textContent = ''; $('save-item').disabled = false;
-    $('delete-item').classList.toggle('hidden',!item.id || !['entry','account'].includes(mode) || !can(mode==='entry'?'entries:edit':'accounts:edit'));
+    editing = { mode, item, detailGroup };
+    $('editor').classList.toggle('bk-field-editor',!!detailGroup); $('editor-error').textContent = ''; $('save-item').disabled = false;
+    $('delete-item').classList.toggle('hidden',!!detailGroup || !item.id || !['entry','account'].includes(mode) || !can(mode==='entry'?'entries:edit':'accounts:edit'));
     let html = '';
     if (mode === 'entry') {
-      $('editor-title').textContent = item.id ? '账单详情' : '记一笔';
+      $('editor-title').textContent = detailGroup ? '修改'+window.bookkeepingDetailGroups[detailGroup].label : item.id ? '编辑账单' : '记一笔';
       html = select('type','类型',item.type==='余额调整'?[...types,'余额调整']:types,item.type||'支出') + field('amount','金额',item.amount??'','type="number" step="0.01" required') + select('currency','货币',currencies,item.currency||'CNY') + field('date','日期与时间',item.date||now(),'type="datetime-local" step="1" required') + select('category','一级分类',[],item.category) + select('subcategory','二级分类',[],item.subcategory,'无二级分类') + select('accountId','付款 / 收款账户',accountOptions(),item.accountId,'未关联账户') + select('toAccountId','转入账户',accountOptions(),item.toAccountId,'请选择') + field('toAmount','跨币种到账金额',item.toAmount??'','type="number" min="0.01" step="0.01"') + field('fee','手续费（付款币种）',item.fee||0,'type="number" min="0" step="0.01"') + field('book','账本',item.book||$('book').value||'个人账本','required') + field('tags','标签',item.tags) + '<label><span class="bk-location-heading">位置 <small id="location-status"></small></span><span class="bk-location-input"><input name="location" aria-label="位置" value="'+esc(item.location)+'"><button type="button" id="location-retry" class="btn ghost" aria-label="重新获取当前位置" title="重新获取当前位置">⌖</button></span></label>' + field('refund','退款信息（辅助字段）',item.refund||0,'type="number" min="0" step="0.01"') + field('discount','优惠信息（辅助字段）',item.discount||0,'type="number" min="0" step="0.01"') + '<label class="full">备注<textarea name="note" maxlength="5000">' + esc(item.note) + '</textarea></label><datalist id="category-suggestions">' + state.categories.map(c => '<option value="'+esc(c)+'">').join('') + '</datalist>';
       if (item.historical) html += '<p class="bk-form-hint">这是历史导入记录，编辑或删除不会改变资产基准。原导出的跨币种转账没有到账金额。</p>';
     } else if (mode === 'account') {
@@ -171,13 +176,22 @@
     $('editor-fields').querySelectorAll('input,select,textarea').forEach(el=>el.disabled=readonly); $('save-item').classList.toggle('hidden',readonly);
     $('editor').showModal();
     if (mode==='entry') {
-      const form = $('editor-form'), t = form.elements.type;
+      const form = $('editor-form'), t = form.elements.type; form.elements.amount.inputMode='decimal';
       locationCapture=window.createBookkeepingLocation({input:form.elements.location,status:$('location-status'),retry:$('location-retry'),active:()=>editing?.mode==='entry' && $('editor').open && form.elements.location===$('editor-form').elements.location,enabled:!readonly && can('location:edit')});
       if(!item.id)void locationCapture.start();
       management.bindCategoryPicker(form,item);
-      const update = () => { const transfer = transferTypes.includes(t.value); ['toAccountId','toAmount'].forEach(n=>form.elements[n].closest('label').classList.toggle('hidden',!transfer)); if (!transfer) { form.elements.toAccountId.value=''; form.elements.toAmount.value=''; } };
+      const update = () => { const transfer = transferTypes.includes(t.value); ['toAccountId','toAmount'].forEach(n=>form.elements[n].closest('label').classList.toggle('hidden',!transfer)); if (!transfer) { form.elements.toAccountId.value=''; form.elements.toAmount.value=''; } applyDetailScope(); };
+      function applyDetailScope(){
+        if(!detailGroup)return;
+        const allowed=new Set(window.bookkeepingDetailGroups[detailGroup].fields);
+        if(detailGroup==='category' && transferTypes.includes(t.value))for(const n of ['accountId','currency','toAccountId','toAmount'])allowed.add(n);
+        if(!transferTypes.includes(t.value)){allowed.delete('toAccountId');allowed.delete('toAmount');}
+        for(const label of $('editor-fields').querySelectorAll(':scope > label')){const control=label.querySelector('[name]');label.classList.toggle('hidden',!control || !allowed.has(control.name));}
+        $('editor-fields').querySelectorAll('.bk-form-hint').forEach(el=>el.classList.add('hidden'));
+      }
       t.addEventListener('change',update); update();
       form.elements.accountId.addEventListener('change',()=>{ const a=state.accounts.find(a=>a.id===form.elements.accountId.value); if(a) form.elements.currency.value=a.currency; });
+      if(detailGroup){const control=form.elements[window.bookkeepingDetailGroups[detailGroup].fields[0]];control?.focus();if(control?.name==='amount')control.select();}
     }
   }
   $('editor-form').addEventListener('submit',async event=>{
@@ -190,7 +204,7 @@
       else if (mode==='account') { input.included=event.target.elements.included.checked; await write('/accounts'+(item.id?'/'+item.id:''),input,item.id?'PUT':'POST'); }
       else if (mode==='adjust') await write('/accounts/'+item.id+'/adjust',input);
       else { const rates={ CNY:1 }, budgets={...state.settings.budgets}; for(const c of currencies) if(input['rate_'+c]) rates[c]=Number(input['rate_'+c]); budgets[input.budgetMonth]=Number(input.budget); await write('/settings',{rates,budgets},'PUT'); }
-      await load(); $('editor').close(); window.portalToast?.success('已保存');
+      await load(); if(mode==='entry' && opened.detailGroup)await details.refresh(item.id); $('editor').close(); window.portalToast?.success('已保存');
     } catch(e) { $('editor-error').textContent=e.message; } finally { $('save-item').disabled=false; }
   });
   $('delete-item').addEventListener('click',async()=>{
@@ -207,7 +221,7 @@
   $('close-editor').onclick=()=>$('editor').close();
   $('add-entry').onclick=()=>openEditor('entry'); $('add-account').onclick=()=>openEditor('account'); $('settings').onclick=()=>openEditor('settings');
   document.querySelector('.bk-tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)tab(b.dataset.tab);});
-  $('entry-list').addEventListener('click',e=>{const b=e.target.closest('[data-entry]');if(b)openEditor('entry',state.entries.find(x=>x.id===b.dataset.entry));});
+  $('entry-list').addEventListener('click',e=>{const b=e.target.closest('[data-entry]');if(b)details.open(state.entries.find(x=>x.id===b.dataset.entry));});
   $('account-groups').addEventListener('click',e=>{
     const b=e.target.closest('button'); if(!b)return;
     if(b.dataset.accountLedger){analysis.clearFocus();periods.choose('all',false);for(const id of ['month','book','currency','type','category','search'])$(id).value='';$('account').value=b.dataset.accountLedger;tab('entries');load();}

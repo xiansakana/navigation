@@ -53,6 +53,11 @@ test('default personal access keeps entries, assets and preferences isolated and
       return {status,result};
     };
     const own=await call('/state');assert.equal(own.status,200);assert.deepEqual(own.result.accounts,[]);assert.deepEqual(own.result.entries,[]);
+    assert.equal((await call('/entries/'+entry)).status,404);
+    const detail=await call('/entries/'+entry,'GET',null,session('a'));
+    assert.equal(detail.status,200);assert.equal(detail.result.entry.id,entry);
+    assert.equal(detail.result.entry.cnyAmount,1);
+    assert.equal(detail.result.entry.balanceCheckpoint,undefined);
     assert.equal((await call('/preferences')).result.period,null);
     const foreign=await call('/state?accountId='+a);assert.deepEqual(foreign.result.entries,[]);
     const edit=await call('/entries/'+entry,'PUT',{date:'2026-10-16T12:00:00',type:'支出',amount:2,accountId:a});assert.notEqual(edit.status,200);
