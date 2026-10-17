@@ -158,6 +158,8 @@ function buildNotificationPermissions() {
 }
 
 var SYSTEM_PERMISSIONS = [
+    { id: 'qq-codex:settings:view', name: '查看自己的QQ Codex群聊设置', group: '通知管理', serviceId: NOTIFICATIONS_SERVICE_ID, action: 'view', permissionPath: ['首页', '通知管理', 'QQ Codex'] },
+    { id: 'qq-codex:settings:edit', name: '配置自己的QQ Codex群聊', group: '通知管理', serviceId: NOTIFICATIONS_SERVICE_ID, action: 'edit', permissionPath: ['首页', '通知管理', 'QQ Codex', '保存群聊配置'] },
     { id: 'qq-codex:execute', name: '通过QQ执行Codex任务', group: '通知管理', serviceId: NOTIFICATIONS_SERVICE_ID, action: 'edit', permissionPath: ['首页', '通知管理', 'QQ Codex', '执行任务'] },
     ...[
         ['view', '进入和检索自己的知识库', []],

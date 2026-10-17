@@ -14,6 +14,7 @@ import { SYSTEM_PERMISSIONS } from '../../portal/src/rbac.js';
 
 const Database = createRequire(new URL('../../portal/package.json', import.meta.url))('better-sqlite3');
 const event = text => ({post_type:'message',message_type:'private',user_id:12345678,self_id:22222222,message_id:42,message:[{type:'text',data:{text}}]});
+const groupEvent = (text, group = '33333333', id = 42) => ({...event(text),message_type:'group',group_id:group,message_id:id,message:[{type:'at',data:{qq:'22222222'}},...event(text).message]});
 function fixture(execute) {
   const db = new Database(':memory:'), store = createCodexStore(db), sent = [];
   const config = normalizeConfig({codex:{enabled:true,defaultProject:'navigation',projects:{navigation:{directory:path.resolve(os.tmpdir(),'codex-test'),remote:'git@example.com:repo.git'}}}});
@@ -113,4 +114,85 @@ test('real authenticated WebSocket routes Codex commands even with bookkeeping d
   server.on('connection',(socket,req)=>{assert.equal(req.headers.authorization,'Bearer private-ws');socket.send(JSON.stringify(event('codex navigation inspect')));});
   try {receiver.start();await received;assert.equal(f.store.active('u1').length,1);}
   finally {receiver.stop();for(const c of server.clients)c.terminate();await new Promise(r=>server.close(r));f.close();}
+});
+
+test('group commands require real bot mention, valid group, sender authorization and saved group allowlist',async()=>{
+  const f=fixture();try {
+    assert.ok(codexEvent(groupEvent('codex task')));
+    assert.equal(codexEvent({...groupEvent('codex task'),message:event('codex task').message}),null);
+    assert.equal(codexEvent({...groupEvent('codex task'),message:[{type:'text',data:{text:'[CQ:at,qq=22222222] codex task'}}]}),null);
+    assert.equal(codexEvent({...groupEvent('codex task'),message:[{type:'at',data:{qq:'11111111'}},...event('codex task').message]}),null);
+    await f.service.receive(groupEvent('codex task'));assert.equal(f.store.active('u1','33333333').length,0);
+    f.store.saveSettings('u1',{groups:['33333333'],groupReply:'private'});
+    await f.service.receive({...groupEvent('codex task'),user_id:87654321});assert.equal(f.store.active('u1','33333333').length,0);
+    await f.service.receive(groupEvent('codex task'));await f.service.receive(groupEvent('codex task'));assert.equal(f.store.active('u1','33333333').length,1);
+    await f.service.deliver();assert.deepEqual(f.sent[0].target,{type:'group',groupId:'33333333',atUserId:'12345678'});
+    assert.equal(f.store.active('u1').length,0);
+  }finally{f.close();}
+});
+
+test('group histories, result lookup, cancellation and resets cannot affect private or other group tasks',async()=>{
+  const seen=[];const f=fixture(async(c,j,s)=>{seen.push({group:j.group_id,session:s});return {result:'result-'+j.group_id,sessionId:'session-'+j.group_id};});
+  try {
+    f.store.saveSettings('u1',{groups:['33333333','44444444'],groupReply:'group'});
+    await f.service.receive(event('codex private'));f.service.start();await f.service.tick();
+    await f.service.receive(groupEvent('codex group'));await f.service.tick();
+    await f.service.receive(groupEvent('codex group2','44444444'));await f.service.tick();
+    await f.service.receive(groupEvent('codex continue','33333333',43));await f.service.tick();
+    assert.equal(seen[1].session,undefined);assert.equal(seen[2].session,undefined);assert.equal(seen[3].session,'session-33333333');
+    assert.equal(f.store.latestResult('u1'),'result-');assert.equal(f.store.latestResult('u1','33333333'),'result-33333333');
+    f.store.enqueue('u1','12345678','private-wait','navigation','private');f.store.enqueue('u1','12345678','group-wait','navigation','group','33333333');
+    f.store.cancel('u1','33333333');assert.equal(f.store.active('u1')[0].state,'queued');
+    f.store.reset('u1','navigation','33333333');assert.equal(f.store.session('u1','navigation','33333333'),undefined);assert.equal(f.store.session('u1','navigation'),'session-');
+    assert.equal(f.store.session('u1','navigation','44444444'),'session-44444444');
+  }finally{f.close();}
+});
+
+test('private group-result mode publishes only status in group, and queued full results honor privacy changes',async()=>{
+  const f=fixture(async()=>({result:'FULL_PRIVATE_RESULT',sessionId:'g-session'}));try {
+    f.store.saveSettings('u1',{groups:['33333333'],groupReply:'private'});
+    await f.service.receive(groupEvent('codex task'));f.service.start();await f.service.tick();
+    while(f.store.pendingReply())await f.service.deliver();
+    assert.ok(f.sent.some(x=>x.target.type==='private'&&x.text.includes('FULL_PRIVATE_RESULT')));
+    assert.ok(!f.sent.some(x=>x.target.type==='group'&&x.text.includes('FULL_PRIVATE_RESULT')));
+    f.store.saveSettings('u1',{groups:['33333333'],groupReply:'group'});
+    await f.service.receive(groupEvent('codex 结果','33333333',43));
+    f.store.saveSettings('u1',{groups:['33333333'],groupReply:'private'});
+    await f.service.deliver();assert.equal(f.sent.at(-1).target.type,'private');assert.match(f.sent.at(-1).text,/FULL_PRIVATE_RESULT/);
+  }finally{f.close();}
+});
+
+test('removing group authorization prevents queued execution and drops pending group replies',async()=>{
+  let calls=0;const f=fixture(async()=>{calls++;return {result:'no'};});try{
+    f.store.saveSettings('u1',{groups:['33333333'],groupReply:'group'});
+    await f.service.receive(groupEvent('codex task'));
+    f.store.saveSettings('u1',{groups:[],groupReply:'group'});
+    f.service.start();await f.service.tick();assert.equal(calls,0);assert.equal(f.store.active('u1','33333333')[0].state,'failed');
+    await f.service.deliver();assert.equal(f.sent.length,0);
+    assert.equal(f.store.settings('other').groups.length,0);
+  }finally{f.close();}
+});
+
+test('authenticated WebSocket delivers a group mention command and group-targeted result',async()=>{
+  const f=fixture(async()=>({result:'GROUP_RESULT',sessionId:'group-session'}));
+  f.store.saveSettings('u1',{groups:['33333333'],groupReply:'group'});
+  const server=new WebSocketServer({host:'127.0.0.1',port:0});await once(server,'listening');
+  f.config.bookkeeping={enabled:false,wsUrl:'ws://127.0.0.1:'+server.address().port};f.config.napcat.accessToken='ws-token';
+  let done;const received=new Promise(resolve=>{done=resolve;});
+  const receiver=createQqCommandReceiver({getConfig:()=>f.config,send:async()=>{},onEvent:async e=>{const result=await f.service.receive(e);done();return result;}});
+  server.on('connection',(socket,req)=>{assert.equal(req.headers.authorization,'Bearer ws-token');socket.send(JSON.stringify(groupEvent('codex navigation inspect')));});
+  try {receiver.start();await received;f.service.start();await f.service.tick();while(f.store.pendingReply())await f.service.deliver();assert.ok(f.sent.some(x=>x.target.type==='group'&&x.target.atUserId==='12345678'&&x.text.includes('GROUP_RESULT')));}
+  finally{receiver.stop();for(const c of server.clients)c.terminate();await new Promise(r=>server.close(r));f.close();}
+});
+
+test('schema upgrade preserves existing private jobs and sessions',()=>{
+  const f=fixture();try{
+    const id=f.store.enqueue('u1','12345678','legacy-private','navigation','private task');
+    f.store.saveSession('u1','navigation','','private-session');
+    f.db.exec('ALTER TABLE qq_codex_jobs DROP COLUMN group_id; ALTER TABLE qq_codex_jobs DROP COLUMN reply_mode; ALTER TABLE qq_codex_outbox DROP COLUMN group_id; ALTER TABLE qq_codex_outbox DROP COLUMN full_result;');
+    const migrated=createCodexStore(f.db);
+    assert.equal(migrated.active('u1')[0].id,id);assert.equal(migrated.session('u1','navigation'),'private-session');
+    assert.equal(migrated.session('u1','navigation','33333333'),undefined);
+    assert.equal(migrated.claim().group_id,'');
+  }finally{f.close();}
 });

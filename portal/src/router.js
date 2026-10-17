@@ -27,7 +27,7 @@ export function siyuanEntryPath(userAgent) {
 
 /** Portal 保留命名空间：即使未在 isPortalApi 注册，也不进入反代 */
 export var PORTAL_API_NAMESPACES = new Set([
-    'oauth', 'login', 'me', 'services', 'menus', 'logout', 'admin', 'piclist', 'blog', 'resources', 'bookkeeping', 'mingli', 'knowledge'
+    'oauth', 'login', 'me', 'services', 'menus', 'logout', 'admin', 'piclist', 'blog', 'resources', 'bookkeeping', 'mingli', 'knowledge', 'qq-codex'
 ]);
 
 /** 思源 /api/{ns} 命名空间（与 kernel/api/router.go 同步） */
@@ -154,6 +154,7 @@ export function isPortalApi(pathname, method) {
     if (pathname.startsWith('/api/bookkeeping/')) return true;
     if (pathname.startsWith('/api/mingli/')) return true;
     if (pathname.startsWith('/api/knowledge/')) return true;
+    if (pathname.startsWith('/api/qq-codex/')) return true;
     if (pathname === '/api/resources/metrics') return true;
     if (pathname === '/api/oauth/providers' && method === 'GET') return true;
     if (/^\/api\/oauth\/(github|google)\/(start|callback)$/.test(pathname) && method === 'GET') return true;

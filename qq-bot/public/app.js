@@ -61,6 +61,7 @@ function fill(data) {
 
 function applyAccess() {
     document.querySelectorAll('.notify-app input, .notify-app select').forEach(function(element) {
+        if (element.closest('#codex-settings')) return;
         element.disabled = !access.canEdit;
     });
     byId('save').disabled = !access.canEdit;

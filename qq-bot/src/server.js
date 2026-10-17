@@ -202,6 +202,7 @@ export function createNotificationServer(initialConfig, options) {
             if (req.method === 'GET' && url.pathname === '/style.css') return serve('style.css', res);
             if (req.method === 'GET' && url.pathname === '/app.js') return serve('app.js', res);
             if (req.method === 'GET' && url.pathname === '/qq-targets.js') return serve('qq-targets.js', res);
+            if (req.method === 'GET' && url.pathname === '/codex.js') return serve('codex.js', res);
             if (req.method === 'GET' && url.pathname === '/integrations.js') return serve('integrations.js', res);
             if (req.method === 'GET' && url.pathname === '/integrations.css') return serve('integrations.css', res);
             return json(res, 404, { ok: false, error: 'Not Found' });

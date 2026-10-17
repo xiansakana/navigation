@@ -50,6 +50,7 @@ import { createResourceMonitor, canViewResources, handleResourceApi } from './re
 import { canBookkeep, handleBookkeepingApi } from './bookkeeping.js';
 import { canMingli, handleMingliApi } from './mingli.js';
 import { canKnowledge, handleKnowledgeApi, handleKnowledgeWorkerApi } from './knowledge.js';
+import { handleQqCodexApi } from './qq-codex.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -174,6 +175,7 @@ function publicServices(userCtx, userAgent) {
 }
 
 async function handleApi(req, res, url, session) {
+    if (url.pathname.startsWith('/api/qq-codex/')) return handleQqCodexApi(req, res, url, session, json);
     if (url.pathname.startsWith('/api/knowledge/')) return handleKnowledgeApi(req, res, url, session, json);
     if (url.pathname.startsWith('/api/mingli/')) return handleMingliApi(req, res, url, session, json);
     if (url.pathname.startsWith('/api/bookkeeping/')) return handleBookkeepingApi(req, res, url, session, json);
