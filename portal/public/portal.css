@@ -1534,13 +1534,16 @@ html[data-theme="light"] body.has-navbar {
     --page-glow: rgba(37, 99, 235, .12);
 }
 
-body.portal-layout--full .navbar-inner,
-body.portal-layout--full .page-header,
-body.portal-layout--full .grid,
-body.portal-layout--full .blog-section,
-body.portal-layout--full .toolbox-hero,
-body.portal-layout--full .toolbox-grid,
-body.portal-layout--full .admin-shell {
+/* The data attribute is the shared contract for new module containers.
+   Include the enabled state so later module/theme styles cannot reapply a width cap. */
+body.portal-layout-enabled.portal-layout--full [data-layout-container],
+body.portal-layout-enabled.portal-layout--full .navbar-inner,
+body.portal-layout-enabled.portal-layout--full .page-header,
+body.portal-layout-enabled.portal-layout--full .grid,
+body.portal-layout-enabled.portal-layout--full .blog-section,
+body.portal-layout-enabled.portal-layout--full .toolbox-hero,
+body.portal-layout-enabled.portal-layout--full .toolbox-grid,
+body.portal-layout-enabled.portal-layout--full .admin-shell {
     max-width: none;
     width: 100%;
 }

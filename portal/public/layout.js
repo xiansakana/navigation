@@ -17,6 +17,7 @@
       btn.setAttribute('aria-label', on ? '退出全宽布局' : '全宽布局');
       var label = btn.querySelector('.label');
       if (label) label.textContent = on ? '退出全宽' : '全宽';
+      else btn.textContent = on ? '退出全宽' : '全宽';
     });
   }
 
