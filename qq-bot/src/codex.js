@@ -9,7 +9,7 @@ import { attachmentSegments, validateAttachments, mergeAttachments, prepareCodex
 
 export function codexEvent(event) {
   if (event?.post_type === 'notice' && event.notice_type === 'group_upload' && /^\d{5,20}$/.test(String(event.group_id || '')) && /^\d{5,20}$/.test(String(event.user_id || '')) && event.file?.id && String(event.user_id) !== String(event.self_id)) {
-    return {qqId:String(event.user_id),groupId:String(event.group_id),text:'',attachments:attachmentSegments([{type:'file',data:{...event.file,file_id:event.file.id}}]),key:[event.self_id,'group-upload',event.group_id,event.user_id,String(event.file.id).slice(0,8192)].join(':')};
+    return {qqId:String(event.user_id),groupId:String(event.group_id),text:'',requiresArm:true,sentAt:typeof event.time==='number'?event.time*1000:0,attachments:attachmentSegments([{type:'file',data:{...event.file,file_id:event.file.id}}]),key:[event.self_id,'group-upload',event.group_id,event.user_id,String(event.file.id).slice(0,8192)].join(':')};
   }
   if (!event || event.post_type !== 'message' || !['private', 'group'].includes(event.message_type) || String(event.user_id) === String(event.self_id) || !Array.isArray(event.message)) return null;
   const group = event.message_type === 'group';
@@ -18,9 +18,11 @@ export function codexEvent(event) {
   const text = event.message.filter(s => s.type === 'text').map(s => s.data?.text || '').join('').trim();
   const attachments = attachmentSegments(event.message);
   const match = /^(?:\/codex|codex)(?:\s+([\s\S]*))?$/i.exec(text);
-  if ((!match && (text || !attachments.length)) || !/^\d{5,20}$/.test(String(event.user_id)) || !/^-?\d{1,30}$/.test(String(event.message_id))) return null;
-  if (group && match && !event.message.some(s => s.type === 'at' && String(s.data?.qq) === String(event.self_id))) return null;
-  return { qqId: String(event.user_id), groupId: group ? String(event.group_id) : '', text: (match?.[1] || '').trim(), attachments, key: group ? [event.self_id, 'group', event.group_id, event.user_id, event.message_id].join(':') : [event.self_id, event.user_id, event.message_id].join(':') };
+  const mentioned=group&&event.message.some(s=>s.type==='at'&&String(s.data?.qq)===String(event.self_id));
+  const arm=mentioned&&!text&&!attachments.length;
+  if ((!arm&&!match&&(text||!attachments.length)) || !/^\d{5,20}$/.test(String(event.user_id)) || !/^-?\d{1,30}$/.test(String(event.message_id))) return null;
+  if (group&&!mentioned&&(match||event.message.some(s=>s.type==='at')))return null;
+  return { qqId: String(event.user_id), groupId: group ? String(event.group_id) : '', text: arm?'上传附件':(match?.[1] || '').trim(), requiresArm:group&&!mentioned,sentAt:typeof event.time==='number'?event.time*1000:0,attachments, key: group ? [event.self_id, 'group', event.group_id, event.user_id, event.message_id].join(':') : [event.self_id, event.user_id, event.message_id].join(':') };
 }
 export function authorizedCodexUser(config, qq, db) {
   const user = config.allowedUsers?.find(u => String(u.qqId) === String(qq));
@@ -29,7 +31,7 @@ export function authorizedCodexUser(config, qq, db) {
   if (!account || account.enabled === false || account.username === 'guest' || !hasPermission(resolveUserPermissions(rbac, account), 'qq-codex:execute')) return null;
   return user;
 }
-const help = 'QQ Codex（私聊 / 授权群中@机器人）\ncodex 项目：列出可用项目\ncodex 模型 [模型ID/默认]：查看或切换模型\ncodex 强度 [强度值/默认]：查看或切换推理强度\n先发图片/文件，再发codex处理要求；也可图片与指令同发。\ncodex 附件 / codex 清空附件：查看或清空待处理附件\ncodex navigation 你的任务：执行任务\ncodex 你的任务：使用默认项目\ncodex 状态：查看当前及最近结果\ncodex 额度：查询5小时、周剩余额度和北京时间重置时间\ncodex 结果：重新读取最近完整结果\ncodex 停止：停止自己的任务\ncodex 同步 [项目]：从Git同步代码和AGENTS.md\ncodex 新会话 [项目]：开始独立的新会话\n群号和结果发送方式可在通知管理的QQ Codex区域配置。群聊会话与私聊隔离。代码通过Git同步，自己的会话可在Navigation的Codex CLI工作台查看和续聊。任务结果返回Git提交；电脑 git pull --ff-only 即可取回代码。';
+const help = 'QQ Codex（私聊 / 授权群中@机器人）\ncodex 项目：列出可用项目\ncodex 模型 [模型ID/默认]：查看或切换模型\ncodex 强度 [强度值/默认]：查看或切换推理强度\n私聊可直接发附件。群聊请单独@机器人，再在2分钟内发下一条附件；或同条@机器人并附图/文件。每条附件后接收窗口关闭。再@机器人发送codex处理要求。\ncodex 上传附件 / codex 取消上传：开启或关闭附件接收窗口\ncodex 附件 / codex 清空附件：查看或清空待处理附件\ncodex navigation 你的任务：执行任务\ncodex 你的任务：使用默认项目\ncodex 状态：查看当前及最近结果\ncodex 额度：查询5小时、周剩余额度和北京时间重置时间\ncodex 结果：重新读取最近完整结果\ncodex 停止：停止自己的任务\ncodex 同步 [项目]：从Git同步代码和AGENTS.md\ncodex 新会话 [项目]：开始独立的新会话\n群号和结果发送方式可在通知管理的QQ Codex区域配置。群聊会话与私聊隔离。代码通过Git同步，自己的会话可在Navigation的Codex CLI工作台查看和续聊。任务结果返回Git提交；电脑 git pull --ff-only 即可取回代码。';
 
 export function createCodexService({ getConfig, send, store: injectedStore, authorize, authorizeWeb, authorizeTodo, readUsage, execute = executeCodex, readCatalog = readCodexCatalog, prepareMedia = prepareCodexMedia, sendArtifact = sendCodexArtifact, log = console }) {
   let store = injectedStore, timer, controller, busy = false, delivering = false, stopped = true;
@@ -66,7 +68,9 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
     const s = storage(), group = event.groupId;
     if (group && !s.settings(user.userId).groups.includes(group)) return true;
     const outcome = s.transaction(() => {
+      if(event.requiresArm&&!s.attachmentReception(user.userId,group,event.sentAt))return false;
       if (!s.event(event.key)) return true;
+      if(group&&event.attachments.length)s.clearAttachmentReception(user.userId,group);
       const reply = message => s.reply(user.userId, event.qqId, message, group);
       try {
         const text = event.text, names = (user.projects || []).filter(name => config.projects?.[name]);
@@ -75,6 +79,11 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
           const files = s.stageAttachments(user.userId,group,event.attachments);
           reply(`已登记附件（共${files.length}个，30分钟内有效）。请发送 codex 你的处理要求${group ? '（需@机器人）' : ''}；可用 codex 附件 查看或 codex 清空附件 取消。`);
         }
+        else if(text==='上传附件'){
+          if(group){s.armAttachments(user.userId,group);reply('已开启本群附件接收：请在2分钟内发送下一条图片或文件。收到首条附件后自动关闭；后续附件请重新@机器人。');}
+          else reply('私聊可直接发送图片或文件，再发送 codex 处理要求。');
+        }
+        else if(text==='取消上传'){s.clearAttachmentReception(user.userId,group);reply('已关闭当前会话的附件接收窗口。');}
         else if (!text || ['帮助', 'help'].includes(text)) reply(help);
         else if (text === '附件') reply('待处理附件：\n' + (s.attachments(user.userId,group).map(f=>f.name).join('\n') || '无'));
         else if (text === '清空附件') { s.clearAttachments(user.userId,group); reply('已清空当前会话的待处理附件。'); }

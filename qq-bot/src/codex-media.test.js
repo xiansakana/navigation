@@ -143,7 +143,7 @@ test('staged attachments are durable, scoped, expire, deduplicate, and survive q
   }finally{service.stop();db.close();}
 });
 
-test('group file notices only stage authorized owner data; exports honor privacy changes and revocation',async()=>{
+test('group file notices require an explicit mention window; exports honor privacy changes and revocation',async()=>{
   const db=new Database(':memory:'),store=createCodexStore(db),sent=[];
   const config=normalizeConfig({codex:{enabled:true,defaultProject:'navigation',projects:{navigation:{directory:path.resolve(os.tmpdir(),'media-project'),remote:'git@example.com:repo'}}}});
   let allowed=true,fail=true;
@@ -153,7 +153,8 @@ test('group file notices only stage authorized owner data; exports honor privacy
   try {
     store.saveSettings('owner',{groups:['33333333'],groupReply:'group'});
     const notice={post_type:'notice',notice_type:'group_upload',self_id:'22222222',group_id:'33333333',user_id:'12345678',file:{id:'file-id',name:'input.csv',size:10}};
-    assert.ok(codexEvent(notice));await service.receive(notice);await service.receive(notice);
+    assert.ok(codexEvent(notice));assert.equal(await service.receive(notice),false);assert.equal(store.pendingReply(),undefined);
+    await service.receive(event('codex 上传附件',[],40,'33333333'));await service.receive(notice);await service.receive(notice);
     assert.equal(store.attachments('owner','33333333').length,1);assert.equal(store.active('owner','33333333').length,0);
     await service.receive(event('codex 处理文件',[],43,'33333333'));service.start();await service.tick();
     store.saveSettings('owner',{groups:['33333333'],groupReply:'private'});
@@ -164,5 +165,40 @@ test('group file notices only stage authorized owner data; exports honor privacy
     store.saveSettings('owner',{groups:[],groupReply:'private'});
     while(store.pendingReply())await service.deliver();assert.equal(sent.length,1);
     store.replyArtifact('owner','12345678',{name:'blocked'});allowed=false;await service.deliver();assert.equal(sent.length,1);
+  }finally{service.stop();db.close();}
+});
+
+test('ordinary group attachments stay silent; bare mentions arm only the next attachment for that owner and group',async()=>{
+  const db=new Database(':memory:'),store=createCodexStore(db);
+  const config=normalizeConfig({codex:{enabled:true,defaultProject:'navigation',projects:{navigation:{directory:path.resolve(os.tmpdir(),'media-project'),remote:'git@example.com:repo'}}}});
+  const service=createCodexService({getConfig:()=>config,store,authorize:qq=>qq==='12345678'?{userId:'owner',projects:['navigation']}:null,send:async()=>{}});
+  const at={type:'at',data:{qq:'22222222'}},group='33333333';
+  const fileSegment={type:'file',data:{file_id:'ordinary-file',name:'report.csv',size:12}};
+  const mention=id=>event('',[at],id,group);
+  const clearReplies=()=>db.prepare('DELETE FROM qq_codex_outbox').run();
+  try{
+    store.saveSettings('owner',{groups:[group,'44444444'],groupReply:'private'});
+    assert.equal(await service.receive(event('',[imageSegment],100,group)),false);
+    assert.equal(await service.receive(event('',[fileSegment],101,group)),false);
+    assert.equal(store.attachments('owner',group).length,0);assert.equal(store.pendingReply(),undefined);
+    await service.receive(mention(102));assert.equal(createCodexStore(db).attachmentReception('owner',group),true);clearReplies();
+    assert.equal(await service.receive(event('',[imageSegment],103,'44444444')),false);
+    await service.receive({...event('',[imageSegment],104,group),user_id:'87654321'});
+    assert.equal(await service.receive(event('',[{type:'at',data:{qq:'all'}},imageSegment],105,group)),false);
+    assert.equal(store.pendingReply(),undefined);assert.equal(store.attachmentReception('owner',group),true);
+    await service.receive(event('',[imageSegment],106,group));assert.equal(store.attachments('owner',group).length,1);assert.equal(store.attachmentReception('owner',group),false);clearReplies();
+    assert.equal(await service.receive(event('',[fileSegment],107,group)),false);assert.equal(store.pendingReply(),undefined);
+    await service.receive(event('',[at,fileSegment],108,group));assert.equal(store.attachments('owner',group).length,2);clearReplies();
+    const notice={post_type:'notice',notice_type:'group_upload',self_id:'22222222',group_id:group,user_id:'12345678',file:{id:'ordinary-file',name:'report.csv',size:12}};
+    assert.equal(await service.receive(notice),false);assert.equal(store.pendingReply(),undefined);
+    await service.receive(mention(109));clearReplies();db.prepare('UPDATE qq_codex_attachment_receptions SET expires_at=0').run();
+    assert.equal(await service.receive(event('',[fileSegment],110,group)),false);assert.equal(store.pendingReply(),undefined);
+    await service.receive(mention(111));clearReplies();
+    assert.equal(await service.receive({...notice,time:Math.floor(Date.now()/1000)-60}),false);assert.equal(store.attachmentReception('owner',group),true);
+    await service.receive({...notice,time:Math.floor(Date.now()/1000)});assert.equal(store.attachmentReception('owner',group),false);clearReplies();
+    assert.equal(await service.receive(event('',[fileSegment],112,group)),false);assert.equal(store.pendingReply(),undefined);
+    await service.receive(mention(113));await service.receive(event('codex 取消上传',[],114,group));assert.equal(store.attachmentReception('owner',group),false);
+    await service.receive(mention(115));await service.receive(event('codex 清空附件',[],116,group));assert.equal(store.attachmentReception('owner',group),false);assert.equal(store.attachments('owner',group).length,0);
+    clearReplies();await service.receive(event('',[imageSegment],117));assert.equal(store.attachments('owner').length,1);
   }finally{service.stop();db.close();}
 });

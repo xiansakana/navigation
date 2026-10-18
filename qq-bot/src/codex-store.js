@@ -28,6 +28,7 @@ export function createCodexStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_settings(user_id TEXT PRIMARY KEY,groups_json TEXT NOT NULL DEFAULT '[]',group_reply TEXT NOT NULL DEFAULT 'private');
     CREATE TABLE IF NOT EXISTS qq_codex_group_sessions(user_id TEXT NOT NULL,project TEXT NOT NULL,group_id TEXT NOT NULL,session_id TEXT NOT NULL,PRIMARY KEY(user_id,project,group_id));`);
   db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_pending_files(user_id TEXT NOT NULL,group_id TEXT NOT NULL,attachments_json TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(user_id,group_id));`);
+  db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_attachment_receptions(user_id TEXT NOT NULL,group_id TEXT NOT NULL,armed_at INTEGER NOT NULL,expires_at INTEGER NOT NULL,PRIMARY KEY(user_id,group_id));`);
   db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_runtime_preferences(user_id TEXT NOT NULL,group_id TEXT NOT NULL,model TEXT NOT NULL DEFAULT '',effort TEXT NOT NULL DEFAULT '',updated_at INTEGER NOT NULL,PRIMARY KEY(user_id,group_id));`);
   const conversations=createConversationStore(db);
   const todos=createTodoStore(db,conversations);
@@ -55,6 +56,12 @@ export function createCodexStore(db) {
       return this.settings(uid);
     },
     transaction(fn) { return db.transaction(fn)(); },
+    armAttachments(uid,group) {
+      const now=Date.now();db.prepare('DELETE FROM qq_codex_attachment_receptions WHERE expires_at<=?').run(now);
+      db.prepare('INSERT INTO qq_codex_attachment_receptions VALUES(?,?,?,?) ON CONFLICT(user_id,group_id) DO UPDATE SET armed_at=excluded.armed_at,expires_at=excluded.expires_at').run(uid,group,now,now+120000);
+    },
+    attachmentReception(uid,group,sentAt=0) {return !!db.prepare('SELECT 1 FROM qq_codex_attachment_receptions WHERE user_id=? AND group_id=? AND expires_at>? AND (?=0 OR armed_at<=?+1000)').get(uid,group,Date.now(),sentAt,sentAt);},
+    clearAttachmentReception(uid,group) {db.prepare('DELETE FROM qq_codex_attachment_receptions WHERE user_id=? AND group_id=?').run(uid,group);},
     attachments(uid, group = '') {
       const row = db.prepare('SELECT * FROM qq_codex_pending_files WHERE user_id=? AND group_id=? AND created_at>?').get(uid,group,Date.now() - 30 * 60000);
       return row ? JSON.parse(row.attachments_json) : [];
@@ -64,7 +71,7 @@ export function createCodexStore(db) {
       db.prepare('INSERT INTO qq_codex_pending_files VALUES(?,?,?,?) ON CONFLICT(user_id,group_id) DO UPDATE SET attachments_json=excluded.attachments_json,created_at=excluded.created_at').run(uid,group,JSON.stringify(all),Date.now());
       return all;
     },
-    clearAttachments(uid, group = '') { db.prepare('DELETE FROM qq_codex_pending_files WHERE user_id=? AND group_id=?').run(uid,group); },
+    clearAttachments(uid, group = '') { this.clearAttachmentReception(uid,group);db.prepare('DELETE FROM qq_codex_pending_files WHERE user_id=? AND group_id=?').run(uid,group); },
     event(key) {
       if (db.prepare('SELECT 1 FROM qq_codex_jobs WHERE event_key=?').get(key)) return false;
       db.prepare('DELETE FROM qq_codex_events WHERE created_at<?').run(Date.now() - 7 * 86400000);
