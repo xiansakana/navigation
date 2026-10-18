@@ -194,7 +194,7 @@ var SYSTEM_PERMISSIONS = [
         ['devices:view', '查看自己的视频处理设备', ['设置', '处理设备']],
         ['devices:install', '下载安装视频工作器', ['设置', '处理设备', '安装并连接']],
         ['devices:edit', '绑定或停用自己的处理设备', ['设置', '处理设备', '管理设备']]
-    ].map(([action, name, parts]) => ({ id: 'knowledge:' + action, name, group: '知识库', serviceId: 'knowledge', action: action.endsWith(':edit') ? 'edit' : 'view', permissionPath: ['首页', '知识库', ...parts] })),
+    ].map(([action, name, parts]) => ({ id: 'knowledge:' + action, name, group: '知识库', serviceId: 'knowledge', action: action.endsWith(':edit') || action === 'devices:install' ? 'edit' : 'view', permissionPath: ['首页', '知识库', ...parts] })),
     { id: 'mingli:categories:view', name: '查看分类和分类筛选', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '案例库', '分类管理'] },
     { id: 'mingli:categories:edit', name: '新增、重命名和删除分类', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '分类管理', '编辑分类'] },
     { id: 'mingli:cases:classify', name: '设置和批量移动案例分类', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '设置分类'] },

@@ -3,13 +3,14 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 
+async function main() {
 const configPath = path.resolve(process.argv[2]), bundle = path.resolve(process.argv[3]);
 const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
 const portal = new URL(config.portalUrl);
 if (portal.protocol !== 'https:' && !(portal.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(portal.hostname))) throw new Error('HTTPS required');
 if (config.deviceId && config.token) {
   const check = await fetch(new URL('/api/knowledge/worker/release', portal), { redirect: 'error', headers: { Authorization: 'Bearer ' + config.token }, signal: AbortSignal.timeout(30000) });
-  if (check.ok) { console.log('Existing device connection is valid.'); process.exit(0); }
+  if (check.ok) { console.log('Existing device connection is valid.'); return; }
 }
 const request = async (route, data) => {
   const r = await fetch(new URL('/api/knowledge/worker/pair/' + route, portal), { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal: AbortSignal.timeout(30000) });
@@ -35,10 +36,12 @@ while (Date.now() < deadline) {
     config.token = result.token; config.deviceId = result.deviceId;
     await fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
     await fs.rm(path.join(bundle, 'worker-pairing.json'), { force: true });
-    console.log('Device connected. No credential needs to be copied.'); process.exit(0);
+    console.log('Device connected. No credential needs to be copied.'); return;
   }
   if (result.status === 'expired') { await browserPair(); continue; }
   if (!['pending', 'slow_down'].includes(result.status)) throw new Error('Pairing refused: ' + result.status);
   await new Promise(resolve => setTimeout(resolve, 5000));
 }
 throw new Error('Pairing expired. Run setup again.');
+}
+main().catch(error => { console.error(String(error.message).replace(/nkw_[a-f0-9]+/g, '[hidden]')); process.exitCode = 1; });

@@ -173,7 +173,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
     }
     if (route === '/worker-package') return sendWorkerPackage(res);
     if (route === '/devices' && method === 'GET') return json(res, 200, { ok: true, devices: store.devices.list(uid) });
-    if (/^\/devices\/[a-f0-9]{32}$/.test(route) && method === 'DELETE') return json(res, store.devices.revoke(uid, route.split('/').pop()) ? 200 : 404, { ok: true });
+    if (/^\/devices\/[a-f0-9]{32}$/.test(route) && method === 'DELETE') { const revoked = store.devices.revoke(uid, route.split('/').pop()); return json(res, revoked ? 200 : 404, { ok: revoked }); }
     if (route === '/device-pair') {
       const code = method === 'GET' ? url.searchParams.get('code') : (await body(req, 1024)).code;
       if (!/^[A-Fa-f0-9]{8}$/.test(code || '')) throw new Error('请输入安装程序显示的8位配对码');

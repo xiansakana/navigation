@@ -46,6 +46,7 @@ if (-not $node) {
 }
 $previous = $null
 $configPath = Join-Path $appRoot 'config.json'
+$boundDevice = if (Test-Path -LiteralPath $configPath) { Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 if ($ReuseConfig) { $previous = Get-Content -LiteralPath $ReuseConfig -Raw -Encoding UTF8 | ConvertFrom-Json }
 elseif (Test-Path -LiteralPath $configPath) { $previous = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json }
 $version = (Get-Content -LiteralPath (Join-Path $bundleRoot 'worker-version.json') -Raw | ConvertFrom-Json).version
@@ -60,7 +61,8 @@ foreach ($file in $packageFiles) {
   if ([IO.Path]::GetFullPath((Join-Path $bundleRoot $file)) -ne [IO.Path]::GetFullPath($destination)) { Copy-Item -LiteralPath (Join-Path $bundleRoot $file) -Destination $destination -Force }
 }
 $config = [ordered]@{ portalUrl=$PortalUrl; token=''; label=$env:COMPUTERNAME; workDir=(Join-Path $appRoot 'cache'); autoUpdate=$true; releaseRoot=$releaseRoot; python=''; ffmpeg=''; asr=@{model='small';device='auto';threads=4;language='zh';modelCache=(Join-Path $appRoot 'models')}; codex=@{binary='';model='';proxyUrl=''} }
-if ($previous -and $previous.deviceId -and $previous.portalUrl -eq $PortalUrl) { $config.token = $previous.token; $config.deviceId = $previous.deviceId }
+if ($boundDevice -and $boundDevice.deviceId -and $boundDevice.portalUrl -eq $PortalUrl) { $config.token = $boundDevice.token; $config.deviceId = $boundDevice.deviceId }
+elseif ($previous -and $previous.deviceId -and $previous.portalUrl -eq $PortalUrl) { $config.token = $previous.token; $config.deviceId = $previous.deviceId }
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 [IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json -Depth 8), $utf8)
 # Redeem short-lived installer authorization before downloading large dependencies.
