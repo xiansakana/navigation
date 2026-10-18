@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { getDatabase } from '../../shared/db/index.js';
 import { storageConfig, sourcePath, proxySource } from './knowledge-storage.js';
 import { hasPermission } from './rbac.js';
-import { createKnowledgeStore, CHUNK_BYTES, MAX_VIDEO_BYTES } from './knowledge-store.js';
+import { createKnowledgeStore, CHUNK_BYTES, MAX_VIDEO_BYTES, MODEL_FIELDS } from './knowledge-store.js';
 import { knowledgeWorkerPackage, sendWorkerPackage } from './knowledge-worker-package.js';
 import { sendWorkerExe } from './knowledge-worker-exe.js';
 
@@ -79,6 +79,7 @@ export function validateKnowledgeResult(raw) {
     return { time: f.time, name: `frame-${i + 1}.jpg`, data };
   });
   const provenance = { backend: String(raw.provenance?.backend || '').slice(0, 30), model: String(raw.provenance?.model || '').slice(0, 120),
+    reasoningEffort: String(raw.provenance?.reasoningEffort || '').slice(0, 20),
     asrModel: String(raw.provenance?.asrModel || '').slice(0, 120), vision: raw.provenance?.vision === true, generatedAt: new Date().toISOString(),
     warnings: Array.isArray(raw.provenance?.warnings) ? raw.provenance.warnings.slice(0, 10).map(s => String(s).slice(0, 300)) : [] };
   return { duration: raw.duration, language: String(raw.language || '').slice(0, 30), notes: raw.notes.trim(), transcript, frames, provenance };
@@ -194,7 +195,11 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
       const approved = store.devices.approve(uid, code); return json(res, approved ? 200 : 409, { ok: approved, ...(approved ? {} : { error: '配对码已失效或已使用' }) });
     }
     if (route === '/settings' && method === 'GET') return json(res, 200, { ok: true, ...store.settings(uid), storage: { provider: storageConfig(uid) ? '115' : 'local' }, worker: store.worker(uid), chunkBytes: CHUNK_BYTES, maxBytes: MAX_VIDEO_BYTES });
-    if (route === '/settings' && method === 'PUT') return json(res, 200, { ok: true, ...store.saveSettings(uid, (await body(req, 4096)).backend) });
+    if (route === '/settings' && method === 'PUT') {
+      const input = await body(req, 4096);
+      if (MODEL_FIELDS.some(key => Object.hasOwn(input, key)) && !canKnowledge(session, 'model:edit')) return json(res, 403, { ok: false, error: '没有模型和强度设置权限' });
+      return json(res, 200, { ok: true, ...store.saveSettings(uid, input) });
+    }
     if (route === '/worker-token' && method === 'POST') return json(res, 200, { ok: true, token: store.rotateToken(uid) });
     if (route === '/documents' && method === 'GET') return json(res, 200, { ok: true, ...store.list(uid, {
       search: url.searchParams.get('search') || '', topic: url.searchParams.get('topic') || '', status: url.searchParams.get('status') || '',

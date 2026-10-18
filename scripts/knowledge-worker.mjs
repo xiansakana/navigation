@@ -48,7 +48,12 @@ async function capabilities() {
     if (!help.includes('--ignore-user-config') || !help.includes('--ignore-rules')) throw new Error('Codex CLI 版本过旧');
     result.codex = { ready: true, model: config.codex?.model || 'CLI 默认模型' };
   } catch { result.codex = { ready: false, detail: '请安装新版 Codex CLI，并在运行工作器的账号下登录' }; }
-  try { const m = modelConfiguration(config, 'openai'); result.openai = { ready: true, model: m.model, detail: m.vision ? '支持关键画面核对' : '仅文字总结' }; }
+  try {
+    const api = config.openai || {}, url = new URL(api.baseUrl || 'https://api.openai.com/v1');
+    const configured = !!(api.apiKey || process.env[api.apiKeyEnv || 'KNOWLEDGE_API_KEY']) || ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    const probe = !api.model && configured ? { ...config, openai: { ...api, model: '由任务设置指定' } } : config;
+    const m = modelConfiguration(probe, 'openai'); result.openai = { ready: true, model: m.model, detail: m.vision ? '支持关键画面核对' : '仅文字总结' };
+  }
   catch { result.openai = { ready: false, detail: '兼容 API 尚未配置模型' }; }
   return result;
 }

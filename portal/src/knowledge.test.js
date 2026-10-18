@@ -64,6 +64,26 @@ test('knowledge routes, per-action permissions, default member grants and guest 
   });
 });
 
+test('model settings are scoped, permission-checked, validated, and snapshotted for upload/retry', async () => fixture(async ({ call, store }) => {
+  const baseline = store.settings('a'); assert.equal(baseline.codexModel, '');
+  const limited = { userId: 'a', permissions: ['knowledge:view', 'knowledge:settings:edit'] };
+  assert.equal((await call('/settings', { method: 'PUT', session: limited, data: { codexModel: 'gpt-6-luna' } })).status, 403);
+  assert.equal((await call('/settings', { method: 'PUT', data: { codexModel: 'bad model\n-c' } })).status, 400);
+  assert.equal((await call('/settings', { method: 'PUT', data: { codexEffort: 'invented' } })).status, 400);
+  assert.equal((await call('/settings', { method: 'PUT', data: { codexModel: 'gpt-6-luna', codexEffort: 'ultra' } })).status, 400);
+  assert.equal((await call('/settings', { method: 'PUT', data: { codexModel: 'gpt-6-luna', codexEffort: 'low', apiModel: 'custom', apiEffort: 'medium' } })).status, 200);
+  assert.equal(store.settings('b').codexModel, '');
+  const doc = store.create('a', upload()); store.enqueue('a', doc.id);
+  store.saveSettings('a', { codexModel: 'gpt-6.1-sol', codexEffort: 'medium' });
+  const job = store.claim('a', ['codex']);
+  assert.equal(job.modelSettings.codexModel, 'gpt-6-luna'); assert.equal(job.modelSettings.codexEffort, 'low');
+  assert.equal(job.modelSettings.apiModel, 'custom');
+  store.fail('a', doc.id, job.lease, 'test'); store.retry('a', doc.id, 'codex');
+  assert.equal(store.get('a', doc.id).modelSettings.codexModel, 'gpt-6.1-sol');
+  store.saveSettings('a', 'openai'); assert.equal(store.settings('a').apiModel, 'custom');
+  assert.equal((await call('/documents/' + doc.id)).payload.document.modelSettings.codexEffort, 'medium');
+}));
+
 test('local delivery API scopes tickets to upload/process permissions and verifies the merged file hash', async () => fixture(async ({ call, store }) => {
   const token = store.rotateToken('a'), workerId = 'a'.repeat(32), file = video(24);
   store.heartbeatWorker('a', { workerId, capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } });

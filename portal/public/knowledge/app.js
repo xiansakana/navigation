@@ -4,7 +4,7 @@ import { createSourcePlayer } from './source.js?v=1';
 import { bindVideoDrop } from './drop.js?v=1';
 import { sendLocalInput } from './local-input.js?v=1';
 const $ = id => document.getElementById(id);
-const state = { permissions: [], documents: [], current: null, settings: null, editing: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
+const state = { permissions: [], documents: [], current: null, settings: null, editing: false, modelDirty: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
 const sourcePlayer = createSourcePlayer({ player: $('player'), frame: $('original-frame'), select: $('playback-source'), link: $('original-link'), hint: $('playback-hint'), allowed: () => can('source:view') });
 const text = (id, value) => { $(id).textContent = value || ''; };
@@ -26,10 +26,17 @@ async function settings() {
   text('storage-policy', state.settings.storage?.provider === '115' ? '原视频保存至115，上传和处理期间使用临时缓存。' : '原视频保存在服务器。');
   $('backend').value = state.settings.backend;
   $('backend').disabled = !can('settings:edit');
+  const prefix = state.settings.backend === 'codex' ? 'codex' : 'api';
+  if (!state.modelDirty) {
+    $('summary-model').value = state.settings[prefix + 'Model'] || '';
+    $('summary-effort').value = state.settings[prefix + 'Effort'] || '';
+  }
+  $('summary-model').disabled = $('summary-effort').disabled = !can('model:edit') || !can('settings:edit');
+  show('model-save', can('model:edit') && can('settings:edit'));
   const worker = state.settings.worker, c = worker.capabilities;
   text('worker-status', worker.online ? `${worker.label || '工作器'} · 在线${worker.scheduling === 'gpu-first' ? ' · GPU 优先，离线后由服务器接手后续任务' : ''}` : worker.configured ? '工作器离线，等待连接。已上传的任务会保留在队列中。' : '尚未连接工作器。生成个人凭据后，可在服务器或本机启动处理。');
   const info = c[state.settings.backend];
-  text('backend-description', info ? `${info.ready ? '可用' : '尚不可用'} · ${info.model || info.detail || ''}` : '选择总结方式后，由已连接工作器执行。');
+  text('backend-description', info ? `${info.ready ? '工作器已就绪' : '工作器未就绪'} · ${state.settings[prefix + 'Model'] || info.model || info.detail || ''} · 强度：${state.settings[prefix + 'Effort'] || '工作器默认'}` : '选择总结方式后，由已连接工作器执行。');
 }
 function renderList() {
   text('total', state.total + ' 篇');
@@ -85,7 +92,8 @@ function renderDocument(d) {
   show('delete', can('delete:edit')); show('export', can('export:view') && !!d.notes);
   $('export').href = '/api/knowledge/documents/' + d.id + '/export';
   const p = d.provenance;
-  text('provenance', p.generatedAt ? `生成于 ${new Date(p.generatedAt).toLocaleString('zh-CN')} · ${p.model || p.backend} · ${p.vision ? '含抽样画面核对' : '未进行模型视觉核对'}。${(p.warnings || []).join(' ')}` : '任务完成后在这里阅读完整笔记。');
+  const profile = d.modelSettings || {}, prefix = d.backend === 'codex' ? 'codex' : 'api';
+  text('provenance', p.generatedAt ? `生成于 ${new Date(p.generatedAt).toLocaleString('zh-CN')} · ${p.model || p.backend} · 推理强度：${p.reasoningEffort || '模型默认'} · ${p.vision ? '含抽样画面核对' : '未进行模型视觉核对'}。${(p.warnings || []).join(' ')}` : `本次任务模型：${profile[prefix + 'Model'] || '工作器默认'} · 强度：${profile[prefix + 'Effort'] || '工作器默认'}。任务完成后在这里阅读完整笔记。`);
   $('note-content').innerHTML = DOMPurify.sanitize(marked.parse(d.notes || ''), { USE_PROFILES: { html: true }, FORBID_TAGS: ['img', 'video', 'audio', 'iframe', 'form', 'input', 'button', 'style'], FORBID_ATTR: ['style', 'id', 'name'] });
   for (const a of $('note-content').querySelectorAll('a')) { a.rel = 'noopener noreferrer'; a.target = '_blank'; }
   $('outline').replaceChildren();
@@ -189,7 +197,15 @@ $('upload-form').addEventListener('reset', () => text('selected-video', '支持�
 $('search-form').onsubmit = event => { event.preventDefault(); load().catch(error); };
 $('topic-filter').onchange = $('status-filter').onchange = () => load().catch(error);
 $('more').onclick = () => load(true).catch(error);
-$('backend').onchange = async () => { try { await send('/settings', 'PUT', { backend: $('backend').value }); await settings(); text('message', '已切换默认总结方式。'); } catch (e) { error(e); } };
+$('backend').onchange = async () => { try { await send('/settings', 'PUT', { backend: $('backend').value }); state.modelDirty = false; await settings(); text('message', '已切换默认总结方式。'); } catch (e) { error(e); } };
+$('summary-model').oninput = $('summary-effort').onchange = () => { state.modelDirty = true; };
+$('model-save').onclick = async () => {
+  const prefix = state.settings.backend === 'codex' ? 'codex' : 'api';
+  try {
+    await send('/settings', 'PUT', { [prefix + 'Model']: $('summary-model').value.trim(), [prefix + 'Effort']: $('summary-effort').value });
+    state.modelDirty = false; await settings(); text('message', '模型和强度已保存，用于新上传和失败重试；已排队和正在处理的任务保留原配置。');
+  } catch (e) { error(e); }
+};
 $('worker-token').onclick = async () => {
   if (state.settings.worker.configured && !window.confirm('这会撤销旧版共享凭据，使用该凭据的工作器需重新配置；独立绑定的设备不受影响。继续？')) return;
   try { const result = await send('/worker-token', 'POST'); $('new-token').value = result.token; show('token-result', true); await settings(); } catch (e) { error(e); }

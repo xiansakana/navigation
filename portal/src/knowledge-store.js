@@ -8,6 +8,18 @@ import { createLocalInputStore } from './knowledge-local-store.js';
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
 export const ACTIVE_STATES = ['processing'];
+export const MODEL_FIELDS = ['codexModel', 'codexEffort', 'apiModel', 'apiEffort'];
+const efforts = ['', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+export function modelSettings(raw, previous = {}) {
+  const result = {};
+  for (const key of MODEL_FIELDS) {
+    const value = raw[key] === undefined ? previous[key] || '' : String(raw[key]).trim();
+    if (key.endsWith('Model') ? value && !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,119}$/.test(value) : !efforts.includes(value)) throw new Error('模型名称或推理强度无效');
+    result[key] = value;
+  }
+  for (const prefix of ['codex', 'api']) if (/^gpt-(6|5\.6)-luna$/.test(result[prefix + 'Model']) && result[prefix + 'Effort'] === 'ultra') throw new Error('Luna最高支持max，请降低推理强度');
+  return result;
+}
 export const backendName = value => {
   if (!['codex', 'openai'].includes(value)) throw new Error('请选择 Codex CLI 或兼容 API');
   return value;
@@ -48,11 +60,14 @@ export function createKnowledgeStore(db) {
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'worker_id')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN worker_id TEXT NOT NULL DEFAULT ''");
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'source_sha256')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN source_sha256 TEXT NOT NULL DEFAULT ''");
   const localInputs = createLocalInputStore(db);
+  for (const table of ['knowledge_settings', 'knowledge_documents']) {
+    if (!db.prepare('PRAGMA table_info(' + table + ')').all().some(c => c.name === 'model_settings_json')) db.exec('ALTER TABLE ' + table + " ADD COLUMN model_settings_json TEXT NOT NULL DEFAULT '{}'");
+  }
   const devices = createKnowledgeDeviceStore(db);
   const sources = createSourceStore(db);
   const getRow = (uid, key) => db.prepare('SELECT * FROM knowledge_documents WHERE user_id=? AND id=?').get(uid, key);
   const read = row => row && ({ id: row.id, title: row.title, topic: row.topic, tags: JSON.parse(row.tags_json), sourceUrl: row.source_url,
-    originalName: row.original_name, bytes: row.byte_size, mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, status: row.status,
+    originalName: row.original_name, bytes: row.byte_size, mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, modelSettings: JSON.parse(row.model_settings_json || '{}'), status: row.status,
     stage: row.stage, progress: row.progress, error: row.error, duration: row.duration, language: row.language, notes: row.notes,
     transcript: JSON.parse(row.transcript_json), frames: JSON.parse(row.frames_json), provenance: JSON.parse(row.provenance_json),
     storage: sources.public(row.user_id, row.id), revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at });
@@ -64,11 +79,12 @@ export function createKnowledgeStore(db) {
     .map(r => ({ id: r.worker_id, label: r.label, lastSeen: r.last_seen, capabilities: JSON.parse(r.capabilities_json) }));
   return {
     get, getRow, expire, sources, devices, localInputs, codexCalls:createKnowledgeCodexCalls(db),
-    settings(uid) { return { backend: db.prepare('SELECT backend FROM knowledge_settings WHERE user_id=?').get(uid)?.backend || 'codex' }; },
-    saveSettings(uid, backend) {
-      backendName(backend);
-      db.prepare('INSERT INTO knowledge_settings(user_id,backend) VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET backend=excluded.backend').run(uid, backend);
-      return { backend };
+    settings(uid) { const row = db.prepare('SELECT * FROM knowledge_settings WHERE user_id=?').get(uid); return { backend: row?.backend || 'codex', ...modelSettings({}, JSON.parse(row?.model_settings_json || '{}')) }; },
+    saveSettings(uid, raw) {
+      if (typeof raw === 'string') raw = { backend: raw };
+      const previous = this.settings(uid), backend = backendName(raw.backend || previous.backend), selection = modelSettings(raw, previous);
+      db.prepare('INSERT INTO knowledge_settings(user_id,backend,model_settings_json) VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET backend=excluded.backend,model_settings_json=excluded.model_settings_json').run(uid, backend, JSON.stringify(selection));
+      return { backend, ...selection };
     },
     worker(uid) {
       const row = db.prepare('SELECT last_seen,label,capabilities_json FROM knowledge_workers WHERE user_id=?').get(uid);
@@ -106,7 +122,7 @@ export function createKnowledgeStore(db) {
       if (topic) { where += ' AND topic=?'; args.push(String(topic).slice(0, 60)); }
       if (status) { where += ' AND status=?'; args.push(status); }
       const total = db.prepare('SELECT count(*) AS n FROM knowledge_documents WHERE ' + where).get(...args).n;
-      const documents = db.prepare(`SELECT id,user_id,title,topic,tags_json,source_url,original_name,byte_size,mime_type,fingerprint,backend,status,stage,progress,error,duration,language,
+      const documents = db.prepare(`SELECT id,user_id,title,topic,tags_json,source_url,original_name,byte_size,mime_type,fingerprint,backend,model_settings_json,status,stage,progress,error,duration,language,
         substr(notes,1,240) AS notes,'[]' AS transcript_json,'[]' AS frames_json,provenance_json,revision,attempt,created_at,updated_at,
         json_array_length(frames_json) AS frame_count,json_array_length(transcript_json) AS segment_count
         FROM knowledge_documents WHERE ` + where + ' ORDER BY updated_at DESC,id LIMIT ? OFFSET ?').all(...args, limit, offset)
@@ -129,6 +145,7 @@ export function createKnowledgeStore(db) {
       const key = id(), time = now();
       db.prepare('INSERT INTO knowledge_documents(id,user_id,title,topic,tags_json,source_url,original_name,byte_size,mime_type,fingerprint,backend,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(key, uid, m.title, m.topic, JSON.stringify(m.tags), m.sourceUrl, name, size, mime, fingerprint, backend, time, time);
+      db.prepare('UPDATE knowledge_documents SET model_settings_json=? WHERE id=?').run(JSON.stringify(modelSettings({}, this.settings(uid))), key);
       return get(uid, key);
     },
     parts(uid, key) {
@@ -192,7 +209,7 @@ export function createKnowledgeStore(db) {
     },
     retry(uid, key, backend) {
       backendName(backend);
-      return db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待工作器',backend=?,progress=0,error='',lease=NULL,updated_at=? WHERE user_id=? AND id=? AND status='failed'").run(backend, now(), uid, key).changes > 0;
+      return db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待工作器',backend=?,model_settings_json=?,progress=0,error='',lease=NULL,updated_at=? WHERE user_id=? AND id=? AND status='failed'").run(backend, JSON.stringify(modelSettings({}, this.settings(uid))), now(), uid, key).changes > 0;
     },
     edit(uid, key, raw) {
       const previous = get(uid, key);

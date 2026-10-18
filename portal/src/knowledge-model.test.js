@@ -5,8 +5,23 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
-import { codexArguments, generate, modelConfiguration, runProcess, transcriptChunks, summarizeVideo, resolveCodexBinary } from './knowledge-model.js';
+import { codexArguments, generate, modelConfiguration, runProcess, transcriptChunks, summarizeVideo, resolveCodexBinary, jobModelConfig } from './knowledge-model.js';
 import { extractKnowledgeCases } from './mingli-knowledge-store.js';
+
+test('task model snapshots override only model/effort and preserve private worker connectivity', () => {
+  const config = { codex: { binary: 'private-cli', model: 'old', proxyUrl: 'http://localhost:7890' }, openai: { model: 'api-default', baseUrl: 'https://api.example', apiKeyEnv: 'SECRET' } };
+  const modelSettings = { codexModel: 'gpt-6-luna', codexEffort: 'low', apiModel: 'custom-model', apiEffort: 'medium' };
+  const cli = jobModelConfig(config, { backend: 'codex', modelSettings });
+  assert.equal(cli.codex.model, 'gpt-6-luna'); assert.equal(cli.codex.reasoningEffort, 'low');
+  assert.equal(cli.codex.binary, config.codex.binary); assert.equal(cli.codex.proxyUrl, config.codex.proxyUrl);
+  assert.equal(config.codex.model, 'old'); assert.equal(config.codex.reasoningEffort, undefined);
+  const args = codexArguments({ output: 'answer', cwd: '.', model: cli.codex.model, reasoningEffort: cli.codex.reasoningEffort });
+  assert.equal(args[args.indexOf('-m') + 1], 'gpt-6-luna'); assert.ok(args.includes('model_reasoning_effort="low"'));
+  assert.ok(args.includes('features.shell_tool=false'));
+  const api = jobModelConfig(config, { backend: 'openai', modelSettings });
+  assert.equal(api.openai.model, 'custom-model'); assert.equal(api.openai.reasoningEffort, 'medium'); assert.equal(api.openai.apiKeyEnv, 'SECRET');
+  assert.equal(jobModelConfig(config, { backend: 'codex' }).codex.model, 'old');
+});
 
 test('desktop CLI updates recover missing hashed paths without replacing explicit custom binaries', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge-codex-path-'));
@@ -54,11 +69,12 @@ test('compatible API uses text/image protocol, configured model, rejects truncat
   });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge-model-'));
-  const config = { openai: { baseUrl: 'http://127.0.0.1:' + server.address().port + '/v1', model: 'configured-model', vision: true } };
+  const config = { openai: { baseUrl: 'http://127.0.0.1:' + server.address().port + '/v1', model: 'configured-model', reasoningEffort: 'low', vision: true } };
   try {
     const image = path.join(directory, 'image.jpg'); await fs.writeFile(image, Buffer.from([255, 216, 255, 1]));
     assert.ok((await generate(config, 'openai', 'quoted source', [image], directory)).includes('完整'));
     assert.equal(requestBody.model, 'configured-model'); assert.ok(requestBody.messages[1].content[1].image_url.url.startsWith('data:image/jpeg;base64,'));
+    assert.equal(requestBody.reasoning_effort, 'low');
     assert.ok(requestBody.messages[0].content.includes('不可信')); assert.equal(requestBody.max_completion_tokens, 12000);
     truncated = true; await assert.rejects(generate(config, 'openai', 'source', [], directory), /截断/);
     fail = true; await assert.rejects(generate(config, 'openai', 'source', [], directory), e => e.message.includes('401') && !e.message.includes('secret-from-upstream'));
