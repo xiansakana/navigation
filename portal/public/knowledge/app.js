@@ -1,8 +1,11 @@
 import { uploadParts } from './upload.js?v=1';
 import { createDevicePanel } from './devices.js?v=3';
+import { createSourcePlayer } from './source.js?v=1';
+import { bindVideoDrop } from './drop.js?v=1';
 const $ = id => document.getElementById(id);
 const state = { permissions: [], documents: [], current: null, settings: null, editing: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
+const sourcePlayer = createSourcePlayer({ player: $('player'), frame: $('original-frame'), select: $('playback-source'), link: $('original-link'), hint: $('playback-hint'), allowed: () => can('source:view') });
 const text = (id, value) => { $(id).textContent = value || ''; };
 const show = (id, yes) => { $(id).hidden = !yes; };
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -51,6 +54,7 @@ async function load(more = false) {
   renderList();
 }
 function tab(name) {
+  sourcePlayer.activate(name === 'source' && !state.editing);
   for (const button of $('tabs').querySelectorAll('button')) {
     button.setAttribute('aria-pressed', String(button.dataset.tab === name)); show(button.dataset.tab + '-view', button.dataset.tab === name && !state.editing);
   }
@@ -89,13 +93,12 @@ function renderDocument(d) {
     if (h.tagName !== 'H2') return;
     const link = document.createElement('a'); link.href = '#' + h.id; link.textContent = h.textContent; $('outline').append(link);
   });
-  $('player').removeAttribute('src'); $('player').load();
-  if (can('source:view') && d.status !== 'uploading') $('player').src = '/api/knowledge/documents/' + d.id + '/source';
+  sourcePlayer.reset(d);
   $('transcript').replaceChildren();
   for (const s of d.transcript) {
     const row = document.createElement('div'); row.className = 'kb-segment';
     const button = document.createElement('button'); button.type = 'button'; button.textContent = time(s.start); button.disabled = !can('source:view');
-    button.addEventListener('click', () => { tab('source'); $('player').currentTime = s.start; $('player').play().catch(() => {}); });
+    button.addEventListener('click', () => { tab('source'); sourcePlayer.seek(s.start); });
     const p = document.createElement('p'); p.textContent = s.text; row.append(button, p); $('transcript').append(row);
   }
   $('frames').replaceChildren();
@@ -118,7 +121,7 @@ async function upload(event) {
   if (state.uploading) return;
   const file = $('video-file').files[0]; if (!file) return;
   if (file.size > state.settings.maxBytes) return error(new Error('视频超过1GB限制'));
-  state.uploading = true; $('upload-submit').disabled = true; show('upload-progress', true);
+  state.uploading = true; $('upload-submit').disabled = true; $('video-file').disabled = true; show('upload-progress', true);
   $('upload-progress').value = 0; text('upload-status', '正在检查文件和续传进度…');
   try {
     const stamp = new Blob([file.slice(0, 1048576), file.slice(Math.max(0, file.size - 1048576)), String(file.size)]);
@@ -145,7 +148,7 @@ async function upload(event) {
     text('message', elapsed + (state.settings.storage?.provider === '115' ? '接下来保存至115并校验，之后自动生成笔记。' : '视频已保存，工作器将按队列生成笔记。')); $('upload-progress').value = 100; text('upload-status', '上传完成'); show('upload-panel', false); $('upload-form').reset();
     await load(); await open(item.id);
   } catch (e) { error(e); text('upload-status', '上传未完成，可重新提交继续上传。'); await load().catch(() => {}); }
-  finally { state.uploading = false; $('upload-submit').disabled = false; }
+  finally { state.uploading = false; $('upload-submit').disabled = false; $('video-file').disabled = false; }
 }
 async function boot() {
   const meResponse = await fetch('/api/me'); if (meResponse.redirected) return location.assign('/login/');
@@ -175,7 +178,11 @@ $('settings-toggle').onclick = () => show('settings', $('settings').hidden);
 $('upload-toggle').onclick = () => { state.resume = null; text('upload-heading', '从一个视频开始'); show('upload-panel', true); };
 $('upload-close').onclick = () => show('upload-panel', false);
 $('upload-form').onsubmit = upload;
-$('video-file').onchange = () => { if (!state.resume && $('video-file').files[0]) $('upload-title').value = $('video-file').files[0].name.replace(/\.[^.]+$/, '').slice(0, 160); };
+bindVideoDrop({ zone: $('video-drop'), input: $('video-file'), busy: () => state.uploading,
+  maxBytes: () => state.settings?.maxBytes || 1024 ** 3, error,
+  selected: file => { show('error', false); text('selected-video', file.name + ' · ' + (file.size / 1024 ** 2).toFixed(1) + ' MB'); if (!state.resume) $('upload-title').value = file.name.replace(/\.[^.]+$/, '').slice(0, 160); }
+});
+$('upload-form').addEventListener('reset', () => text('selected-video', '支持拖拽一个视频，也可点击选择文件'));
 $('search-form').onsubmit = event => { event.preventDefault(); load().catch(error); };
 $('topic-filter').onchange = $('status-filter').onchange = () => load().catch(error);
 $('more').onclick = () => load(true).catch(error);
@@ -190,7 +197,7 @@ $('retry').onclick = async () => { try { await send('/documents/' + state.curren
 $('resume-upload').onclick = () => { state.resume = state.current; $('upload-title').value = state.current.title; text('upload-heading', '继续上传：' + state.current.title); show('upload-panel', true); $('video-file').click(); };
 $('delete').onclick = async () => {
   if (!window.confirm('删除这篇笔记及其原视频、转写和截图？')) return;
-  try { await api('/documents/' + state.current.id, { method: 'DELETE' }); state.current = null; state.editing = false; $('player').removeAttribute('src'); $('player').load(); show('detail', false); show('empty', true); await load(); } catch (e) { error(e); }
+  try { await api('/documents/' + state.current.id, { method: 'DELETE' }); state.current = null; state.editing = false; sourcePlayer.reset(null); show('detail', false); show('empty', true); await load(); } catch (e) { error(e); }
 };
 $('edit').onclick = () => {
   const d = state.current; state.editing = true; $('edit-title').value = d.title; $('edit-topic').value = d.topic; $('edit-tags').value = d.tags.join(', '); $('edit-source').value = d.sourceUrl; $('edit-notes').value = d.notes;
