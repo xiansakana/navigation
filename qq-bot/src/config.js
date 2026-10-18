@@ -1,4 +1,4 @@
-import { codexConfig } from '../../shared/runtime-config.js';
+import { codexConfig, integrationConfig } from '../../shared/runtime-config.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,6 +55,8 @@ export function loadConfig() {
         );
     }
     const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    const integrations = integrationConfig();
+    if (integrations.notifyToken) raw.server = { ...raw.server, notifyToken: integrations.notifyToken };
     const execution = codexConfig();
     if (execution) raw.codex = execution;
     return normalizeConfig(raw);
