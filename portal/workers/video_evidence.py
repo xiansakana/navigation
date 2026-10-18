@@ -6,7 +6,7 @@ import os
 import pathlib
 import subprocess
 import sys
-import time
+from time import perf_counter
 import wave
 
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
@@ -39,7 +39,7 @@ def append_segment(transcript, start, end, text, duration):
 
 
 def main():
-    started_at = time.perf_counter()
+    started_at = perf_counter()
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', required=True)
     parser.add_argument('--output', required=True)
@@ -114,14 +114,14 @@ def main():
         audio_path = out / 'audio.wav'
         command(ff + ['-vn', '-ac', '1', '-ar', '16000', '-threads', '1', str(audio_path)])
         emit('加载语音模型（首次需下载）', 15)
-        model_started = time.perf_counter()
+        model_started = perf_counter()
         device = args.device
         if device == 'auto':
             device = 'cuda' if ctranslate2.get_cuda_device_count() else 'cpu'
         model = WhisperModel(args.model, device=device, compute_type='float16' if device == 'cuda' else 'int8',
                              cpu_threads=max(1, min(8, args.threads)), download_root=args.model_cache or None)
-        model_seconds = time.perf_counter() - model_started
-        asr_started = time.perf_counter()
+        model_seconds = perf_counter() - model_started
+        asr_started = perf_counter()
         hardware = 'GPU CUDA' if device == 'cuda' else 'CPU'
         emit('语音转写 · ' + hardware + ' · 准备音频批次', 18)
         # Decode WAV ourselves to avoid PyAV version-specific metadata options.
@@ -141,14 +141,14 @@ def main():
                 for segment in segments:
                     absolute_start, absolute_end = offset + segment.start, offset + segment.end
                     append_segment(transcript, absolute_start, absolute_end, segment.text, duration)
-                    emit(f'语音转写 · {hardware} · {clock(absolute_end)}/{clock(duration)} · 已用{clock(time.perf_counter() - asr_started)}',
+                    emit(f'语音转写 · {hardware} · {clock(absolute_end)}/{clock(duration)} · 已用{clock(perf_counter() - asr_started)}',
                          18 + min(45, int(absolute_end / duration * 45)))
                 if start + len(audio) >= total:
                     break
                 start += 16000 * 598  # overlap: skip fully covered segments, retain new speech
         emit('语音转写完成 · ' + hardware, 63, metrics={
             'device': device, 'audioSeconds': round(duration, 3), 'modelLoadSeconds': round(model_seconds, 3),
-            'asrSeconds': round(time.perf_counter() - asr_started, 3), 'segments': len(transcript)})
+            'asrSeconds': round(perf_counter() - asr_started, 3), 'segments': len(transcript)})
         audio_path.unlink(missing_ok=True)
         if not transcript:
             warnings.append('未识别到有效语音；笔记仅能依据抽取画面。')
@@ -157,7 +157,7 @@ def main():
     result = {'duration': duration, 'language': detected, 'frames': frames, 'transcript': transcript,
               'asrModel': args.model, 'warnings': warnings}
     (out / 'evidence.json').write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
-    emit('素材提取完成', 65, metrics={'extractionSeconds': round(time.perf_counter() - started_at, 3)})
+    emit('素材提取完成', 65, metrics={'extractionSeconds': round(perf_counter() - started_at, 3)})
 
 
 if __name__ == '__main__':
