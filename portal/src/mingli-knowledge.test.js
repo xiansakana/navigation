@@ -77,6 +77,15 @@ test('later visual proof fills unknown gender while contradictory proof stays un
   assert.equal(conflict.genderEvidence.length, 2);
 });
 
+test('read 元男/元女 from the day pillar cell in four-column and labelled-row tables', () => {
+  const a = extractKnowledgeCases('| 年柱 | 月柱 | 日柱 | 时柱 |\n|---|---|---|---|\n|壬辰|壬寅|甲寅|庚午|\n|偏印|偏印|元男|七杀|')[0];
+  assert.equal(a.gender, 1); assert.match(a.genderEvidence[0].text, /元男/);
+  const b = extractKnowledgeCases('| 项目 | 年柱 | 月柱 | 日柱 | 时柱 |\n|---|---|---|---|---|\n|四柱|丁巳|辛亥|壬午|乙巳|\n|十神|正财|正印|元女|伤官|')[0];
+  assert.equal(b.gender, 0); assert.deepEqual(b.pairs, ['丁巳','辛亥','壬午','乙巳']);
+  const c = extractKnowledgeCases('| 年柱 | 月柱 | 日柱 | 时柱 |\n|---|---|---|---|\n|壬辰|壬寅|甲寅|庚午|\n|元女|偏印|日主|七杀|')[0];
+  assert.equal(c.gender, null, 'a marker in a different column cannot label the owner');
+});
+
 test('backfill, deduplication, filtering, edits and deletion synchronize without touching personal cases', () => {
   const db = new Database(':memory:');
   try {

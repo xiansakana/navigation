@@ -3,23 +3,28 @@ import { flowPillar } from '../public/mingli/chart-presentation.js';
 import { STEMS, BRANCHES, PILLARS } from '../public/mingli/filter-options.js';
 import { caseFilterSql } from './mingli-filters.js';
 
-const VERSION = 'knowledge-bazi-v2';
+const VERSION = 'knowledge-bazi-v3';
 const hash = text => crypto.createHash('sha256').update(text).digest('hex');
 const pair = `[${STEMS}][${BRANCHES}]`;
 const clean = text => text.replace(/[*`_]/g, '');
 function genderEvidence(lines, offsets, index, start, end) {
   const evidence = [];
-  const chartStart = text => /(?:四柱|八字|乾造|坤造)\s*[:：]?\s*[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]|年柱.*月柱.*日柱.*时柱/.test(clean(text));
+  const chartStart = text => /(?:四柱|八字|乾造|坤造)\s*[:：]?\s*\|?\s*[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]|年柱.*月柱.*日柱.*时柱/.test(clean(text));
+  const table = /年柱\s*\|\s*月柱\s*\|\s*日柱\s*\|\s*时柱/.test(clean(lines[index])) || /^\s*\|\s*四柱\s*\|/.test(clean(lines[index]));
   const previousChart = lines.slice(Math.max(0, start - 1), index).some(chartStart);
   for (let j = previousChart ? index : Math.max(start, index - 3); j < Math.min(end, index + 12); j++) {
     const line = clean(lines[j]).trim(), plain = line.replace(/^(?:#+\s*|[-+>]\s*)/, '');
     if (j > index && chartStart(line)) break;
     const labelled = /^(?:画面性别标记|性别依据|命主性别|性别|日主标记|日元标记|画面标记)\s*[:：]/.test(plain);
     const standalone = /^(?:元\s*[男女]|男命|女命|乾造|坤造)(?:\s|[：:，,。；;（(]|$)/.test(plain);
-    if (!(j === index || j === start && /^#/.test(line) || labelled || standalone)) continue;
+    const cells = line.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+    const dayCell = cells.length === 4 ? cells[2] : cells.length === 5 ? cells[3] : '';
+    const tableMarker = table && j > index && j <= index + 6 && /^(?:元\s*[男女]|乾造|坤造)$/.test(dayCell);
+    if (!(j === index || j === start && /^#/.test(line) || labelled || standalone || tableMarker)) continue;
     if (/待核对|模糊|看不清|无法辨认|不确定|未确认/.test(line)) continue;
-    const female = /女命|坤造|元\s*女/.test(line) || labelled && /[:：]\s*女(?:\s|[（(，,。；;]|$)/.test(line);
-    const male = /男命|乾造|元\s*男/.test(line) || labelled && /[:：]\s*男(?:\s|[（(，,。；;]|$)/.test(line);
+    const genderText = tableMarker ? dayCell : line;
+    const female = /女命|坤造|元\s*女/.test(genderText) || labelled && /[:：]\s*女(?:\s|[（(，,。；;]|$)/.test(line);
+    const male = /男命|乾造|元\s*男/.test(genderText) || labelled && /[:：]\s*男(?:\s|[（(，,。；;]|$)/.test(line);
     if (female) evidence.push({ gender: 0, text: line, offset: offsets[j] });
     if (male) evidence.push({ gender: 1, text: line, offset: offsets[j] });
   }
@@ -46,7 +51,7 @@ export function extractKnowledgeCases(notes) {
     const line = clean(lines[i]), next = lines.slice(i, i + 4).map(clean).join('\n');
     let values;
     if (/(?:四柱|八字|乾造|坤造)/.test(line) && !/^\s*#/.test(line)) {
-      const tail = line.replace(/^.*?(?:四柱|八字|乾造|坤造)\s*[:：]?\s*/, '');
+      const tail = line.replace(/^.*?(?:四柱|八字|乾造|坤造)\s*[:：]?\s*\|?\s*/, '');
       const match = new RegExp(String.raw`^(${pair})[\s、，,|/；;]*(${pair})[\s、，,|/；;]*(${pair})[\s、，,|/；;]*(${pair})(?![${STEMS}${BRANCHES}])`).exec(tail);
       if (match) values = match.slice(1, 5);
     }
