@@ -120,6 +120,19 @@ def backup(root, destination, keep=7, database=None, logical=False):
                 os.chmod(partial, 0o600)
                 with tarfile.open(fileobj=raw, mode='w:gz', compresslevel=1) as target:
                     for name, file in sorted(candidates.items()):
+                        if Path(directory) in file.parents:
+                            # Snapshot files are immutable: stream them directly instead of making
+                            # a third, temporary copy of a multi-gigabyte database export.
+                            digest = hashlib.sha256()
+                            with file.open('rb') as source:
+                                while chunk := source.read(1024 * 1024):
+                                    digest.update(chunk)
+                                source.seek(0)
+                                entry = tarfile.TarInfo(name)
+                                entry.size, entry.mode = file.stat().st_size, 0o600
+                                target.addfile(entry, source)
+                            manifest['files'][name] = digest.hexdigest()
+                            continue
                         # Spool each file once so the archived bytes always match the recorded digest.
                         with tempfile.SpooledTemporaryFile(max_size=1024 * 1024) as spool, file.open('rb') as source:
                             digest, size = hashlib.sha256(), 0
