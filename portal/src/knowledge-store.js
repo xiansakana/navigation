@@ -4,6 +4,7 @@ import { createSourceStore } from './knowledge-source-store.js';
 import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
 import { createKnowledgeDeviceStore } from './knowledge-devices.js';
 import { createLocalInputStore } from './knowledge-local-store.js';
+import { createImportStore } from './knowledge-import-store.js';
 
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
@@ -60,6 +61,7 @@ export function createKnowledgeStore(db) {
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'worker_id')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN worker_id TEXT NOT NULL DEFAULT ''");
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'source_sha256')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN source_sha256 TEXT NOT NULL DEFAULT ''");
   const localInputs = createLocalInputStore(db);
+  const imports = createImportStore(db);
   for (const table of ['knowledge_settings', 'knowledge_documents']) {
     if (!db.prepare('PRAGMA table_info(' + table + ')').all().some(c => c.name === 'model_settings_json')) db.exec('ALTER TABLE ' + table + " ADD COLUMN model_settings_json TEXT NOT NULL DEFAULT '{}'");
   }
@@ -70,7 +72,7 @@ export function createKnowledgeStore(db) {
     originalName: row.original_name, bytes: row.byte_size, mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, modelSettings: JSON.parse(row.model_settings_json || '{}'), status: row.status,
     stage: row.stage, progress: row.progress, error: row.error, duration: row.duration, language: row.language, notes: row.notes,
     transcript: JSON.parse(row.transcript_json), frames: JSON.parse(row.frames_json), provenance: JSON.parse(row.provenance_json),
-    storage: sources.public(row.user_id, row.id), revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at });
+    storage: sources.public(row.user_id, row.id), importState: imports.get(row.user_id, row.id)?.state || '', revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at });
   const get = (uid, key) => { const row = getRow(uid, key); return row && row.status !== 'deleting' ? read(row) : null; };
   const expire = uid => db.prepare("UPDATE knowledge_documents SET status='failed',stage='处理已中断',error='工作器超过15分钟未响应，请检查本机工作器后重试',lease=NULL,updated_at=? WHERE user_id=? AND status='processing' AND heartbeat<?")
     .run(now(), uid, new Date(Date.now() - 15 * 60000).toISOString());
@@ -78,7 +80,7 @@ export function createKnowledgeStore(db) {
     .all(uid, new Date(Date.now() - 90000).toISOString())
     .map(r => ({ id: r.worker_id, label: r.label, lastSeen: r.last_seen, capabilities: JSON.parse(r.capabilities_json) }));
   return {
-    get, getRow, expire, sources, devices, localInputs, codexCalls:createKnowledgeCodexCalls(db),
+    get, getRow, expire, sources, devices, localInputs, imports, codexCalls:createKnowledgeCodexCalls(db),
     settings(uid) { const row = db.prepare('SELECT * FROM knowledge_settings WHERE user_id=?').get(uid); return { backend: row?.backend || 'codex', ...modelSettings({}, JSON.parse(row?.model_settings_json || '{}')) }; },
     saveSettings(uid, raw) {
       if (typeof raw === 'string') raw = { backend: raw };
@@ -140,7 +142,7 @@ export function createKnowledgeStore(db) {
       const fingerprint = String(raw.fingerprint || '');
       if (fingerprint && !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('文件指纹无效');
       const quota = db.prepare("SELECT count(*) AS n,coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE user_id=?").get(uid);
-      const pending = db.prepare("SELECT count(*) AS n FROM knowledge_documents WHERE user_id=? AND status IN ('uploading','queued','processing')").get(uid).n;
+      const pending = db.prepare("SELECT count(*) AS n FROM knowledge_documents WHERE user_id=? AND status IN ('uploading','importing','queued','processing')").get(uid).n;
       if (pending >= 5 || quota.bytes + size > 20 * MAX_VIDEO_BYTES || quota.n >= 2000) throw new Error('最多5个待处理任务、20GB视频或2000篇笔记，请先清理或完成已有任务');
       const key = id(), time = now();
       db.prepare('INSERT INTO knowledge_documents(id,user_id,title,topic,tags_json,source_url,original_name,byte_size,mime_type,fingerprint,backend,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
@@ -175,7 +177,7 @@ export function createKnowledgeStore(db) {
         const gpuWorkers = workers.filter(w => w.capabilities.media?.ready && w.capabilities.media.detail === 'cuda');
         const hasLocal = r => { const local = localInputs.get(uid, r.id); return local && local.worker_id === workerId && localDocuments.includes(r.id) && r.source_sha256 && local.sha256 === r.source_sha256; };
         const receivingLocal = r => { const local = localInputs.get(uid, r.id); return local && local.worker_id === workerId && !local.sha256 && local.expires > Date.now(); };
-        const row = candidates.find(r => backends.includes(r.backend) && !receivingLocal(r) && (!sources.get(uid, r.id) || sources.get(uid, r.id).state === 'ready' || hasLocal(r)) &&
+        const row = candidates.find(r => backends.includes(r.backend) && !receivingLocal(r) && (!sources.get(uid, r.id) || sources.get(uid, r.id).state === 'ready' || hasLocal(r) || imports.get(uid, r.id)?.state === 'done') &&
           (!gpuWorkers.some(w => w.capabilities[r.backend]?.ready) || gpuWorkers.some(w => w.id === workerId && w.capabilities[r.backend]?.ready)));
         if (!row) return null;
         const lease = crypto.randomBytes(24).toString('hex'), time = now();
@@ -209,6 +211,14 @@ export function createKnowledgeStore(db) {
     },
     retry(uid, key, backend) {
       backendName(backend);
+      if (getRow(uid, key)?.status === 'failed' && imports.get(uid, key)?.state === 'failed') {
+        if (db.prepare("SELECT count(*) AS n FROM knowledge_documents WHERE user_id=? AND status IN ('importing','uploading','queued','processing')").get(uid).n >= 5) throw new Error('最多5个待处理任务，请等待已有任务完成');
+        return db.transaction(() => {
+          imports.retry(uid, key);
+          return db.prepare("UPDATE knowledge_documents SET status='importing',stage='等待下载B站视频',backend=?,model_settings_json=?,progress=0,error='',updated_at=? WHERE user_id=? AND id=? AND status='failed'")
+            .run(backend, JSON.stringify(modelSettings({}, this.settings(uid))), now(), uid, key).changes > 0;
+        })();
+      }
       return db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待工作器',backend=?,model_settings_json=?,progress=0,error='',lease=NULL,updated_at=? WHERE user_id=? AND id=? AND status='failed'").run(backend, JSON.stringify(modelSettings({}, this.settings(uid))), now(), uid, key).changes > 0;
     },
     edit(uid, key, raw) {
@@ -230,6 +240,7 @@ export function createKnowledgeStore(db) {
         createKnowledgeCaseStore(db).removeDocument(uid, key);
         sources.remove(uid, key);
         localInputs.remove(uid, key);
+        imports.remove(uid, key);
         db.prepare('DELETE FROM knowledge_codex_calls WHERE user_id=? AND document_id=?').run(uid,key);
         db.prepare('DELETE FROM knowledge_parts WHERE document_id=?').run(key);
         return db.prepare('DELETE FROM knowledge_documents WHERE user_id=? AND id=?').run(uid, key).changes > 0;

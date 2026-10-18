@@ -49,7 +49,8 @@ import { startThumbnailWorker } from './blog-media-process.js';
 import { createResourceMonitor, canViewResources, handleResourceApi } from './resources.js';
 import { canBookkeep, handleBookkeepingApi } from './bookkeeping.js';
 import { canMingli, handleMingliApi } from './mingli.js';
-import { canKnowledge, handleKnowledgeApi, handleKnowledgeWorkerApi } from './knowledge.js';
+import { canKnowledge, handleKnowledgeApi, handleKnowledgeWorkerApi, knowledgeDirectory } from './knowledge.js';
+import { startKnowledgeImports } from './knowledge-import.js';
 import { handleQqCodexApi } from './qq-codex.js';
 import { handleCodexCliApi, canCodexCli } from './codex-cli.js';
 
@@ -733,6 +734,11 @@ server.listen(port, host, function() {
     startAssetHistory(getDatabase());
     resumeVideoJobs(getDatabase(), config);
     startThumbnailWorker(getDatabase());
+    startKnowledgeImports(getDatabase(), knowledgeDirectory, uid => {
+        const ctx = resolveSessionUser({ userId: uid }, config);
+        const s = ctx && { userId: uid, permissions: ctx.permissions, isGuest: ctx.user.username === (config.auth?.guestUsername || 'guest') };
+        return ['view', 'import:edit', 'upload:edit', 'process:edit'].every(action => canKnowledge(s, action));
+    });
     console.log('服务导航门户已启动: http://' + (host === '0.0.0.0' ? '127.0.0.1' : host) + ':' + port);
     if (host === '0.0.0.0' && port === 80) {
         console.log('外网访问: http://<公网IP>/');

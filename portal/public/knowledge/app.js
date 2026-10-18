@@ -3,6 +3,7 @@ import { createDevicePanel } from './devices.js?v=3';
 import { createSourcePlayer } from './source.js?v=1';
 import { bindVideoDrop } from './drop.js?v=1';
 import { sendLocalInput } from './local-input.js?v=1';
+import { bindLinkImport } from './link-import.js?v=1';
 const $ = id => document.getElementById(id);
 const state = { permissions: [], documents: [], current: null, settings: null, editing: false, modelDirty: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
@@ -21,6 +22,7 @@ async function api(route, options = {}) {
   return payload;
 }
 const send = (route, method, data = {}) => api(route, { method, body: JSON.stringify(data) });
+const linkImport = bindLinkImport({ element: $, can: () => can('import:edit'), send, busy: () => state.uploading, onError: error });
 async function settings() {
   state.settings = await api('/settings');
   text('storage-policy', state.settings.storage?.provider === '115' ? '原视频保存至115，上传和处理期间使用临时缓存。' : '原视频保存在服务器。');
@@ -128,9 +130,22 @@ async function open(id, quiet = false) {
 async function upload(event) {
   event.preventDefault(); show('error', false);
   if (state.uploading) return;
+  if ($('upload-mode').value === 'link') {
+    state.uploading = true; $('upload-submit').disabled = true; $('upload-mode').disabled = true;
+    text('upload-status', '正在提交链接导入任务…');
+    try {
+      const result = await send('/imports', 'POST', { url: $('video-link').value, title: $('upload-title').value,
+        topic: $('upload-topic').value, tags: tags($('upload-tags').value), sourceUrl: $('upload-source').value, backend: state.settings.backend });
+      state.resume = null; show('upload-panel', false); $('upload-form').reset(); linkImport.mode();
+      text('message', '视频已加入链接下载队列。可关闭页面，下载、生成笔记和115归档会在后台继续。'); text('upload-status', '链接已提交');
+      await load(); await open(result.document.id);
+    } catch (e) { error(e); text('upload-status', '链接未提交，请检查后重试。'); }
+    finally { state.uploading = false; $('upload-submit').disabled = false; $('upload-mode').disabled = false; }
+    return;
+  }
   const file = $('video-file').files[0]; if (!file) return;
   if (file.size > state.settings.maxBytes) return error(new Error('视频超过1GB限制'));
-  state.uploading = true; $('upload-submit').disabled = true; $('video-file').disabled = true; show('upload-progress', true);
+  state.uploading = true; $('upload-submit').disabled = true; $('upload-mode').disabled = true; $('video-file').disabled = true; show('upload-progress', true);
   $('upload-progress').value = 0; text('upload-status', '正在检查文件和续传进度…');
   try {
     const stamp = new Blob([file.slice(0, 1048576), file.slice(Math.max(0, file.size - 1048576)), String(file.size)]);
@@ -159,13 +174,14 @@ async function upload(event) {
     text('message', elapsed + (localReady ? '已启用本机原视频处理，无需等待115归档或下载；归档在后台独立继续。' : state.settings.storage?.provider === '115' ? '接下来保存至115并校验，之后自动生成笔记。' : '视频已保存，工作器将按队列生成笔记。')); $('upload-progress').value = 100; text('upload-status', '上传完成'); show('upload-panel', false); $('upload-form').reset();
     await load(); await open(item.id);
   } catch (e) { error(e); text('upload-status', '上传未完成，可重新提交继续上传。'); await load().catch(() => {}); }
-  finally { state.uploading = false; $('upload-submit').disabled = false; $('video-file').disabled = false; }
+  finally { state.uploading = false; $('upload-submit').disabled = false; $('upload-mode').disabled = false; $('video-file').disabled = false; }
 }
 async function boot() {
   const meResponse = await fetch('/api/me'); if (meResponse.redirected) return location.assign('/login/');
   const me = await meResponse.json(); state.permissions = me.permissions || [];
   if (me.isGuest || !can('view')) throw new Error('请登录具备知识库权限的账号');
   show('upload-toggle', can('upload:edit') && can('process:edit')); show('worker-token', can('worker:edit'));
+  show('upload-mode-label', can('import:edit') && can('upload:edit') && can('process:edit')); linkImport.mode();
   createDevicePanel({ can, api, send, onError: error });
   await settings();
   if (can('notes:view')) {
@@ -180,8 +196,8 @@ async function boot() {
     if (document.hidden || state.uploading) return;
     try {
       await settings();
-      if (can('notes:view') && (state.current?.storage?.provider === '115' && state.current.storage.state !== 'ready' || state.documents.some(d => ['queued', 'processing', 'uploading'].includes(d.status) || d.storage?.provider === '115' && d.storage.state !== 'ready'))) await load();
-      if (!state.editing && state.current && (['queued', 'processing'].includes(state.current.status) || state.current.storage?.provider === '115' && state.current.storage.state !== 'ready')) await open(state.current.id, true);
+      if (can('notes:view') && (state.current?.storage?.provider === '115' && state.current.storage.state !== 'ready' || state.documents.some(d => ['queued', 'processing', 'uploading', 'importing'].includes(d.status) || d.storage?.provider === '115' && d.storage.state !== 'ready'))) await load();
+      if (!state.editing && state.current && (['queued', 'processing', 'importing'].includes(state.current.status) || state.current.storage?.provider === '115' && state.current.storage.state !== 'ready')) await open(state.current.id, true);
     } catch { /* Keep existing content during temporary connection loss. */ }
   }, 5000);
 }
@@ -213,7 +229,7 @@ $('worker-token').onclick = async () => {
 $('tabs').onclick = event => { const button = event.target.closest('[data-tab]'); if (button) tab(button.dataset.tab); };
 $('storage-retry').onclick = async () => { try { await send('/documents/' + state.current.id + '/storage-retry', 'POST'); await open(state.current.id, true); await load(); } catch (e) { error(e); } };
 $('retry').onclick = async () => { try { await send('/documents/' + state.current.id + '/retry', 'POST', { backend: state.settings.backend }); await open(state.current.id); await load(); } catch (e) { error(e); } };
-$('resume-upload').onclick = () => { state.resume = state.current; $('upload-title').value = state.current.title; text('upload-heading', '继续上传：' + state.current.title); show('upload-panel', true); $('video-file').click(); };
+$('resume-upload').onclick = () => { $('upload-mode').value = 'file'; linkImport.mode(); state.resume = state.current; $('upload-title').value = state.current.title; text('upload-heading', '继续上传：' + state.current.title); show('upload-panel', true); $('video-file').click(); };
 $('delete').onclick = async () => {
   if (!window.confirm('删除这篇笔记及其原视频、转写和截图？')) return;
   try { await api('/documents/' + state.current.id, { method: 'DELETE' }); state.current = null; state.editing = false; sourcePlayer.reset(null); show('detail', false); show('empty', true); await load(); } catch (e) { error(e); }

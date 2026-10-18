@@ -9,6 +9,7 @@ import { hasPermission } from './rbac.js';
 import { createKnowledgeStore, CHUNK_BYTES, MAX_VIDEO_BYTES, MODEL_FIELDS } from './knowledge-store.js';
 import { knowledgeWorkerPackage, sendWorkerPackage } from './knowledge-worker-package.js';
 import { sendWorkerExe } from './knowledge-worker-exe.js';
+import { inspectBilibili } from './knowledge-bilibili.js';
 
 const root = () => path.resolve(process.env.KNOWLEDGE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/knowledge'));
 export function knowledgeDirectory(id) {
@@ -33,6 +34,15 @@ async function body(req, max = 1024 * 1024) {
 }
 const locks = new Map();
 const pairingRates = new Map();
+const importRequests = new Map();
+async function inspectImport(uid, url) {
+  const time = Date.now();
+  for (const [key, value] of importRequests) if (time - value.since > 60000 && !value.busy) importRequests.delete(key);
+  const rate = importRequests.get(uid) || { since: time, count: 0, busy: false };
+  if (rate.busy || rate.count >= 20 || importRequests.size > 10000) throw Object.assign(new Error('视频信息读取过于频繁，请稍后重试'), { status: 429 });
+  rate.count++; rate.busy = true; importRequests.set(uid, rate);
+  try { return await inspectBilibili(url); } finally { rate.busy = false; }
+}
 async function lock(key, fn) {
   const previous = locks.get(key) || Promise.resolve();
   const pending = previous.catch(() => {}).then(fn);
@@ -58,6 +68,10 @@ function stream(req, res, file, type, attachment = '') {
 }
 async function serveSource(req, res, store, uid, id) {
   const source = store.sources.get(uid, id), item = store.get(uid, id);
+  // Link imports may be processed while 115 archives in parallel. If its cache
+  // was cleaned between claim and GET, verified/ready storage below is available.
+  const local = path.join(knowledgeDirectory(id), 'source');
+  if (item.importState === 'done' && fs.existsSync(local)) return stream(req, res, local, item.mimeType);
   if (source && ['ready', 'verified'].includes(source.state)) return proxySource(req, res, uid, source, item.mimeType);
   return stream(req, res, path.join(knowledgeDirectory(id), 'source'), item.mimeType);
 }
@@ -161,6 +175,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
   const route = url.pathname.slice('/api/knowledge'.length), method = req.method;
   const document = /^\/documents\/([a-f0-9]{32})(?:\/(parts|complete|local-input|retry|storage-retry|source|export|frames)(?:\/([a-z0-9.-]+))?)?$/.exec(route);
   const action = route === '/settings' ? method === 'GET' ? 'view' : 'settings:edit'
+    : ['/imports/preview', '/imports'].includes(route) && method === 'POST' ? 'import:edit'
     : route === '/worker-package' && method === 'GET' ? 'devices:install'
     : route === '/worker-install' && method === 'POST' ? 'devices:install'
     : route === '/devices' && method === 'GET' ? 'devices:view'
@@ -179,6 +194,27 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
   const store = createKnowledgeStore(getDatabase()), uid = session.userId;
   const visible = d => d && ({ ...d, transcript: canKnowledge(session, 'transcript:view') ? d.transcript : [], frames: canKnowledge(session, 'frames:view') ? d.frames : [] });
   try {
+    if (['/imports/preview', '/imports'].includes(route)) {
+      if (!canKnowledge(session, 'upload:edit') || !canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要上传视频和生成笔记权限' });
+      const input = await body(req, 8192);
+      const info = await inspectImport(uid, input.url);
+      if (route === '/imports/preview') return json(res, 200, { ok: true, metadata: info });
+      await fsp.mkdir(root(), { recursive: true, mode: 0o700 });
+      const disk = await fsp.statfs(root());
+      const reserved = getDatabase().prepare("SELECT coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE status IN ('uploading','importing')").get().bytes;
+      if (MAX_VIDEO_BYTES * 3 + reserved * 2 + 5 * 1024 ** 3 > disk.bavail * disk.bsize) throw new Error('服务器可用空间不足');
+      const config = storageConfig(uid);
+      const item = getDatabase().transaction(() => {
+        const created = store.create(uid, { title: input.title === undefined ? info.title : input.title, topic: input.topic === undefined ? info.topic : input.topic,
+          tags: input.tags === undefined ? info.tags : input.tags, sourceUrl: input.sourceUrl === undefined ? info.sourceUrl : input.sourceUrl,
+          bytes: MAX_VIDEO_BYTES, mimeType: 'video/mp4', originalName: info.title.replace(/[\\/:*?"<>|]/g, '-') + '.mp4', backend: input.backend || store.settings(uid).backend });
+        store.imports.add(uid, created.id, info.sourceUrl);
+        if (config) store.sources.add(uid, created.id, sourcePath(config, uid, created));
+        getDatabase().prepare("UPDATE knowledge_documents SET status='importing',stage='等待下载B站视频' WHERE user_id=? AND id=?").run(uid, created.id);
+        return store.get(uid, created.id);
+      })();
+      return json(res, 202, { ok: true, document: item });
+    }
     if (route === '/worker-install') {
       if (!canKnowledge(session, 'devices:edit') || !canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要设备绑定和视频处理权限' });
       const pairing = store.devices.start('Windows 视频工作器'); store.devices.approve(uid, pairing.userCode);
@@ -211,7 +247,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
       if (!canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '上传视频还需生成笔记权限' });
       await fsp.mkdir(root(), { recursive: true, mode: 0o700 });
       const disk = await fsp.statfs(root());
-      if (Number(input.bytes) * 3 + 5 * 1024 ** 3 + getDatabase().prepare("SELECT coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE status='uploading'").get().bytes * 2 > disk.bavail * disk.bsize) throw new Error('服务器可用空间不足');
+      if (Number(input.bytes) * 3 + 5 * 1024 ** 3 + getDatabase().prepare("SELECT coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE status IN ('uploading','importing')").get().bytes * 2 > disk.bavail * disk.bsize) throw new Error('服务器可用空间不足');
       const config = storageConfig(uid);
       const item = getDatabase().transaction(() => {
         const created = store.create(uid, input);
@@ -244,6 +280,8 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
         return json(res, 200, { ok: true, document: visible(store.edit(uid, id, await body(req))) });
       }
       if (!operation && method === 'DELETE') {
+        const downloading = store.imports.get(uid, id);
+        if (downloading?.state === 'downloading' && downloading.heartbeat > Date.now() - 120000) return json(res, 409, { ok: false, error: '视频正在下载，请等待下载完成或失败后删除' });
         if (store.sources.deleting(uid, id)) return json(res, 200, { ok: true });
         store.remove(uid, id);
         await fsp.rm(directory, { recursive: true, force: true });
@@ -276,6 +314,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
         return json(res, 202, { ok: true, document: store.get(uid, id) });
       }
       if (operation === 'retry' && method === 'POST') {
+        if (store.imports.get(uid, id)?.state === 'failed' && !canKnowledge(session, 'import:edit')) return json(res, 403, { ok: false, error: '需要链接导入权限' });
         const input = await body(req, 4096);
         if (!store.retry(uid, id, input.backend || store.settings(uid).backend)) return json(res, 409, { ok: false, error: '仅失败任务可以重试' });
         return json(res, 202, { ok: true, document: store.get(uid, id) });

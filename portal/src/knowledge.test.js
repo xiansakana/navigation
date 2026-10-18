@@ -64,6 +64,42 @@ test('knowledge routes, per-action permissions, default member grants and guest 
   });
 });
 
+test('link preview and creation require import, upload and process grants and reject cross-site requests', async () => fixture(async ({ call }) => {
+  for (const route of ['/imports/preview', '/imports']) {
+    for (const permissions of [['knowledge:view'], ['knowledge:view', 'knowledge:import:edit'], ['knowledge:view', 'knowledge:upload:edit', 'knowledge:process:edit']]) {
+      assert.equal((await call(route, { method: 'POST', data: { url: 'http://127.0.0.1/' }, session: { userId: 'a', permissions } })).status, 403);
+    }
+    assert.equal((await call(route, { method: 'POST', data: { url: 'http://127.0.0.1/' }, headers: { origin: 'https://evil.example' } })).status, 403);
+    assert.equal((await call(route, { method: 'POST', data: { url: 'http://127.0.0.1/' } })).status, 400);
+  }
+}));
+
+test('link metadata fills defaults, user edits survive, and imports expose cache while storage is pending', async () => fixture(async ({ call, store, root, db }) => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (String(url).startsWith('https://api.bilibili.com/')) {
+      return new Response(JSON.stringify({ code: 0, data: String(url).includes('/tags?') ? [{ tag_name: '八字' }] :
+        { bvid: 'BV1LTpi69Efh', title: '八字学习', duration: 30, owner: { name: '作者' }, pages: [{ page: 1, cid: 42, duration: 30 }] } }));
+    }
+    return originalFetch(url, options);
+  };
+  try {
+    const preview = await call('/imports/preview', { method: 'POST', data: { url: 'https://www.bilibili.com/video/BV1LTpi69Efh/' } });
+    assert.equal(preview.payload.metadata.topic, '命理'); assert.deepEqual(preview.payload.metadata.tags, ['八字']);
+    const result = await call('/imports', { method: 'POST', data: { url: preview.payload.metadata.sourceUrl, title: '我的课程', topic: '自定义分类', tags: ['已编辑'] } });
+    assert.equal(result.status, 202);
+    const doc = result.payload.document; assert.equal(doc.title, '我的课程'); assert.equal(doc.topic, '自定义分类'); assert.deepEqual(doc.tags, ['已编辑']);
+    assert.equal(doc.status, 'importing'); assert.equal(doc.importState, 'pending');
+    assert.equal((await call('/documents/' + doc.id, { session: member('b') })).status, 404);
+    store.sources.add('a', doc.id, '/115/test/source.mp4');
+    const job = store.imports.claim(); store.imports.done(job);
+    const directory = path.join(root, 'media', doc.id); fs.mkdirSync(directory, { recursive: true }); fs.writeFileSync(path.join(directory, 'source'), video(24));
+    db.prepare("UPDATE knowledge_documents SET status='uploading',byte_size=24 WHERE id=?").run(doc.id); store.enqueue('a', doc.id);
+    const source = await call('/documents/' + doc.id + '/source'); assert.equal(source.status, 200); assert.deepEqual(source.payload, video(24));
+    assert.equal(store.sources.get('a', doc.id).state, 'pending');
+  } finally { globalThis.fetch = originalFetch; }
+}));
+
 test('model settings are scoped, permission-checked, validated, and snapshotted for upload/retry', async () => fixture(async ({ call, store }) => {
   const baseline = store.settings('a'); assert.equal(baseline.codexModel, '');
   const limited = { userId: 'a', permissions: ['knowledge:view', 'knowledge:settings:edit'] };
