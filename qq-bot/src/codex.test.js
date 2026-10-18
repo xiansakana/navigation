@@ -71,6 +71,22 @@ test('web conversations share the serial queue, resume their own thread, persist
   } finally {f.close();}
 });
 
+test('Todo worker executes automatically with QQ offline, retains results and aborts a paused task',async()=>{
+  let started;const ready=new Promise(resolve=>{started=resolve;});let calls=0;
+  const f=fixture(async(c,j,s,{signal,onSession})=>{
+    calls++;onSession('todo-session');
+    if(calls===1)return {result:'first done',sessionId:'todo-session'};
+    started();await new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('paused')),{once:true}));
+  },{authorizeWeb:()=>true,authorizeTodo:()=>true,readCatalog:async()=>({models:[{id:'test',efforts:['low'],defaultEffort:'low'}],defaults:{model:'test',effort:'low'}}),readUsage:async()=>({rateLimits:{primary:{usedPercent:0}}})});
+  try{
+    f.config.channels.qq.enabled=false;
+    const values={title:'todo',project:'navigation',prompt:'do it',runtime:{model:'test',effort:'low'},autoRun:true};
+    const first=f.store.todos.create('u1','12345678',values);f.service.start();await f.service.tick();f.store.todos.reconcile();assert.equal(f.store.todos.get('u1',first.id).state,'succeeded');assert.equal(f.store.pendingReply(),undefined);
+    const second=f.store.todos.create('u1','12345678',values);const running=f.service.tick();await ready;f.store.todos.pause('u1',second.id);await running;
+    assert.equal(f.store.todos.get('u1',second.id).state,'paused');assert.equal(f.store.conversations.jobs('u1',f.store.todos.get('u1',second.id).conversation_id)[0].state,'cancelled');assert.equal(f.sent.length,0);
+  }finally{f.close();}
+});
+
 test('private provisioning is not exposed or writable through public notification config',()=>{
   const c=normalizeConfig({codex:{enabled:true,binary:'/private/bin',allowedUsers:[{userId:'u',qqId:'12345678'}],projects:{private:{remote:'secret'}}}});
   assert.equal(publicConfig(c).codex,undefined);

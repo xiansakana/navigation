@@ -6,10 +6,10 @@
   <script>try{var t=localStorage.getItem('portal-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;}catch(e){}</script>
   <link rel="stylesheet" href="/portal.css?v=layout-20261018"><link rel="stylesheet" href="/experience.css"><link rel="stylesheet" href="/codex-cli/style.css?v=1">
   <script src="/ui/input-guard.js"></script><script defer src="/ui/back-to-top.js"></script>
-<link rel="stylesheet" href="/codex-cli/chat.css?v=1"></head>
+<link rel="stylesheet" href="/codex-cli/chat.css?v=2"><link rel="stylesheet" href="/codex-cli/todos.css?v=1"></head>
 <body class="portal-experience has-navbar portal-layout-enabled">
   <header class="navbar"><div class="navbar-inner"><a class="navbar-brand" href="/"><span class="navbar-logo">⚡</span><span>服务导航</span></a><nav class="navbar-nav"><span class="navbar-title">Codex CLI</span></nav><div class="navbar-actions"><button type="button" class="btn ghost navbar-layout-btn" aria-pressed="false"><span class="label">全宽</span></button><button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题"><span class="navbar-theme-icon">☀️</span><span class="label navbar-theme-label">日间</span></button></div></div></header>
-  <nav class="codex-tabs" aria-label="Codex模块"><button id="workspace-tab" class="active" type="button" aria-pressed="true">会话工作台</button><button id="settings-tab" type="button" aria-pressed="false">服务器与 QQ 设置</button></nav>
+  <nav class="codex-tabs" aria-label="Codex模块"><button id="workspace-tab" class="active" type="button" aria-pressed="true">会话工作台</button><button id="todos-tab" type="button" aria-pressed="false" hidden>Todo 待办</button><button id="settings-tab" type="button" aria-pressed="false">服务器与 QQ 设置</button></nav>
   <section id="workspace" class="workspace" data-layout-container aria-label="会话工作台">
     <aside class="session-sidebar">
       <div class="sidebar-heading"><div><span class="eyebrow">CODEX WORKSPACE</span><h1>我的会话</h1></div><button id="new-chat" class="btn primary" type="button" hidden>＋ 新建</button></div>
@@ -29,6 +29,18 @@
       </form>
     </div>
   </section>
+  <section id="todos-view" class="todo-shell" data-layout-container aria-label="Todo 指令待办" hidden>
+    <header class="todo-heading"><div><p class="eyebrow">PLAN / QUEUE / EXECUTE</p><h1>指令待办</h1><p class="muted">先安排好要做的事。额度恢复后，Codex 会按顺序自动执行。</p></div><button id="todo-new" class="btn primary" type="button" hidden>＋ 新增待办</button></header>
+    <div class="todo-guide"><strong>关闭网页，待办仍会继续等待和执行。</strong><p>自动任务在普通 Codex 额度可用时进入队列；执行中耗尽额度会等待恢复后继续。普通失败会阻止后续待办，检查后可重试或暂停并跳过。结果保留在关联会话中。</p></div>
+    <div class="todo-toolbar"><p id="todo-summary" class="muted">正在读取待办…</p><label for="todo-filter">显示</label><select id="todo-filter"><option value="active">待处理</option><option value="all">全部</option><option value="done">已完成</option></select></div>
+    <p id="todo-notice" class="notice" role="status" aria-live="polite"></p><div id="todo-list" class="todo-list"></div>
+  </section>
+  <dialog id="todo-dialog" class="chat-dialog todo-dialog"><form id="todo-form"><h2 id="todo-dialog-title">新增待办</h2><label for="todo-title">标题</label><input id="todo-title" maxlength="80" required placeholder="例如：完善登录页面">
+    <div class="todo-form-grid"><div><label for="todo-project">项目</label><select id="todo-project" required></select></div><div><label for="todo-conversation">执行会话</label><select id="todo-conversation"><option value="">执行时新建独立会话</option></select></div></div>
+    <label for="todo-prompt">要交给 Codex 的指令</label><textarea id="todo-prompt" maxlength="20000" rows="6" required placeholder="写清目标、约束和完成标准…"></textarea>
+    <div class="todo-form-grid"><div><label for="todo-model">模型</label><select id="todo-model"><option value="">执行时继承默认模型</option></select></div><div><label for="todo-effort">推理强度</label><select id="todo-effort"><option value="">默认</option></select></div></div>
+    <label class="todo-auto"><input id="todo-auto" type="checkbox" checked>额度可用时，按顺序自动执行</label><p class="hint">取消勾选则仅保存。开始执行前可以编辑指令和调整顺序；执行后可在关联会话中检查结果。</p>
+    <p id="todo-form-error" class="todo-error" role="alert"></p><div class="dialog-actions"><button id="todo-cancel" class="btn ghost" type="button">取消</button><button id="todo-save" class="btn primary" type="submit">保存待办</button></div></form></dialog>
   <dialog id="new-dialog" class="chat-dialog"><form id="new-form"><h2>新建会话</h2><p class="hint">选择已授权的项目，Codex 将使用该项目的开发工作区。</p><label for="new-project">项目</label><select id="new-project" required></select><div class="dialog-actions"><button id="cancel-new" class="btn ghost" type="button">取消</button><button id="create-chat" class="btn primary" type="submit">创建会话</button></div></form></dialog>
   <dialog id="rename-dialog" class="chat-dialog"><form id="rename-form"><h2>重命名会话</h2><label for="new-title">会话标题</label><input id="new-title" maxlength="80" required><div class="dialog-actions"><button id="cancel-rename" class="btn ghost" type="button">取消</button><button id="save-title" class="btn primary" type="submit">保存</button></div></form></dialog>
   <main id="settings-view" class="codex-shell" data-layout-container hidden>
@@ -55,6 +67,6 @@
     <section id="usage-panel" class="panel usage-panel" hidden><div class="section-heading"><span class="section-number">03</span><div><h2>账户额度</h2><p>服务器当前登录账号的实时额度，重置时间使用北京时间。</p></div></div><pre id="usage">正在读取额度…</pre></section>
     <footer id="updated" class="muted"></footer>
   </main>
-  <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script><script src="/vendor/marked.js"></script><script src="/vendor/purify.js"></script><script src="/codex-cli/chat.js?v=1"></script><script src="/codex-cli/app.js?v=2"></script>
+  <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script><script src="/vendor/marked.js"></script><script src="/vendor/purify.js"></script><script src="/codex-cli/chat.js?v=2"></script><script src="/codex-cli/todos.js?v=1"></script><script src="/codex-cli/app.js?v=2"></script>
 </body>
 </html>

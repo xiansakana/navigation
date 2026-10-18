@@ -51,6 +51,18 @@ test('completed Codex changes and AGENTS are pushed through Git, with independen
   await run(local,['pull','--ff-only']);assert.equal(await fs.readFile(path.join(local,'implemented.txt'),'utf8'),'implemented');assert.equal(await run(local,['rev-parse','HEAD']),result.commit);
 }));
 
+test('quota errors are typed only for interrupted CLI turns and retain their resume session',async()=>fixture(async({p})=>{
+  await assert.rejects(executeCodex({projects:{navigation:p}},{project:'navigation',prompt:'task'},undefined,{command:async(binary,args,options)=>{
+    options.onEvent({type:'thread.started',thread_id:'quota-session'});
+    options.onEvent({type:'turn.failed',error:{message:'You have hit your usage limit',code:'usage_limit_exceeded'}});
+    throw new Error('private CLI diagnostics');
+  }}),error=>error.code==='CODEX_QUOTA_EXHAUSTED'&&error.quotaCanResume&&error.sessionId==='quota-session'&&!error.message.includes('private'));
+  await assert.rejects(executeCodex({projects:{navigation:p}},{project:'navigation',prompt:'task'},undefined,{command:async(binary,args,options)=>{
+    options.onEvent({type:'item.completed',item:{type:'file_change'}});
+    options.onEvent({type:'turn.failed',error:{code:'usage_limit_exceeded'}});throw new Error('interrupted');
+  }}),error=>error.code==='CODEX_QUOTA_EXHAUSTED'&&!error.quotaCanResume);
+}));
+
 test('incomplete model output never reports success or discards uncommitted edits',async()=>fixture(async({p,directory,run})=>{
   await assert.rejects(executeCodex({projects:{navigation:p}},{project:'navigation',prompt:'change'},undefined,{command:async(binary,args,options)=>{
     await fs.writeFile(path.join(directory,'unfinished.txt'),'preserve');options.onEvent({type:'thread.started',thread_id:'resume-this'});

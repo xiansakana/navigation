@@ -134,3 +134,7 @@ Codex CLI 管理模块及QQ模型/强度设置也更新 `portal,qq-bot`，入口
 会话工作台同样部署 `portal,qq-bot`。迁移自动新增 `codex_conversations`、`codex_job_progress` 以及任务 `origin`、`conversation_id` 字段；备份范围需包含这两张表（如已存在）和 `qq_codex_*`、`rbac_snapshot`。工作台仅导入当前用户在本应用中已有的 QQ 任务历史，不枚举服务器全部 CLI 会话。项目或群授权撤销后立即停止展示与续接，执行中也会重新校验权限。网页与 QQ 共用串行队列，但网页任务不写 QQ 回执，也不覆盖 QQ 当前会话。QQ 开关关闭时，已授权的网页执行仍可运行；Codex 总开关会同时暂停两个入口。
 
 工作台支持新建、续聊、模型/强度选择、查看执行记录、停止、重命名和归档；消息、任务状态及进度存入共享 SQLite，页面每3秒读取最新状态，关闭页面不终止后台任务。发送请求使用唯一请求标识避免网络重试重复执行。`codex-cli:sessions:view/create/manage`、`codex-cli:messages:send`、`codex-cli:tasks:stop` 分别控制相关界面与 API，执行仍需私有项目授权及 `qq-codex:execute`。前端模型选择仅作用于本次发送，不改服务器或 QQ 默认配置。
+
+Todo 待办更新 `portal,qq-bot`，新增 `codex_todos` 表及任务 `todo_id`、`failure_kind` 字段；迁移前备份此表（如已有）、`qq_codex_*`、`codex_conversations`、`codex_job_progress`、`rbac_snapshot`，无需备份整个行情数据库。Todo 数据按 Portal 用户归属，权限为 `codex-cli:todos:view/edit/run/order/stop`；自动执行还需该用户已配置项目和会话查看、新建、发送权限。保存自动待办即授权后续执行，未勾选则仅保存为暂停状态；请求标识防止网络重试重复建立自动任务。
+
+调度由 qq-bot 内部队列工作器处理，关闭浏览器不影响运行。手动任务优先，共享项目仍全局串行；Todo 按用户设置的顺序执行。普通 Codex 额度耗尽或额度信息不可用时不提交 CLI 任务，在服务器给出的重置时间附近复核实际余额（1—5分钟间隔）；不自动切换 Reserve 模型、消费重置积分或购买额度。明确额度错误且可安全续接时等待后恢复原会话；一般失败及服务重启中断不自动重做，并阻止该用户后续待办，需手动重试或暂停并跳过。暂停、删除、排序、编辑和关联会话均校验所有权；执行期间持续检查账号、项目、群聊和自动执行权限。只改模型默认设置不会改已进入队列的运行快照。

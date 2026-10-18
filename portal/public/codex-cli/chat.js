@@ -6,13 +6,17 @@
   async function api(path='',method='GET',body) {
     const response=await fetch('/api/codex-cli/conversations'+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
     if(response.redirected&&response.url.includes('/login')){location.assign('/login/');throw new Error('请先登录');}
-    const data=await response.json();if(!response.ok||!data.ok){if(response.status===403&&!path){$('workspace-tab').hidden=true;view(false);}throw new Error(data.error || '请求失败');}return data;
+    const data=await response.json();if(!response.ok||!data.ok){if(response.status===403&&!path){$('workspace-tab').hidden=true;if(!$('workspace').hidden)view(false);}throw new Error(data.error || '请求失败');}return data;
   }
   function view(workspace) {
-    $('workspace').hidden=!workspace;$('settings-view').hidden=workspace;
-    for(const [id,active] of [['workspace-tab',workspace],['settings-tab',!workspace]]){$(id).classList.toggle('active',active);$(id).setAttribute('aria-pressed',String(active));}
+    const name=workspace===true?'workspace':workspace===false?'settings':workspace;
+    $('workspace').hidden=name!=='workspace';$('settings-view').hidden=name!=='settings';$('todos-view').hidden=name!=='todos';
+    for(const id of ['workspace','settings','todos']){$(id+'-tab').classList.toggle('active',id===name);$(id+'-tab').setAttribute('aria-pressed',String(id===name));}
+    history.replaceState(null,'',location.pathname+location.search+(name==='workspace'?'':'#'+name));
+    document.dispatchEvent(new CustomEvent('codex-view',{detail:name}));
   }
-  $('workspace-tab').onclick=()=>view(true);$('settings-tab').onclick=()=>view(false);
+  $('workspace-tab').onclick=()=>view(true);$('settings-tab').onclick=()=>view(false);$('todos-tab').onclick=()=>view('todos');
+  document.addEventListener('codex-open-conversation',event=>{view(true);void refreshList().then(()=>select(event.detail)).catch(error=>notice(error.message,true));});
   function node(tag,text,className) {const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(className)el.className=className;return el;}
   function markdown(text) {
     const el=node('div',undefined,'markdown');
@@ -112,6 +116,7 @@
     if(reading||sending||document.hidden)return;reading=true;
     try{await refreshList();await detail();}catch(error){notice(error.message,true);}finally{reading=false;}
   }
+  if(location.hash==='#todos')view('todos');else if(location.hash==='#settings')view(false);
   void refreshList().catch(error=>{notice(error.message,true);$('sessions-notice').textContent=error.message;});
   setInterval(()=>void poll(),3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)void poll();});
 })();

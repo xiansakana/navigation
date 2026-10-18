@@ -1,0 +1,47 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import crypto from 'node:crypto';
+import {once} from 'node:events';
+import {createRequire} from 'node:module';
+import {createCodexStore} from '../../qq-bot/src/codex-store.js';
+import {handleCodexCliApi} from './codex-cli.js';
+
+const Database=createRequire(import.meta.url)('better-sqlite3');
+test('Todo API enforces owner/project/group boundaries, action permissions, CSRF and durable create deduplication',async()=>{
+  const db=new Database(':memory:'),store=createCodexStore(db);let projects=['navigation'],hook=()=>{};
+  const catalog={models:[{id:'test',efforts:['low','high'],defaultEffort:'low'}],defaults:{model:'test',effort:'low'}};
+  const dependencies={store,setup:()=>({config:{},configured:true,qqId:'12345678',enabled:false,projects}),catalog:async()=>{hook();return catalog;}};
+  const server=http.createServer((req,res)=>void handleCodexCliApi(req,res,new URL(req.url,'http://localhost'),JSON.parse(req.headers['x-session'] || '{"userId":"owner","permissions":["*"]}'),(r,s,b)=>{r.writeHead(s,{'Content-Type':'application/json'});r.end(JSON.stringify(b));},dependencies));server.listen(0,'127.0.0.1');await once(server,'listening');
+  const request=async(path='',method='GET',body,session,origin)=>{const r=await fetch('http://127.0.0.1:'+server.address().port+'/api/codex-cli/todos'+path,{method,headers:{...(session?{'X-Session':JSON.stringify(session)}:{}),...(origin?{Origin:origin}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});return {status:r.status,body:await r.json()};};
+  const body=()=>({title:'做一件事',project:'navigation',prompt:'do it',model:'test',effort:'low',autoRun:true,requestId:crypto.randomUUID()});
+  const viewer={userId:'owner',permissions:['codex-cli:view','codex-cli:todos:view','qq-codex:execute']};
+  try{
+    assert.equal((await request('', 'GET',undefined,{userId:'owner',permissions:['codex-cli:view']})).status,403);
+    assert.equal((await request('','POST',body(),viewer)).status,403);
+    assert.equal((await request('','POST',body(),undefined,'https://evil.test')).status,403);
+    assert.equal((await request('','POST',{...body(),project:'other'})).status,400);
+    const editor={...viewer,permissions:[...viewer.permissions,'codex-cli:todos:edit']};
+    assert.equal((await request('','POST',body(),editor)).status,403);
+    const payload=body(),created=await request('','POST',payload);assert.equal(created.status,201);const id=created.body.todo.id;
+    assert.equal((await request('','POST',payload)).body.todo.id,id);
+    assert.equal((await request('','POST',{...payload,prompt:'changed'})).status,400);
+    assert.equal((await request()).body.todos.length,1);assert.equal(db.prepare('SELECT count(*) AS n FROM qq_codex_jobs').get().n,0);
+    assert.doesNotMatch(JSON.stringify((await request()).body),/12345678|payload_hash|request_id/);
+    for(const [suffix,method,value] of [['','PATCH',{...payload,title:'new'}],['/pause','POST',{}],['/resume','POST',{}],['/move','POST',{direction:'up'}],['','DELETE',undefined]])assert.equal((await request('/'+id+suffix,method,value,viewer)).status,403);
+    assert.equal((await request('/'+id,'DELETE',undefined,{userId:'other',permissions:['*']})).status,404);
+    assert.equal((await request('/'+id,'PATCH',{...payload,title:'new',autoRun:false})).status,200);
+    assert.equal((await request('/'+id+'/resume','POST',{})).body.todo.state,'pending');
+    await request('/'+id+'/pause','POST',{});assert.equal((await request()).body.todos[0].state,'paused');
+    const second=(await request('','POST',body())).body.todo;
+    assert.equal((await request('/'+second.id+'/move','POST',{direction:'up'})).status,200);assert.equal((await request()).body.todos[0].id,second.id);
+    assert.equal((await request('/'+second.id+'/move','POST',{direction:'bad'})).status,400);
+    const c=store.conversations.create('owner','navigation');store.conversations.update('owner',c.id,{archived:true});
+    assert.equal((await request('','POST',{...body(),conversationId:c.id})).status,404);
+    store.conversations.update('owner',c.id,{archived:false});assert.equal((await request('','POST',{...body(),conversationId:c.id})).status,201);
+    projects=[];assert.equal((await request('/'+id,'DELETE')).status,404);assert.equal((await request()).body.todos.length,0);
+    projects=['navigation'];hook=()=>{projects=[];};assert.equal((await request('','POST',body())).status,403);
+    projects=['navigation'];hook=()=>{};
+    await request('/'+id,'DELETE');assert.equal((await request()).body.todos.some(row=>row.id===id),false);
+  }finally{server.closeAllConnections();await new Promise(r=>server.close(r));db.close();}
+});

@@ -167,7 +167,12 @@ var SYSTEM_PERMISSIONS = [
         ['sessions:create','新建Codex会话',['会话工作台','新建会话'],'create'],
         ['messages:send','发送消息并执行Codex任务',['会话工作台','发送消息'],'execute'],
         ['sessions:manage','重命名与归档自己的会话',['会话工作台','管理会话'],'edit'],
-        ['tasks:stop','停止自己的Codex任务',['会话工作台','停止任务'],'execute']
+        ['tasks:stop','停止自己的Codex任务',['会话工作台','停止任务'],'execute'],
+        ['todos:view','查看自己的指令待办',['Todo'],'view'],
+        ['todos:edit','新增编辑与删除指令待办',['Todo','管理待办'],'edit'],
+        ['todos:run','启用待办自动执行或重试',['Todo','自动执行'],'execute'],
+        ['todos:order','调整待办执行顺序',['Todo','调整顺序'],'edit'],
+        ['todos:stop','暂停待办与停止执行',['Todo','暂停'],'execute']
     ].map(([id,name,parts,action])=>({id:'codex-cli:'+id,name,group:'Codex CLI',serviceId:'codex-cli',action,permissionPath:['首页','Codex CLI',...parts]})),
     { id: 'qq-codex:settings:view', name: '查看自己的QQ Codex群聊设置', group: '通知管理', serviceId: NOTIFICATIONS_SERVICE_ID, action: 'view', permissionPath: ['首页', '通知管理', 'QQ Codex'] },
     { id: 'qq-codex:settings:edit', name: '配置自己的QQ Codex群聊', group: '通知管理', serviceId: NOTIFICATIONS_SERVICE_ID, action: 'edit', permissionPath: ['首页', '通知管理', 'QQ Codex', '保存群聊配置'] },

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { createConversationStore } from './codex-conversations.js';
 import { codexQqChunks } from './codex-text.js';
+import { createTodoStore } from './codex-todos.js';
 import { validateAttachments, mergeAttachments } from './codex-media.js';
 
 export function createCodexStore(db) {
@@ -21,6 +22,7 @@ export function createCodexStore(db) {
     ['qq_codex_jobs', 'attachments_json', "TEXT NOT NULL DEFAULT '[]'"], ['qq_codex_jobs', 'artifacts_json', "TEXT NOT NULL DEFAULT '[]'"],
     ['qq_codex_jobs', 'runtime_json', "TEXT NOT NULL DEFAULT '{}'"],
     ['qq_codex_jobs', 'origin', "TEXT NOT NULL DEFAULT 'qq'"], ['qq_codex_jobs', 'conversation_id', "TEXT NOT NULL DEFAULT ''"],
+    ['qq_codex_jobs', 'todo_id', "TEXT NOT NULL DEFAULT ''"], ['qq_codex_jobs', 'failure_kind', "TEXT NOT NULL DEFAULT ''"],
     ['qq_codex_outbox', 'artifact_json', "TEXT NOT NULL DEFAULT ''"], ['qq_codex_outbox', 'source_group_id', "TEXT NOT NULL DEFAULT ''"]
   ]) if (!db.prepare('PRAGMA table_info(' + table + ')').all().some(c => c.name === column)) db.exec('ALTER TABLE ' + table + ' ADD COLUMN ' + column + ' ' + definition); }).immediate();
   db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_settings(user_id TEXT PRIMARY KEY,groups_json TEXT NOT NULL DEFAULT '[]',group_reply TEXT NOT NULL DEFAULT 'private');
@@ -28,9 +30,12 @@ export function createCodexStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_pending_files(user_id TEXT NOT NULL,group_id TEXT NOT NULL,attachments_json TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(user_id,group_id));`);
   db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_runtime_preferences(user_id TEXT NOT NULL,group_id TEXT NOT NULL,model TEXT NOT NULL DEFAULT '',effort TEXT NOT NULL DEFAULT '',updated_at INTEGER NOT NULL,PRIMARY KEY(user_id,group_id));`);
   const conversations=createConversationStore(db);
+  const todos=createTodoStore(db,conversations);
   db.exec('CREATE INDEX IF NOT EXISTS qq_codex_conversation_jobs ON qq_codex_jobs(user_id,conversation_id,created_at)');
   return {
     conversations,
+    todos,
+    hasActiveJobs(includeQQ=true) {return !!db.prepare("SELECT 1 FROM qq_codex_jobs WHERE state='running' OR (state='queued' AND "+(includeQQ?'1':"origin='web'")+") LIMIT 1").get();},
     runtime(uid,group='') { const row=db.prepare('SELECT model,effort FROM qq_codex_runtime_preferences WHERE user_id=? AND group_id=?').get(uid,group);return row || {model:'',effort:''}; },
     saveRuntime(uid,group,values) {
       if(!values||typeof values.model!=='string'||typeof values.effort!=='string'||values.model.length>120||values.effort.length>24)throw new Error('模型设置格式无效');
@@ -117,13 +122,14 @@ export function createCodexStore(db) {
       if (group) db.prepare('DELETE FROM qq_codex_group_sessions WHERE user_id=? AND project=? AND group_id=?').run(uid, project, group);
       else db.prepare('DELETE FROM qq_codex_sessions WHERE user_id=? AND project=?').run(uid, project);
     },
-    finish(job, { state, result, sessionId = job.session_id || '', commit = '', artifacts = [], runtime }) {
+    finish(job, { state, result, sessionId = job.session_id || '', commit = '', artifacts = [], runtime, failureKind = '' }) {
       return db.transaction(() => {
         if (!db.prepare("UPDATE qq_codex_jobs SET state=?,result=?,session_id=?,commit_sha=?,finished_at=? WHERE id=? AND state IN ('queued','running')")
           .run(state, result.slice(0, 24000), sessionId, commit, Date.now(), job.id).changes) return;
         if (sessionId && job.origin!=='web') this.saveSession(job.user_id, job.project, job.group_id || '', sessionId);
         if(sessionId)conversations.capture(job,sessionId);
         db.prepare('UPDATE qq_codex_jobs SET artifacts_json=? WHERE id=?').run(JSON.stringify(artifacts),job.id);
+        db.prepare('UPDATE qq_codex_jobs SET failure_kind=? WHERE id=?').run(failureKind,job.id);
         if(job.origin==='web')return;
         const summary = `Codex ${job.id.slice(0, 8)} · ${job.project} · ${{ succeeded: '完成', failed: '失败', cancelled: '已停止' }[state]}`;
         const settings = this.settings(job.user_id), allowed = job.group_id && settings.groups.includes(job.group_id);

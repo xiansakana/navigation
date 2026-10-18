@@ -635,7 +635,7 @@ var server = http.createServer(async function(req, res) {
         if (!codexSession) return;
         if (!canCodexCli(codexSession)) return sendError(req,res,url,403,'无权访问Codex CLI模块');
         var codexFile = url.pathname.replace(/^\/codex-cli\/?/,'') || 'index.html';
-        if (!['index.html','app.js','style.css','chat.js','chat.css'].includes(codexFile)) return json(res,404,{ok:false,error:'Not Found'});
+        if (!['index.html','app.js','style.css','chat.js','chat.css','todos.js','todos.css'].includes(codexFile)) return json(res,404,{ok:false,error:'Not Found'});
         return serveStatic(path.join(PUBLIC_DIR,'codex-cli',codexFile),res);
     }
 
