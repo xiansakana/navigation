@@ -8,6 +8,7 @@ import { storageConfig, sourcePath, proxySource } from './knowledge-storage.js';
 import { hasPermission } from './rbac.js';
 import { createKnowledgeStore, CHUNK_BYTES, MAX_VIDEO_BYTES } from './knowledge-store.js';
 import { knowledgeWorkerPackage, sendWorkerPackage } from './knowledge-worker-package.js';
+import { sendWorkerExe } from './knowledge-worker-exe.js';
 
 const root = () => path.resolve(process.env.KNOWLEDGE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/knowledge'));
 export function knowledgeDirectory(id) {
@@ -169,7 +170,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
     if (route === '/worker-install') {
       if (!canKnowledge(session, 'devices:edit') || !canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要设备绑定和视频处理权限' });
       const pairing = store.devices.start('Windows 视频工作器'); store.devices.approve(uid, pairing.userCode);
-      return sendWorkerPackage(res, { portalUrl: process.env.KNOWLEDGE_PUBLIC_URL || 'https://saoyu.fun', deviceCode: pairing.deviceCode, expiresAt: Date.now() + 600000 });
+      return sendWorkerExe(res, { portalUrl: process.env.KNOWLEDGE_PUBLIC_URL || 'https://saoyu.fun', deviceCode: pairing.deviceCode, expiresAt: Date.now() + 600000 });
     }
     if (route === '/worker-package') return sendWorkerPackage(res);
     if (route === '/devices' && method === 'GET') return json(res, 200, { ok: true, devices: store.devices.list(uid) });

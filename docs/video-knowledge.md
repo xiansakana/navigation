@@ -87,7 +87,7 @@ pm2 start scripts/knowledge-worker.mjs --name knowledge-worker -- portal/knowled
 
 ### Windows 安装与独立设备
 
-知识库“处理设置”提供“安装并连接这台电脑”，需要 `knowledge:devices:install`、`knowledge:devices:edit` 和 `knowledge:process:edit` 权限。下载 ZIP 后解压并运行 `scripts/knowledge-worker-setup.cmd`；浏览器不能静默执行本机程序。安装包仅附带10分钟有效、只能使用一次的账号绑定授权，不包含长期凭据、服务器登录或源视频。请勿转发仍有效的个人安装包。过期时安装程序显示配对码并打开知识库，登录后核对设备名称及配对码再确认。
+知识库“处理设置”提供“安装并连接这台电脑”，需要 `knowledge:devices:install`、`knowledge:devices:edit` 和 `knowledge:process:edit` 权限。下载 `Navigation-Knowledge-Worker-Setup.exe` 后双击运行，安装界面显示进度及日志，自动解包并执行安装流程；浏览器不能静默执行本机程序。EXE 引导程序兼容 Windows 10/11 内置的 .NET Framework，绑定数据以独立尾部载荷附加，公共引导程序不包含账号凭据。源代码在 `scripts/windows-worker/Installer.cs`，通过 `scripts/build-knowledge-worker-exe.ps1` 构建；服务端同时核对源码及二进制哈希。用于自动更新的 ZIP 接口保持不变。安装包仅附带10分钟有效、只能使用一次的账号绑定授权，不包含长期凭据、服务器登录或源视频。请勿转发仍有效的个人安装包。过期时安装程序显示配对码并打开知识库，登录后核对设备名称及配对码再确认。
 
 安装器面向 Windows x64：优先使用已有 Node 22+，否则下载带官方 SHA256 校验的 Node 22.20.0；安装独立 Python 3.11.9 时核验 Python Software Foundation 数字签名，创建私有环境并安装固定的语音依赖、FFmpeg 和可选 CUDA 推理库。首次需要联网下载依赖和语音模型。已有 Codex 原生程序会复用其登录；否则按 [OpenAI Docs](https://learn.chatgpt.com/docs/codex/cli) 安装 CLI 并引导用户登录。网站账号与 Codex 账号授权独立，不在设备间复制 Codex 登录缓存。
 

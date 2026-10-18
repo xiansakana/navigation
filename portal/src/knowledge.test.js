@@ -218,8 +218,9 @@ test('device APIs enforce permissions, CSRF, authenticated pairing, and per-devi
   assert.equal((await call('/worker/release', { token })).status, 200);
   assert.equal((await call('/worker-install', { method: 'POST', data: {}, session: { userId: 'a', permissions: ['knowledge:view', 'knowledge:devices:install'] } })).status, 403);
   const installer = await call('/worker-install', { method: 'POST', data: {} });
-  assert.equal(installer.status, 200); assert.equal(installer.headers.get('content-type'), 'application/zip');
-  assert.ok(installer.payload.includes(Buffer.from('worker-pairing.json')));
+  assert.equal(installer.status, 200); assert.equal(installer.headers.get('content-type'), 'application/vnd.microsoft.portable-executable');
+  assert.equal(installer.payload.toString('ascii', 0, 2), 'MZ');
+  assert.equal(installer.payload.toString('ascii', installer.payload.length - 8), 'NKWEXE01');
   assert.ok(!installer.payload.includes(Buffer.from(token)), 'download does not contain an existing device credential');
   assert.equal((await call('/devices/' + deviceId, { method: 'DELETE' })).status, 200);
   assert.equal((await call('/worker/heartbeat', { method: 'POST', token, data: {} })).status, 401);

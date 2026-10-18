@@ -30,11 +30,11 @@ export function createDevicePanel({ can, api, send, onError }) {
     const button = $('worker-install'); button.disabled = true;
     try {
       const r = await fetch('/api/knowledge/worker-install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      if (!r.ok || !r.headers.get('content-type')?.includes('application/zip')) { const d = await r.json().catch(() => ({})); throw new Error(d.error || '安装包下载失败，请重新登录后重试'); }
+      if (!r.ok || !r.headers.get('content-type')?.includes('application/vnd.microsoft.portable-executable')) { const d = await r.json().catch(() => ({})); throw new Error(d.error || '安装包下载失败，请重新登录后重试'); }
       const blob = await r.blob(), url = URL.createObjectURL(blob), link = document.createElement('a');
-      link.href = url; link.download = 'Navigation-Knowledge-Worker-Windows.zip'; document.body.append(link); link.click(); link.remove();
+      link.href = url; link.download = 'Navigation-Knowledge-Worker-Setup.exe'; document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-      $('device-install-status').textContent = '安装包已下载。请解压后运行 scripts 中的 knowledge-worker-setup.cmd；10分钟内运行可自动绑定当前账号，超时会打开网页确认。首次安装会下载依赖；Codex 未登录时会引导登录。';
+      $('device-install-status').textContent = 'EXE 安装程序已下载，双击运行即可，无需解压。10分钟内运行可自动绑定当前账号，超时会打开网页确认。首次安装会下载依赖；Codex 未登录时会引导登录。';
     } catch (e) { onError(e); } finally { button.disabled = false; }
   };
   async function inspect() {
