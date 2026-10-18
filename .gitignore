@@ -28,3 +28,8 @@ alist/data/
 alist/files/
 alist/.env
 alist/tokens.env
+
+data/integrations.json
+data/codex.json
+data/backup115.json
+data/platform-runtime-v1.json
