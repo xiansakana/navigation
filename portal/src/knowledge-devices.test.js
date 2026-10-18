@@ -6,6 +6,8 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import http from 'node:http';
 import { once } from 'node:events';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createKnowledgeStore } from './knowledge-store.js';
 import { knowledgeWorkerPackage, zipFiles, workerPackageFiles } from './knowledge-worker-package.js';
 import { extractWorkerPackage, updateWorker } from '../../scripts/knowledge-worker-launcher.mjs';
@@ -84,5 +86,21 @@ test('automatic updates verify package checksums and preserve private configurat
     const saved = JSON.parse(await fs.readFile(file, 'utf8'));
     assert.equal(saved.token, 'test-device-secret'); assert.equal(saved.workDir, 'existing-cache');
     assert.equal(JSON.parse(await fs.readFile(path.join(saved.releaseRoot, 'worker-version.json'), 'utf8')).version, pkg.version);
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('one-use installer authorization binds without opening a browser and exits normally', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge-bind-'));
+  const token = 'nkw_' + 'a'.repeat(64), deviceId = 'b'.repeat(32);
+  const server = http.createServer((req, res) => { req.resume(); res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: true, status: 'approved', token, deviceId })); });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const portalUrl = 'http://127.0.0.1:' + server.address().port, file = path.join(root, 'config.json');
+  await fs.writeFile(file, JSON.stringify({ portalUrl }));
+  await fs.writeFile(path.join(root, 'worker-pairing.json'), JSON.stringify({ portalUrl, deviceCode: 'c'.repeat(64), expiresAt: Date.now() + 60000 }));
+  try {
+    const { stdout } = await promisify(execFile)(process.execPath, [path.resolve('scripts/knowledge-worker-pair.mjs'), file, root], { timeout: 15000, windowsHide: true });
+    assert.ok(stdout.includes('Device connected')); assert.ok(!stdout.includes(token));
+    assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).deviceId, deviceId);
+    await assert.rejects(fs.access(path.join(root, 'worker-pairing.json')));
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await fs.rm(root, { recursive: true, force: true }); }
 });

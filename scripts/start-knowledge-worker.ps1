@@ -14,7 +14,7 @@ try {
     $workerLog = Join-Path $LogDirectory ((Get-Date -Format 'yyyy-MM-dd') + '.log')
     # Node inherits the user's login, CUDA libraries and private configuration.
     $workerEntry = Join-Path $workerRoot 'scripts/knowledge-worker.mjs'
-    if ((Get-Content -LiteralPath $workerConfig -Raw | ConvertFrom-Json).autoUpdate) { $workerEntry = Join-Path $workerRoot 'scripts/knowledge-worker-launcher.mjs' }
+    if ((Get-Content -LiteralPath $workerConfig -Raw -Encoding UTF8 | ConvertFrom-Json).autoUpdate) { $workerEntry = Join-Path $workerRoot 'scripts/knowledge-worker-launcher.mjs' }
     $ErrorActionPreference = 'Continue'
     & $NodePath $workerEntry $workerConfig *>> $workerLog
     $workerExitCode = $LASTEXITCODE
