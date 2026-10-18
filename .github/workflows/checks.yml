@@ -1,0 +1,26 @@
+name: Navigation checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: |
+          for service in portal stock-manage qqq-dip qq-bot torn-toolbox-desktop; do
+            npm ci --prefix "$service"
+          done
+      - run: npm test
+      - run: npm run test:backup
+      - run: python3 -m unittest discover -s portal/workers -p 'test_*.py'
+      - run: git diff --check

@@ -1,3 +1,4 @@
+import { cookieOptions } from './login-security.js';
 import crypto from 'node:crypto';
 import {
     loadRbac,
@@ -44,7 +45,7 @@ export function listOAuthProviders(config) {
     });
 }
 
-function createStateCookie(provider, secret) {
+function createStateCookie(provider, secret, options = {}) {
     var state = crypto.randomBytes(16).toString('hex');
     var exp = Date.now() + 10 * 60 * 1000;
     var payload = provider + ':' + state + ':' + exp;
@@ -52,7 +53,7 @@ function createStateCookie(provider, secret) {
     return {
         state: state,
         cookie: 'portal_oauth_state=' + encodeURIComponent(payload + '.' + token)
-            + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=600'
+            + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=600' + (options.secure ? '; Secure' : '')
     };
 }
 
@@ -77,8 +78,8 @@ function verifyStateCookie(req, provider, state, secret) {
     return true;
 }
 
-function clearStateCookie() {
-    return 'portal_oauth_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0';
+function clearStateCookie(options = {}) {
+    return 'portal_oauth_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0' + (options.secure ? '; Secure' : '');
 }
 
 async function readJsonResponse(resp) {
@@ -194,7 +195,7 @@ export function handleOAuthStart(providerId, req, res, config, secret) {
         res.end('OAuth 未启用');
         return;
     }
-    var stateInfo = createStateCookie(providerId, secret);
+    var stateInfo = createStateCookie(providerId, secret, cookieOptions(config));
     var params = new URLSearchParams({
         client_id: setup.cfg.clientId,
         redirect_uri: setup.cfg.redirectUri,
@@ -243,15 +244,15 @@ export async function handleOAuthCallback(providerId, req, res, config, secret) 
         res.writeHead(302, {
             Location: '/',
             'Set-Cookie': [
-                createSessionCookie(user.id, secret),
-                clearStateCookie()
+                createSessionCookie(user.id, secret, cookieOptions(config)),
+                clearStateCookie(cookieOptions(config))
             ]
         });
         res.end();
     } catch (e) {
         res.writeHead(302, {
             Location: '/login/?error=' + encodeURIComponent(e.message || 'OAuth 登录失败'),
-            'Set-Cookie': clearStateCookie()
+            'Set-Cookie': clearStateCookie(cookieOptions(config))
         });
         res.end();
     }

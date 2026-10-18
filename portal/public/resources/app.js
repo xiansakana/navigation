@@ -72,6 +72,8 @@
     ];
     $('overview').innerHTML = stats.map(([label, value, usage, detail]) => `<article class="resource-stat"><span class="resource-label">${esc(label)}</span><strong>${esc(value)}</strong>${usage == null ? '' : meter(usage)}<small>${esc(detail)}</small></article>`).join('');
     $('service-summary').textContent = `${data.processes.length} 个应用进程 · ${data.containers.length} 个容器`;
+    const taskLabels = { queued: '排队', processing: '执行中', running: '执行中', failed: '失败', ready: '已完成', succeeded: '已完成', uploading: '上传中', cancelled: '已取消' };
+    $('modules').innerHTML = (data.modules || []).map(m => `<tr><td><strong>${esc(m.title)}</strong><small>${esc(m.path)}</small></td><td>${esc(m.runtime)}</td><td>${esc(m.status === 'disabled' ? '已禁用' : '已注册')}</td><td>${esc(Object.entries(m.tasks || {}).map(([state, n]) => `${taskLabels[state] || state} ${n}`).join(' · ') || '—')}</td><td>${m.worker ? esc(`在线 ${m.worker.online}${m.worker.remote ? ' · 远端资源未采集' : ''}`) : '未上报 / 不适用'}</td></tr>`).join('') || empty(5, '模块目录暂不可用');
     renderServices();
     $('disks').innerHTML = data.disks.map((d) => `<tr><td><strong>${esc(d.mount)}</strong><small>${esc(d.device)}</small></td><td>${bytes(d.used)} / ${bytes(d.total)}</td><td>${bytes(d.available)}</td><td>${pct(d.percent)}${meter(d.percent)}</td><td>${pct(d.inodePercent)}${meter(d.inodePercent)}</td><td>${esc(d.fsType)}</td></tr>`).join('') || empty(6, '文件系统信息不可用');
     $('interfaces').innerHTML = data.network.map((n) => `<tr><td>${esc(n.name)}</td><td>${rate(n.rxBytesPerSecond)}</td><td>${rate(n.txBytesPerSecond)}</td><td>${count(n.rxErrors + n.txErrors)} / ${count(n.rxDropped + n.txDropped)}</td></tr>`).join('') || empty(4, '网络接口统计不可用');

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_PATH = path.resolve(__dirname, '../config.json');
+const CONFIG_PATH = process.env.PORTAL_CONFIG_PATH || path.resolve(__dirname, '../config.json');
 
 export function loadConfig() {
     if (!fs.existsSync(CONFIG_PATH)) {

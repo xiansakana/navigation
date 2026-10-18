@@ -1,5 +1,5 @@
 import path from 'node:path';
-import {withCodexClient} from '../../qq-bot/src/codex-client.js';
+import {withCodexClient} from '../../shared/codex/codex-client.js';
 
 const sourceKinds=['cli','vscode','exec','appServer','subAgent','subAgentReview','subAgentCompact','subAgentThreadSpawn','subAgentOther','unknown'];
 const caches=new Map();

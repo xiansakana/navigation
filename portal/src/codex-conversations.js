@@ -1,7 +1,8 @@
+import { sameOriginWrite } from '../../shared/http.js';
 import { getDatabase } from '../../shared/db/index.js';
 import {createServerSessions} from './codex-server-sessions.js';
-import { createCodexStore } from '../../qq-bot/src/codex-store.js';
-import { readCodexCatalog, resolveRuntime, validateRuntime } from '../../qq-bot/src/codex-control.js';
+import { createCodexStore } from '../../shared/codex/codex-store.js';
+import { readCodexCatalog, resolveRuntime, validateRuntime } from '../../shared/codex/codex-control.js';
 import { hasPermission } from './rbac.js';
 
 async function bodyOf(req) {
@@ -21,7 +22,7 @@ export async function handleCodexConversationsApi(req,res,url,session,json,depen
   if(!['GET','POST','PATCH'].includes(method)||method==='GET'&&action||method==='PATCH'&&(!id||action)||method==='POST'&&id&&!action)return json(res,405,{ok:false,error:'不支持此方法'});
   if(method!=='GET') {
     if(!hasPermission(session.permissions||[],'qq-codex:execute'))return json(res,403,{ok:false,error:'没有Codex任务执行权限'});
-    if(req.headers['sec-fetch-site']==='cross-site'||req.headers.origin&&!['http://'+req.headers.host,'https://'+req.headers.host].includes(req.headers.origin))return json(res,403,{ok:false,error:'不允许跨站写入'});
+    if(!sameOriginWrite(req))return json(res,403,{ok:false,error:'不允许跨站写入'});
     const permission=method==='PATCH'?'sessions:manage':action==='messages'?'messages:send':action==='stop'?'tasks:stop':'sessions:create';
     if(!can(permission))return json(res,403,{ok:false,error:'没有执行此操作的权限'});
   }

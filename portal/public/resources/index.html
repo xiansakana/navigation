@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/portal.css?v=layout-20261018">
   <link rel="stylesheet" href="/experience.css?v=shared-social-1">
   <link rel="stylesheet" href="/skeleton/skeleton.css?v=2">
-  <link rel="stylesheet" href="/resources/style.css?v=1">
+  <link rel="stylesheet" href="/resources/style.css?v=2">
   <script src="/ui/input-guard.js?v=20261011-2"></script>
   <script defer src="/ui/back-to-top.js?v=1"></script>
 </head>
@@ -28,6 +28,10 @@
     <p class="resource-error hidden" id="error" role="alert"></p>
     <p class="resource-notice hidden" id="warnings" role="status"></p>
     <section class="resource-cards" id="overview" aria-label="服务器资源概览"></section>
+    <section class="resource-panel">
+      <div class="resource-panel-heading"><div><h2>功能模块</h2><p>由模块目录自动接入；已注册不代表业务接口健康。共享进程资源请在下方 PM2 列表查看。</p></div></div>
+      <div class="resource-table-wrap"><table><thead><tr><th>模块</th><th>运行服务</th><th>接入状态</th><th>任务状态</th><th>工作器</th></tr></thead><tbody id="modules"></tbody></table></div>
+    </section>
     <section class="resource-two-col">
       <article class="resource-panel"><div class="resource-panel-heading"><div><h2>CPU 与内存趋势</h2><p>百分比 · 最近采样</p></div><div class="resource-legend"><span class="cpu-key">CPU</span><span class="mem-key">内存</span></div></div><div id="usage-chart" class="resource-chart"></div></article>
       <article class="resource-panel"><div class="resource-panel-heading"><div><h2>网络吞吐趋势</h2><p>物理网卡合计 · 接收 / 发送</p></div><div class="resource-legend"><span class="cpu-key">接收</span><span class="mem-key">发送</span></div></div><div id="network-chart" class="resource-chart"></div></article>
@@ -46,6 +50,6 @@
   </main>
   <script src="/skeleton/skeleton.js?v=1"></script>
   <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script>
-  <script src="/resources/app.js?v=1"></script>
+  <script src="/resources/app.js?v=2"></script>
 </body>
 </html>

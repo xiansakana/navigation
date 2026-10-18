@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Reset portal admin password in navigation.db (and sync config.json fallback). */
+/** Explicit offline administrator password recovery. Never print credentials. */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,7 +11,8 @@ const ROOT = path.resolve(__dirname, '..');
 const require = createRequire(path.join(ROOT, 'portal/package.json'));
 const Database = require('better-sqlite3');
 
-const NEW_PASSWORD = process.argv[2] || 'Kimigabansuki';
+const NEW_PASSWORD = process.env.NAVIGATION_ADMIN_PASSWORD;
+if (!NEW_PASSWORD || NEW_PASSWORD.length < 12) throw new Error('请通过 NAVIGATION_ADMIN_PASSWORD 提供至少12字符的新密码');
 const DB_PATH = process.env.NAVIGATION_DB_PATH || path.join(ROOT, 'data/navigation.db');
 const CONFIG_PATH = path.join(ROOT, 'portal/config.json');
 
@@ -47,18 +48,10 @@ if (!admin) {
   process.exit(1);
 }
 
-const testPasswords = ['Kimigabansuki', 'Kimiga1bansuki', 'change-me'];
-for (const p of testPasswords) {
-  if (verifyPassword(p, admin)) {
-    console.log('current password matches:', p);
-    if (p === NEW_PASSWORD) process.exit(0);
-  }
-}
-
 const record = createPasswordRecord(NEW_PASSWORD);
 admin.salt = record.salt;
 admin.passwordHash = record.passwordHash;
-db.prepare('INSERT OR REPLACE INTO rbac_snapshot (id, payload) VALUES (1, ?)').run(JSON.stringify(rbac));
+db.prepare('UPDATE rbac_snapshot SET payload=? WHERE id=1').run(JSON.stringify(rbac));
 
 if (fs.existsSync(CONFIG_PATH)) {
   const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
@@ -68,5 +61,5 @@ if (fs.existsSync(CONFIG_PATH)) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + '\n');
 }
 
-console.log('admin password reset to:', NEW_PASSWORD);
+console.log('管理员密码已更新；未输出密码');
 console.log('run: pm2 restart portal  (required to reload in-memory RBAC cache)');

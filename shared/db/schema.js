@@ -7,7 +7,8 @@ export function initSchema(db) {
 
     CREATE TABLE IF NOT EXISTS rbac_snapshot (
       id INTEGER PRIMARY KEY CHECK (id = 1),
-      payload TEXT NOT NULL
+      payload TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS trades (
@@ -151,6 +152,7 @@ export function initSchema(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_yolo_attempts_user_time ON yolo_collection_attempts (user_id, id DESC);
   `);
+  ensureRbacRevision(db);
 
   const ensureColumn = (table, column, definition) => {
     const columns = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -222,4 +224,19 @@ export function initSchema(db) {
   } else if (Number(row.value) < 6) {
     db.prepare("UPDATE meta SET value = '6' WHERE key = 'schema_version'").run();
   }
+}
+
+export function ensureRbacRevision(db) {
+  const migrate = () => {
+  if (!db.prepare('PRAGMA table_info(rbac_snapshot)').all().some(column => column.name === 'revision')) {
+    db.exec('ALTER TABLE rbac_snapshot ADD COLUMN revision INTEGER NOT NULL DEFAULT 1');
+  }
+  // Also invalidate caches for legacy maintenance tools updating payload directly.
+  db.exec(`CREATE TRIGGER IF NOT EXISTS rbac_payload_revision AFTER UPDATE OF payload ON rbac_snapshot
+    WHEN NEW.revision = OLD.revision BEGIN
+      UPDATE rbac_snapshot SET revision = OLD.revision + 1 WHERE id = NEW.id;
+    END`);
+  };
+  if (db.transaction) db.transaction(migrate).immediate();
+  else migrate();
 }

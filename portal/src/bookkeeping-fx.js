@@ -1,11 +1,10 @@
-import fs from 'node:fs';
+import { integrationConfig } from '../../shared/runtime-config.js';
 import { createForeignExchangeService, FX_CURRENCIES } from '../../shared/foreign-exchange.js';
 
 let service;
 function getService() {
   if (!service) {
-    let finnhubApiKey = '';
-    try { finnhubApiKey = JSON.parse(fs.readFileSync(new URL('../../stock-manage/config.json', import.meta.url), 'utf8')).finnhubApiKey || ''; } catch { /* Public sources do not require a key. */ }
+    const finnhubApiKey = process.env.FINNHUB_API_KEY || integrationConfig().finnhubApiKey || '';
     service = createForeignExchangeService({ finnhubApiKey, requestOptions: { timeoutMs: 8000, retries: 0 } });
   }
   return service;

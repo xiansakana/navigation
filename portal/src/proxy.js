@@ -8,7 +8,7 @@ export { siyuanEntryPath } from './router.js';
 function pickHeaders(reqHeaders, extra, opts) {
     var options = opts || {};
     var keys = [
-        'content-type', 'authorization', 'x-api-key', 'accept', 'accept-language', 'cache-control',
+        'x-request-id', 'content-type', 'authorization', 'x-api-key', 'accept', 'accept-language', 'cache-control',
         'cookie', 'user-agent', 'referer', 'origin',
         'x-portal-user-id', 'x-portal-username', 'x-portal-permissions',
         'range', 'if-range',
@@ -26,10 +26,15 @@ function pickHeaders(reqHeaders, extra, opts) {
     return out;
 }
 
-function readBody(req) {
+function readBody(req, maxBytes = 1024 * 1024) {
     return new Promise(function(resolve, reject) {
         var chunks = [];
-        req.on('data', function(chunk) { chunks.push(chunk); });
+        var size = 0;
+        req.on('data', function(chunk) {
+            size += chunk.length;
+            if (size > maxBytes) { reject(new Error('代理改写请求体过大')); return; }
+            chunks.push(chunk);
+        });
         req.on('end', function() { resolve(Buffer.concat(chunks)); });
         req.on('error', reject);
     });
@@ -422,7 +427,14 @@ function sendPublishForbidden(res) {
 export async function proxyHttpRequest(service, req, res) {
     var target = buildTargetUrl(service, req.url);
     var lib = target.protocol === 'https:' ? https : http;
-    var body = req.method === 'GET' || req.method === 'HEAD' ? null : await readBody(req);
+    // Only this small JSON endpoint changes request content; all uploads keep backpressure.
+    const rewriteRequest = service.id === 'siyuan-publish'
+        && publishUpstreamPath(service, req.url) === '/api/petal/loadPetals';
+    var body = null;
+    if (rewriteRequest) {
+        try { body = await readBody(req); }
+        catch { res.writeHead(413); res.end('请求体过大或已中断'); return; }
+    }
     var pipeJson = shouldPipeJsonResponse(service, req.url);
 
     if (service.id === 'siyuan-publish') {
@@ -442,6 +454,16 @@ export async function proxyHttpRequest(service, req, res) {
     }
 
     await new Promise(function(resolve) {
+        let finished = false;
+        const done = () => { if (!finished) { finished = true; resolve(); } };
+        let upstream;
+        const fail = (status = 502) => {
+            if (finished) return;
+            if (!res.headersSent && !res.destroyed) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: false, error: '上游服务不可用' })); }
+            else if (!res.destroyed) res.destroy();
+            upstream?.destroy();
+            done();
+        };
         var fwdHost = req.headers['x-forwarded-host'] || req.headers.host || target.host;
         var fwdProto = req.headers['x-forwarded-proto']
             || (req.socket && req.socket.encrypted ? 'https' : 'http');
@@ -459,13 +481,16 @@ export async function proxyHttpRequest(service, req, res) {
         }
         if (body && body.length) {
             headersOut['content-length'] = String(body.length);
+        } else if (!rewriteRequest) {
+            if (req.headers['content-length']) headersOut['content-length'] = req.headers['content-length'];
         }
-        var upstream = lib.request(target, {
+        upstream = lib.request(target, {
             method: req.method,
             headers: headersOut
         }, function(upstreamRes) {
+            upstreamRes.on('error', () => fail());
+            upstreamRes.on('aborted', () => fail());
             var headers = Object.assign({}, upstreamRes.headers);
-            delete headers['content-security-policy'];
             if (headers.location) {
                 headers.location = rewriteLocation(
                     headers.location,
@@ -483,18 +508,20 @@ export async function proxyHttpRequest(service, req, res) {
                 && !pipeJson;
             var isStream = ctype.includes('text/event-stream');
             var rewriteKind = isHtml ? 'html' : isJs ? 'js' : isCss ? 'css' : isJson ? 'json' : '';
+            // Keep upstream protection for passthrough responses; shell injection needs a service-specific policy.
+            if (isHtml) delete headers['content-security-policy'];
 
             if (isStream) {
                 res.writeHead(upstreamRes.statusCode, headers);
                 upstreamRes.pipe(res);
-                upstreamRes.on('end', resolve);
+                upstreamRes.on('end', done);
                 return;
             }
 
             if (!rewriteKind) {
                 res.writeHead(upstreamRes.statusCode, headers);
                 upstreamRes.pipe(res);
-                upstreamRes.on('end', resolve);
+                upstreamRes.on('end', done);
                 return;
             }
 
@@ -503,8 +530,14 @@ export async function proxyHttpRequest(service, req, res) {
             delete headers['transfer-encoding'];
 
             var chunks = [];
-            upstreamRes.on('data', function(chunk) { chunks.push(chunk); });
+            let responseBytes = 0;
+            upstreamRes.on('data', function(chunk) {
+                responseBytes += chunk.length;
+                if (responseBytes > 32 * 1024 * 1024) { upstreamRes.destroy(); fail(); return; }
+                chunks.push(chunk);
+            });
             upstreamRes.on('end', function() {
+                if (finished) return;
                 var buf = Buffer.concat(chunks);
                 var text = rewriteProxiedBody(buf.toString('utf8'), service, rewriteKind);
                 if (isHtml) {
@@ -516,18 +549,17 @@ export async function proxyHttpRequest(service, req, res) {
                 headers['content-length'] = Buffer.byteLength(text, 'utf8');
                 res.writeHead(upstreamRes.statusCode, headers);
                 res.end(text);
-                resolve();
+                done();
             });
         });
 
-        upstream.on('error', function(err) {
-            res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
-            res.end(JSON.stringify({ ok: false, error: '上游服务不可用: ' + err.message }));
-            resolve();
-        });
-
-        if (body && body.length) upstream.write(body);
-        upstream.end();
+        upstream.on('error', () => fail());
+        upstream.setTimeout(Number(service.timeoutMs) || 120000, () => fail(504));
+        req.once('aborted', () => { upstream.destroy(); done(); });
+        req.once('error', () => { upstream.destroy(); done(); });
+        res.once('close', () => { upstream.destroy(); done(); });
+        if (rewriteRequest) upstream.end(body);
+        else req.pipe(upstream);
     });
 }
 

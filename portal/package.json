@@ -9,7 +9,8 @@
   },
   "scripts": {
     "build:blog": "esbuild src/client/blog-rich-editor.js --bundle --minify --target=es2020 --legal-comments=eof --outfile=public/blog-rich-editor.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node ../scripts/test.mjs portal"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1145.0",

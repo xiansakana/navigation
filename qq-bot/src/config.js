@@ -1,3 +1,4 @@
+import { codexConfig } from '../../shared/runtime-config.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,7 +54,10 @@ export function loadConfig() {
             '未找到 config.json，请复制 config.example.json 为 config.json 并填写 NapCat 地址与 QQ 号'
         );
     }
-    return normalizeConfig(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')));
+    const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+    const execution = codexConfig();
+    if (execution) raw.codex = execution;
+    return normalizeConfig(raw);
 }
 
 export function saveConfig(config) {

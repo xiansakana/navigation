@@ -42,6 +42,7 @@ export async function drainMediaCleanup(db, operations = {}, now = new Date()) {
 }
 
 export function kickMediaCleanup(db) {
+  if (process.env.NAVIGATION_EXTERNAL_WORKERS === '1' && process.env.NAVIGATION_PROCESS_ROLE !== 'background') return;
   setImmediate(() => drainMediaCleanup(db).catch(error => console.error('博客媒体清理任务失败:', error.message))).unref();
 }
 

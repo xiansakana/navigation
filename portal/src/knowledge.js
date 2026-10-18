@@ -1,3 +1,4 @@
+import { sameOriginWrite } from '../../shared/http.js';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
@@ -194,7 +195,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
   if (!canKnowledge(session, action)) return json(res, 403, { ok: false, error: '无权执行此知识库操作' });
   if (method === 'GET' && (route === '/documents' || document && !['parts', 'source', 'frames'].includes(document[2])) && !canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '无权查看学习笔记' });
   if (document && ['source', 'frames'].includes(document[2]) && !canKnowledge(session, document[2] + ':view')) return json(res, 403, { ok: false, error: '无权查看此原始材料' });
-  if (!['GET', 'HEAD'].includes(method) && (req.headers['sec-fetch-site'] === 'cross-site' || req.headers.origin && !['http://' + req.headers.host, 'https://' + req.headers.host].includes(req.headers.origin))) return json(res, 403, { ok: false, error: '不允许跨站写入' });
+  if (!['GET', 'HEAD'].includes(method) && (!sameOriginWrite(req))) return json(res, 403, { ok: false, error: '不允许跨站写入' });
   const store = createKnowledgeStore(getDatabase()), uid = session.userId;
   const visible = d => d && ({ ...d, transcript: canKnowledge(session, 'transcript:view') ? d.transcript : [], frames: canKnowledge(session, 'frames:view') ? d.frames : [] });
   try {

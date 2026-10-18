@@ -129,7 +129,7 @@ export function createNotificationServer(initialConfig, options) {
             return sendThrough(currentConfig, channel, { ...target, message: message }, options);
         }
     }) : null;
-    var codex = createCodexService({getConfig:()=>config,
+    var codex = createCodexService({getConfig:()=>config,executeJobs:!config.codex?.externalExecutor,
         send:(c,target,message)=>(options?.sendQq || sendMessage)(c.napcat,target,message)});
     if(options?.startMonitors)codex.start();
     var receiver = createQqCommandReceiver({getConfig:()=>config,request:options?.bookkeepingFetch || fetch,onEvent:codex.receive,

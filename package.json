@@ -1,0 +1,10 @@
+{
+  "name": "navigation-checks",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20.19" },
+  "scripts": {
+    "test": "node scripts/test.mjs",
+    "test:backup": "python3 -m unittest discover -s scripts -p test_backup_navigation.py"
+  }
+}

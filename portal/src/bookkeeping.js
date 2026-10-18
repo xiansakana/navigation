@@ -1,3 +1,4 @@
+import { sameOriginWrite } from '../../shared/http.js';
 import { createQqBookkeeping } from './bookkeeping-qq.js';
 import { parseCoordinates, resolveAddress } from './blog-address.js';
 import crypto from 'node:crypto';
@@ -40,7 +41,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
   const permission = route === '/preferences' ? 'view' : route === '/location' ? 'location:edit' : route.startsWith('/qq') ? 'qq:edit' : route.startsWith('/categories') ? (method === 'GET' ? 'categories:view' : 'categories:edit') : route.startsWith('/groups') ? (method === 'GET' ? 'accounts:view' : 'accounts:edit') : route === '/fx/refresh' ? 'fx:edit' : route.startsWith('/import') ? 'import:edit' : route === '/export' ? 'export:view' : route.startsWith('/settings') && method !== 'GET' ? 'settings:edit' :
     route.startsWith('/accounts') ? (method === 'GET' ? 'accounts:view' : 'accounts:edit') : method === 'GET' ? 'view' : 'entries:edit';
   if (!canBookkeep(session, permission)) return json(res, 403, { ok: false, error: '无权执行此记账操作' });
-  if (!['GET', 'HEAD'].includes(method) && req.headers.origin && req.headers.origin !== new URL(req.url, 'http://' + req.headers.host).origin && req.headers.origin !== 'https://' + req.headers.host) {
+  if (!sameOriginWrite(req)) {
     return json(res, 403, { ok: false, error: '不允许跨站写入' });
   }
   const store = createBookkeepingStore(getDatabase()), uid = session.userId;

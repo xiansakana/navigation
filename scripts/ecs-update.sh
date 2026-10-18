@@ -74,6 +74,13 @@ if [[ -n "$EXPECTED_SHA" ]]; then
     echo "==> 已核对部署提交: $actual_sha"
 fi
 
+# First platform transition: verify a private off-host archive before changing authentication/runtime.
+if [[ -f data/navigation.db && ! -f data/platform-runtime-v1.json ]]; then
+    node scripts/configure-backup115.mjs
+    bash scripts/backup-navigation-115.sh
+    node scripts/migrate-platform-runtime.mjs --apply
+fi
+
 if should_run qq-bot; then
     echo "==> qq-bot"
     cd "$ROOT/qq-bot"
@@ -230,6 +237,10 @@ if should_run napcat; then
     fi
 fi
 
+if should_run portal || should_run qq-bot; then
+    bash "$ROOT/scripts/start-platform-workers.sh"
+    node "$ROOT/scripts/verify-platform.mjs"
+fi
 pm2 save 2>/dev/null || true
 echo "==> 更新完成"
 pm2 status 2>/dev/null || true

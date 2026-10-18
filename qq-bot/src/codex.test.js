@@ -154,7 +154,7 @@ test('Portal account and explicit Codex permission are rechecked independently o
   const db=new Database(':memory:');db.exec('CREATE TABLE rbac_snapshot(id INTEGER PRIMARY KEY,payload TEXT)');
   const c={allowedUsers:[{userId:'u',qqId:'12345678',projects:['navigation']}]};
   const rbac={users:[{id:'u',username:'owner',roleIds:['r']}],roles:[{id:'r',permissions:[]}]};
-  const save=()=>db.prepare('INSERT OR REPLACE INTO rbac_snapshot VALUES(1,?)').run(JSON.stringify(rbac));
+  const save=()=>db.prepare('INSERT OR REPLACE INTO rbac_snapshot(id,payload) VALUES(1,?)').run(JSON.stringify(rbac));
   try {
     save(); assert.equal(authorizedCodexUser(c,'12345678',db),null);
     rbac.roles[0].permissions=['qq-codex:execute'];save();assert.equal(authorizedCodexUser(c,'12345678',db).userId,'u');

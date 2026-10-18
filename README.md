@@ -56,6 +56,10 @@ Torn 浏览器用户脚本在独立仓库 [xiansakana-torn-scripts](https://gith
 
 首次使用时，将已导入案例的原站分组一次性迁移到当前用户的 `mingli_categories`，案例通过 `mingli_cases.category_id` 关联。后续重命名／删除不会被读取或重复导入恢复；新导入案例按原站分组归类。权限分别为「分类管理」查看／编辑和「设置分类」，页面与 API 均校验；分类和案例按用户隔离。
 
+## 架构与验证
+
+模块接入、执行器边界、115加密备份与恢复流程见 [平台架构与运维](docs/platform-architecture.md)。根目录 `npm test` 自动发现全部 Node 测试，测试使用匹配 SQLite 原生模块的 Node22。
+
 ## 部署
 
 见 [DEPLOY-ECS.md](./DEPLOY-ECS.md)。

@@ -1,3 +1,8 @@
+import { instrumentRequest } from '../../shared/request-log.js';
+import { moduleApiHandler } from './module-api.js';
+import { moduleInventory } from './modules.js';
+import { readJson, sameOriginWrite } from '../../shared/http.js';
+import { sessionSecret, cookieOptions, createLoginLimiter } from './login-security.js';
 import { createQqBookkeeping, internalQqAuthorized } from './bookkeeping-qq.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
 import http from 'node:http';
@@ -44,20 +49,22 @@ import { handleAdminApi } from './admin-api.js';
 import { wantsJsonResponse, renderErrorPage, sendHtml } from './error-page.js';
 import { handleOAuthStart, handleOAuthCallback, listOAuthProviders } from './oauth.js';
 import { getPiclistStatus, savePiclistConfig, restartPiclist } from './piclist-admin.js';
-import { handleBlogApi, resumeVideoJobs } from './blog.js';
+import { resumeVideoJobs } from './blog.js';
 import { startThumbnailWorker } from './blog-media-process.js';
-import { createResourceMonitor, canViewResources, handleResourceApi } from './resources.js';
-import { canBookkeep, handleBookkeepingApi } from './bookkeeping.js';
-import { canMingli, handleMingliApi } from './mingli.js';
-import { canKnowledge, handleKnowledgeApi, handleKnowledgeWorkerApi, knowledgeDirectory } from './knowledge.js';
+import { createResourceMonitor, canViewResources } from './resources.js';
+import { canBookkeep } from './bookkeeping.js';
+import { canMingli } from './mingli.js';
+import { canKnowledge, handleKnowledgeWorkerApi, knowledgeDirectory } from './knowledge.js';
 import { startKnowledgeImports } from './knowledge-import.js';
-import { handleQqCodexApi } from './qq-codex.js';
-import { handleCodexCliApi, canCodexCli } from './codex-cli.js';
+import { canCodexCli } from './codex-cli.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
 var config = loadConfig();
-const resourceMonitor = createResourceMonitor();
+sessionSecret(config);
+if (config.runtime?.externalWorkers) process.env.NAVIGATION_EXTERNAL_WORKERS = '1';
+const loginLimiter = createLoginLimiter();
+const resourceMonitor = createResourceMonitor({ moduleReader: () => moduleInventory(getDatabase(), config.services || []) });
 
 function json(res, status, body) {
     var text = JSON.stringify(body);
@@ -88,24 +95,6 @@ function redirect(res, location, setCookie) {
     res.end();
 }
 
-function readJson(req, maxBytes = 0) {
-    return new Promise(function(resolve, reject) {
-        var chunks = [];
-        var size = 0;
-        req.on('data', function(chunk) {
-            size += chunk.length;
-            if (maxBytes && size > maxBytes) { reject(new Error('请求体过大')); return; }
-            chunks.push(chunk);
-        });
-        req.on('end', function() {
-            if (!chunks.length) return resolve({});
-            try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
-            catch (e) { reject(new Error('请求体不是合法 JSON')); }
-        });
-        req.on('error', reject);
-    });
-}
-
 function serveStatic(filePath, res) {
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
         return false;
@@ -122,7 +111,7 @@ function serveStatic(filePath, res) {
 }
 
 function getSessionSecret() {
-    return config.auth?.sessionSecret || config.auth?.password || 'portal';
+    return sessionSecret(config);
 }
 
 function requireAuth(req, res, options) {
@@ -177,17 +166,8 @@ function publicServices(userCtx, userAgent) {
 }
 
 async function handleApi(req, res, url, session) {
-    if (url.pathname.startsWith('/api/codex-cli/')) return handleCodexCliApi(req,res,url,session,json);
-    if (url.pathname.startsWith('/api/qq-codex/')) return handleQqCodexApi(req, res, url, session, json);
-    if (url.pathname.startsWith('/api/knowledge/')) return handleKnowledgeApi(req, res, url, session, json);
-    if (url.pathname.startsWith('/api/mingli/')) return handleMingliApi(req, res, url, session, json);
-    if (url.pathname.startsWith('/api/bookkeeping/')) return handleBookkeepingApi(req, res, url, session, json);
-    if (url.pathname === '/api/resources/metrics') {
-        return handleResourceApi(req, res, session, resourceMonitor, json);
-    }
-    if (url.pathname.startsWith('/api/blog/')) {
-        return handleBlogApi(req, res, url, session, json, config);
-    }
+    const moduleHandler = moduleApiHandler(url.pathname);
+    if (moduleHandler) return moduleHandler(req, res, url, session, { json, config, resourceMonitor });
     if (req.method === 'GET' && url.pathname === '/api/me') {
         var rbac = loadRbac(config);
         var stockManagePrefs = getStockManagePrefs(rbac, session.userId);
@@ -241,7 +221,7 @@ async function handleApi(req, res, url, session) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/logout') {
-        res.setHeader('Set-Cookie', clearSessionCookie());
+        res.setHeader('Set-Cookie', clearSessionCookie(cookieOptions(config)));
         return json(res, 200, { ok: true });
     }
 
@@ -306,12 +286,18 @@ async function handleLoginApi(req, res) {
         return false;
     }
     try {
-        var body = await readJson(req);
+        if (!sameOriginWrite(req)) return json(res, 403, { ok: false, error: '不允许跨站写入' });
+        var body = await readJson(req, 8192);
+        if (typeof body.username !== 'string' || typeof body.password !== 'string' || body.username.length > 128 || body.password.length > 1024) return json(res, 400, { ok: false, error: '登录信息无效' });
+        const retry = loginLimiter.check(req, body.username, config);
+        if (retry) { res.setHeader('Retry-After', String(retry)); return json(res, 429, { ok: false, error: '登录尝试过于频繁，请稍后重试' }); }
         var user = verifyLogin(body.username, body.password, config);
         if (!user) {
+            loginLimiter.failure(req, body.username, config);
             return json(res, 401, { ok: false, error: '用户名或密码错误' });
         }
-        res.setHeader('Set-Cookie', createSessionCookie(user.id, getSessionSecret()));
+        loginLimiter.success(req, body.username, config);
+        res.setHeader('Set-Cookie', createSessionCookie(user.id, getSessionSecret(), cookieOptions(config)));
         return json(res, 200, { ok: true });
     } catch (err) {
         return json(res, 400, { ok: false, error: err.message });
@@ -515,11 +501,15 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
             .toString('base64url');
     }
     req.url = ctx.proxyUrl;
-    proxyHttpRequest(ctx.service, req, res);
+    await proxyHttpRequest(ctx.service, req, res);
     return true;
 }
 
-var server = http.createServer(async function(req, res) {
+async function handleRequest(req, res) {
+    if (req.method === 'GET' && ['/healthz', '/readyz'].includes(new URL(req.url, 'http://localhost').pathname)) {
+        if (req.url.startsWith('/readyz')) getDatabase().prepare('SELECT 1').get();
+        return json(res, 200, { ok: true, service: 'portal' });
+    }
     if (serveUiAsset(req, res)) return;
     var url = new URL(req.url, 'http://127.0.0.1');
     var canonicalPage = canonicalPortalPagePath(url.pathname);
@@ -558,6 +548,7 @@ var server = http.createServer(async function(req, res) {
     }
 
     if (route.kind === 'portal-api') {
+        if (!sameOriginWrite(req)) return json(res, 403, { ok: false, error: '不允许跨站写入' });
         if (url.pathname === '/api/login') {
             await handleLoginApi(req, res);
             return;
@@ -693,6 +684,15 @@ var server = http.createServer(async function(req, res) {
     if (staticPath.startsWith(PUBLIC_DIR) && serveStatic(staticPath, res)) return;
 
     json(res, 404, { ok: false, error: 'Not Found' });
+}
+
+var server = http.createServer((req, res) => {
+    instrumentRequest(req, res, 'portal');
+    handleRequest(req, res).catch(error => {
+        console.error(JSON.stringify({ service: 'portal', requestId: req.requestId, event: 'request_failed', code: error.code || 'REQUEST_ERROR' }));
+        if (!res.headersSent && !res.destroyed) json(res, error.status || 503, { ok: false, error: '请求暂时无法处理，请稍后重试', requestId: req.requestId });
+        else res.destroy();
+    });
 });
 
 server.on('upgrade', async function(req, socket, head) {
@@ -730,10 +730,12 @@ var host = config.server?.host || '127.0.0.1';
 var port = config.server?.port || 8080;
 
 server.listen(port, host, function() {
+    if (!config.runtime?.externalWorkers) {
     startMediaCleanup(getDatabase());
     startAssetHistory(getDatabase());
     resumeVideoJobs(getDatabase(), config);
     startThumbnailWorker(getDatabase());
+    }
     startKnowledgeImports(getDatabase(), knowledgeDirectory, uid => {
         const ctx = resolveSessionUser({ userId: uid }, config);
         const s = ctx && { userId: uid, permissions: ctx.permissions, isGuest: ctx.user.username === (config.auth?.guestUsername || 'guest') };
@@ -746,4 +748,8 @@ server.listen(port, host, function() {
     console.log('未登录访客默认使用 guest 账号权限；管理员可访问 /admin/');
 });
 
-process.on('SIGINT', function() { process.exit(0); });
+for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
+    server.close(() => process.exit(0));
+    server.closeIdleConnections();
+    setTimeout(() => { server.closeAllConnections(); process.exit(0); }, 30000).unref();
+});

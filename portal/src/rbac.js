@@ -1,6 +1,9 @@
+import { hasPermission, resolveUserPermissions } from '../../shared/auth/permissions.js';
+export { hasPermission, resolveUserPermissions } from '../../shared/auth/permissions.js';
+import { PORTAL_MODULES, moduleMenu } from './modules.js';
 import crypto from 'node:crypto';
 import { getDatabase } from '../../shared/db/index.js';
-import { loadRbacBlob, saveRbacBlob } from '../../shared/db/rbac-store.js';
+import { loadRbacBlob, saveRbacBlob, rbacRevision, copyRbac } from '../../shared/db/rbac-store.js';
 
 var rbacCache = null;
 var rbacCacheConfigKey = null;
@@ -465,24 +468,9 @@ export function buildMenusFromServices(services, overrides) {
         enabled: true
     }, overrideMap.menu_admin || {}));
     menus.push(adminMenu);
-    menus.push(Object.assign({id:'menu_codex-cli',title:'Codex CLI',description:'会话工作台、任务进度、账户额度与服务器配置',icon:'⌘',type:'hub',sort:9940,enabled:true},overrideMap['menu_codex-cli'] || {},{path:'/codex-cli/',permission:'codex-cli:view',serviceId:'codex-cli'}));
-    menus.push(Object.assign({
-        id: 'menu_knowledge', title: '知识库', description: '上传视频，积累可检索的完整学习笔记',
-        icon: '📚', type: 'hub', serviceId: 'knowledge', sort: 9950, enabled: true
-    }, overrideMap.menu_knowledge || {}, { path: '/knowledge/', permission: 'knowledge:view', serviceId: 'knowledge' }));
-    menus.push(Object.assign({
-        id: 'menu_mingli', title: '命理', description: '八字排盘、大运流年与个人案例笔记',
-        icon: '☯', type: 'hub', serviceId: 'mingli', sort: 9960, enabled: true
-    }, overrideMap.menu_mingli || {}, { path: '/mingli/', permission: 'mingli:view', serviceId: 'mingli' }));
-    menus.push(Object.assign({
-        id: 'menu_bookkeeping', title: '记账', description: 'iCost 账单、收支统计与多币种资产账户',
-        icon: '📒', type: 'hub', serviceId: 'bookkeeping', sort: 9970, enabled: true
-    }, overrideMap.menu_bookkeeping || {}, { path: '/bookkeeping/', permission: 'bookkeeping:view', serviceId: 'bookkeeping' }));
-    menus.push(normalizeMenuPermission(Object.assign({
-        id: 'menu_resources', title: '资源管理', description: '服务器负载、服务状态与资源占用监控',
-        icon: '🖥️', type: 'hub', serviceId: 'resources', path: '/resources/',
-        permission: 'service:resources:view', sort: 9980, enabled: true
-    }, overrideMap.menu_resources || {}, { path: '/resources/', permission: 'service:resources:view', serviceId: 'resources' })));
+    for (const module of PORTAL_MODULES.filter(module => module.path)) {
+        menus.push(moduleMenu(module, overrideMap['menu_' + module.id] || {}));
+    }
     return menus.sort(function(a, b) { return (a.sort || 0) - (b.sort || 0); });
 }
 
@@ -512,29 +500,30 @@ function createDefaultRbac(config) {
 }
 
 export function loadRbac(config) {
-    var key = configServicesKey(config);
-    if (rbacCache && rbacCacheConfigKey === key) {
-        return rbacCache;
-    }
     var db = getDatabase();
+    var key = configServicesKey(config) + ':' + db.name + ':' + rbacRevision(db);
+    if (rbacCache && rbacCacheConfigKey === key) {
+        return copyRbac(rbacCache);
+    }
     var data = loadRbacBlob(db);
     if (!data) {
         data = createDefaultRbac(config);
         saveRbac(data);
         rbacCache = data;
-        rbacCacheConfigKey = key;
-        return data;
+        rbacCacheConfigKey = configServicesKey(config) + ':' + db.name + ':' + rbacRevision(db);
+        return copyRbac(data);
     }
     data = syncRbacPermissions(data, config);
     rbacCache = data;
-    rbacCacheConfigKey = key;
-    return data;
+    rbacCacheConfigKey = configServicesKey(config) + ':' + db.name + ':' + rbacRevision(db);
+    return copyRbac(data);
 }
 
 export function saveRbac(data) {
     var db = getDatabase();
     saveRbacBlob(db, data);
-    rbacCache = data;
+    rbacCache = copyRbac(data);
+    rbacCacheConfigKey = null;
 }
 
 function migrateRolePermissions(permissions) {
@@ -612,59 +601,6 @@ export function findUserByUsername(data, username) {
 
 export function findUserById(data, userId) {
     return (data.users || []).find(function(u) { return u.id === userId; }) || null;
-}
-
-export function resolveUserPermissions(data, user) {
-    if (!user) return [];
-    var perms = new Set();
-    (user.roleIds || []).forEach(function(roleId) {
-        var role = (data.roles || []).find(function(r) { return r.id === roleId; });
-        if (!role) return;
-        (role.permissions || []).forEach(function(p) { perms.add(p); });
-    });
-    if (perms.has('*')) {
-        (data.permissions || []).forEach(function(p) { perms.add(p.id); });
-    }
-    return Array.from(perms);
-}
-
-export function hasPermission(userPerms, permission) {
-    if (!permission) return true;
-    if (userPerms.includes('*')) return true;
-    if (userPerms.includes(permission)) return true;
-
-    var legacyService = /^service:([^:]+)$/.exec(permission);
-    if (legacyService) {
-        var serviceId = legacyService[1];
-        if (userPerms.includes(serviceViewPermissionId(serviceId))
-            || userPerms.includes(serviceEditPermissionId(serviceId))) {
-            return true;
-        }
-    }
-    if (permission === 'admin:access') {
-        if (userPerms.includes('admin:access:view') || userPerms.includes('admin:access:edit')) {
-            return true;
-        }
-    }
-
-    if (permission.endsWith(':view')) {
-        var editPerm = permission.slice(0, -5) + ':edit';
-        if (userPerms.includes(editPerm)) return true;
-        var legacy = permission.replace(/:view$/, '');
-        if (legacy !== permission && userPerms.includes(legacy)) return true;
-    }
-
-    if (permission.endsWith(':edit')) {
-        var legacyEdit = permission.replace(/:edit$/, '');
-        if (legacyEdit !== permission && userPerms.includes(legacyEdit)) return true;
-    }
-
-    var parts = permission.split(':');
-    while (parts.length > 1) {
-        parts.pop();
-        if (userPerms.includes(parts.join(':') + ':*')) return true;
-    }
-    return false;
 }
 
 export function canViewAdmin(userPerms) {

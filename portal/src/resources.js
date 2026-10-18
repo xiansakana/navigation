@@ -149,7 +149,7 @@ async function readServices() {
     ? [['PM2 服务信息暂不可用', 'Docker 容器信息暂不可用', 'Docker 资源统计暂不可用'][i]] : []) };
 }
 
-export function createResourceMonitor({ hostReader = readHost, serviceReader = readServices, clock = Date.now, cacheMs = 10000 } = {}) {
+export function createResourceMonitor({ hostReader = readHost, serviceReader = readServices, moduleReader = async () => [], clock = Date.now, cacheMs = 10000 } = {}) {
   let previous = null, cached = null, pending = null, updatedAt = 0;
   const history = [];
   return {
@@ -157,7 +157,7 @@ export function createResourceMonitor({ hostReader = readHost, serviceReader = r
       if (cached && clock() - updatedAt < cacheMs) return cached;
       if (pending) return pending;
       pending = (async () => {
-        const [host, service] = await Promise.all([hostReader(), serviceReader()]);
+        const [host, service, modules] = await Promise.all([hostReader(), serviceReader(), moduleReader()]);
         const elapsed = previous ? host.collectedAt - previous.collectedAt : 0;
         const priorCpu = previous?.cpu;
         const delta = priorCpu ? host.cpu.total - priorCpu.total : 0;
@@ -174,7 +174,7 @@ export function createResourceMonitor({ hostReader = readHost, serviceReader = r
         };
         history.push({ at: host.collectedAt, cpuPercent, memoryPercent: host.memory.percent, load1: host.load[0], rx: traffic('rxBytesPerSecond'), tx: traffic('txBytesPerSecond') });
         if (history.length > 120) history.shift();
-        cached = { ...host, cpu: undefined, cpuPercent, network, diskIo, ...service, history: history.slice(), intervalSeconds: cacheMs / 1000 };
+        cached = { ...host, cpu: undefined, cpuPercent, network, diskIo, ...service, modules, history: history.slice(), intervalSeconds: cacheMs / 1000 };
         if (host.platform !== 'linux') cached.warnings = [...cached.warnings, '当前非 Linux 系统，部分服务器指标不可用'];
         previous = host; updatedAt = clock();
         return cached;

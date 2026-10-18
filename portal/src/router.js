@@ -1,3 +1,4 @@
+import { PORTAL_MODULES, findModuleApi } from './modules.js';
 /**
  * Portal 统一路由：请求分流优先级
  *
@@ -27,7 +28,7 @@ export function siyuanEntryPath(userAgent) {
 
 /** Portal 保留命名空间：即使未在 isPortalApi 注册，也不进入反代 */
 export var PORTAL_API_NAMESPACES = new Set([
-    'oauth', 'login', 'me', 'services', 'menus', 'logout', 'admin', 'piclist', 'blog', 'resources', 'bookkeeping', 'mingli', 'knowledge', 'qq-codex', 'codex-cli'
+    'oauth', 'login', 'me', 'services', 'menus', 'logout', 'admin', 'piclist', ...PORTAL_MODULES.map(module => module.namespace)
 ]);
 
 /** 思源 /api/{ns} 命名空间（与 kernel/api/router.go 同步） */
@@ -151,12 +152,7 @@ function refererFromService(referer, servicePath) {
 
 /** Portal 自有 HTTP API（method + path）；新增接口只需在此登记 */
 export function isPortalApi(pathname, method) {
-    if (pathname.startsWith('/api/codex-cli/')) return true;
-    if (pathname.startsWith('/api/bookkeeping/')) return true;
-    if (pathname.startsWith('/api/mingli/')) return true;
-    if (pathname.startsWith('/api/knowledge/')) return true;
-    if (pathname.startsWith('/api/qq-codex/')) return true;
-    if (pathname === '/api/resources/metrics') return true;
+    if (findModuleApi(pathname, method)) return true;
     if (pathname === '/api/oauth/providers' && method === 'GET') return true;
     if (/^\/api\/oauth\/(github|google)\/(start|callback)$/.test(pathname) && method === 'GET') return true;
     if (pathname === '/api/login' && method === 'POST') return true;
@@ -168,17 +164,6 @@ export function isPortalApi(pathname, method) {
     if (pathname === '/api/piclist/status' && method === 'GET') return true;
     if (pathname === '/api/piclist/config' && method === 'PUT') return true;
     if (pathname === '/api/piclist/restart' && method === 'POST') return true;
-    if (pathname === '/api/blog/posts' && (method === 'GET' || method === 'POST')) return true;
-    if (pathname === '/api/blog/location' && method === 'GET') return true;
-    if (/^\/api\/blog\/posts\/[a-f0-9]{32}\/video-uploads$/.test(pathname) && method === 'POST') return true;
-    if (/^\/api\/blog\/video-uploads\/[a-f0-9]{32}$/.test(pathname) && ['GET', 'POST', 'DELETE'].includes(method)) return true;
-    if (/^\/api\/blog\/posts\/[a-f0-9]{32}\/comments$/.test(pathname) && ['GET', 'POST'].includes(method)) return true;
-    if (/^\/api\/blog\/comments\/[a-f0-9]{32}$/.test(pathname) && method === 'DELETE') return true;
-    if (/^\/api\/blog\/video-uploads\/[a-f0-9]{32}\/parts\/[1-9]\d{0,4}$/.test(pathname) && method === 'PUT') return true;
-    if (/^\/api\/blog\/media\/[a-f0-9]{32}$/.test(pathname) && method === 'GET') return true;
-    if (/^\/api\/blog\/posts\/[a-f0-9]{32}$/.test(pathname) && (method === 'PUT' || method === 'DELETE')) return true;
-    if (/^\/api\/blog\/posts\/[a-f0-9]{32}\/media$/.test(pathname) && method === 'POST') return true;
-    if (/^\/api\/blog\/images\/[a-f0-9]{32}$/.test(pathname) && method === 'GET') return true;
     if (pathname.startsWith('/api/admin/')) return true;
     return false;
 }

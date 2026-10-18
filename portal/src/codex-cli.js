@@ -1,16 +1,16 @@
-import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { sameOriginWrite } from '../../shared/http.js';
+import { codexConfig } from '../../shared/runtime-config.js';
 import { getDatabase } from '../../shared/db/index.js';
-import { createCodexStore } from '../../qq-bot/src/codex-store.js';
-import { readCodexCatalog, readCodexStatus, writeCodexDefaults, resolveRuntime, validateRuntime } from '../../qq-bot/src/codex-control.js';
-import { readCodexUsage, formatCodexUsage } from '../../qq-bot/src/codex-usage.js';
+import { createCodexStore } from '../../shared/codex/codex-store.js';
+import { readCodexCatalog, readCodexStatus, writeCodexDefaults, resolveRuntime, validateRuntime } from '../../shared/codex/codex-control.js';
+import { readCodexUsage, formatCodexUsage } from '../../shared/codex/codex-usage.js';
 import { hasPermission } from './rbac.js';
 import { handleCodexConversationsApi } from './codex-conversations.js';
 import { handleCodexTodosApi } from './codex-todos.js';
 
 export const canCodexCli=session=>!!session?.userId&&!session.isGuest&&hasPermission(session.permissions || [],'codex-cli:view');
 export function codexServerSetup(uid){
-  let raw;try{raw=JSON.parse(fs.readFileSync(process.env.QQ_CODEX_CONFIG || fileURLToPath(new URL('../../qq-bot/config.json',import.meta.url)),'utf8'));}catch{throw new Error('服务器Codex入口配置不可用，请检查私有配置');}
+  const raw={codex:codexConfig()};if(!raw.codex)throw new Error('服务器Codex执行配置不可用');
   const user=raw.codex?.allowedUsers?.find(u=>u.userId===uid);
   return {config:raw.codex || {},qqId:String(user?.qqId || ''),configured:!!user,enabled:!!raw.codex?.enabled,projects:user?.projects || []};
 }
@@ -29,7 +29,7 @@ export async function handleCodexCliApi(req,res,url,session,json,dependencies={}
   if(!routes.includes(url.pathname))return json(res,404,{ok:false,error:'接口不存在'});
   const write=req.method==='PUT';
   if(!['GET','PUT'].includes(req.method)||write&&!['/api/codex-cli/settings','/api/codex-cli/runtime'].includes(url.pathname)||!write&&url.pathname==='/api/codex-cli/settings')return json(res,405,{ok:false,error:'不支持此方法'});
-  if(write&&(req.headers['sec-fetch-site']==='cross-site'||req.headers.origin&&!['http://'+req.headers.host,'https://'+req.headers.host].includes(req.headers.origin)))return json(res,403,{ok:false,error:'不允许跨站写入'});
+  if(write&&(!sameOriginWrite(req)))return json(res,403,{ok:false,error:'不允许跨站写入'});
   if(write&&!can(url.pathname.endsWith('/settings')?'codex-cli:settings:edit':'codex-cli:runtime:edit'))return json(res,403,{ok:false,error:'没有保存此设置的权限'});
   if(url.pathname.endsWith('/usage')&&!can('codex-cli:usage:view'))return json(res,403,{ok:false,error:'无权查看服务器账户额度'});
   try{

@@ -206,10 +206,12 @@ async function readJson(req) {
 }
 
 const processing = new Set();
+export const activeVideoJobs = () => processing.size;
 export function processVideoJob(db, upload, session, config) {
     if (processing.has(upload.id)) return;
-    processing.add(upload.id);
     db.prepare("UPDATE blog_video_uploads SET state = 'queued', error = NULL WHERE id = ?").run(upload.id);
+    if (config?.runtime?.externalWorkers && process.env.NAVIGATION_PROCESS_ROLE !== 'background') return;
+    processing.add(upload.id);
     setImmediate(async () => {
         try {
             const existing = upload.multipart_id === 'local' ? db.prepare('SELECT id FROM blog_media WHERE post_id = ? AND storage_key = ?').get(upload.post_id, upload.storage_key) : null;

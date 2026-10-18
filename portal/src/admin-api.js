@@ -73,7 +73,7 @@ export async function handleAdminApi(req, res, url, session, config, json, readJ
                 saveRbac(rbac);
                 return json(res, 200, { ok: true, users: sanitizeRbac(rbac).users });
             } catch (err) {
-                return json(res, 400, { ok: false, error: err.message });
+                return json(res, err.status || 400, { ok: false, error: err.message });
             }
         }
     }
@@ -85,7 +85,7 @@ export async function handleAdminApi(req, res, url, session, config, json, readJ
             saveRbac(rbac);
             return json(res, 200, { ok: true });
         } catch (err) {
-            return json(res, 400, { ok: false, error: err.message });
+            return json(res, err.status || 400, { ok: false, error: err.message });
         }
     }
 
@@ -101,7 +101,7 @@ export async function handleAdminApi(req, res, url, session, config, json, readJ
                 saveRbac(rbac);
                 return json(res, 200, { ok: true, roles: sanitizeRbac(rbac).roles });
             } catch (err) {
-                return json(res, 400, { ok: false, error: err.message });
+                return json(res, err.status || 400, { ok: false, error: err.message });
             }
         }
     }
@@ -113,7 +113,7 @@ export async function handleAdminApi(req, res, url, session, config, json, readJ
             saveRbac(rbac);
             return json(res, 200, { ok: true, roles: sanitizeRbac(rbac).roles });
         } catch (err) {
-            return json(res, 400, { ok: false, error: err.message });
+            return json(res, err.status || 400, { ok: false, error: err.message });
         }
     }
 
@@ -125,7 +125,7 @@ export async function handleAdminApi(req, res, url, session, config, json, readJ
             saveRbac(rbac);
             return json(res, 200, { ok: true, menus: sanitizeRbac(rbac).menus });
         } catch (err) {
-            return json(res, 400, { ok: false, error: err.message });
+            return json(res, err.status || 400, { ok: false, error: err.message });
         }
     }
 

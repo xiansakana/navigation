@@ -1,12 +1,12 @@
-import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { sameOriginWrite } from '../../shared/http.js';
+import { codexConfig } from '../../shared/runtime-config.js';
 import { getDatabase } from '../../shared/db/index.js';
-import { createCodexStore } from '../../qq-bot/src/codex-store.js';
+import { createCodexStore } from '../../shared/codex/codex-store.js';
 import { hasPermission } from './rbac.js';
 
 export function codexProvisioning(uid) {
   try {
-    const config = JSON.parse(fs.readFileSync(process.env.QQ_CODEX_CONFIG || fileURLToPath(new URL('../../qq-bot/config.json', import.meta.url)), 'utf8'));
+    const config = {codex:codexConfig()};
     const user = config.codex?.allowedUsers?.find(u => u.userId === uid);
     return { enabled: config.codex?.enabled === true, configured: !!user, projects: user?.projects || [] };
   } catch { return { enabled: false, configured: false, projects: [] }; }
@@ -19,7 +19,7 @@ export async function handleQqCodexApi(req, res, url, session, json, provision =
   const setup = provision(session.userId);
   if (!['GET', 'PUT'].includes(req.method)) return json(res, 405, { ok: false, error: '不支持此方法' });
   if (req.method === 'PUT' && !can('settings:edit')) return json(res, 403, { ok: false, error: '无权保存QQ Codex设置' });
-  if (req.method === 'PUT' && (req.headers['sec-fetch-site'] === 'cross-site' || req.headers.origin && !['http://' + req.headers.host, 'https://' + req.headers.host].includes(req.headers.origin))) return json(res, 403, { ok: false, error: '不允许跨站写入' });
+  if (req.method === 'PUT' && (!sameOriginWrite(req))) return json(res, 403, { ok: false, error: '不允许跨站写入' });
   try {
     const store = createCodexStore(getDatabase());
     if (req.method === 'PUT') {

@@ -1,3 +1,4 @@
+import { sameOriginWrite } from '../../shared/http.js';
 import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
 import { calculateChart } from './mingli-chart.js';
@@ -40,7 +41,7 @@ export async function handleMingliApi(req, res, url, session, json) {
   if (!action) return json(res, 404, { ok: false, error: '命理接口不存在' });
   if (!canMingli(session, action)) return json(res, 403, { ok: false, error: '无权执行此命理操作' });
   if (action === 'knowledge:view' && (!canKnowledge(session) || !canKnowledge(session, 'notes:view'))) return json(res, 403, { ok: false, error: '知识库案例还需要知识库及笔记查看权限' });
-  if (method !== 'GET' && (req.headers['sec-fetch-site'] === 'cross-site' || req.headers.origin && !['http://' + req.headers.host, 'https://' + req.headers.host].includes(req.headers.origin))) {
+  if (method !== 'GET' && (!sameOriginWrite(req))) {
     return json(res, 403, { ok: false, error: '不允许跨站写入' });
   }
   try {

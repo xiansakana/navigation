@@ -1,7 +1,7 @@
 # 资源管理
 
 首页的「资源管理」入口指向 `/resources/`，指标接口为 `GET /api/resources/metrics`。
-默认仅管理员拥有访问权；可在权限后台为其他登录用户授予 `service:resources:view`。
+默认仅管理员拥有监控访问权；可在权限后台为其他登录用户授予 `service:resources:edit`。`view` 只表示入口可见，不授予服务器监控数据访问权。
 访客无法访问页面或接口，接口响应使用 `Cache-Control: no-store`。
 
 ## 指标

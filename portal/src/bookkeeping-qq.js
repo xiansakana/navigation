@@ -1,5 +1,5 @@
+import { integrationConfig } from '../../shared/runtime-config.js';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import { createBookkeepingStore } from './bookkeeping-store.js';
 import { hasPermission } from './rbac.js';
 import { billLocationText } from '../../shared/bookkeeping-location.js';
@@ -185,7 +185,7 @@ export function createQqBookkeeping(db, { resolveUser, clock = Date.now } = {}) 
 export function internalQqAuthorized(req) {
   if(!['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress))return false;
   try {
-    const config=JSON.parse(fs.readFileSync(new URL('../../qq-bot/config.json',import.meta.url),'utf8'));
+    const config={server:{notifyToken:integrationConfig().notifyToken}};
     const expected=Buffer.from('Bearer '+(config.server?.notifyToken || '')),actual=Buffer.from(req.headers.authorization || '');
     return !!config.server?.notifyToken && actual.length===expected.length && crypto.timingSafeEqual(actual,expected);
   } catch {return false;}
