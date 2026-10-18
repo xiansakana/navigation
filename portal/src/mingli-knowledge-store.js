@@ -3,10 +3,29 @@ import { flowPillar } from '../public/mingli/chart-presentation.js';
 import { STEMS, BRANCHES, PILLARS } from '../public/mingli/filter-options.js';
 import { caseFilterSql } from './mingli-filters.js';
 
-const VERSION = 'knowledge-bazi-v1';
+const VERSION = 'knowledge-bazi-v2';
 const hash = text => crypto.createHash('sha256').update(text).digest('hex');
 const pair = `[${STEMS}][${BRANCHES}]`;
 const clean = text => text.replace(/[*`_]/g, '');
+function genderEvidence(lines, offsets, index, start, end) {
+  const evidence = [];
+  const chartStart = text => /(?:四柱|八字|乾造|坤造)\s*[:：]?\s*[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]|年柱.*月柱.*日柱.*时柱/.test(clean(text));
+  const previousChart = lines.slice(Math.max(0, start - 1), index).some(chartStart);
+  for (let j = previousChart ? index : Math.max(start, index - 3); j < Math.min(end, index + 12); j++) {
+    const line = clean(lines[j]).trim(), plain = line.replace(/^(?:#+\s*|[-+>]\s*)/, '');
+    if (j > index && chartStart(line)) break;
+    const labelled = /^(?:画面性别标记|性别依据|命主性别|性别|日主标记|日元标记|画面标记)\s*[:：]/.test(plain);
+    const standalone = /^(?:元\s*[男女]|男命|女命|乾造|坤造)(?:\s|[：:，,。；;（(]|$)/.test(plain);
+    if (!(j === index || j === start && /^#/.test(line) || labelled || standalone)) continue;
+    if (/待核对|模糊|看不清|无法辨认|不确定|未确认/.test(line)) continue;
+    const female = /女命|坤造|元\s*女/.test(line) || labelled && /[:：]\s*女(?:\s|[（(，,。；;]|$)/.test(line);
+    const male = /男命|乾造|元\s*男/.test(line) || labelled && /[:：]\s*男(?:\s|[（(，,。；;]|$)/.test(line);
+    if (female) evidence.push({ gender: 0, text: line, offset: offsets[j] });
+    if (male) evidence.push({ gender: 1, text: line, offset: offsets[j] });
+  }
+  return evidence;
+}
+function resolveGender(evidence) { const values = new Set(evidence.map(e => e.gender)); return { gender: values.size === 1 ? [...values][0] : null, genderConflict: values.size > 1 }; }
 
 // Extract only explicitly ordered natal pillars. Dates, luck rows and ASR fragments are not inferred.
 export function extractKnowledgeCases(notes) {
@@ -52,9 +71,8 @@ export function extractKnowledgeCases(notes) {
     const end = scope?.end ?? Math.min(lines.length, i + 24);
     const contextStart = offsets[start], contextEnd = offsets[end] ?? notes.length;
     const context = notes.slice(contextStart, Math.min(contextEnd, contextStart + 30000)).trimEnd();
-    const genderText = /女命|坤造|男命|乾造/.test(line) ? line : clean(lines.slice(Math.max(start, i - 3), i).join('\n'));
-    const female = /女命|坤造/.test(genderText), male = /男命|乾造/.test(genderText);
-    const gender = female !== male ? female ? 0 : 1 : null;
+    const evidence = genderEvidence(lines, offsets, i, start, end);
+    const gender = resolveGender(evidence);
     const title = heading >= 0 ? clean(lines[heading].replace(/^#+\s*/, '')).slice(0, 160) : '八字案例 ' + values.join(' ');
     const valid = values.every(p => flowPillar(p, values[2][0]));
     const reference = { title, offset: offsets[i], sectionOffset: offsets[start], anchor: scope?.anchor || '' };
@@ -65,15 +83,16 @@ export function extractKnowledgeCases(notes) {
         const combined = previous.context + '\n\n--- 同一四柱的另一处来源 ---\n\n' + context;
         previous.context = combined.slice(0, 30000); previous.excerptTruncated ||= combined.length > 30000;
       }
-      if (previous.gender !== null && gender !== null && previous.gender !== gender) previous.gender = null;
+      previous.genderEvidence.push(...evidence);
+      Object.assign(previous, resolveGender(previous.genderEvidence));
       continue;
     }
-    found.set(key, { key, title, pairs: values, gender, context, offset: offsets[i], occurrences: [offsets[i]], references: [reference],
+    found.set(key, { key, title, pairs: values, ...gender, genderEvidence: evidence, context, offset: offsets[i], occurrences: [offsets[i]], references: [reference],
       anchor: scope?.anchor || '', excerptTruncated: contextEnd - contextStart > 30000,
       timeLabel: context.match(/(?:讲解[：:]?\s*)?(\d{1,2}:\d{2}(?::\d{2})?(?:[—–~-]\d{1,2}:\d{2}(?::\d{2})?)?)/)?.[1] || '',
       validation: valid ? '四柱干支有效；自动提取，尚未人工核对' : '存在无效干支，需对照原文核对' });
   }
-  return [...found.values()];
+  return [...found.values()].map(item => ({ ...item, validation: item.validation + (item.genderConflict ? '；性别依据冲突，需核对' : '') }));
 }
 
 export function createKnowledgeCaseStore(db) {
@@ -110,7 +129,7 @@ export function createKnowledgeCaseStore(db) {
       for (const item of cases) {
         const id = hash(row.user_id + ':' + row.id + ':' + item.key).slice(0, 32), now = new Date().toISOString();
         const chart = { dayMaster: item.pairs[2][0], pillars: item.pairs.map((p, i) => ({ ...(flowPillar(p, item.pairs[2][0]) || { ganZhi: p, gan: p[0], zhi: p[1] }), label: PILLARS[i] })) };
-        const metadata = { validation: item.validation, timeLabel: item.timeLabel, offset: item.offset, anchor: item.anchor, excerptTruncated: item.excerptTruncated, occurrences: item.occurrences, references: item.references, tags: JSON.parse(row.tags_json), parserVersion: VERSION };
+        const metadata = { validation: item.validation, genderEvidence: item.genderEvidence, genderConflict: item.genderConflict, timeLabel: item.timeLabel, offset: item.offset, anchor: item.anchor, excerptTruncated: item.excerptTruncated, occurrences: item.occurrences, references: item.references, tags: JSON.parse(row.tags_json), parserVersion: VERSION };
         db.prepare(`INSERT INTO mingli_knowledge_cases(id,user_id,document_id,case_key,title,birth_json,chart_json,notes,metadata_json,created_at,updated_at)
           VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,document_id,case_key) DO UPDATE SET title=excluded.title,birth_json=excluded.birth_json,
           chart_json=excluded.chart_json,notes=excluded.notes,metadata_json=excluded.metadata_json,updated_at=excluded.updated_at`)

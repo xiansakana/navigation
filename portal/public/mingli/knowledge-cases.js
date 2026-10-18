@@ -28,7 +28,8 @@ export function createKnowledgeCases({ run, api, tab }) {
   function show(item) {
     const p = item.chart.pillars;
     $('kc-title').textContent = item.title;
-    $('kc-meta').textContent = `${item.documentTitle} · ${item.timeLabel || '时间未注明'} · ${item.validation}${item.excerptTruncated ? ' · 摘录超过3万字已截断，请查看知识库原文' : ''}`;
+    const genderBasis = [...new Set((item.genderEvidence || []).map(e => e.text.match(/元\s*[男女]|坤造|乾造|女命|男命/)?.[0]).filter(Boolean))];
+    $('kc-meta').textContent = `${item.documentTitle} · ${item.birth.gender === 1 ? '男命' : item.birth.gender === 0 ? '女命' : '性别待核对'} · ${item.timeLabel || '时间未注明'} · ${item.validation}${genderBasis.length ? ' · 性别依据：' + genderBasis.join('、') : ''}${item.excerptTruncated ? ' · 摘录超过3万字已截断，请查看知识库原文' : ''}`;
     $('kc-source').href = item.sourceUrl;
     $('kc-references').replaceChildren();
     for (const ref of (item.references || []).slice(1)) {

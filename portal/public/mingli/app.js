@@ -1,6 +1,6 @@
 import { flowPillar, selectedFlow, shortGod } from './chart-presentation.js?v=1';
 import { createCaseFilters } from './case-filters.js?v=2';
-import { createKnowledgeCases } from './knowledge-cases.js?v=1';
+import { createKnowledgeCases } from './knowledge-cases.js?v=2';
 
 const $ = id => document.getElementById(id);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);

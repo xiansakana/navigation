@@ -58,6 +58,25 @@ test('extract labelled and table layouts while preserving year-month-day-hour or
   assert.equal(extractKnowledgeCases('四柱：甲子 戊辰 己丑 癸酉')[0].gender, null);
 });
 
+test('visual 元男/元女 markers stay bound to their chart, preserve proof and never infer from children', () => {
+  const notes = '## 案例一\n四柱：壬辰、壬寅、甲寅、庚午。\n画面性别标记：元男（截图 00:13:59）。\n讲解提到女儿、妻子和女命的另一种规则。\n## 案例二\n四柱：丁巳、辛亥、壬午、乙巳。\n画面性别标记：元女（截图 00:20:10）。';
+  const cases = extractKnowledgeCases(notes);
+  assert.equal(cases[0].gender, 1); assert.equal(cases[1].gender, 0);
+  assert.match(cases[0].genderEvidence[0].text, /元男.*13:59/);
+  assert.equal(extractKnowledgeCases('## 案例一\n四柱：壬辰、壬寅、甲寅、庚午。\n作者说生了一个女儿。')[0].gender, null);
+  assert.equal(extractKnowledgeCases('四柱：壬辰、壬寅、甲寅、庚午。\n画面性别标记：元男（模糊待核对）。')[0].gender, null);
+  const neighbour = extractKnowledgeCases('四柱：壬辰、壬寅、甲寅、庚午。\n画面性别标记：元男。\n四柱：丁巳、辛亥、壬午、乙巳。');
+  assert.equal(neighbour[0].gender, 1); assert.equal(neighbour[1].gender, null);
+});
+
+test('later visual proof fills unknown gender while contradictory proof stays unresolved', () => {
+  const base = '## 案例一\n四柱：壬辰、壬寅、甲寅、庚午。\n', male = '## 画面案例一\n四柱：壬辰、壬寅、甲寅、庚午。\n画面性别标记：元男（截图 00:13:59）。\n';
+  assert.equal(extractKnowledgeCases(base + male)[0].gender, 1);
+  const conflict = extractKnowledgeCases(base + male + male.replaceAll('元男', '元女'))[0];
+  assert.equal(conflict.gender, null); assert.equal(conflict.genderConflict, true); assert.match(conflict.validation, /性别依据冲突/);
+  assert.equal(conflict.genderEvidence.length, 2);
+});
+
 test('backfill, deduplication, filtering, edits and deletion synchronize without touching personal cases', () => {
   const db = new Database(':memory:');
   try {

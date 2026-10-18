@@ -5,7 +5,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
-import { codexArguments, generate, modelConfiguration, runProcess, transcriptChunks } from './knowledge-model.js';
+import { codexArguments, generate, modelConfiguration, runProcess, transcriptChunks, summarizeVideo } from './knowledge-model.js';
+import { extractKnowledgeCases } from './mingli-knowledge-store.js';
 
 test('CLI arguments isolate source material and never interpolate it into a shell command', async () => {
   const args = codexArguments({ output: 'answer.md', cwd: 'job', images: ['slide with spaces.jpg'] });
@@ -46,4 +47,24 @@ test('compatible API uses text/image protocol, configured model, rejects truncat
     fail = true; await assert.rejects(generate(config, 'openai', 'source', [], directory), e => e.message.includes('401') && !e.message.includes('secret-from-upstream'));
     assert.throws(() => modelConfiguration({ openai: { baseUrl: 'http://evil.example', model: 'm' } }, 'openai'), /HTTPS/);
   } finally { await new Promise(resolve => server.close(resolve)); await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('visual gender evidence survives final summarization even when the model omits it from prose', async () => {
+  let visualPrompt;
+  const server = http.createServer(async (req, res) => {
+    const chunks = []; for await (const c of req) chunks.push(c);
+    const body = JSON.parse(Buffer.concat(chunks)); const prompt = body.messages[1].content[0].text;
+    const visual = prompt.includes('只输出JSON对象');
+    if (visual) { visualPrompt = prompt; assert.ok(body.messages[1].content.some(c => c.type === 'image_url')); }
+    const notes = visual ? JSON.stringify({ notes: '画面展示了一个命盘，标记清楚，以下记录同屏四柱和截图时间。', charts: [{ frame: 'frame-1.jpg', pillars: ['壬辰', '壬寅', '甲寅', '庚午'], marker: '元男' }] }) : '## 案例一\n四柱：壬辰、壬寅、甲寅、庚午。\n详细讲解木旺用火的分析过程，此处模拟最终模型遗漏性别，但保留足够长度的案例内容。';
+    res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: notes } }] }));
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge-visual-model-'));
+  try {
+    await fs.writeFile(path.join(directory, 'frame-1.jpg'), Buffer.from([255, 216, 255, 1]));
+    const result = await summarizeVideo({ openai: { baseUrl: 'http://127.0.0.1:' + server.address().port, model: 'test', vision: true } }, { id: 'a'.repeat(32), title: '案例', backend: 'openai' }, { frames: [{ name: 'frame-1.jpg', time: 10 }], transcript: [], duration: 60 }, directory, async () => {});
+    assert.match(visualPrompt, /元男.*元女/); assert.match(result.notes, /画面性别标记：元男/);
+    assert.equal(extractKnowledgeCases(result.notes)[0].gender, 1);
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await fs.rm(directory, { recursive: true, force: true }); }
 });

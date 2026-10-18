@@ -7,7 +7,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 export const workerPackageFiles = [
   'scripts/knowledge-worker.mjs', 'scripts/start-knowledge-worker.ps1', 'scripts/install-knowledge-worker.ps1',
   'scripts/setup-knowledge-worker.ps1', 'scripts/knowledge-worker-launcher.mjs', 'scripts/knowledge-worker-pair.mjs',
-  'scripts/knowledge-worker-setup.cmd', 'portal/src/knowledge-model.js', 'portal/src/knowledge-download.js',
+  'scripts/knowledge-worker-setup.cmd', 'portal/src/knowledge-model.js', 'portal/src/knowledge-visual-evidence.js', 'portal/src/knowledge-download.js',
   'portal/workers/video_evidence.py', 'portal/workers/video_runtime.py', 'portal/workers/requirements.txt'
 ];
 function crc32(data) {
