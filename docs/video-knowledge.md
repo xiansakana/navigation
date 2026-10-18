@@ -85,6 +85,16 @@ pm2 start scripts/knowledge-worker.mjs --name knowledge-worker -- portal/knowled
 
 首次运行语音模型可能需要下载。`asr.model` 可以填已下载的 CTranslate2 模型目录；`asr.modelCache` 可固定缓存目录。未安装转写依赖、CLI未登录或API未配置时，工作器只报告状态，不领取不具备条件的任务。状态中的“可用”是安装/登录或配置检查，模型网络在实际任务中验证。
 
+### Windows 安装与独立设备
+
+知识库“处理设置”提供“安装并连接这台电脑”，需要 `knowledge:devices:install`、`knowledge:devices:edit` 和 `knowledge:process:edit` 权限。下载 ZIP 后解压并运行 `scripts/knowledge-worker-setup.cmd`；浏览器不能静默执行本机程序。安装包仅附带10分钟有效、只能使用一次的账号绑定授权，不包含长期凭据、服务器登录或源视频。请勿转发仍有效的个人安装包。过期时安装程序显示配对码并打开知识库，登录后核对设备名称及配对码再确认。
+
+安装器面向 Windows x64：优先使用已有 Node 22+，否则下载带官方 SHA256 校验的 Node 22.20.0；安装独立 Python 3.11.9 时核验 Python Software Foundation 数字签名，创建私有环境并安装固定的语音依赖、FFmpeg 和可选 CUDA 推理库。首次需要联网下载依赖和语音模型。已有 Codex 原生程序会复用其登录；否则按 [OpenAI Docs](https://learn.chatgpt.com/docs/codex/cli) 安装 CLI 并引导用户登录。网站账号与 Codex 账号授权独立，不在设备间复制 Codex 登录缓存。
+
+运行文件位于 `%LOCALAPPDATA%/Navigation/KnowledgeWorker/releases/`，私有配置为同目录下的 `config.json`，缓存、模型独立保存。设备凭据在服务端仅保存哈希，网页设备列表不返回凭据。设备有独立ID、名称、心跳和停用状态；停用只取消该设备的访问和正在持有的任务租约，不影响其他设备。旧版共享凭据收进高级设置，轮换不再撤销独立设备。
+
+安装后的工作器每15分钟空闲时检查更新；通过已有设备凭据下载固定文件清单的 ZIP，验证 SHA256 后放入新版本目录并切换，网络失败继续使用旧版本。更新不会覆盖账号配置、模型和缓存，不打断正在处理的视频。此更新仅覆盖工作器代码，Python/CUDA依赖调整需重新运行安装程序修复。重新运行会复用仍有效的独立设备凭据；已停用时需重新绑定。现有手工工作器保持兼容，可用 `setup-knowledge-worker.ps1 -ReuseConfig <原私有配置>` 迁移环境。
+
 ### ECS 后台运行与 CordCloud 代理
 
 无桌面服务器可使用 CordCloud 官方提供的 Clash 通用订阅配合 Mihomo 核心，按[官方 systemd 文档](https://wiki.metacubex.one/startup/service/)运行。当前部署使用已核验发布包 SHA256 的 Mihomo v1.19.32；没有安装图形客户端。订阅、节点口令和 Codex 登录缓存均为运行时私有文件，不进入 Git。

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { createSourceStore } from './knowledge-source-store.js';
 import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
+import { createKnowledgeDeviceStore } from './knowledge-devices.js';
 
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
@@ -42,6 +43,8 @@ export function createKnowledgeStore(db) {
     CREATE TABLE IF NOT EXISTS knowledge_worker_instances(user_id TEXT NOT NULL,worker_id TEXT NOT NULL,
       last_seen TEXT NOT NULL,label TEXT NOT NULL,capabilities_json TEXT NOT NULL,PRIMARY KEY(user_id,worker_id));`);
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'fingerprint')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''");
+  if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'worker_id')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN worker_id TEXT NOT NULL DEFAULT ''");
+  const devices = createKnowledgeDeviceStore(db);
   const sources = createSourceStore(db);
   const getRow = (uid, key) => db.prepare('SELECT * FROM knowledge_documents WHERE user_id=? AND id=?').get(uid, key);
   const read = row => row && ({ id: row.id, title: row.title, topic: row.topic, tags: JSON.parse(row.tags_json), sourceUrl: row.source_url,
@@ -56,7 +59,7 @@ export function createKnowledgeStore(db) {
     .all(uid, new Date(Date.now() - 90000).toISOString())
     .map(r => ({ id: r.worker_id, label: r.label, lastSeen: r.last_seen, capabilities: JSON.parse(r.capabilities_json) }));
   return {
-    get, getRow, expire, sources,
+    get, getRow, expire, sources, devices,
     settings(uid) { return { backend: db.prepare('SELECT backend FROM knowledge_settings WHERE user_id=?').get(uid)?.backend || 'codex' }; },
     saveSettings(uid, backend) {
       backendName(backend);
@@ -67,18 +70,18 @@ export function createKnowledgeStore(db) {
       const row = db.prepare('SELECT last_seen,label,capabilities_json FROM knowledge_workers WHERE user_id=?').get(uid);
       const workers = onlineWorkers(uid);
       const preferred = workers.find(w => w.capabilities.media?.ready && w.capabilities.media.detail === 'cuda' && w.capabilities[this.settings(uid).backend]?.ready) || workers[0];
-      return row ? { configured: true, online: !!row.last_seen && Date.now() - Date.parse(row.last_seen) < 90000,
+      return row ? { configured: true, online: workers.length > 0 || !!row.last_seen && Date.now() - Date.parse(row.last_seen) < 90000,
         lastSeen: preferred?.lastSeen || row.last_seen, label: preferred?.label || row.label,
         capabilities: preferred?.capabilities || JSON.parse(row.capabilities_json), workers, scheduling: 'gpu-first' } : { configured: false, online: false, capabilities: {} };
     },
     rotateToken(uid) {
       const token = 'nkw_' + crypto.randomBytes(32).toString('hex');
       db.prepare("INSERT INTO knowledge_workers(user_id,token_hash) VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET token_hash=excluded.token_hash,last_seen=NULL,capabilities_json='{}'").run(uid, hashToken(token));
-      db.prepare('DELETE FROM knowledge_worker_instances WHERE user_id=?').run(uid);
-      db.prepare("UPDATE knowledge_documents SET status='failed',stage='工作器凭据已更换',error='请使用新凭据连接工作器后重试',lease=NULL,updated_at=? WHERE user_id=? AND status='processing'").run(now(), uid);
+      db.prepare('DELETE FROM knowledge_worker_instances WHERE user_id=? AND worker_id NOT IN (SELECT id FROM knowledge_worker_devices WHERE user_id=?)').run(uid, uid);
+      db.prepare("UPDATE knowledge_documents SET status='failed',stage='工作器凭据已更换',error='请使用新凭据连接工作器后重试',lease=NULL,updated_at=? WHERE user_id=? AND status='processing' AND worker_id NOT IN (SELECT id FROM knowledge_worker_devices WHERE user_id=?)").run(now(), uid, uid);
       return token;
     },
-    workerUser(token) { return db.prepare('SELECT user_id FROM knowledge_workers WHERE token_hash=?').get(hashToken(token))?.user_id || null; },
+    workerUser(token) { return devices.authenticate(token)?.user_id || db.prepare('SELECT user_id FROM knowledge_workers WHERE token_hash=?').get(hashToken(token))?.user_id || null; },
     heartbeatWorker(uid, raw = {}) {
       const capabilities = {};
       for (const key of ['codex', 'openai', 'media']) {
@@ -152,7 +155,7 @@ export function createKnowledgeStore(db) {
           (!gpuWorkers.some(w => w.capabilities[r.backend]?.ready) || gpuWorkers.some(w => w.id === workerId && w.capabilities[r.backend]?.ready)));
         if (!row) return null;
         const lease = crypto.randomBytes(24).toString('hex'), time = now();
-        db.prepare("UPDATE knowledge_documents SET status='processing',stage='读取视频',progress=1,lease=?,heartbeat=?,updated_at=?,attempt=attempt+1 WHERE id=? AND status='queued'").run(lease, time, time, row.id);
+        db.prepare("UPDATE knowledge_documents SET status='processing',stage='读取视频',progress=1,lease=?,heartbeat=?,updated_at=?,worker_id=?,attempt=attempt+1 WHERE id=? AND status='queued'").run(lease, time, time, workerId, row.id);
         return { ...get(uid, row.id), sourceSha256: sources.get(uid, row.id)?.sha256 || '', lease };
       }).immediate();
     },

@@ -190,7 +190,10 @@ var SYSTEM_PERMISSIONS = [
         ['delete:edit', '删除自己的视频和笔记', ['笔记', '删除']],
         ['export:view', '导出自己的 Markdown 笔记', ['笔记', '导出']],
         ['settings:edit', '切换默认总结后端', ['设置', '总结后端']],
-        ['worker:edit', '生成或轮换个人工作器凭据', ['设置', '工作器']]
+        ['worker:edit', '生成或轮换旧版共享工作器凭据', ['设置', '高级设置', '旧版凭据']],
+        ['devices:view', '查看自己的视频处理设备', ['设置', '处理设备']],
+        ['devices:install', '下载安装视频工作器', ['设置', '处理设备', '安装并连接']],
+        ['devices:edit', '绑定或停用自己的处理设备', ['设置', '处理设备', '管理设备']]
     ].map(([action, name, parts]) => ({ id: 'knowledge:' + action, name, group: '知识库', serviceId: 'knowledge', action: action.endsWith(':edit') ? 'edit' : 'view', permissionPath: ['首页', '知识库', ...parts] })),
     { id: 'mingli:categories:view', name: '查看分类和分类筛选', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '案例库', '分类管理'] },
     { id: 'mingli:categories:edit', name: '新增、重命名和删除分类', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '分类管理', '编辑分类'] },

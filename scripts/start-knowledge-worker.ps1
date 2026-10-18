@@ -13,7 +13,13 @@ try {
   while ($true) {
     $workerLog = Join-Path $LogDirectory ((Get-Date -Format 'yyyy-MM-dd') + '.log')
     # Node inherits the user's login, CUDA libraries and private configuration.
-    & $NodePath (Join-Path $workerRoot 'scripts/knowledge-worker.mjs') $workerConfig *>> $workerLog
+    $workerEntry = Join-Path $workerRoot 'scripts/knowledge-worker.mjs'
+    if ((Get-Content -LiteralPath $workerConfig -Raw | ConvertFrom-Json).autoUpdate) { $workerEntry = Join-Path $workerRoot 'scripts/knowledge-worker-launcher.mjs' }
+    $ErrorActionPreference = 'Continue'
+    & $NodePath $workerEntry $workerConfig *>> $workerLog
+    $workerExitCode = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($workerExitCode -eq 78) { break }
     Start-Sleep -Seconds 15
   }
 } finally {

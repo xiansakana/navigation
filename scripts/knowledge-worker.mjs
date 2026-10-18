@@ -116,6 +116,7 @@ async function processJob(job) {
   } finally { clearInterval(heartbeat); activeController = null; }
 }
 let cachedCapabilities = {}, checkedAt = 0;
+let updateCheckedAt = Date.now();
 console.log('知识库工作器已启动：', portal.origin, '配置：', configPath);
 while (!stopped) {
   try {
@@ -124,10 +125,20 @@ while (!stopped) {
     const backends = cachedCapabilities.media?.ready ? ['codex', 'openai'].filter(b => cachedCapabilities[b]?.ready) : [];
     const { job } = await request('/claim', { data: { backends, workerId } });
     if (job) await processJob(job);
-    else await sleep(5000);
+    else {
+      if (config.autoUpdate && Date.now() - updateCheckedAt > 15 * 60000) {
+        updateCheckedAt = Date.now();
+        try {
+          const release = await request('/release');
+          const current = JSON.parse(await fsp.readFile(path.join(repo, 'worker-version.json'), 'utf8'));
+          if (release.version !== current.version) { process.exitCode = 75; break; }
+        } catch { /* Keep processing when update checks are unavailable. */ }
+      }
+      await sleep(5000);
+    }
   } catch (e) {
     console.error(new Date().toISOString(), e.message);
-    if (e.status === 401) { console.error('请更新私有配置中的工作器凭据后重启。'); break; }
+    if ([401, 403].includes(e.status)) { console.error('设备已停用或凭据失效，请重新运行安装程序连接。'); process.exitCode = 78; break; }
     await sleep(10000);
   }
 }

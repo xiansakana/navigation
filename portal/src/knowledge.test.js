@@ -202,3 +202,25 @@ test('validation rejects bad formats, excessive video sizes and fabricated times
   assert.equal(MAX_VIDEO_BYTES, 1024 ** 3);
   assert.equal(crypto.createHash('sha256').update('token').digest('hex').length, 64);
 });
+
+test('device APIs enforce permissions, CSRF, authenticated pairing, and per-device identity', async () => fixture(async ({ call, store }) => {
+  const started = await call('/worker/pair/start', { method: 'POST', data: { label: 'QA Laptop' } });
+  assert.equal(started.status, 200); const pair = started.payload;
+  assert.equal((await call('/device-pair?code=' + pair.userCode, { session: { userId: 'a', permissions: ['knowledge:view'] } })).status, 403);
+  assert.equal((await call('/device-pair', { method: 'POST', data: { code: pair.userCode }, headers: { Origin: 'https://evil.test' } })).status, 403);
+  assert.equal((await call('/device-pair', { method: 'POST', data: { code: pair.userCode } })).status, 200);
+  const polled = await call('/worker/pair/poll', { method: 'POST', data: { deviceCode: pair.deviceCode } });
+  assert.equal(polled.payload.status, 'approved'); const { token, deviceId } = polled.payload;
+  await call('/worker/heartbeat', { method: 'POST', token, data: { workerId: 'spoof-other-device', label: 'spoof', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } } });
+  assert.equal(store.worker('a').workers[0].id, deviceId);
+  assert.equal((await call('/devices', { session: member('b') })).payload.devices.length, 0);
+  assert.equal((await call('/devices/' + deviceId, { method: 'DELETE', session: member('b') })).status, 404);
+  assert.equal((await call('/worker/release', { token })).status, 200);
+  assert.equal((await call('/worker-install', { method: 'POST', data: {}, session: { userId: 'a', permissions: ['knowledge:view', 'knowledge:devices:install'] } })).status, 403);
+  const installer = await call('/worker-install', { method: 'POST', data: {} });
+  assert.equal(installer.status, 200); assert.equal(installer.headers.get('content-type'), 'application/zip');
+  assert.ok(installer.payload.includes(Buffer.from('worker-pairing.json')));
+  assert.ok(!installer.payload.includes(Buffer.from(token)), 'download does not contain an existing device credential');
+  assert.equal((await call('/devices/' + deviceId, { method: 'DELETE' })).status, 200);
+  assert.equal((await call('/worker/heartbeat', { method: 'POST', token, data: {} })).status, 401);
+}));

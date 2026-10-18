@@ -1,4 +1,5 @@
 import { uploadParts } from './upload.js?v=1';
+import { createDevicePanel } from './devices.js?v=1';
 const $ = id => document.getElementById(id);
 const state = { permissions: [], documents: [], current: null, settings: null, editing: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
@@ -151,6 +152,7 @@ async function boot() {
   const me = await meResponse.json(); state.permissions = me.permissions || [];
   if (me.isGuest || !can('view')) throw new Error('请登录具备知识库权限的账号');
   show('upload-toggle', can('upload:edit') && can('process:edit')); show('worker-token', can('worker:edit'));
+  createDevicePanel({ can, api, send, onError: error });
   await settings();
   if (can('notes:view')) {
     await load();
@@ -179,7 +181,7 @@ $('topic-filter').onchange = $('status-filter').onchange = () => load().catch(er
 $('more').onclick = () => load(true).catch(error);
 $('backend').onchange = async () => { try { await send('/settings', 'PUT', { backend: $('backend').value }); await settings(); text('message', '已切换默认总结方式。'); } catch (e) { error(e); } };
 $('worker-token').onclick = async () => {
-  if (state.settings.worker.configured && !window.confirm('更换后旧工作器凭据立即失效，正在处理的任务需重试。继续？')) return;
+  if (state.settings.worker.configured && !window.confirm('这会撤销旧版共享凭据，使用该凭据的工作器需重新配置；独立绑定的设备不受影响。继续？')) return;
   try { const result = await send('/worker-token', 'POST'); $('new-token').value = result.token; show('token-result', true); await settings(); } catch (e) { error(e); }
 };
 $('tabs').onclick = event => { const button = event.target.closest('[data-tab]'); if (button) tab(button.dataset.tab); };

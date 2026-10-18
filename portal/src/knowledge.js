@@ -7,6 +7,7 @@ import { getDatabase } from '../../shared/db/index.js';
 import { storageConfig, sourcePath, proxySource } from './knowledge-storage.js';
 import { hasPermission } from './rbac.js';
 import { createKnowledgeStore, CHUNK_BYTES, MAX_VIDEO_BYTES } from './knowledge-store.js';
+import { knowledgeWorkerPackage, sendWorkerPackage } from './knowledge-worker-package.js';
 
 const root = () => path.resolve(process.env.KNOWLEDGE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/knowledge'));
 export function knowledgeDirectory(id) {
@@ -30,6 +31,7 @@ async function body(req, max = 1024 * 1024) {
   catch (e) { if (e.status) throw e; throw new Error('请求体不是合法 JSON'); }
 }
 const locks = new Map();
+const pairingRates = new Map();
 async function lock(key, fn) {
   const previous = locks.get(key) || Promise.resolve();
   const pending = previous.catch(() => {}).then(fn);
@@ -83,18 +85,36 @@ export function validateKnowledgeResult(raw) {
 
 export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = () => false) {
   res.setHeader('Cache-Control', 'no-store');
+  const route = url.pathname.slice('/api/knowledge/worker'.length), method = req.method;
+  const store = createKnowledgeStore(getDatabase());
+  if (['/pair/start', '/pair/poll'].includes(route) && method === 'POST') {
+    try {
+      const raw = await body(req, 1024);
+      if (route === '/pair/start') {
+        const key = req.socket.remoteAddress || 'unknown', time = Date.now();
+        for (const [ip, r] of pairingRates) if (r.until < time) pairingRates.delete(ip);
+        const rate = pairingRates.get(key) || { count: 0, until: time + 60000 };
+        if (++rate.count > 30 || pairingRates.size > 10000) return json(res, 429, { ok: false, error: '配对请求过多，请稍后重试' });
+        pairingRates.set(key, rate);
+        return json(res, 200, { ok: true, ...store.devices.start(raw.label) });
+      }
+      if (!/^[a-f0-9]{64}$/.test(raw.deviceCode || '')) return json(res, 400, { ok: false, error: '配对请求无效' });
+      return json(res, 200, { ok: true, ...store.devices.poll(raw.deviceCode, authorize, raw.label) });
+    } catch (e) { return json(res, e.status || 400, { ok: false, error: e.message }); }
+  }
   const token = /^Bearer (nkw_[a-f0-9]{64})$/.exec(req.headers.authorization || '')?.[1];
   if (!token) return json(res, 401, { ok: false, error: '工作器凭据无效' });
-  const store = createKnowledgeStore(getDatabase()), uid = store.workerUser(token);
+  const uid = store.workerUser(token), device = store.devices.authenticate(token);
   if (!uid) return json(res, 401, { ok: false, error: '工作器凭据已撤销' });
   if (!authorize(uid)) return json(res, 403, { ok: false, error: '账号已停用或知识库处理权限已撤销' });
-  const route = url.pathname.slice('/api/knowledge/worker'.length), method = req.method;
   try {
-    if (route === '/heartbeat' && method === 'POST') { store.heartbeatWorker(uid, await body(req, 4096)); return json(res, 200, { ok: true }); }
+    if (route === '/package' && method === 'GET') return sendWorkerPackage(res);
+    if (route === '/release' && method === 'GET') { const { version, sha256, bytes } = knowledgeWorkerPackage(); return json(res, 200, { ok: true, version, sha256, bytes }); }
+    if (route === '/heartbeat' && method === 'POST') { const raw = await body(req, 4096); store.heartbeatWorker(uid, device ? { ...raw, workerId: device.id, label: device.label } : raw); return json(res, 200, { ok: true }); }
     if (route === '/claim' && method === 'POST') {
       const raw = await body(req, 4096);
       const backends = Array.isArray(raw.backends) ? raw.backends.filter(b => ['codex', 'openai'].includes(b)) : [];
-      return json(res, 200, { ok: true, job: store.claim(uid, backends, typeof raw.workerId === 'string' ? raw.workerId : '') });
+      return json(res, 200, { ok: true, job: store.claim(uid, backends, device?.id || (typeof raw.workerId === 'string' ? raw.workerId : '')) });
     }
     const match = /^\/jobs\/([a-f0-9]{32})\/(source|progress|complete|fail)$/.exec(route);
     if (!match) return json(res, 404, { ok: false, error: '工作器接口不存在' });
@@ -128,6 +148,11 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
   const route = url.pathname.slice('/api/knowledge'.length), method = req.method;
   const document = /^\/documents\/([a-f0-9]{32})(?:\/(parts|complete|retry|storage-retry|source|export|frames)(?:\/([a-z0-9.-]+))?)?$/.exec(route);
   const action = route === '/settings' ? method === 'GET' ? 'view' : 'settings:edit'
+    : route === '/worker-package' && method === 'GET' ? 'devices:install'
+    : route === '/worker-install' && method === 'POST' ? 'devices:install'
+    : route === '/devices' && method === 'GET' ? 'devices:view'
+    : /^\/devices\/[a-f0-9]{32}$/.test(route) && method === 'DELETE' ? 'devices:edit'
+    : route === '/device-pair' ? method === 'GET' ? 'devices:view' : method === 'POST' ? 'devices:edit' : null
     : route === '/worker-token' && method === 'POST' ? 'worker:edit'
       : route === '/documents' ? method === 'GET' ? 'view' : 'upload:edit'
         : document ? method === 'GET' ? document[2] === 'export' ? 'export:view' : 'view'
@@ -141,6 +166,21 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
   const store = createKnowledgeStore(getDatabase()), uid = session.userId;
   const visible = d => d && ({ ...d, transcript: canKnowledge(session, 'transcript:view') ? d.transcript : [], frames: canKnowledge(session, 'frames:view') ? d.frames : [] });
   try {
+    if (route === '/worker-install') {
+      if (!canKnowledge(session, 'devices:edit') || !canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要设备绑定和视频处理权限' });
+      const pairing = store.devices.start('Windows 视频工作器'); store.devices.approve(uid, pairing.userCode);
+      return sendWorkerPackage(res, { portalUrl: process.env.KNOWLEDGE_PUBLIC_URL || 'https://saoyu.fun', deviceCode: pairing.deviceCode, expiresAt: Date.now() + 600000 });
+    }
+    if (route === '/worker-package') return sendWorkerPackage(res);
+    if (route === '/devices' && method === 'GET') return json(res, 200, { ok: true, devices: store.devices.list(uid) });
+    if (/^\/devices\/[a-f0-9]{32}$/.test(route) && method === 'DELETE') return json(res, store.devices.revoke(uid, route.split('/').pop()) ? 200 : 404, { ok: true });
+    if (route === '/device-pair') {
+      const code = method === 'GET' ? url.searchParams.get('code') : (await body(req, 1024)).code;
+      if (!/^[A-Fa-f0-9]{8}$/.test(code || '')) throw new Error('请输入安装程序显示的8位配对码');
+      if (method === 'GET') { const pair = store.devices.inspect(code); return json(res, pair ? 200 : 404, pair ? { ok: true, ...pair } : { ok: false, error: '配对码已失效或已使用' }); }
+      if (!canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要知识库处理权限' });
+      const approved = store.devices.approve(uid, code); return json(res, approved ? 200 : 409, { ok: approved, ...(approved ? {} : { error: '配对码已失效或已使用' }) });
+    }
     if (route === '/settings' && method === 'GET') return json(res, 200, { ok: true, ...store.settings(uid), storage: { provider: storageConfig(uid) ? '115' : 'local' }, worker: store.worker(uid), chunkBytes: CHUNK_BYTES, maxBytes: MAX_VIDEO_BYTES });
     if (route === '/settings' && method === 'PUT') return json(res, 200, { ok: true, ...store.saveSettings(uid, (await body(req, 4096)).backend) });
     if (route === '/worker-token' && method === 'POST') return json(res, 200, { ok: true, token: store.rotateToken(uid) });
