@@ -1,5 +1,5 @@
 import { uploadParts } from './upload.js?v=1';
-import { createDevicePanel } from './devices.js?v=1';
+import { createDevicePanel } from './devices.js?v=2';
 const $ = id => document.getElementById(id);
 const state = { permissions: [], documents: [], current: null, settings: null, editing: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
