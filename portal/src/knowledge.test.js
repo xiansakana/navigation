@@ -225,3 +225,17 @@ test('device APIs enforce permissions, CSRF, authenticated pairing, and per-devi
   assert.equal((await call('/devices/' + deviceId, { method: 'DELETE' })).status, 200);
   assert.equal((await call('/worker/heartbeat', { method: 'POST', token, data: {} })).status, 401);
 }));
+
+
+test('worker Codex call reporting requires its own current lease and cannot spoof ownership or modify finished turns',async()=>fixture(async({call,store,db})=>{
+  const token=store.rotateToken('a'),other=store.rotateToken('b'),d=store.create('a',upload());store.enqueue('a',d.id);const job=store.claim('a',['codex']);
+  const route='/worker/jobs/'+d.id+'/codex',data={id:crypto.randomUUID(),prompt:'Quoted transcript',result:'',state:'running',model:'test',sessionId:''};
+  assert.equal((await call(route,{method:'POST',token:other,lease:job.lease,data})).status,409);
+  assert.equal((await call(route,{method:'POST',token,lease:'bad',data})).status,409);
+  assert.equal((await call(route,{method:'POST',token,lease:job.lease,data:{...data,user_id:'b'}})).status,400);
+  assert.equal((await call(route,{method:'POST',token,lease:job.lease,data})).status,200);
+  assert.equal((await call(route,{method:'POST',token,lease:job.lease,data:{...data,state:'succeeded',result:'Answer'}})).status,200);
+  assert.equal((await call(route,{method:'POST',token,lease:job.lease,data})).status,200);
+  const row=db.prepare('SELECT * FROM knowledge_codex_calls').get();assert.equal(row.user_id,'a');assert.equal(row.result,'Answer');assert.equal(row.state,'succeeded');
+  store.fail('a',d.id,job.lease,'done');assert.equal((await call(route,{method:'POST',token,lease:job.lease,data})).status,409);
+}));

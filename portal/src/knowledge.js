@@ -117,11 +117,17 @@ export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = 
       const backends = Array.isArray(raw.backends) ? raw.backends.filter(b => ['codex', 'openai'].includes(b)) : [];
       return json(res, 200, { ok: true, job: store.claim(uid, backends, device?.id || (typeof raw.workerId === 'string' ? raw.workerId : '')) });
     }
-    const match = /^\/jobs\/([a-f0-9]{32})\/(source|progress|complete|fail)$/.exec(route);
+    const match = /^\/jobs\/([a-f0-9]{32})\/(source|progress|complete|fail|codex)$/.exec(route);
     if (!match) return json(res, 404, { ok: false, error: '工作器接口不存在' });
     const [, id, action] = match, lease = req.headers['x-knowledge-lease'];
     return await lock(id, async () => {
       if (!store.leased(uid, id, lease)) return json(res, 409, { ok: false, error: '任务已删除、过期或由其他工作器领取' });
+      if(action==='codex'&&method==='POST'){
+        const input=await body(req,3*1024*1024);
+        if(!store.leased(uid,id,lease))return json(res,409,{ok:false,error:'任务已过期'});
+        const doc=store.getRow(uid,id);if(doc.backend!=='codex')return json(res,400,{ok:false,error:'此任务未使用Codex'});
+        store.codexCalls.record(uid,doc,input);return json(res,200,{ok:true});
+      }
       if (action === 'source' && method === 'GET') return serveSource(req, res, store, uid, id);
       if (action === 'progress' && method === 'POST') {
         const input = await body(req, 4096); store.progress(uid, id, lease, input.stage, input.progress); return json(res, 200, { ok: true });

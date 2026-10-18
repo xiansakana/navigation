@@ -164,6 +164,7 @@ var SYSTEM_PERMISSIONS = [
         ['settings:edit','保存服务器Codex默认设置',['服务器默认设置','保存'],'edit'],
         ['runtime:edit','保存自己的QQ模型和强度',['我的QQ设置','保存'],'edit'],
         ['sessions:view','查看自己的Codex会话',['会话工作台'],'view'],
+        ['sessions:server:view','查看服务器全部CLI会话',['会话工作台','服务器全部会话'],'view'],
         ['sessions:create','新建Codex会话',['会话工作台','新建会话'],'create'],
         ['messages:send','发送消息并执行Codex任务',['会话工作台','发送消息'],'execute'],
         ['sessions:manage','重命名与归档自己的会话',['会话工作台','管理会话'],'edit'],

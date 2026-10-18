@@ -1,4 +1,5 @@
 import { getDatabase } from '../../shared/db/index.js';
+import {createServerSessions} from './codex-server-sessions.js';
 import { createCodexStore } from '../../qq-bot/src/codex-store.js';
 import { readCodexCatalog, resolveRuntime, validateRuntime } from '../../qq-bot/src/codex-control.js';
 import { hasPermission } from './rbac.js';
@@ -13,24 +14,34 @@ const summary=c=>({id:c.id,title:c.title,project:c.project,source:c.source,group
 
 export async function handleCodexConversationsApi(req,res,url,session,json,dependencies) {
   const can=p=>hasPermission(session.permissions || [],'codex-cli:'+p),uid=session.userId;
-  if(!can('sessions:view')||!hasPermission(session.permissions || [],'qq-codex:execute'))return json(res,403,{ok:false,error:'无权访问会话工作台'});
+  if(!can('sessions:view')||!hasPermission(session.permissions || [],'qq-codex:execute')&&!hasPermission(session.permissions || [],'knowledge:view')&&!can('sessions:server:view'))return json(res,403,{ok:false,error:'无权访问会话工作台'});
   const match=/^\/api\/codex-cli\/conversations(?:\/([a-zA-Z0-9-]{1,80})(?:\/(messages|stop))?)?$/.exec(url.pathname);
   if(!match)return json(res,404,{ok:false,error:'接口不存在'});
   const [,id,action]=match,method=req.method;
   if(!['GET','POST','PATCH'].includes(method)||method==='GET'&&action||method==='PATCH'&&(!id||action)||method==='POST'&&id&&!action)return json(res,405,{ok:false,error:'不支持此方法'});
   if(method!=='GET') {
+    if(!hasPermission(session.permissions||[],'qq-codex:execute'))return json(res,403,{ok:false,error:'没有Codex任务执行权限'});
     if(req.headers['sec-fetch-site']==='cross-site'||req.headers.origin&&!['http://'+req.headers.host,'https://'+req.headers.host].includes(req.headers.origin))return json(res,403,{ok:false,error:'不允许跨站写入'});
     const permission=method==='PATCH'?'sessions:manage':action==='messages'?'messages:send':action==='stop'?'tasks:stop':'sessions:create';
     if(!can(permission))return json(res,403,{ok:false,error:'没有执行此操作的权限'});
   }
   try {
     const setup=dependencies.setup(uid);
-    if(!setup.configured)return json(res,403,{ok:false,error:'当前账号尚未配置Codex执行项目'});
+    if(method!=='GET'&&!setup.configured)return json(res,403,{ok:false,error:'当前账号尚未配置Codex执行项目'});
     const store=dependencies.store || createCodexStore(getDatabase()),conversations=store.conversations;
-    const allowed=c=>c&&setup.projects.includes(c.project)&&(!c.group_id||store.settings(uid).groups.includes(c.group_id));
+    const external=dependencies.external || (!dependencies.store?createServerSessions(getDatabase()):null);
+    const cursor=url.searchParams.get('cursor')||'';if(cursor.length>8192)throw new Error('分页标识无效');
+    const externalOptions={config:setup.config,all:can('sessions:server:view'),canKnowledge:['knowledge:view','knowledge:notes:view'].every(p=>hasPermission(session.permissions||[],p)),canKnowledgePrompts:['knowledge:transcript:view','knowledge:frames:view'].every(p=>hasPermission(session.permissions||[],p)),archived:url.searchParams.get('archived')==='true',cursor};
+    const allowed=c=>c&&hasPermission(session.permissions||[],'qq-codex:execute')&&setup.projects.includes(c.project)&&(!c.group_id||store.settings(uid).groups.includes(c.group_id));
     if(method==='GET'&&!id) {
-      return json(res,200,{ok:true,conversations:conversations.list(uid).filter(allowed).map(summary),projects:setup.projects,
-        enabled:setup.enabled,permissions:{create:can('sessions:create'),send:can('messages:send'),manage:can('sessions:manage'),stop:can('tasks:stop')}});
+      const local=conversations.list(uid).filter(allowed),extra=await external?.list(uid,{...externalOptions,excludeSessionIds:local.map(c=>c.session_id).filter(Boolean)})||{conversations:[]};
+      return json(res,200,{ok:true,conversations:[...local.map(summary),...extra.conversations].sort((a,b)=>b.updatedAt-a.updatedAt),nextCursor:extra.nextCursor||null,warning:extra.warning||'',projects:setup.projects,
+        enabled:setup.enabled,permissions:{serverHistory:can('sessions:server:view'),create:setup.configured&&can('sessions:create'),send:setup.configured&&can('messages:send'),manage:can('sessions:manage'),stop:can('tasks:stop')}});
+    }
+    if(id&&(id.startsWith('knowledge-')||id.startsWith('cli-'))){
+      if(method!=='GET')return json(res,403,{ok:false,error:'模块与服务器历史仅供查看，请在原入口管理任务'});
+      const detail=await external?.detail(uid,id,externalOptions);
+      return detail?json(res,200,{ok:true,...detail}):json(res,404,{ok:false,error:'会话不存在或未授权'});
     }
     const conversation=id?conversations.get(uid,id):null;
     if(id&&!allowed(conversation))return json(res,404,{ok:false,error:'会话不存在或未授权'});

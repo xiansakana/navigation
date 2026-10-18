@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {createKnowledgeCodexCalls} from './knowledge-codex-calls.js';
 import { createSourceStore } from './knowledge-source-store.js';
 import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
 import { createKnowledgeDeviceStore } from './knowledge-devices.js';
@@ -59,7 +60,7 @@ export function createKnowledgeStore(db) {
     .all(uid, new Date(Date.now() - 90000).toISOString())
     .map(r => ({ id: r.worker_id, label: r.label, lastSeen: r.last_seen, capabilities: JSON.parse(r.capabilities_json) }));
   return {
-    get, getRow, expire, sources, devices,
+    get, getRow, expire, sources, devices, codexCalls:createKnowledgeCodexCalls(db),
     settings(uid) { return { backend: db.prepare('SELECT backend FROM knowledge_settings WHERE user_id=?').get(uid)?.backend || 'codex' }; },
     saveSettings(uid, backend) {
       backendName(backend);
@@ -205,6 +206,7 @@ export function createKnowledgeStore(db) {
         if (!getRow(uid, key)) return false;
         createKnowledgeCaseStore(db).removeDocument(uid, key);
         sources.remove(uid, key);
+        db.prepare('DELETE FROM knowledge_codex_calls WHERE user_id=? AND document_id=?').run(uid,key);
         db.prepare('DELETE FROM knowledge_parts WHERE document_id=?').run(key);
         return db.prepare('DELETE FROM knowledge_documents WHERE user_id=? AND id=?').run(uid, key).changes > 0;
       })();

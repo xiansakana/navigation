@@ -6,21 +6,23 @@
   <script>try{var t=localStorage.getItem('portal-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;}catch(e){}</script>
   <link rel="stylesheet" href="/portal.css?v=layout-20261018"><link rel="stylesheet" href="/experience.css"><link rel="stylesheet" href="/codex-cli/style.css?v=1">
   <script src="/ui/input-guard.js"></script><script defer src="/ui/back-to-top.js"></script>
-<link rel="stylesheet" href="/codex-cli/chat.css?v=2"><link rel="stylesheet" href="/codex-cli/todos.css?v=1"></head>
+<link rel="stylesheet" href="/codex-cli/chat.css?v=3"><link rel="stylesheet" href="/codex-cli/todos.css?v=1"></head>
 <body class="portal-experience has-navbar portal-layout-enabled">
   <header class="navbar"><div class="navbar-inner"><a class="navbar-brand" href="/"><span class="navbar-logo">⚡</span><span>服务导航</span></a><nav class="navbar-nav"><span class="navbar-title">Codex CLI</span></nav><div class="navbar-actions"><button type="button" class="btn ghost navbar-layout-btn" aria-pressed="false"><span class="label">全宽</span></button><button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题"><span class="navbar-theme-icon">☀️</span><span class="label navbar-theme-label">日间</span></button></div></div></header>
   <nav class="codex-tabs" aria-label="Codex模块"><button id="workspace-tab" class="active" type="button" aria-pressed="true">会话工作台</button><button id="todos-tab" type="button" aria-pressed="false" hidden>Todo 待办</button><button id="settings-tab" type="button" aria-pressed="false">服务器与 QQ 设置</button></nav>
   <section id="workspace" class="workspace" data-layout-container aria-label="会话工作台">
     <aside class="session-sidebar">
-      <div class="sidebar-heading"><div><span class="eyebrow">CODEX WORKSPACE</span><h1>我的会话</h1></div><button id="new-chat" class="btn primary" type="button" hidden>＋ 新建</button></div>
+      <div class="sidebar-heading"><div><span class="eyebrow">CODEX WORKSPACE</span><h1>会话总览</h1></div><button id="new-chat" class="btn primary" type="button" hidden>＋ 新建</button></div>
       <label class="sr-only" for="session-search">搜索会话</label><input id="session-search" type="search" placeholder="搜索标题或项目…" maxlength="100">
+      <label class="sr-only" for="session-source">会话来源</label><select id="session-source" aria-label="会话来源"><option value="">全部来源</option><option value="web">网页</option><option value="qq">QQ</option><option value="knowledge">知识库</option><option value="cli">服务器 CLI</option></select>
       <label class="archive-filter"><input id="show-archived" type="checkbox">显示已归档</label>
       <p id="sessions-notice" class="hint" role="status">正在读取会话…</p><div id="sessions" class="session-list" aria-label="我的会话列表"></div>
-      <div class="sidebar-footer">网页与 QQ 会话统一展示<br>仅显示当前账号获授权的项目</div>
+      <button id="sessions-more" class="btn ghost" type="button" hidden>加载更多服务器会话</button><div class="sidebar-footer">网页、QQ、知识库与服务器 CLI 统一展示<br>服务器全部历史需要单独授权</div>
     </aside>
     <div class="chat-main">
       <header class="chat-heading"><div><h2 id="chat-title">开始一次新对话</h2><p id="chat-meta">与 Codex 讨论问题，或交给它完成项目任务。</p></div><div class="chat-actions"><button id="rename-chat" class="btn ghost" type="button" hidden>重命名</button><button id="archive-chat" class="btn ghost" type="button" hidden>归档</button></div></header>
       <p id="chat-notice" class="chat-notice" role="status" aria-live="polite"></p>
+      <button id="history-more" class="btn ghost" type="button" hidden>加载更早对话</button>
       <div id="chat-scroll" class="chat-scroll"><div id="messages" class="messages"><div class="chat-empty"><span class="empty-icon">⌘</span><h3>从想法到完成</h3><p>新建会话选择项目，发送问题或任务。<br>执行过程、回复和 Git 提交都会保留在这里。</p></div></div></div>
       <form id="chat-form" class="composer">
         <div class="composer-options"><label for="chat-model">模型</label><select id="chat-model" disabled><option value="">服务器默认</option></select><label for="chat-effort">强度</label><select id="chat-effort" disabled><option value="">默认</option></select><span id="task-state"></span></div>
@@ -68,6 +70,6 @@
     <section id="usage-panel" class="panel usage-panel" hidden><div class="section-heading"><span class="section-number">03</span><div><h2>账户额度</h2><p>服务器当前登录账号的实时额度，重置时间使用北京时间。</p></div></div><pre id="usage">正在读取额度…</pre></section>
     <footer id="updated" class="muted"></footer>
   </main>
-  <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script><script src="/vendor/marked.js"></script><script src="/vendor/purify.js"></script><script src="/codex-cli/chat.js?v=2"></script><script src="/codex-cli/todos.js?v=2"></script><script src="/codex-cli/app.js?v=2"></script>
+  <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script><script src="/vendor/marked.js"></script><script src="/vendor/purify.js"></script><script src="/codex-cli/chat.js?v=3"></script><script src="/codex-cli/todos.js?v=2"></script><script src="/codex-cli/app.js?v=2"></script>
 </body>
 </html>

@@ -96,7 +96,7 @@ async function processJob(job) {
     }
     if (job.storage?.provider === '115' && job.storage.state === 'ready') await fsp.rm(path.join(directory, 'source'), { force: true });
     const evidence = JSON.parse(await fsp.readFile(evidenceFile, 'utf8'));
-    const summary = await summarizeVideo(config, job, evidence, directory, update, signal);
+    const summary = await summarizeVideo({...config,onCodexCall:input=>request('/jobs/'+job.id+'/codex',{data:input,lease:job.lease,signal})}, job, evidence, directory, update, signal);
     const frames = [];
     for (const f of evidence.frames) frames.push({ time: f.time, data: (await fsp.readFile(path.join(directory, f.name))).toString('base64') });
     const result = { ...evidence, ...summary, frames };

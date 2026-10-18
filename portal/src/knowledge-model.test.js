@@ -68,3 +68,22 @@ test('visual gender evidence survives final summarization even when the model om
     assert.equal(extractKnowledgeCases(result.notes)[0].gender, 1);
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await fs.rm(directory, { recursive: true, force: true }); }
 });
+
+
+test('ephemeral CLI calls report durable start/completion and thread identity without enabling tools',async()=>{
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'knowledge-codex-calls-')),seen=[];
+  const config={codex:{model:'test'},onCodexCall:async event=>seen.push({...event})};
+  try{
+    const answer='A complete generated answer with enough characters.';
+    const run=async(binary,args,options)=>{
+      assert.ok(args.includes('--ephemeral'));assert.ok(args.includes('--json'));assert.ok(args.includes('features.shell_tool=false'));
+      options.onLine(JSON.stringify({type:'thread.started',thread_id:'native-thread'}));
+      await fs.writeFile(args[args.indexOf('-o')+1],answer);
+    };
+    assert.equal(await generate(config,'codex','quoted source',[],directory,undefined,{run}),answer);
+    assert.deepEqual(seen.map(x=>x.state),['running','succeeded']);assert.equal(seen[0].id,seen[1].id);assert.equal(seen[1].sessionId,'native-thread');assert.match(seen[0].prompt,/quoted source/);
+    assert.deepEqual(await fs.readdir(directory),[]);
+    seen.length=0;await assert.rejects(generate(config,'codex','source',[],directory,undefined,{run:async()=>{throw new Error('quota');}}),/quota/);
+    assert.deepEqual(seen.map(x=>x.state),['running','failed']);
+  }finally{await fs.rm(directory,{recursive:true,force:true});}
+});

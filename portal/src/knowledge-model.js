@@ -33,7 +33,7 @@ export function runProcess(binary, args, { cwd, input = '', onLine = () => {}, t
 }
 export function codexArguments({ output, cwd, images = [], model = '' }) {
   // Isolated, tool-free invocation: video contents must never become shell/MCP actions.
-  const args = ['-a', 'never', 'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', '-C', cwd,
+  const args = ['-a', 'never', 'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral', '--json', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', '-C', cwd,
     '-c', 'web_search="disabled"', '-c', 'mcp_servers={}', '-c', 'features.shell_tool=false', '-c', 'features.unified_exec=false',
     '-c', 'features.apps=false', '-c', 'features.browser_use=false', '-c', 'features.computer_use=false', '-c', 'features.view_image=false',
     '-c', 'features.skill_search=false', '-c', 'features.skip_host_skill_discovery=true', '-c', 'features.memories=false', '-c', 'features.remote_plugin=false',
@@ -54,15 +54,22 @@ export function modelConfiguration(config, backend) {
   return { backend, model: o.model, vision: o.vision === true, baseUrl: baseUrl.href.replace(/\/$/, ''), apiKey,
     maxTokensParameter: o.maxTokensParameter === 'max_tokens' ? 'max_tokens' : 'max_completion_tokens' };
 }
-export async function generate(config, backend, prompt, images, cwd, signal) {
+export async function generate(config, backend, prompt, images, cwd, signal, {run=runProcess}={}) {
   const model = modelConfiguration(config, backend);
   if (backend === 'codex') {
     const output = path.join(cwd, 'answer-' + crypto.randomBytes(6).toString('hex') + '.md');
     const proxy = config.codex?.proxyUrl;
     const env = proxy ? { ...process.env, HTTPS_PROXY: proxy, HTTP_PROXY: proxy, ALL_PROXY: proxy } : process.env;
-    await runProcess(config.codex?.binary || (process.platform === 'win32' ? 'codex.exe' : 'codex'),
-      codexArguments({ output, cwd, images, model: config.codex?.model }), { cwd, input: SOURCE_POLICY + '\n\n' + prompt, signal, timeout: 1800000, env });
-    try { return cleanAnswer(await fsp.readFile(output, 'utf8')); } finally { await fsp.rm(output, { force: true }); }
+    const input=SOURCE_POLICY + '\n\n' + prompt,id=crypto.randomUUID();let sessionId='';
+    const report=async(state,result='')=>{if(config.onCodexCall)await config.onCodexCall({id,prompt:input.slice(0,100000),result:result.slice(0,500000),state,model:config.codex?.model||'',sessionId});};
+    await report('running');
+    try {
+      await run(config.codex?.binary || (process.platform === 'win32' ? 'codex.exe' : 'codex'),
+        codexArguments({ output, cwd, images, model: config.codex?.model }), { cwd, input, signal, timeout: 1800000, env,
+          onLine:line=>{try{const event=JSON.parse(line);if(event.type==='thread.started')sessionId=String(event.thread_id||'').slice(0,100);}catch{}} });
+      const answer=cleanAnswer(await fsp.readFile(output,'utf8'));await report('succeeded',answer);return answer;
+    } catch(error) {await report(signal?.aborted?'cancelled':'failed',error.message);throw error;}
+    finally {await fsp.rm(output,{force:true});}
   }
   const content = [{ type: 'text', text: prompt }];
   if (model.vision) for (const image of images) content.push({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + (await fsp.readFile(image)).toString('base64'), detail: 'high' } });

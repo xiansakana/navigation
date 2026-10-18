@@ -13,7 +13,7 @@ test('chat UI creates, sends, resumes, stops, renames and archives with safe mar
   w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
   w.setInterval=()=>0;Object.defineProperty(w.crypto,'randomUUID',{value:crypto.randomUUID});
   w.fetch=async(url,options={})=>{
-    const method=options.method || 'GET',path=url.replace('/api/codex-cli/conversations',''),body=options.body?JSON.parse(options.body):undefined;calls.push({path,method,body});
+    const method=options.method || 'GET',path=url.replace('/api/codex-cli/conversations','').split('?')[0],body=options.body?JSON.parse(options.body):undefined;calls.push({path,method,body});
     if(!path&&method==='POST'){const value={...c,id:'new-'+(++counter),title:'新会话',source:'web'};conversations.push(value);return response({conversation:value});}
     if(!path)return response({conversations,projects:['navigation'],enabled:true,permissions:{create:true,send:true,manage:true,stop:true}});
     const conversation=conversations.find(item=>item.id===path.split('/')[1]);
