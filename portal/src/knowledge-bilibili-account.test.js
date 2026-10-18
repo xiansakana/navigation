@@ -11,7 +11,7 @@ function fixture() {
   const service = createBilibiliAccount(db, { key: () => key, clock: () => time, qr: async () => 'data:image/png;base64,cXJjb2Rl',
     async fetcher(url, options) {
       calls.push({ url, headers: options.headers });
-      if (url.endsWith('/generate')) return new Response(JSON.stringify({ code: 0, data: { url: 'https://passport.bilibili.com/h5-app/passport/login/scan?foo=qr', qrcode_key: 'a'.repeat(32) } }));
+      if (url.endsWith('/generate')) return new Response(JSON.stringify({ code: 0, data: { url: 'https://account.bilibili.com/h5-app/passport/login/scan?foo=qr', qrcode_key: 'a'.repeat(32) } }));
       if (url.includes('/poll?')) {
         const headers = new Headers(); headers.append('Set-Cookie', 'SESSDATA=' + secret + '; Path=/; Secure; HttpOnly'); headers.append('Set-Cookie', 'DedeUserID=123; Path=/');
         return new Response(JSON.stringify({ code: 0, data: { code } }), { headers });

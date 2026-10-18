@@ -25,6 +25,7 @@ export function createBilibiliPanel({ element: $, can, api, send, onError, onDef
   }
   $('bilibili-login').onclick = async () => {
     if (!can('bilibili:edit')) return;
+    $('error').hidden = true;
     stop(); const epoch = generation; $('bilibili-login').disabled = true;
     try {
       const r = await send('/bilibili/login/start', 'POST');

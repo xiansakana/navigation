@@ -4,7 +4,7 @@ import { createSourcePlayer } from './source.js?v=1';
 import { bindVideoDrop } from './drop.js?v=1';
 import { sendLocalInput } from './local-input.js?v=1';
 import { bindLinkImport } from './link-import.js?v=2';
-import { createBilibiliPanel } from './bilibili-account.js?v=1';
+import { createBilibiliPanel } from './bilibili-account.js?v=2';
 const $ = id => document.getElementById(id);
 const state = { permissions: [], documents: [], current: null, settings: null, editing: false, modelDirty: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);

@@ -102,7 +102,7 @@ export function createBilibiliAccount(db, { fetcher = fetch, key = masterKey, cl
       try {
         const { data } = await request('https://passport.bilibili.com', '/x/passport-login/web/qrcode/generate');
         const u = new URL(data?.url);
-        if (u.protocol !== 'https:' || u.hostname !== 'passport.bilibili.com' || !/^[a-zA-Z0-9_-]{16,256}$/.test(data?.qrcode_key || '')) throw new Error('B站二维码无效');
+        if (u.protocol !== 'https:' || !['passport.bilibili.com', 'account.bilibili.com'].includes(u.hostname) || u.username || u.password || u.port || u.href.length > 4096 || !/^[a-zA-Z0-9_-]{16,256}$/.test(data?.qrcode_key || '')) throw new Error('B站二维码无效');
         pending.key = data.qrcode_key; pending.qrImage = await qr(u.href); pending.starting = false;
         if (sessions.get(uid) !== pending) throw new Error('扫码已取消');
         return { qrImage: pending.qrImage, expiresAt: pending.expiresAt };
