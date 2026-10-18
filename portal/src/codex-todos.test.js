@@ -23,7 +23,10 @@ test('Todo API enforces owner/project/group boundaries, action permissions, CSRF
     assert.equal((await request('','POST',{...body(),project:'other'})).status,400);
     const editor={...viewer,permissions:[...viewer.permissions,'codex-cli:todos:edit']};
     assert.equal((await request('','POST',body(),editor)).status,403);
-    const payload=body(),created=await request('','POST',payload);assert.equal(created.status,201);const id=created.body.todo.id;
+    for(const scheduledAt of [-1,1.5,'2026-10-20',null,9e15])assert.equal((await request('','POST',{...body(),scheduledAt})).status,400);
+    const planned=Date.now()+3600000;
+    const payload={...body(),scheduledAt:planned},created=await request('','POST',payload);assert.equal(created.status,201);const id=created.body.todo.id;assert.equal(created.body.todo.scheduledAt,planned);
+    assert.equal((await request('','POST',{...payload,scheduledAt:planned+60000})).status,400);
     assert.equal((await request('','POST',payload)).body.todo.id,id);
     assert.equal((await request('','POST',{...payload,prompt:'changed'})).status,400);
     assert.equal((await request()).body.todos.length,1);assert.equal(db.prepare('SELECT count(*) AS n FROM qq_codex_jobs').get().n,0);
@@ -32,6 +35,8 @@ test('Todo API enforces owner/project/group boundaries, action permissions, CSRF
     assert.equal((await request('/'+id,'DELETE',undefined,{userId:'other',permissions:['*']})).status,404);
     assert.equal((await request('/'+id,'PATCH',{...payload,title:'new',autoRun:false})).status,200);
     assert.equal((await request('/'+id+'/resume','POST',{})).body.todo.state,'pending');
+    assert.equal((await request()).body.todos[0].scheduledAt,planned);
+    assert.equal((await request('/'+id,'PATCH',{...payload,scheduledAt:0})).body.todo.scheduledAt,0);
     await request('/'+id+'/pause','POST',{});assert.equal((await request()).body.todos[0].state,'paused');
     const second=(await request('','POST',body())).body.todo;
     assert.equal((await request('/'+second.id+'/move','POST',{direction:'up'})).status,200);assert.equal((await request()).body.todos[0].id,second.id);

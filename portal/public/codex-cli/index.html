@@ -30,8 +30,8 @@
     </div>
   </section>
   <section id="todos-view" class="todo-shell" data-layout-container aria-label="Todo 指令待办" hidden>
-    <header class="todo-heading"><div><p class="eyebrow">PLAN / QUEUE / EXECUTE</p><h1>指令待办</h1><p class="muted">先安排好要做的事。额度恢复后，Codex 会按顺序自动执行。</p></div><button id="todo-new" class="btn primary" type="button" hidden>＋ 新增待办</button></header>
-    <div class="todo-guide"><strong>关闭网页，待办仍会继续等待和执行。</strong><p>自动任务在普通 Codex 额度可用时进入队列；执行中耗尽额度会等待恢复后继续。普通失败会阻止后续待办，检查后可重试或暂停并跳过。结果保留在关联会话中。</p></div>
+    <header class="todo-heading"><div><p class="eyebrow">PLAN / QUEUE / EXECUTE</p><h1>指令待办</h1><p class="muted">先安排好要做的事。可指定执行时间，到点且额度可用后自动执行。</p></div><button id="todo-new" class="btn primary" type="button" hidden>＋ 新增待办</button></header>
+    <div class="todo-guide"><strong>关闭网页，待办仍会继续等待和执行。</strong><p>自动任务到达计划时间且普通 Codex 额度可用时进入队列；未到点的待办不会阻挡其他已到点的任务，同一账号已到点的待办按列表顺序执行。执行中耗尽额度会等待恢复后继续。普通失败会阻止后续待办，检查后可重试或暂停并跳过。结果保留在关联会话中。</p></div>
     <div class="todo-toolbar"><p id="todo-summary" class="muted">正在读取待办…</p><label for="todo-filter">显示</label><select id="todo-filter"><option value="active">待处理</option><option value="all">全部</option><option value="done">已完成</option></select></div>
     <p id="todo-notice" class="notice" role="status" aria-live="polite"></p><div id="todo-list" class="todo-list"></div>
   </section>
@@ -39,7 +39,8 @@
     <div class="todo-form-grid"><div><label for="todo-project">项目</label><select id="todo-project" required></select></div><div><label for="todo-conversation">执行会话</label><select id="todo-conversation"><option value="">执行时新建独立会话</option></select></div></div>
     <label for="todo-prompt">要交给 Codex 的指令</label><textarea id="todo-prompt" maxlength="20000" rows="6" required placeholder="写清目标、约束和完成标准…"></textarea>
     <div class="todo-form-grid"><div><label for="todo-model">模型</label><select id="todo-model"><option value="">执行时继承默认模型</option></select></div><div><label for="todo-effort">推理强度</label><select id="todo-effort"><option value="">默认</option></select></div></div>
-    <label class="todo-auto"><input id="todo-auto" type="checkbox" checked>额度可用时，按顺序自动执行</label><p class="hint">取消勾选则仅保存。开始执行前可以编辑指令和调整顺序；执行后可在关联会话中检查结果。</p>
+    <label for="todo-scheduled">最早执行时间（北京时间，可选）</label><input id="todo-scheduled" type="datetime-local" max="2100-12-31T23:59"><p class="hint">留空则尽快执行。到点后仍需等待空闲和可用额度；过去的时间按已到点处理。</p>
+    <label class="todo-auto"><input id="todo-auto" type="checkbox" checked>到达执行时间且额度可用时，按顺序自动执行</label><p class="hint">取消勾选则仅保存。开始执行前可以编辑指令和调整顺序；执行后可在关联会话中检查结果。</p>
     <p id="todo-form-error" class="todo-error" role="alert"></p><div class="dialog-actions"><button id="todo-cancel" class="btn ghost" type="button">取消</button><button id="todo-save" class="btn primary" type="submit">保存待办</button></div></form></dialog>
   <dialog id="new-dialog" class="chat-dialog"><form id="new-form"><h2>新建会话</h2><p class="hint">选择已授权的项目，Codex 将使用该项目的开发工作区。</p><label for="new-project">项目</label><select id="new-project" required></select><div class="dialog-actions"><button id="cancel-new" class="btn ghost" type="button">取消</button><button id="create-chat" class="btn primary" type="submit">创建会话</button></div></form></dialog>
   <dialog id="rename-dialog" class="chat-dialog"><form id="rename-form"><h2>重命名会话</h2><label for="new-title">会话标题</label><input id="new-title" maxlength="80" required><div class="dialog-actions"><button id="cancel-rename" class="btn ghost" type="button">取消</button><button id="save-title" class="btn primary" type="submit">保存</button></div></form></dialog>
@@ -67,6 +68,6 @@
     <section id="usage-panel" class="panel usage-panel" hidden><div class="section-heading"><span class="section-number">03</span><div><h2>账户额度</h2><p>服务器当前登录账号的实时额度，重置时间使用北京时间。</p></div></div><pre id="usage">正在读取额度…</pre></section>
     <footer id="updated" class="muted"></footer>
   </main>
-  <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script><script src="/vendor/marked.js"></script><script src="/vendor/purify.js"></script><script src="/codex-cli/chat.js?v=2"></script><script src="/codex-cli/todos.js?v=1"></script><script src="/codex-cli/app.js?v=2"></script>
+  <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script><script src="/vendor/marked.js"></script><script src="/vendor/purify.js"></script><script src="/codex-cli/chat.js?v=2"></script><script src="/codex-cli/todos.js?v=2"></script><script src="/codex-cli/app.js?v=2"></script>
 </body>
 </html>

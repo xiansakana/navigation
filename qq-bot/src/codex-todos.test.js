@@ -9,6 +9,17 @@ const catalog={models:[{id:'test',efforts:['low','high'],defaultEffort:'low'}],d
 const usage=(used=20,reset=Date.now()+120000)=>({rateLimitsByLimitId:{codex:{limitId:'codex',primary:{usedPercent:used,windowDurationMins:300,resetsAt:reset/1000},secondary:{usedPercent:20,windowDurationMins:10080,resetsAt:(reset+86400000)/1000}}}});
 const values=(title='one',extra={})=>({title,project:'navigation',prompt:'Do '+title,runtime:{model:'test',effort:'low'},autoRun:true,...extra});
 
+test('existing todos migrate with immediate scheduling and repeated initialization preserves plans',()=>{
+  const db=new Database(':memory:');
+  try{
+    const store=createCodexStore(db),row=store.todos.create('u','12345678',values());
+    db.exec('ALTER TABLE codex_todos DROP COLUMN scheduled_at');
+    const migrated=createCodexStore(db);assert.equal(migrated.todos.get('u',row.id).scheduled_at,0);
+    migrated.todos.edit('u',row.id,values('one',{scheduledAt:Date.now()+3600000}));
+    assert.equal(createCodexStore(db).todos.get('u',row.id).scheduled_at,migrated.todos.get('u',row.id).scheduled_at);
+  }finally{db.close();}
+});
+
 test('quota gate uses the ordinary bucket, checks all windows and never assumes a timestamp means reset',()=>{
   const now=Date.now(),snapshot=usage(100,now+120000);snapshot.rateLimitsByLimitId.reserve={primary:{usedPercent:0}};
   assert.equal(quotaGate(snapshot,now).available,false);assert.equal(quotaGate(snapshot,now).resetAt,now+120000);
@@ -90,5 +101,35 @@ test('dispatch rechecks edited payloads and priorities after async quota/catalog
     assert.equal(db.prepare('SELECT count(*) AS n FROM qq_codex_jobs').get().n,0);
     await createTodoScheduler({store,getConfig:()=>({}),authorize:()=>true,readUsage:async()=>usage(),readCatalog:async()=>catalog}).tick();
     assert.equal(store.claim().todo_id,second.id);
+  }finally{db.close();}
+});
+
+
+test('scheduled work waits durably, skips future predecessors, checks quota at due time and survives pause/resume',async()=>{
+  const db=new Database(':memory:'),store=createCodexStore(db);let now=Date.now(),reads=0,used=20;
+  const future=now+3600000;
+  const first=store.todos.create('u','12345678',values('future',{scheduledAt:future}));
+  const make=()=>createTodoScheduler({store,getConfig:()=>({}),authorize:()=>true,readCatalog:async()=>catalog,readUsage:async()=>{reads++;return usage(used,now+120000);},now:()=>now});
+  try{
+    await make().tick();assert.equal(reads,0);assert.equal(createCodexStore(db).todos.get('u',first.id).scheduled_at,future);
+    store.todos.pause('u',first.id);store.todos.resume('u',first.id);await make().tick();assert.equal(reads,0);
+    const second=store.todos.create('u','12345678',values('ready'));
+    await make().tick();assert.equal(store.todos.get('u',second.id).state,'queued');assert.equal(store.todos.get('u',first.id).state,'pending');
+    const job=store.claim();store.finish(job,{state:'succeeded',result:'done'});
+    now=future-1;await make().tick();assert.equal(reads,1);
+    now=future;used=100;await make().tick();assert.equal(store.todos.get('u',first.id).state,'waiting_quota');
+    now+=180000;used=20;await make().tick();assert.equal(store.claim().todo_id,first.id);
+  }finally{db.close();}
+});
+
+test('quota deferral does not touch future plans and async schedule edits cannot start early',async()=>{
+  const db=new Database(':memory:'),store=createCodexStore(db);const now=Date.now(),future=now+3600000;
+  try{
+    const a=store.todos.create('u','12345678',values('ready')),b=store.todos.create('u','12345678',values('future',{scheduledAt:future}));
+    store.todos.defer('quota',now+60000,0,now);assert.equal(store.todos.get('u',b.id).state,'pending');
+    store.todos.edit('u',a.id,values('ready'));
+    await createTodoScheduler({store,getConfig:()=>({}),authorize:()=>true,readUsage:async()=>usage(),readCatalog:async()=>{store.todos.edit('u',a.id,values('ready',{scheduledAt:future}));return catalog;},now:()=>now}).tick();
+    assert.equal(db.prepare('SELECT count(*) AS n FROM qq_codex_jobs').get().n,0);
+    store.todos.edit('u',a.id,values('ready',{scheduledAt:0}));assert.equal(store.todos.due(now)[0].id,a.id);
   }finally{db.close();}
 });

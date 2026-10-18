@@ -26,6 +26,7 @@ export function createTodoStore(db, conversations) {
     created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,UNIQUE(user_id,request_id));
     CREATE INDEX IF NOT EXISTS codex_todos_owner ON codex_todos(user_id,sort_order);
     CREATE INDEX IF NOT EXISTS codex_todos_due ON codex_todos(state,next_check_at);`);
+  db.transaction(()=>{if(!db.prepare('PRAGMA table_info(codex_todos)').all().some(c=>c.name==='scheduled_at'))db.exec('ALTER TABLE codex_todos ADD COLUMN scheduled_at INTEGER NOT NULL DEFAULT 0');}).immediate();
   const get=(uid,id)=>db.prepare('SELECT t.*,j.state AS job_state FROM codex_todos t LEFT JOIN qq_codex_jobs j ON j.id=t.job_id AND j.user_id=t.user_id WHERE t.user_id=? AND t.id=?').get(uid,id);
   return {
     get,
@@ -46,21 +47,21 @@ export function createTodoStore(db, conversations) {
     list(uid) {this.reconcile();return db.prepare('SELECT t.*,j.state AS job_state FROM codex_todos t LEFT JOIN qq_codex_jobs j ON j.id=t.job_id AND j.user_id=t.user_id WHERE t.user_id=? ORDER BY t.sort_order,t.created_at').all(uid);},
     create(uid,qq,values) {
       return db.transaction(()=>{
-        const requestId=values.requestId || crypto.randomUUID(),fingerprint=crypto.createHash('sha256').update(JSON.stringify([values.project,values.title,values.prompt,values.runtime,values.conversationId || '',values.autoRun])).digest('hex');
+        const requestId=values.requestId || crypto.randomUUID(),fingerprint=crypto.createHash('sha256').update(JSON.stringify([values.project,values.title,values.prompt,values.runtime,values.conversationId || '',values.autoRun,...(values.scheduledAt?[values.scheduledAt]:[])])).digest('hex');
         const previous=db.prepare('SELECT id,payload_hash FROM codex_todos WHERE user_id=? AND request_id=?').get(uid,requestId);
         if(previous){if(previous.payload_hash!==fingerprint)throw new Error('此请求已保存其他内容，请刷新列表后再新增');return get(uid,previous.id);}
         if(db.prepare('SELECT count(*) AS n FROM codex_todos WHERE user_id=?').get(uid).n>=200)throw new Error('最多保留200条待办，请先删除不再需要的记录');
         const id=crypto.randomUUID(),now=Date.now(),order=db.prepare('SELECT COALESCE(MAX(sort_order),0)+1 AS n FROM codex_todos WHERE user_id=?').get(uid).n;
-        db.prepare('INSERT INTO codex_todos(id,user_id,qq_id,project,title,prompt,request_id,payload_hash,runtime_json,conversation_id,state,sort_order,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(id,uid,qq,values.project,values.title,values.prompt,requestId,fingerprint,JSON.stringify(values.runtime),values.conversationId || '',values.autoRun?'pending':'paused',order,now,now);
+        db.prepare('INSERT INTO codex_todos(id,user_id,qq_id,project,title,prompt,request_id,payload_hash,runtime_json,conversation_id,state,sort_order,created_at,updated_at,scheduled_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(id,uid,qq,values.project,values.title,values.prompt,requestId,fingerprint,JSON.stringify(values.runtime),values.conversationId || '',values.autoRun?'pending':'paused',order,now,now,values.scheduledAt || 0);
         return get(uid,id);
       }).immediate();
     },
     edit(uid,id,values) {
       return db.transaction(()=>{
         const row=get(uid,id);if(!row||row.job_id||!['pending','waiting_quota','paused'].includes(row.state))throw new Error('仅尚未开始执行的待办可以编辑指令');
-        db.prepare("UPDATE codex_todos SET project=?,title=?,prompt=?,runtime_json=?,conversation_id=?,state=?,next_check_at=0,reset_at=0,note='',updated_at=? WHERE user_id=? AND id=?")
-          .run(values.project,values.title,values.prompt,JSON.stringify(values.runtime),values.conversationId || '',values.autoRun?'pending':'paused',Date.now(),uid,id);
+        db.prepare("UPDATE codex_todos SET project=?,title=?,prompt=?,runtime_json=?,conversation_id=?,state=?,scheduled_at=?,next_check_at=0,reset_at=0,note='',updated_at=? WHERE user_id=? AND id=?")
+          .run(values.project,values.title,values.prompt,JSON.stringify(values.runtime),values.conversationId || '',values.autoRun?'pending':'paused',values.scheduledAt || 0,Date.now(),uid,id);
         return get(uid,id);
       }).immediate();
     },
@@ -90,14 +91,14 @@ export function createTodoStore(db, conversations) {
         if(other){const set=db.prepare('UPDATE codex_todos SET sort_order=? WHERE user_id=? AND id=?');set.run(other.sort_order,uid,id);set.run(row.sort_order,uid,other.id);}
       }).immediate();return get(uid,id);
     },
-    due(now) {this.reconcile(now);return db.prepare("SELECT t.* FROM codex_todos t WHERE t.state IN ('pending','waiting_quota') AND t.next_check_at<=? AND NOT EXISTS(SELECT 1 FROM codex_todos p WHERE p.user_id=t.user_id AND p.sort_order<t.sort_order AND p.state IN ('pending','waiting_quota','queued','running','failed')) ORDER BY t.sort_order,t.created_at LIMIT 20").all(now);},
-    defer(reason,next,reset=0,now=Date.now()) {db.prepare("UPDATE codex_todos SET state='waiting_quota',note=?,next_check_at=?,reset_at=?,updated_at=? WHERE state IN ('pending','waiting_quota') AND next_check_at<=?").run(reason,next,reset,now,now);},
+    due(now) {this.reconcile(now);return db.prepare("SELECT t.* FROM codex_todos t WHERE t.state IN ('pending','waiting_quota') AND t.next_check_at<=? AND t.scheduled_at<=? AND NOT EXISTS(SELECT 1 FROM codex_todos p WHERE p.user_id=t.user_id AND p.sort_order<t.sort_order AND p.state IN ('pending','waiting_quota','queued','running','failed') AND (p.state NOT IN ('pending','waiting_quota') OR p.scheduled_at<=?)) ORDER BY t.sort_order,t.created_at LIMIT 20").all(now,now,now);},
+    defer(reason,next,reset=0,now=Date.now()) {db.prepare("UPDATE codex_todos SET state='waiting_quota',note=?,next_check_at=?,reset_at=?,updated_at=? WHERE state IN ('pending','waiting_quota') AND next_check_at<=? AND scheduled_at<=?").run(reason,next,reset,now,now,now);},
     fail(row,note,state='failed') {db.prepare("UPDATE codex_todos SET state=?,note=?,updated_at=? WHERE id=? AND user_id=? AND state IN ('pending','waiting_quota')").run(state,note,Date.now(),row.id,row.user_id);},
     promote(row,runtime,now,includeQQ=true) {
       return db.transaction(()=>{
-        const fresh=get(row.user_id,row.id);if(!fresh||!['pending','waiting_quota'].includes(fresh.state)||fresh.next_check_at>now)return null;
-        if(['project','title','prompt','runtime_json','conversation_id','sort_order','updated_at'].some(key=>fresh[key]!==row[key]))return null;
-        if(db.prepare("SELECT 1 FROM codex_todos WHERE user_id=? AND sort_order<? AND state IN ('pending','waiting_quota','queued','running','failed') LIMIT 1").get(row.user_id,fresh.sort_order))return null;
+        const fresh=get(row.user_id,row.id);if(!fresh||!['pending','waiting_quota'].includes(fresh.state)||fresh.next_check_at>now||fresh.scheduled_at>now)return null;
+        if(['project','title','prompt','runtime_json','conversation_id','sort_order','scheduled_at','updated_at'].some(key=>fresh[key]!==row[key]))return null;
+        if(db.prepare("SELECT 1 FROM codex_todos WHERE user_id=? AND sort_order<? AND state IN ('pending','waiting_quota','queued','running','failed') AND (state NOT IN ('pending','waiting_quota') OR scheduled_at<=?) LIMIT 1").get(row.user_id,fresh.sort_order,now))return null;
         if(db.prepare("SELECT 1 FROM qq_codex_jobs WHERE state='running' OR (state='queued' AND "+(includeQQ?'1':"origin='web'")+") LIMIT 1").get())return null;
         let conversation=fresh.conversation_id&&conversations.get(row.user_id,fresh.conversation_id);
         if(!conversation)conversation=conversations.create(row.user_id,row.project,('Todo · '+row.title).slice(0,80));

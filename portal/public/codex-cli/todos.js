@@ -19,24 +19,25 @@
   }
   async function action(row,name,method='POST',body={}){
     if(mutating)return;mutating=true;render();
-    try{await api('/'+row.id+(name?'/'+name:''),method,body);notice(name==='pause'?'已暂停，正在执行的任务将停止。':name==='resume'?'已启用，额度可用时自动执行。':'已保存。');await load(true);}
+    try{await api('/'+row.id+(name?'/'+name:''),method,body);notice(name==='pause'?'已暂停，正在执行的任务将停止。':name==='resume'?'已启用，到达计划时间且额度可用后自动执行。':'已保存。');await load(true);}
     catch(error){notice(error.message,true);}finally{mutating=false;render();}
   }
   function button(text,callback){const node=el('button',text,'btn ghost');node.type='button';node.disabled=mutating;node.onclick=callback;return node;}
   function render(){
     if(!state)return;
     const p=state.permissions,filter=$('todo-filter').value;
-    const snapshot=JSON.stringify([state.todos,p,filter,mutating]);if(snapshot===lastRender)return;lastRender=snapshot;
+    const snapshot=JSON.stringify([state.todos,p,filter,mutating,state.todos.map(row=>row.scheduledAt>Date.now())]);if(snapshot===lastRender)return;lastRender=snapshot;
     const expanded=new Set([...$('todo-list').querySelectorAll('.todo-card')].filter(card=>card.querySelector('details')?.open).map(card=>card.dataset.id));
     const rows=state.todos.filter(row=>filter==='all'||(filter==='done'?row.state==='succeeded':!['succeeded','cancelled'].includes(row.state)));
     const count=key=>state.todos.filter(row=>key.includes(row.state)).length;
     $('todo-summary').textContent=`${count(['pending','waiting_quota','paused'])} 条待办 · ${count(['queued','running'])} 条执行中 · ${count(['succeeded'])} 条完成 · ${count(['failed'])} 条需检查`;
     $('todo-new').hidden=!p.edit;$('todo-new').disabled=mutating;
     const cards=rows.map((row,index)=>{
-      const card=el('article',undefined,'todo-card'),heading=el('div',undefined,'todo-card-heading'),info=el('div'),status=el('span',row.state==='paused'&&['queued','running'].includes(row.jobState)?'正在停止':labels[row.state],'todo-state state-'+row.state);
+      const card=el('article',undefined,'todo-card'),heading=el('div',undefined,'todo-card-heading'),info=el('div'),status=el('span',row.state==='paused'&&['queued','running'].includes(row.jobState)?'正在停止':row.state==='pending'&&row.scheduledAt>Date.now()?'等待定时':labels[row.state],'todo-state state-'+row.state);
       card.dataset.id=row.id;info.append(el('small',String(index+1).padStart(2,'0')+' / '+row.project,'todo-number'),el('h2',row.title));heading.append(info,status);card.append(heading);
       const details=el('details',undefined,'todo-instruction');details.open=expanded.has(row.id);details.append(el('summary','查看指令'),el('p',row.prompt));card.append(details);
       card.append(el('p',(row.runtime.model || '执行时继承默认模型')+' · '+(row.runtime.effort || '默认强度')+(row.attempts?' · 已执行 '+row.attempts+' 轮':''),'todo-runtime'));
+      if(row.scheduledAt)card.append(el('p','最早执行：'+time(row.scheduledAt)+'（北京时间）','todo-schedule'));
       if(row.note)card.append(el('p',row.note,'todo-note'));
       if(row.state==='waiting_quota')card.append(el('p',(row.resetAt?'预计重置：'+time(row.resetAt)+' · ':'')+'下次复查：'+time(row.nextCheckAt)+'（北京时间）','todo-schedule'));
       const actions=el('div',undefined,'todo-actions'),active=['queued','running'].includes(row.jobState),editable=!row.jobId&&['pending','waiting_quota','paused'].includes(row.state);
@@ -63,6 +64,7 @@
   }
   function open(row){
     editing=row?.id || '';formRequest=crypto.randomUUID();$('todo-dialog-title').textContent=editing?'编辑待办':'新增待办';$('todo-form-error').textContent='';
+    $('todo-scheduled').value=row?.scheduledAt?new Date(row.scheduledAt+8*3600000).toISOString().slice(0,16):'';
     $('todo-title').value=row?.title || '';$('todo-prompt').value=row?.prompt || '';
     choices($('todo-project'),state.projects.map(value=>({value,label:value})),row?.project || state.projects[0]);conversations(row?.conversationId);
     choices($('todo-model'),[{value:'',label:'执行时继承默认模型'},...(catalog?.models || []).map(m=>({value:m.id,label:m.id}))],row?.runtime.model || '');efforts(row?.runtime.effort);
@@ -72,7 +74,9 @@
   $('todo-form').onsubmit=async event=>{
     event.preventDefault();$('todo-save').disabled=true;$('todo-form-error').textContent='';
     try{
-      await api(editing?'/'+editing:'',editing?'PATCH':'POST',{title:$('todo-title').value,project:$('todo-project').value,prompt:$('todo-prompt').value,conversationId:$('todo-conversation').value,model:$('todo-model').value,effort:$('todo-effort').value,autoRun:$('todo-auto').checked,requestId:formRequest});
+      const scheduledAt=$('todo-scheduled').value?Date.parse($('todo-scheduled').value+':00+08:00'):0;
+      if(!Number.isSafeInteger(scheduledAt)||scheduledAt<0)throw new Error('请选择有效的执行时间');
+      await api(editing?'/'+editing:'',editing?'PATCH':'POST',{title:$('todo-title').value,project:$('todo-project').value,prompt:$('todo-prompt').value,conversationId:$('todo-conversation').value,model:$('todo-model').value,effort:$('todo-effort').value,autoRun:$('todo-auto').checked,requestId:formRequest,scheduledAt});
       $('todo-dialog').close();notice('待办已保存。');await load(true);
     }catch(error){$('todo-form-error').textContent=error.message;}finally{$('todo-save').disabled=false;}
   };
