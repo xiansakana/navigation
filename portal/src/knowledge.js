@@ -112,10 +112,15 @@ export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = 
     if (route === '/package' && method === 'GET') return sendWorkerPackage(res);
     if (route === '/release' && method === 'GET') { const { version, sha256, bytes } = knowledgeWorkerPackage(); return json(res, 200, { ok: true, version, sha256, bytes }); }
     if (route === '/heartbeat' && method === 'POST') { const raw = await body(req, 4096); store.heartbeatWorker(uid, device ? { ...raw, workerId: device.id, label: device.label } : raw); return json(res, 200, { ok: true }); }
+    if (route === '/local-input' && method === 'POST') {
+      const raw = await body(req, 4096), workerId = device?.id || raw.workerId;
+      if (raw.action === 'forget') { store.localInputs.forget(uid, raw.documentId, workerId); return json(res, 200, { ok: true }); }
+      return json(res, 200, { ok: true, ...store.localInputs.verify(uid, raw.documentId, workerId, raw.ticket, raw.sha256) });
+    }
     if (route === '/claim' && method === 'POST') {
       const raw = await body(req, 4096);
       const backends = Array.isArray(raw.backends) ? raw.backends.filter(b => ['codex', 'openai'].includes(b)) : [];
-      return json(res, 200, { ok: true, job: store.claim(uid, backends, device?.id || (typeof raw.workerId === 'string' ? raw.workerId : '')) });
+      return json(res, 200, { ok: true, job: store.claim(uid, backends, device?.id || (typeof raw.workerId === 'string' ? raw.workerId : ''), Array.isArray(raw.localDocuments) ? raw.localDocuments.slice(0, 200).filter(id => /^[a-f0-9]{32}$/.test(id)) : []) });
     }
     const match = /^\/jobs\/([a-f0-9]{32})\/(source|progress|complete|fail|codex)$/.exec(route);
     if (!match) return json(res, 404, { ok: false, error: '工作器接口不存在' });
@@ -153,7 +158,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
   res.setHeader('Cache-Control', 'no-store');
   if (!canKnowledge(session)) return json(res, 403, { ok: false, error: '请登录并获取知识库权限' });
   const route = url.pathname.slice('/api/knowledge'.length), method = req.method;
-  const document = /^\/documents\/([a-f0-9]{32})(?:\/(parts|complete|retry|storage-retry|source|export|frames)(?:\/([a-z0-9.-]+))?)?$/.exec(route);
+  const document = /^\/documents\/([a-f0-9]{32})(?:\/(parts|complete|local-input|retry|storage-retry|source|export|frames)(?:\/([a-z0-9.-]+))?)?$/.exec(route);
   const action = route === '/settings' ? method === 'GET' ? 'view' : 'settings:edit'
     : route === '/worker-package' && method === 'GET' ? 'devices:install'
     : route === '/worker-install' && method === 'POST' ? 'devices:install'
@@ -163,7 +168,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
     : route === '/worker-token' && method === 'POST' ? 'worker:edit'
       : route === '/documents' ? method === 'GET' ? 'view' : 'upload:edit'
         : document ? method === 'GET' ? document[2] === 'export' ? 'export:view' : 'view'
-          : method === 'DELETE' ? 'delete:edit' : document[2] === 'storage-retry' ? 'storage:edit' : document[2] === 'retry' ? 'process:edit'
+          : method === 'DELETE' ? 'delete:edit' : document[2] === 'local-input' ? 'local-input:edit' : document[2] === 'storage-retry' ? 'storage:edit' : document[2] === 'retry' ? 'process:edit'
             : document[2] ? 'upload:edit' : 'notes:edit' : null;
   if (!action) return json(res, 404, { ok: false, error: '知识库接口不存在' });
   if (!canKnowledge(session, action)) return json(res, 403, { ok: false, error: '无权执行此知识库操作' });
@@ -222,6 +227,12 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
       const item = store.get(uid, id);
       if (!item) return json(res, 404, { ok: false, error: '笔记不存在' });
       const directory = knowledgeDirectory(id);
+      if (operation === 'local-input' && method === 'POST') {
+        if (!canKnowledge(session, 'upload:edit') || !canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要上传和生成笔记权限' });
+        const input = await body(req, 1024);
+        if (input.cancel) { store.localInputs.remove(uid, id); return json(res, 200, { ok: true }); }
+        return json(res, 200, { ok: true, ...store.localInputs.offer(uid, id, input.workerId) });
+      }
       if (!operation && method === 'GET') return json(res, 200, { ok: true, document: visible(item) });
       if (!operation && method === 'PUT') {
         if (item.status === 'processing') return json(res, 409, { ok: false, error: '请等待当前任务完成后编辑' });
@@ -251,10 +262,11 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
         const parts = store.parts(uid, id), count = Math.ceil(item.bytes / CHUNK_BYTES);
         if (parts.length !== count || parts.some((p, i) => p.part !== i + 1) || parts.reduce((n, p) => n + p.bytes, 0) !== item.bytes) throw new Error('视频尚未上传完整');
         const target = await fsp.open(path.join(directory, 'source.tmp'), 'w');
-        try { for (const p of parts) for await (const chunk of fs.createReadStream(path.join(directory, 'part-' + p.part))) await target.writeFile(chunk); }
+        const digest = crypto.createHash('sha256');
+        try { for (const p of parts) for await (const chunk of fs.createReadStream(path.join(directory, 'part-' + p.part))) { digest.update(chunk); await target.writeFile(chunk); } }
         finally { await target.close(); }
         await fsp.rename(path.join(directory, 'source.tmp'), path.join(directory, 'source'));
-        store.enqueue(uid, id);
+        store.enqueue(uid, id, digest.digest('hex'));
         for (const p of parts) await fsp.rm(path.join(directory, 'part-' + p.part), { force: true });
         return json(res, 202, { ok: true, document: store.get(uid, id) });
       }

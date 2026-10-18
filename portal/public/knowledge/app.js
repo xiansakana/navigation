@@ -2,6 +2,7 @@ import { uploadParts } from './upload.js?v=1';
 import { createDevicePanel } from './devices.js?v=3';
 import { createSourcePlayer } from './source.js?v=1';
 import { bindVideoDrop } from './drop.js?v=1';
+import { sendLocalInput } from './local-input.js?v=1';
 const $ = id => document.getElementById(id);
 const state = { permissions: [], documents: [], current: null, settings: null, editing: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
@@ -36,7 +37,7 @@ function renderList() {
   if (!state.documents.length) { const p = document.createElement('p'); p.className = 'kb-hint'; p.textContent = '还没有符合条件的内容。上传视频后会出现在这里。'; list.append(p); }
   for (const d of state.documents) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'kb-document' + (state.current?.id === d.id ? ' active' : '');
-    button.innerHTML = `<strong>${escape(d.title)}</strong><small>${escape(d.topic || '未分类')} · ${escape(d.storage?.provider === '115' && d.storage.state !== 'ready' ? ({ waiting: '等待上传', pending: '等待保存至115', uploading: '正在保存至115', verifying: '校验原视频', verified: '清理临时原片', failed: '115保存待重试' })[d.storage.state] || d.stage : d.stage)}${d.status === 'processing' ? ' ' + d.progress + '%' : ''}</small><p>${escape(d.preview || d.originalName)}</p>`;
+    button.innerHTML = `<strong>${escape(d.title)}</strong><small>${escape(d.topic || '未分类')} · ${escape(d.status === 'queued' && d.storage?.provider === '115' && d.storage.state !== 'ready' ? ({ waiting: '等待上传', pending: '等待保存至115', uploading: '正在保存至115', verifying: '校验原视频', verified: '清理临时原片', failed: '115保存待重试' })[d.storage.state] || d.stage : d.stage)}${d.status === 'processing' ? ' ' + d.progress + '%' : ''}</small><p>${escape(d.preview || d.originalName)}</p>`;
     button.addEventListener('click', () => open(d.id).catch(error)); list.append(button);
   }
   show('more', state.documents.length < state.total);
@@ -136,16 +137,18 @@ async function upload(event) {
       item = result.document; state.resume = item;
     }
     const { parts, chunkBytes } = await api('/documents/' + item.id + '/parts');
+    const localTransfer = can('local-input:edit') ? sendLocalInput({ file, documentId: item.id, send, status: value => text('local-input-status', value) }) : Promise.resolve(false);
     const transfer = await uploadParts({ file, parts, chunkBytes, url: `/api/knowledge/documents/${item.id}/parts/`, onProgress(p) {
       const progress = Math.min(99, Math.floor(p.loaded / p.total * 100));
       $('upload-progress').value = progress;
       text('upload-status', `上传到服务器 ${progress}% · ${(p.speed / 1024 ** 2).toFixed(2)} MB/s · ${p.remaining === null ? '正在测算剩余时间' : p.loaded === p.total ? '等待服务器确认' : '预计剩余 ' + time(Math.ceil(p.remaining))} · 已用 ${time(p.elapsed)}`);
     } });
     text('upload-status', '分片已传完，正在合并视频…');
+    const localReady = await localTransfer;
     const mergeStarted = performance.now();
     await send('/documents/' + item.id + '/complete', 'POST'); state.resume = null;
     const elapsed = `本次上传用时 ${time(transfer.elapsedMs / 1000)}，合并用时 ${time((performance.now() - mergeStarted) / 1000)}。`;
-    text('message', elapsed + (state.settings.storage?.provider === '115' ? '接下来保存至115并校验，之后自动生成笔记。' : '视频已保存，工作器将按队列生成笔记。')); $('upload-progress').value = 100; text('upload-status', '上传完成'); show('upload-panel', false); $('upload-form').reset();
+    text('message', elapsed + (localReady ? '已启用本机原视频处理，无需等待115归档或下载；归档在后台独立继续。' : state.settings.storage?.provider === '115' ? '接下来保存至115并校验，之后自动生成笔记。' : '视频已保存，工作器将按队列生成笔记。')); $('upload-progress').value = 100; text('upload-status', '上传完成'); show('upload-panel', false); $('upload-form').reset();
     await load(); await open(item.id);
   } catch (e) { error(e); text('upload-status', '上传未完成，可重新提交继续上传。'); await load().catch(() => {}); }
   finally { state.uploading = false; $('upload-submit').disabled = false; $('video-file').disabled = false; }

@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { downloadVideo } from '../portal/src/knowledge-download.js';
+import { startLocalInputServer, localDocuments, verifyLocalInput, pruneLocalInputs } from '../portal/src/knowledge-local-input.js';
 import { runProcess, summarizeVideo, modelConfiguration, resolveCodexBinary } from '../portal/src/knowledge-model.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -80,7 +81,16 @@ async function processJob(job) {
     console.log(new Date().toISOString(), '领取任务', job.id, job.backend);
     const evidenceFile = path.join(directory, 'evidence.json');
     if (!fs.existsSync(evidenceFile)) {
-      const input = await download(job, directory, signal);
+      let input;
+      if (job.localInput) {
+        await update('校验本机原视频 · 无需下载', 2);
+        if (!await verifyLocalInput(workRoot, job)) {
+          await request('/local-input', { data: { action: 'forget', documentId: job.id, workerId: config.deviceId || workerId } });
+          throw new Error('本机原视频缓存失效，归档完成后可重试');
+        }
+        input = path.join(directory, 'source');
+        console.log(new Date().toISOString(), '直接使用本机原视频', job.id);
+      } else input = await download(job, directory, signal);
       const args = [path.join(repo, 'portal/workers/video_evidence.py'), '--input', input, '--output', directory,
         '--ffmpeg', config.ffmpeg || 'ffmpeg', '--model', config.asr?.model || 'small', '--device', config.asr?.device || 'cpu',
         '--threads', String(config.asr?.threads || 2)];
@@ -117,17 +127,27 @@ async function processJob(job) {
   } finally { clearInterval(heartbeat); activeController = null; }
 }
 let cachedCapabilities = {}, checkedAt = 0;
+let localServer;
+if (process.platform === 'win32' && config.localUpload !== false) {
+  try {
+    localServer = await startLocalInputServer({ portalOrigin: portal.origin, workRoot, workerId: config.deviceId || workerId,
+      ready: () => cachedCapabilities.media?.ready && cachedCapabilities.media.detail === 'cuda',
+      authorize: data => request('/local-input', { data: { ...data, workerId: config.deviceId || workerId } }) });
+  } catch { console.error('本机直送端口不可用，将继续使用服务器下载流程'); }
+}
 let updateCheckedAt = Date.now();
+let cacheCheckedAt = 0;
 console.log('知识库工作器已启动：', portal.origin, '配置：', configPath);
 while (!stopped) {
   try {
     if (Date.now() - checkedAt > 60000) { cachedCapabilities = await capabilities(); checkedAt = Date.now(); }
     await request('/heartbeat', { data: { workerId, label: config.label || os.hostname(), capabilities: cachedCapabilities } });
     const backends = cachedCapabilities.media?.ready ? ['codex', 'openai'].filter(b => cachedCapabilities[b]?.ready) : [];
-    const { job } = await request('/claim', { data: { backends, workerId } });
+    const { job } = await request('/claim', { data: { backends, workerId, localDocuments: localServer ? await localDocuments(workRoot) : [] } });
     if (job) await processJob(job);
     else {
-      if (config.autoUpdate && Date.now() - updateCheckedAt > 15 * 60000) {
+      if (localServer && !localServer.isReceiving() && Date.now() - cacheCheckedAt > 3600000) { await pruneLocalInputs(workRoot); cacheCheckedAt = Date.now(); }
+      if (config.autoUpdate && !localServer?.isReceiving() && Date.now() - updateCheckedAt > 15 * 60000) {
         updateCheckedAt = Date.now();
         try {
           const release = await request('/release');
@@ -143,3 +163,4 @@ while (!stopped) {
     await sleep(10000);
   }
 }
+localServer?.close();

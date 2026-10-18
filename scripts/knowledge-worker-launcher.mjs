@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const allowed = new Set(['package.json', 'README.txt', 'worker-version.json',
   'scripts/knowledge-worker.mjs', 'scripts/start-knowledge-worker.ps1', 'scripts/install-knowledge-worker.ps1',
   'scripts/setup-knowledge-worker.ps1', 'scripts/knowledge-worker-launcher.mjs', 'scripts/knowledge-worker-pair.mjs', 'scripts/knowledge-worker-setup.cmd',
-  'portal/src/knowledge-model.js', 'portal/src/knowledge-visual-evidence.js', 'portal/src/knowledge-download.js', 'portal/workers/video_evidence.py', 'portal/workers/video_runtime.py', 'portal/workers/requirements.txt']);
+  'portal/src/knowledge-model.js', 'portal/src/knowledge-visual-evidence.js', 'portal/src/knowledge-download.js', 'portal/src/knowledge-local-input.js', 'portal/workers/video_evidence.py', 'portal/workers/video_runtime.py', 'portal/workers/requirements.txt']);
 export async function extractWorkerPackage(data, destination) {
   let offset = 0; const names = new Set();
   while (offset + 30 <= data.length && data.readUInt32LE(offset) === 0x04034b50) {

@@ -64,6 +64,27 @@ test('knowledge routes, per-action permissions, default member grants and guest 
   });
 });
 
+test('local delivery API scopes tickets to upload/process permissions and verifies the merged file hash', async () => fixture(async ({ call, store }) => {
+  const token = store.rotateToken('a'), workerId = 'a'.repeat(32), file = video(24);
+  store.heartbeatWorker('a', { workerId, capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } });
+  const created = await call('/documents', { method: 'POST', data: upload({ bytes: file.length }) });
+  const id = created.payload.document.id;
+  const route = '/documents/' + id + '/local-input';
+  const readonly = { userId: 'a', permissions: ['knowledge:view', 'knowledge:upload:edit', 'knowledge:process:edit'] };
+  assert.equal((await call(route, { method: 'POST', session: readonly, data: { workerId } })).status, 403);
+  assert.equal((await call(route, { method: 'POST', session: member('b'), data: { workerId } })).status, 404);
+  const grant = await call(route, { method: 'POST', data: { workerId } });
+  assert.equal(grant.status, 200);
+  assert.equal((await call('/worker/local-input', { method: 'POST', token, data: { workerId: 'b'.repeat(32), documentId: id, ticket: grant.payload.ticket } })).status, 400);
+  const accepted = await call('/worker/local-input', { method: 'POST', token, data: { workerId, documentId: id, ticket: grant.payload.ticket, sha256: crypto.createHash('sha256').update(file).digest('hex') } });
+  assert.equal(accepted.status, 200);
+  await call('/documents/' + id + '/parts/1', { method: 'PUT', binary: file });
+  assert.equal((await call('/documents/' + id + '/complete', { method: 'POST' })).status, 202);
+  const job = (await call('/worker/claim', { method: 'POST', token, data: { workerId, backends: ['codex'], localDocuments: [id] } })).payload.job;
+  assert.equal(job.localInput, true);
+  assert.equal(job.sourceSha256, crypto.createHash('sha256').update(file).digest('hex'));
+}));
+
 test('115 source status is private to owner and archive retry enforces its own permission', async () => fixture(async ({ call, store }) => {
   const item = store.create('a', upload());
   store.sources.add('a', item.id, '/115/private/object', 'pending');

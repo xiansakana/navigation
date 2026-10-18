@@ -3,6 +3,7 @@ import {createKnowledgeCodexCalls} from './knowledge-codex-calls.js';
 import { createSourceStore } from './knowledge-source-store.js';
 import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
 import { createKnowledgeDeviceStore } from './knowledge-devices.js';
+import { createLocalInputStore } from './knowledge-local-store.js';
 
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
@@ -45,6 +46,8 @@ export function createKnowledgeStore(db) {
       last_seen TEXT NOT NULL,label TEXT NOT NULL,capabilities_json TEXT NOT NULL,PRIMARY KEY(user_id,worker_id));`);
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'fingerprint')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''");
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'worker_id')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN worker_id TEXT NOT NULL DEFAULT ''");
+  if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'source_sha256')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN source_sha256 TEXT NOT NULL DEFAULT ''");
+  const localInputs = createLocalInputStore(db);
   const devices = createKnowledgeDeviceStore(db);
   const sources = createSourceStore(db);
   const getRow = (uid, key) => db.prepare('SELECT * FROM knowledge_documents WHERE user_id=? AND id=?').get(uid, key);
@@ -60,7 +63,7 @@ export function createKnowledgeStore(db) {
     .all(uid, new Date(Date.now() - 90000).toISOString())
     .map(r => ({ id: r.worker_id, label: r.label, lastSeen: r.last_seen, capabilities: JSON.parse(r.capabilities_json) }));
   return {
-    get, getRow, expire, sources, devices, codexCalls:createKnowledgeCodexCalls(db),
+    get, getRow, expire, sources, devices, localInputs, codexCalls:createKnowledgeCodexCalls(db),
     settings(uid) { return { backend: db.prepare('SELECT backend FROM knowledge_settings WHERE user_id=?').get(uid)?.backend || 'codex' }; },
     saveSettings(uid, backend) {
       backendName(backend);
@@ -138,26 +141,29 @@ export function createKnowledgeStore(db) {
       const uploaded = db.prepare('SELECT sum(bytes) AS n FROM knowledge_parts WHERE document_id=?').get(key).n;
       db.prepare('UPDATE knowledge_documents SET progress=?,updated_at=? WHERE id=? AND user_id=?').run(Math.floor(uploaded / getRow(uid, key).byte_size * 100), now(), key, uid);
     },
-    enqueue(uid, key) {
+    enqueue(uid, key, sha256 = '') {
       return db.transaction(() => {
         const changed = db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待工作器',progress=0,error='',updated_at=? WHERE user_id=? AND id=? AND status='uploading'").run(now(), uid, key).changes > 0;
         if (changed) sources.enqueue(uid, key);
+        if (changed && /^[a-f0-9]{64}$/.test(sha256)) db.prepare('UPDATE knowledge_documents SET source_sha256=? WHERE user_id=? AND id=?').run(sha256, uid, key);
         return changed;
       })();
     },
-    claim(uid, backends, workerId = '') {
+    claim(uid, backends, workerId = '', localDocuments = []) {
       expire(uid);
       return db.transaction(() => {
         if (db.prepare("SELECT 1 FROM knowledge_documents WHERE user_id=? AND status='processing'").get(uid)) return null;
-        const candidates = db.prepare("SELECT * FROM knowledge_documents WHERE user_id=? AND status='queued' AND NOT EXISTS (SELECT 1 FROM knowledge_sources s WHERE s.document_id=knowledge_documents.id AND s.state<>'ready') ORDER BY created_at,id").all(uid);
+        const candidates = db.prepare("SELECT * FROM knowledge_documents WHERE user_id=? AND status='queued' ORDER BY created_at,id").all(uid);
         const workers = onlineWorkers(uid);
         const gpuWorkers = workers.filter(w => w.capabilities.media?.ready && w.capabilities.media.detail === 'cuda');
-        const row = candidates.find(r => backends.includes(r.backend) &&
+        const hasLocal = r => { const local = localInputs.get(uid, r.id); return local && local.worker_id === workerId && localDocuments.includes(r.id) && r.source_sha256 && local.sha256 === r.source_sha256; };
+        const receivingLocal = r => { const local = localInputs.get(uid, r.id); return local && local.worker_id === workerId && !local.sha256 && local.expires > Date.now(); };
+        const row = candidates.find(r => backends.includes(r.backend) && !receivingLocal(r) && (!sources.get(uid, r.id) || sources.get(uid, r.id).state === 'ready' || hasLocal(r)) &&
           (!gpuWorkers.some(w => w.capabilities[r.backend]?.ready) || gpuWorkers.some(w => w.id === workerId && w.capabilities[r.backend]?.ready)));
         if (!row) return null;
         const lease = crypto.randomBytes(24).toString('hex'), time = now();
         db.prepare("UPDATE knowledge_documents SET status='processing',stage='读取视频',progress=1,lease=?,heartbeat=?,updated_at=?,worker_id=?,attempt=attempt+1 WHERE id=? AND status='queued'").run(lease, time, time, workerId, row.id);
-        return { ...get(uid, row.id), sourceSha256: sources.get(uid, row.id)?.sha256 || '', lease };
+        return { ...get(uid, row.id), localInput: !!hasLocal(row), sourceSha256: row.source_sha256 || sources.get(uid, row.id)?.sha256 || '', lease };
       }).immediate();
     },
     leased(uid, key, lease) {
@@ -206,6 +212,7 @@ export function createKnowledgeStore(db) {
         if (!getRow(uid, key)) return false;
         createKnowledgeCaseStore(db).removeDocument(uid, key);
         sources.remove(uid, key);
+        localInputs.remove(uid, key);
         db.prepare('DELETE FROM knowledge_codex_calls WHERE user_id=? AND document_id=?').run(uid,key);
         db.prepare('DELETE FROM knowledge_parts WHERE document_id=?').run(key);
         return db.prepare('DELETE FROM knowledge_documents WHERE user_id=? AND id=?').run(uid, key).changes > 0;
