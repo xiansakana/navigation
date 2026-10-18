@@ -15,6 +15,11 @@ import tempfile
 import time
 
 
+def rebuildable(file, root):
+    return any(part in ['__pycache__', 'node_modules', '.venv', 'venv'] or part.endswith('-venv')
+               for part in file.relative_to(root).parts)
+
+
 def verify(archive, restore=True):
     with tempfile.TemporaryDirectory(prefix='navigation-restore-', dir=Path(archive).resolve().parent) as directory:
         with tarfile.open(archive, 'r:gz') as source:
@@ -65,6 +70,14 @@ def backup(root, destination, keep=7, database=None, logical=False):
     # A destination within runtime data would recursively include its own backups.
     if destination == root or root in destination.parents:
         raise ValueError('Backup destination must be outside the repository')
+    # Validate directory policy before spending minutes exporting a large database.
+    folders = ['data', 'portal/data', 'stock-manage/data', 'qqq-dip/data', 'qq-bot/data', 'torn-toolbox-desktop/data']
+    for folder in folders:
+        base = root / folder
+        if base.exists():
+            for file in base.rglob('*'):
+                if not rebuildable(file, root) and file.is_symlink():
+                    raise RuntimeError('Runtime symlinks need an explicit backup policy')
     destination.mkdir(parents=True, exist_ok=True, mode=0o700)
     if not logical and shutil.disk_usage(destination).free < database.stat().st_size * 2 + 512 * 1024 * 1024:
         raise RuntimeError('Insufficient space for snapshot and verification; use logical export with off-host restore verification')
@@ -89,11 +102,13 @@ def backup(root, destination, keep=7, database=None, logical=False):
                         db.backup(output)
             os.chmod(snapshot, 0o600)
             candidates = {('data/navigation.sql.gz' if logical else 'data/navigation.db'): snapshot}
-            for folder in ['data', 'portal/data', 'stock-manage/data', 'qqq-dip/data', 'qq-bot/data', 'torn-toolbox-desktop/data']:
+            for folder in folders:
                 base = root / folder
                 if not base.exists():
                     continue
                 for file in base.rglob('*'):
+                    if rebuildable(file, root):
+                        continue
                     if file.is_symlink():
                         raise RuntimeError('Runtime symlinks need an explicit backup policy')
                     if not file.is_file() or file.name.endswith(('-wal', '-shm')) or file.resolve() == database:

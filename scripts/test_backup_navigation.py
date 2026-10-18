@@ -17,6 +17,8 @@ class BackupTests(unittest.TestCase):
             (root / 'data').mkdir(parents=True)
             (root / 'portal/data/knowledge').mkdir(parents=True)
             (root / 'portal/data/knowledge/video').write_bytes(b'video')
+            (root / 'portal/data/knowledge-venv/bin').mkdir(parents=True)
+            (root / 'portal/data/knowledge-venv/bin/python').write_bytes(b'rebuildable runtime')
             with closing(sqlite3.connect(root / 'data/navigation.db')) as db:
                 db.execute('PRAGMA journal_mode=WAL')
                 db.execute('CREATE TABLE sample(value TEXT)')
@@ -26,6 +28,7 @@ class BackupTests(unittest.TestCase):
                 logical = module.backup(root, destination, logical=True)
                 self.assertEqual(module.verify(logical)['databaseFormat'], 'sql-gzip')
                 self.assertIn('portal/data/knowledge/video', module.verify(archive)['files'])
+                self.assertNotIn('portal/data/knowledge-venv/bin/python', module.verify(archive)['files'])
                 import tarfile
                 with tarfile.open(archive) as source:
                     restored = Path(directory) / 'restored.db'
