@@ -12,8 +12,11 @@ export function uploadDirectory(id) {
 export async function removeUploadFiles(id) { await fsp.rm(uploadDirectory(id), { recursive: true, force: true }); }
 
 let tail = Promise.resolve();
+let mediaPending = 0;
+export const activeMediaJobs = () => mediaPending > 0 || thumbnailsBusy;
 export function withMediaProcessor(operation) {
-  const result = tail.then(operation);
+  mediaPending++;
+  const result = tail.then(operation).finally(() => { mediaPending--; });
   tail = result.catch(() => {});
   return result;
 }

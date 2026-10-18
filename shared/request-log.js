@@ -8,7 +8,8 @@ export function instrumentRequest(req, res, service, log = console.log) {
   res.setHeader('X-Request-Id', id);
   if (process.env.NODE_TEST_CONTEXT) return;
   res.once('finish', () => {
-    const path = new URL(req.url, 'http://localhost').pathname;
+    let path = '/';
+    try { path = new URL(req.url, 'http://localhost').pathname; } catch { /* Malformed requests must not crash logging. */ }
     // Namespace only: paths and query strings can contain bearer tickets or personal identifiers.
     log(JSON.stringify({ at: new Date().toISOString(), service, requestId: id,
       method: req.method, namespace: path.startsWith('/api/') ? path.split('/')[2] : 'page',

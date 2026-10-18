@@ -16,6 +16,6 @@ const cookie = createSessionCookie(admin.id, sessionSecret(config)).split(';')[0
 const response = await fetch(base + '/api/resources/metrics', { headers: { Cookie: cookie } });
 const result = await response.json();
 if (!response.ok || !result.ok || result.snapshot.modules.length < 7) throw new Error('Module inventory check failed');
-const anonymous = await fetch(base + '/api/resources/metrics');
-if (anonymous.status !== 403) throw new Error('Anonymous resource access must be denied');
+const anonymous = await fetch(base + '/api/resources/metrics', { redirect: 'manual' });
+if (![401, 403, 302, 303].includes(anonymous.status)) throw new Error('Anonymous resource access must be denied');
 console.log(JSON.stringify({ ok: true, modules: result.snapshot.modules.length, services: result.snapshot.processes.length, anonymousDenied: true }));

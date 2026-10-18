@@ -2,7 +2,7 @@ import { getDatabase, closeDatabase } from '../../shared/db/index.js';
 import { loadConfig } from './config.js';
 import { startMediaCleanup } from './blog-media-cleanup.js';
 import { startAssetHistory } from './bookkeeping-asset-history.js';
-import { startThumbnailWorker } from './blog-media-process.js';
+import { startThumbnailWorker, activeMediaJobs } from './blog-media-process.js';
 import { resumeVideoJobs, activeVideoJobs } from './blog.js';
 
 process.env.NAVIGATION_PROCESS_ROLE = 'background';
@@ -22,6 +22,6 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   clearInterval(cleanup); clearInterval(thumbnails); clearInterval(videos); clearInterval(heartbeat); history.stop();
   // PM2's kill_timeout is configured to allow graceful draining of media subprocesses.
   const drain = setInterval(() => {
-    if (!activeVideoJobs()) { clearInterval(drain); closeDatabase(); process.exit(0); }
+    if (!activeVideoJobs() && !activeMediaJobs()) { clearInterval(drain); closeDatabase(); process.exit(0); }
   }, 500);
 });
