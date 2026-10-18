@@ -74,11 +74,25 @@ test('link preview and creation require import, upload and process grants and re
   }
 }));
 
+test('Bilibili account and quality endpoints enforce separate grants, ownership and cross-site write protection', async () => fixture(async ({ call }) => {
+  for (const [route, method] of [['/bilibili', 'GET'], ['/bilibili', 'DELETE'], ['/bilibili/login/start', 'POST'], ['/bilibili/login/poll', 'POST'], ['/bilibili/settings', 'PUT']]) {
+    assert.equal((await call(route, { method, data: method === 'GET' ? undefined : {}, session: { userId: 'a', permissions: ['knowledge:view'] } })).status, 403);
+    if (method !== 'GET') assert.equal((await call(route, { method, data: {}, headers: { origin: 'https://evil.example' } })).status, 403);
+  }
+  const saved = await call('/bilibili/settings', { method: 'PUT', data: { quality: 64, strict: false } });
+  assert.deepEqual(saved.payload.settings, { quality: 64, strict: false });
+  assert.equal((await call('/bilibili')).payload.account.quality, 64);
+  assert.equal((await call('/bilibili', { session: member('b') })).payload.account.quality, 80);
+  assert.equal((await call('/bilibili/check', { method: 'POST' })).payload.account.bound, false);
+  assert.doesNotMatch(JSON.stringify((await call('/bilibili')).payload), /cipher|SESSDATA|qrcode_key/);
+}));
+
 test('link metadata fills defaults, user edits survive, and imports expose cache while storage is pending', async () => fixture(async ({ call, store, root, db }) => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, options) => {
     if (String(url).startsWith('https://api.bilibili.com/')) {
       return new Response(JSON.stringify({ code: 0, data: String(url).includes('/tags?') ? [{ tag_name: '八字' }] :
+        String(url).includes('/playurl?') ? { dash: { video: [{ id: 80, height: 1080, codecid: 7, baseUrl: 'https://test.bilivideo.com/v' }], audio: [{ baseUrl: 'https://test.bilivideo.com/a' }] } } :
         { bvid: 'BV1LTpi69Efh', title: '八字学习', duration: 30, owner: { name: '作者' }, pages: [{ page: 1, cid: 42, duration: 30 }] } }));
     }
     return originalFetch(url, options);

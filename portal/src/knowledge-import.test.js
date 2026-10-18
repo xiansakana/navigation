@@ -23,11 +23,13 @@ test('durable link import becomes a hashed queued source; worker can read before
   store.saveSettings('a', { codexModel: 'gpt-6-luna', codexEffort: 'high' });
   const originalSettings = store.get('a', d.id).modelSettings;
   await runKnowledgeImport(db, () => directory, () => true, { async download(url, dir, { progress }) {
-    progress(32); const file = path.join(dir, 'test.mp4'); await fs.writeFile(file, Buffer.alloc(32)); return { file, bytes: 32, cleanup: async () => {} };
+    progress(32); const file = path.join(dir, 'test.mp4'); await fs.writeFile(file, Buffer.alloc(32)); return { file, bytes: 32,
+      media: { requestedQuality: 80, quality: 80, width: 1920, height: 1080, strict: true, downgraded: false }, cleanup: async () => {} };
   } });
   const item = store.get('a', d.id);
   assert.equal(item.status, 'queued'); assert.equal(item.bytes, 32); assert.equal(item.importState, 'done');
   assert.deepEqual(item.modelSettings, originalSettings); assert.equal(item.storage.state, 'pending');
+  assert.equal(item.sourceMedia.width, 1920); assert.equal(item.sourceMedia.quality, 80);
   assert.match(store.getRow('a', d.id).source_sha256, /^[a-f0-9]{64}$/);
   assert.equal(store.get('b', d.id), null);
   assert.equal(store.claim('b', ['codex']), null);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { bilibiliUrl, inspectBilibili, selectStreams, mediaUrl, downloadBilibili, IMPORT_LIMIT } from './knowledge-bilibili.js';
+import { bilibiliUrl, inspectBilibili, inspectBilibiliQuality, selectBilibiliMedia, selectStreams, mediaUrl, downloadBilibili, IMPORT_LIMIT } from './knowledge-bilibili.js';
 
 const url = 'https://www.bilibili.com/video/BV1LTpi69Efh/';
 const view = { bvid: 'BV1LTpi69Efh', title: '八字课程', duration: 90, owner: { name: '作者' }, pages: [{ page: 1, cid: 12, duration: 90 }, { page: 2, cid: 13, duration: 30, part: '第二节' }] };
@@ -36,19 +36,37 @@ test('shortlink redirects are checked before fetching their destination, and err
   assert.deepEqual(seen, ['https://b23.tv/abcd']);
   await assert.rejects(inspectBilibili(url, { fetcher: () => new Response(JSON.stringify({ code: -403 })) }), /访问权限/);
   assert.throws(() => selectStreams({ ...streams, is_preview: 1 }), /试看/);
-  assert.throws(() => selectStreams({ dash: {} }), /音视频流/);
+  assert.throws(() => selectStreams({ dash: {} }), /没有可用/);
 });
 test('stream downloads enforce aggregate size and CDN redirects, mux audio/video without passing remote URLs to ffmpeg', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'bili-import-'));
   try {
     let args;
     const result = await downloadBilibili(url, directory, { fetcher, async run(binary, input) {
+      if (binary.includes('ffprobe')) return JSON.stringify({ streams: [{ codec_type: 'video', width: 1920, height: 1080 }, { codec_type: 'audio' }] });
       args = input; await fs.writeFile(input.at(-1), Buffer.alloc(32));
     } });
     assert.equal(result.bytes, 32); assert.ok(args.includes('1:a:0')); assert.ok(!args.some(a => a.startsWith('https://')));
+    assert.deepEqual(result.media, { requestedQuality: 80, quality: 80, strict: true, width: 1920, height: 1080, downgraded: false });
     await result.cleanup();
     await assert.rejects(downloadBilibili(url, directory, { fetcher: u => u.includes('test.bilivideo.com') ? new Response('small', { headers: { 'content-length': String(IMPORT_LIMIT + 1) } }) : fetcher(u) }), /1GB/);
     await assert.rejects(downloadBilibili(url, directory, { fetcher: u => u.includes('test.bilivideo.com') ? new Response(null, { status: 302, headers: { location: 'http://127.0.0.1/' } }) : fetcher(u) }), /域名/);
     assert.deepEqual(await fs.readdir(directory), []);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('strict quality refuses 480p before downloading; explicit downgrade selects only permitted actual streams', async () => {
+  const data = { ...streams, accept_quality: [80, 64, 32], dash: { ...streams.dash, video: [{ id: 32, height: 480, codecid: 7, baseUrl: 'https://test.bilivideo.com/v' }] } };
+  assert.throws(() => selectBilibiliMedia(data), /没有可用的1080p/);
+  assert.equal(selectBilibiliMedia(data, { quality: 80, strict: false }).quality, 32);
+  const seen = [];
+  const f = (u, o) => { seen.push([u, o.headers]); return u.includes('playurl') ? json(data) : fetcher(u); };
+  const preview = await inspectBilibiliQuality({ bvid: 'BV1LTpi69Efh', cid: 12 }, {}, { fetcher: f, cookie: 'SESSDATA=test' });
+  assert.deepEqual(preview.availableQualities, [32]); assert.equal(preview.canImport, false);
+  assert.equal(seen[0][1].Cookie, 'SESSDATA=test');
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'bili-strict-'));
+  try {
+    await assert.rejects(downloadBilibili(url, directory, { fetcher: f }), /没有可用的1080p/);
+    assert.ok(seen.every(([u]) => !u.includes('test.bilivideo.com')));
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });

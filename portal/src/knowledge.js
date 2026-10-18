@@ -9,7 +9,8 @@ import { hasPermission } from './rbac.js';
 import { createKnowledgeStore, CHUNK_BYTES, MAX_VIDEO_BYTES, MODEL_FIELDS } from './knowledge-store.js';
 import { knowledgeWorkerPackage, sendWorkerPackage } from './knowledge-worker-package.js';
 import { sendWorkerExe } from './knowledge-worker-exe.js';
-import { inspectBilibili } from './knowledge-bilibili.js';
+import { inspectBilibili, inspectBilibiliQuality, qualityLabel } from './knowledge-bilibili.js';
+import { bilibiliAccount, qualitySettings } from './knowledge-bilibili-account.js';
 
 const root = () => path.resolve(process.env.KNOWLEDGE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/knowledge'));
 export function knowledgeDirectory(id) {
@@ -175,6 +176,9 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
   const route = url.pathname.slice('/api/knowledge'.length), method = req.method;
   const document = /^\/documents\/([a-f0-9]{32})(?:\/(parts|complete|local-input|retry|storage-retry|source|export|frames)(?:\/([a-z0-9.-]+))?)?$/.exec(route);
   const action = route === '/settings' ? method === 'GET' ? 'view' : 'settings:edit'
+    : (route === '/bilibili' && method === 'GET' || route === '/bilibili/check' && method === 'POST') ? 'bilibili:view'
+    : (route === '/bilibili' && method === 'DELETE' || ['/bilibili/login/start', '/bilibili/login/poll'].includes(route) && method === 'POST') ? 'bilibili:edit'
+    : route === '/bilibili/settings' && method === 'PUT' ? 'quality:edit'
     : ['/imports/preview', '/imports'].includes(route) && method === 'POST' ? 'import:edit'
     : route === '/worker-package' && method === 'GET' ? 'devices:install'
     : route === '/worker-install' && method === 'POST' ? 'devices:install'
@@ -194,11 +198,24 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
   const store = createKnowledgeStore(getDatabase()), uid = session.userId;
   const visible = d => d && ({ ...d, transcript: canKnowledge(session, 'transcript:view') ? d.transcript : [], frames: canKnowledge(session, 'frames:view') ? d.frames : [] });
   try {
+    if (route.startsWith('/bilibili')) {
+      const account = bilibiliAccount(getDatabase());
+      if (route === '/bilibili' && method === 'GET') return json(res, 200, { ok: true, account: account.public(uid) });
+      if (route === '/bilibili/check') return json(res, 200, { ok: true, account: await account.check(uid) });
+      if (route === '/bilibili/settings') return json(res, 200, { ok: true, settings: qualitySettings({}, account.saveSettings(uid, await body(req, 1024))) });
+      if (route === '/bilibili/login/start') return json(res, 200, { ok: true, ...await account.start(uid) });
+      if (route === '/bilibili/login/poll') return json(res, 200, { ok: true, ...await account.poll(uid) });
+      if (route === '/bilibili' && method === 'DELETE') return json(res, 200, { ok: true, account: account.unlink(uid) });
+    }
     if (['/imports/preview', '/imports'].includes(route)) {
       if (!canKnowledge(session, 'upload:edit') || !canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要上传视频和生成笔记权限' });
       const input = await body(req, 8192);
       const info = await inspectImport(uid, input.url);
-      if (route === '/imports/preview') return json(res, 200, { ok: true, metadata: info });
+      const account = bilibiliAccount(getDatabase()), selection = qualitySettings(input, account.public(uid));
+      const cookie = await account.credentials(uid);
+      const playback = await inspectBilibiliQuality(info, selection, { cookie });
+      if (route === '/imports/preview') return json(res, 200, { ok: true, metadata: { ...info, playback } });
+      if (!playback.canImport) throw new Error(playback.reason);
       await fsp.mkdir(root(), { recursive: true, mode: 0o700 });
       const disk = await fsp.statfs(root());
       const reserved = getDatabase().prepare("SELECT coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE status IN ('uploading','importing')").get().bytes;
@@ -208,7 +225,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
         const created = store.create(uid, { title: input.title === undefined ? info.title : input.title, topic: input.topic === undefined ? info.topic : input.topic,
           tags: input.tags === undefined ? info.tags : input.tags, sourceUrl: input.sourceUrl === undefined ? info.sourceUrl : input.sourceUrl,
           bytes: MAX_VIDEO_BYTES, mimeType: 'video/mp4', originalName: info.title.replace(/[\\/:*?"<>|]/g, '-') + '.mp4', backend: input.backend || store.settings(uid).backend });
-        store.imports.add(uid, created.id, info.sourceUrl);
+        store.imports.add(uid, created.id, info.sourceUrl, selection);
         if (config) store.sources.add(uid, created.id, sourcePath(config, uid, created));
         getDatabase().prepare("UPDATE knowledge_documents SET status='importing',stage='等待下载B站视频' WHERE user_id=? AND id=?").run(uid, created.id);
         return store.get(uid, created.id);
@@ -230,7 +247,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
       if (!canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要知识库处理权限' });
       const approved = store.devices.approve(uid, code); return json(res, approved ? 200 : 409, { ok: approved, ...(approved ? {} : { error: '配对码已失效或已使用' }) });
     }
-    if (route === '/settings' && method === 'GET') return json(res, 200, { ok: true, ...store.settings(uid), storage: { provider: storageConfig(uid) ? '115' : 'local' }, worker: store.worker(uid), chunkBytes: CHUNK_BYTES, maxBytes: MAX_VIDEO_BYTES });
+    if (route === '/settings' && method === 'GET') return json(res, 200, { ok: true, ...store.settings(uid), linkDefaults: qualitySettings({}, bilibiliAccount(getDatabase()).public(uid)), storage: { provider: storageConfig(uid) ? '115' : 'local' }, worker: store.worker(uid), chunkBytes: CHUNK_BYTES, maxBytes: MAX_VIDEO_BYTES });
     if (route === '/settings' && method === 'PUT') {
       const input = await body(req, 4096);
       if (MODEL_FIELDS.some(key => Object.hasOwn(input, key)) && !canKnowledge(session, 'model:edit')) return json(res, 403, { ok: false, error: '没有模型和强度设置权限' });
@@ -316,6 +333,11 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
       if (operation === 'retry' && method === 'POST') {
         if (store.imports.get(uid, id)?.state === 'failed' && !canKnowledge(session, 'import:edit')) return json(res, 403, { ok: false, error: '需要链接导入权限' });
         const input = await body(req, 4096);
+        if (store.imports.get(uid, id)?.state === 'failed') {
+          if (!canKnowledge(session, 'upload:edit')) return json(res, 403, { ok: false, error: '需要上传视频权限' });
+          const selected = qualitySettings(input, bilibiliAccount(getDatabase()).public(uid));
+          getDatabase().prepare('UPDATE knowledge_imports SET settings_json=? WHERE user_id=? AND document_id=?').run(JSON.stringify(selected), uid, id);
+        }
         if (!store.retry(uid, id, input.backend || store.settings(uid).backend)) return json(res, 409, { ok: false, error: '仅失败任务可以重试' });
         return json(res, 202, { ok: true, document: store.get(uid, id) });
       }
@@ -326,7 +348,8 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
       if (operation === 'source' && method === 'GET') return serveSource(req, res, store, uid, id);
       if (operation === 'frames' && method === 'GET' && item.frames.some(f => f.name === part)) return stream(req, res, path.join(directory, part), 'image/jpeg');
       if (operation === 'export' && method === 'GET') {
-        const text = `# ${item.title}\n\n来源：${item.sourceUrl || item.originalName}\n生成后端：${item.provenance.backend || item.backend} / ${item.provenance.model || '未生成'}\n\n${item.notes}\n`;
+        const m = item.sourceMedia, media = m.width ? `\n原片清晰度：${qualityLabel(m.quality)} · ${m.width}×${m.height}${m.downgraded ? '（已降级，目标' + qualityLabel(m.requestedQuality) + '）' : ''}` : '';
+        const text = `# ${item.title}\n\n来源：${item.sourceUrl || item.originalName}${media}\n生成后端：${item.provenance.backend || item.backend} / ${item.provenance.model || '未生成'}\n\n${item.notes}\n`;
         res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Disposition': "attachment; filename*=UTF-8''" + encodeURIComponent(item.title.replace(/[\\/:*?"<>|]/g, '-') + '.md') });
         return res.end(text);
       }

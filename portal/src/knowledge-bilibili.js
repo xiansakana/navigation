@@ -4,6 +4,7 @@ import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { runProcess } from './knowledge-model.js';
+import { qualitySettings } from './knowledge-bilibili-account.js';
 
 const headers = { 'User-Agent': 'Mozilla/5.0', Referer: 'https://www.bilibili.com/' };
 export const IMPORT_LIMIT = 1024 ** 3;
@@ -32,8 +33,8 @@ async function resolveUrl(input, fetcher, signal) {
   if (target.startsWith('https://b23.tv/')) throw new Error('B站短链接未指向视频页');
   return target;
 }
-async function api(route, fetcher, signal) {
-  const response = await fetcher('https://api.bilibili.com' + route, { headers, redirect: 'error', signal });
+async function api(route, fetcher, signal, cookie = '') {
+  const response = await fetcher('https://api.bilibili.com' + route, { headers: { ...headers, ...(cookie ? { Cookie: cookie } : {}) }, redirect: 'error', signal });
   if (!response.ok) { await response.body?.cancel(); throw new Error('B站接口暂时不可用（HTTP ' + response.status + '），请稍后重试'); }
   // Metadata is bounded too; never buffer an unbounded remote response.
   const chunks = []; let size = 0;
@@ -76,14 +77,39 @@ export function mediaUrl(value) {
       !['bilivideo.com', 'bilivideo.cn', 'bilivideo.net', 'hdslb.com'].some(h => u.hostname.endsWith('.' + h))) throw new Error('B站视频流域名不在允许范围');
   return u.href;
 }
-export function selectStreams(data) {
+export const qualityLabel = q => ({ 80: '1080p', 64: '720p', 32: '480p', 16: '360p' })[q] || '未知';
+function streamQuality(v) {
+  return Number(v.id) || (Number(v.height) >= 1080 ? 80 : Number(v.height) >= 720 ? 64 : Number(v.height) >= 480 ? 32 : 16);
+}
+export function availableQualities(data) {
+  const values = (data.dash?.video || []).filter(v => Number(v.codecid) === 7).map(streamQuality);
+  if (!values.length && data.durl?.length === 1) values.push(Number(data.quality));
+  return [...new Set(values)].filter(q => [80, 64, 32, 16].includes(q)).sort((a, b) => b - a);
+}
+export function selectBilibiliMedia(data, settings = {}) {
+  const { quality, strict } = qualitySettings(settings);
   if (data.is_preview || data.isPreview) throw new Error('此视频只提供试看，请使用有权访问的完整视频');
-  const video = (data.dash?.video || []).filter(v => Number(v.height) <= 1080 && Number(v.codecid) === 7)
-    .sort((a, b) => b.height - a.height || b.bandwidth - a.bandwidth)[0];
+  const available = availableQualities(data), selected = strict ? available.find(q => q === quality) : available.find(q => q <= quality);
+  if (!selected) throw new Error(`没有可用的${qualityLabel(quality)}视频流；当前可用：${available.map(qualityLabel).join('、') || '无'}。请扫码绑定、选择较低清晰度或允许自动降级`);
+  const video = (data.dash?.video || []).filter(v => streamQuality(v) === selected && Number(v.codecid) === 7)
+    .sort((a, b) => b.bandwidth - a.bandwidth)[0];
   const audio = (data.dash?.audio || []).sort((a, b) => b.bandwidth - a.bandwidth)[0];
-  if (video && audio) return [mediaUrl(video.baseUrl || video.base_url), mediaUrl(audio.baseUrl || audio.base_url)];
-  if (data.durl?.length === 1) return [mediaUrl(data.durl[0].url)];
+  if (video && audio) return { urls: [mediaUrl(video.baseUrl || video.base_url), mediaUrl(audio.baseUrl || audio.base_url)], quality: selected, availableQualities: available };
+  if (data.durl?.length === 1) return { urls: [mediaUrl(data.durl[0].url)], quality: selected, availableQualities: available };
   throw new Error('没有可下载的完整音视频流，可能需要登录；可改用上传文件');
+}
+export const selectStreams = (data, settings) => selectBilibiliMedia(data, settings).urls;
+async function playback(meta, settings, fetcher, signal, cookie) {
+  return api(`/x/player/playurl?bvid=${meta.bvid}&cid=${meta.cid}&qn=${settings.quality}&fnval=4048&fourk=0`, fetcher, signal, cookie);
+}
+export async function inspectBilibiliQuality(meta, settings = {}, { fetcher = fetch, cookie = '', signal = AbortSignal.timeout(20000) } = {}) {
+  settings = qualitySettings(settings);
+  const data = await playback(meta, settings, fetcher, signal, cookie);
+  const available = availableQualities(data);
+  try {
+    const selected = selectBilibiliMedia(data, settings);
+    return { ...settings, availableQualities: available, selectedQuality: selected.quality, canImport: true, reason: '' };
+  } catch (e) { return { ...settings, availableQualities: available, selectedQuality: null, canImport: false, reason: e.message }; }
 }
 async function download(url, file, budget, fetcher, signal, progress) {
   let response;
@@ -104,10 +130,10 @@ async function download(url, file, budget, fetcher, signal, progress) {
   } });
   await pipeline(Readable.fromWeb(response.body), limit, fs.createWriteStream(file, { mode: 0o600 }), { signal });
 }
-export async function downloadBilibili(input, directory, { fetcher = fetch, signal, progress = () => {}, run = runProcess } = {}) {
+export async function downloadBilibili(input, directory, { fetcher = fetch, signal, cookie = '', quality = 80, strict = true, progress = () => {}, run = runProcess } = {}) {
   const meta = await inspectBilibili(input, { fetcher, signal });
-  const data = await api(`/x/player/playurl?bvid=${meta.bvid}&cid=${meta.cid}&qn=80&fnval=4048&fourk=0`, fetcher, signal);
-  const urls = selectStreams(data), budget = { remaining: IMPORT_LIMIT, downloaded: 0 };
+  const data = await playback(meta, qualitySettings({ quality, strict }), fetcher, signal, cookie);
+  const media = selectBilibiliMedia(data, { quality, strict }), urls = media.urls, budget = { remaining: IMPORT_LIMIT, downloaded: 0 };
   const temp = path.join(directory, 'link-download');
   await fsp.mkdir(temp, { recursive: true, mode: 0o700 });
   try {
@@ -119,6 +145,11 @@ export async function downloadBilibili(input, directory, { fetcher = fetch, sign
     catch { throw new Error('音视频合并失败，请检查服务器FFmpeg或改用上传文件'); }
     const size = (await fsp.stat(output)).size;
     if (size < 12 || size > IMPORT_LIMIT) throw new Error('下载的视频为空或超过1GB限制');
-    return { file: output, bytes: size, meta, cleanup: () => fsp.rm(temp, { recursive: true, force: true }) };
+    let probe;
+    try { probe = JSON.parse(await run(process.env.KNOWLEDGE_IMPORT_FFPROBE || 'ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,width,height', '-of', 'json', output], { signal, timeout: 20000 })); }
+    catch { throw new Error('无法验证下载视频的实际分辨率，请检查FFprobe'); }
+    const v = probe.streams?.find(s => s.codec_type === 'video');
+    if (!v || !Number.isSafeInteger(v.width) || !Number.isSafeInteger(v.height) || v.width <= 0 || v.height <= 0 || !probe.streams.some(s => s.codec_type === 'audio')) throw new Error('下载视频缺少有效画面或音轨');
+    return { file: output, bytes: size, meta, media: { requestedQuality: quality, quality: media.quality, strict, width: v.width, height: v.height, downgraded: media.quality !== quality }, cleanup: () => fsp.rm(temp, { recursive: true, force: true }) };
   } catch (e) { await fsp.rm(temp, { recursive: true, force: true }); throw e; }
 }

@@ -23,7 +23,8 @@
     "exceljs": "^4.4.0",
     "jsdom": "28.0.0",
     "lunar-javascript": "1.7.7",
-    "marked": "15.0.12"
+    "marked": "15.0.12",
+    "qrcode": "1.5.4"
   },
   "devDependencies": {
     "esbuild": "0.28.2"

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createKnowledgeStore, MAX_VIDEO_BYTES } from './knowledge-store.js';
 import { downloadBilibili } from './knowledge-bilibili.js';
 import { hashFile } from './knowledge-storage.js';
+import { bilibiliAccount } from './knowledge-bilibili-account.js';
 
 export async function runKnowledgeImport(db, directoryFor, authorize, { download = downloadBilibili } = {}) {
   const store = createKnowledgeStore(db), job = store.imports.claim();
@@ -18,7 +19,8 @@ export async function runKnowledgeImport(db, directoryFor, authorize, { download
     const disk = await fsp.statfs(directory);
     if (disk.bavail * disk.bsize < 3 * MAX_VIDEO_BYTES + 5 * 1024 ** 3) throw new Error('服务器可用空间不足');
     let last = 0;
-    result = await download(job.url, directory, { signal, progress(bytes) {
+    const cookie = await bilibiliAccount(db).credentials(uid), settings = JSON.parse(job.settings_json);
+    result = await download(job.url, directory, { signal, cookie, ...settings, progress(bytes) {
       if (Date.now() - last < 1500) return;
       last = Date.now();
       db.prepare("UPDATE knowledge_documents SET stage=?,updated_at=? WHERE user_id=? AND id=? AND status='importing'")
@@ -28,7 +30,7 @@ export async function runKnowledgeImport(db, directoryFor, authorize, { download
     if (!allowed()) throw new Error('账号、权限或导入任务已变化');
     await fsp.rename(result.file, path.join(directory, 'source'));
     db.transaction(() => {
-      if (!store.imports.done(job)) throw new Error('导入任务已过期');
+      if (!store.imports.done(job, result.media)) throw new Error('导入任务已过期');
       db.prepare("UPDATE knowledge_documents SET byte_size=?,status='uploading',stage='下载完成',updated_at=? WHERE user_id=? AND id=? AND status='importing'")
         .run(hashes.bytes, new Date().toISOString(), uid, id);
       store.enqueue(uid, id, hashes.sha256);

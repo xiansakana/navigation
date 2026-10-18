@@ -72,7 +72,8 @@ export function createKnowledgeStore(db) {
     originalName: row.original_name, bytes: row.byte_size, mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, modelSettings: JSON.parse(row.model_settings_json || '{}'), status: row.status,
     stage: row.stage, progress: row.progress, error: row.error, duration: row.duration, language: row.language, notes: row.notes,
     transcript: JSON.parse(row.transcript_json), frames: JSON.parse(row.frames_json), provenance: JSON.parse(row.provenance_json),
-    storage: sources.public(row.user_id, row.id), importState: imports.get(row.user_id, row.id)?.state || '', revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at });
+    storage: sources.public(row.user_id, row.id), importState: imports.get(row.user_id, row.id)?.state || '',
+    sourceMedia: JSON.parse(imports.get(row.user_id, row.id)?.media_json || '{}'), revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at });
   const get = (uid, key) => { const row = getRow(uid, key); return row && row.status !== 'deleting' ? read(row) : null; };
   const expire = uid => db.prepare("UPDATE knowledge_documents SET status='failed',stage='处理已中断',error='工作器超过15分钟未响应，请检查本机工作器后重试',lease=NULL,updated_at=? WHERE user_id=? AND status='processing' AND heartbeat<?")
     .run(now(), uid, new Date(Date.now() - 15 * 60000).toISOString());
@@ -199,8 +200,10 @@ export function createKnowledgeStore(db) {
     finish(uid, key, lease, result) {
       if (!this.leased(uid, key, lease)) return false;
       return db.transaction(() => {
+        const imported = imports.get(uid, key);
+        const provenance = { ...result.provenance, ...(imported ? { sourceMedia: JSON.parse(imported.media_json) } : {}) };
         db.prepare("UPDATE knowledge_documents SET status='ready',stage='笔记已生成',progress=100,error='',duration=?,language=?,notes=?,transcript_json=?,frames_json=?,provenance_json=?,revision=revision+1,lease=NULL,updated_at=? WHERE user_id=? AND id=? AND lease=?")
-          .run(result.duration, result.language, result.notes, JSON.stringify(result.transcript), JSON.stringify(result.frames), JSON.stringify(result.provenance), now(), uid, key, lease);
+          .run(result.duration, result.language, result.notes, JSON.stringify(result.transcript), JSON.stringify(result.frames), JSON.stringify(provenance), now(), uid, key, lease);
         createKnowledgeCaseStore(db).syncDocument(getRow(uid, key));
         return true;
       })();

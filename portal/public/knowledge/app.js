@@ -3,7 +3,8 @@ import { createDevicePanel } from './devices.js?v=3';
 import { createSourcePlayer } from './source.js?v=1';
 import { bindVideoDrop } from './drop.js?v=1';
 import { sendLocalInput } from './local-input.js?v=1';
-import { bindLinkImport } from './link-import.js?v=1';
+import { bindLinkImport } from './link-import.js?v=2';
+import { createBilibiliPanel } from './bilibili-account.js?v=1';
 const $ = id => document.getElementById(id);
 const state = { permissions: [], documents: [], current: null, settings: null, editing: false, modelDirty: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
@@ -25,6 +26,7 @@ const send = (route, method, data = {}) => api(route, { method, body: JSON.strin
 const linkImport = bindLinkImport({ element: $, can: () => can('import:edit'), send, busy: () => state.uploading, onError: error });
 async function settings() {
   state.settings = await api('/settings');
+  linkImport.defaults(state.settings.linkDefaults);
   text('storage-policy', state.settings.storage?.provider === '115' ? '原视频保存至115，上传和处理期间使用临时缓存。' : '原视频保存在服务器。');
   $('backend').value = state.settings.backend;
   $('backend').disabled = !can('settings:edit');
@@ -94,8 +96,10 @@ function renderDocument(d) {
   show('delete', can('delete:edit')); show('export', can('export:view') && !!d.notes);
   $('export').href = '/api/knowledge/documents/' + d.id + '/export';
   const p = d.provenance;
+  const media = d.sourceMedia || {};
   const profile = d.modelSettings || {}, prefix = d.backend === 'codex' ? 'codex' : 'api';
   text('provenance', p.generatedAt ? `生成于 ${new Date(p.generatedAt).toLocaleString('zh-CN')} · ${p.model || p.backend} · 推理强度：${p.reasoningEffort || '模型默认'} · ${p.vision ? '含抽样画面核对' : '未进行模型视觉核对'}。${(p.warnings || []).join(' ')}` : `本次任务模型：${profile[prefix + 'Model'] || '工作器默认'} · 强度：${profile[prefix + 'Effort'] || '工作器默认'}。任务完成后在这里阅读完整笔记。`);
+  if (media.width) $('provenance').textContent += ` 原片：${media.width}×${media.height}${media.downgraded ? '（已按设置自动降级）' : ''}。`;
   $('note-content').innerHTML = DOMPurify.sanitize(marked.parse(d.notes || ''), { USE_PROFILES: { html: true }, FORBID_TAGS: ['img', 'video', 'audio', 'iframe', 'form', 'input', 'button', 'style'], FORBID_ATTR: ['style', 'id', 'name'] });
   for (const a of $('note-content').querySelectorAll('a')) { a.rel = 'noopener noreferrer'; a.target = '_blank'; }
   $('outline').replaceChildren();
@@ -135,7 +139,7 @@ async function upload(event) {
     text('upload-status', '正在提交链接导入任务…');
     try {
       const result = await send('/imports', 'POST', { url: $('video-link').value, title: $('upload-title').value,
-        topic: $('upload-topic').value, tags: tags($('upload-tags').value), sourceUrl: $('upload-source').value, backend: state.settings.backend });
+        topic: $('upload-topic').value, tags: tags($('upload-tags').value), sourceUrl: $('upload-source').value, backend: state.settings.backend, ...linkImport.selection() });
       state.resume = null; show('upload-panel', false); $('upload-form').reset(); linkImport.mode();
       text('message', '视频已加入链接下载队列。可关闭页面，下载、生成笔记和115归档会在后台继续。'); text('upload-status', '链接已提交');
       await load(); await open(result.document.id);
@@ -183,6 +187,8 @@ async function boot() {
   show('upload-toggle', can('upload:edit') && can('process:edit')); show('worker-token', can('worker:edit'));
   show('upload-mode-label', can('import:edit') && can('upload:edit') && can('process:edit')); linkImport.mode();
   createDevicePanel({ can, api, send, onError: error });
+  const bilibili = createBilibiliPanel({ element: $, can, api, send, onError: error, onDefaults: s => linkImport.defaults(s) });
+  await bilibili.refresh();
   await settings();
   if (can('notes:view')) {
     await load();
@@ -209,7 +215,7 @@ bindVideoDrop({ zone: $('video-drop'), input: $('video-file'), busy: () => state
   maxBytes: () => state.settings?.maxBytes || 1024 ** 3, error,
   selected: file => { show('error', false); text('selected-video', file.name + ' · ' + (file.size / 1024 ** 2).toFixed(1) + ' MB'); if (!state.resume) $('upload-title').value = file.name.replace(/\.[^.]+$/, '').slice(0, 160); }
 });
-$('upload-form').addEventListener('reset', () => text('selected-video', '支持拖拽一个视频，也可点击选择文件'));
+$('upload-form').addEventListener('reset', () => { text('selected-video', '支持拖拽一个视频，也可点击选择文件'); queueMicrotask(() => linkImport.reset()); });
 $('search-form').onsubmit = event => { event.preventDefault(); load().catch(error); };
 $('topic-filter').onchange = $('status-filter').onchange = () => load().catch(error);
 $('more').onclick = () => load(true).catch(error);

@@ -107,6 +107,8 @@ Deploy Key 需加到 **navigation** 仓库（可与 torn-scripts 共用同一密
 
 B站链接导入随Portal进程运行，需现有FFmpeg（可设`KNOWLEDGE_IMPORT_FFMPEG`），不依赖yt-dlp或Python下载器。自动新增`knowledge_imports`表；备份该表和原有知识库数据。一次只下载所选单个分P，1GB/4小时上限，权限为`knowledge:import:edit`并需上传/生成笔记权限。下载完成后GPU处理和115归档并行；无须更新本机工作器。部署仍只更新`portal`。
 
+B站扫码与画质更新仍只部署`portal`，安装Node依赖qrcode并使用FFprobe核实实际宽高（可设`KNOWLEDGE_IMPORT_FFPROBE`）。新增`knowledge_bilibili_accounts`及导入表`settings_json/media_json`字段；首次绑定生成0600权限的`portal/data/knowledge-bilibili.key`（可设`KNOWLEDGE_BILIBILI_KEY_FILE`）。备份账号表时同时备份并单独保护该密钥；不得提交Git。新导入默认1080p严格模式，旧导入快照保留自动降级；网页登录后扫码确认即可，无需迁移浏览器Cookie或升级GPU工作器。
+
 在 `portal/config.json` 的 `services` 增加卡片；新服务放在本仓库根目录（与 `qq-bot` 平级），独立端口 + pm2，仅 portal :80 对外。
 
 ---
