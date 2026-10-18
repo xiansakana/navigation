@@ -5,8 +5,25 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
-import { codexArguments, generate, modelConfiguration, runProcess, transcriptChunks, summarizeVideo } from './knowledge-model.js';
+import { codexArguments, generate, modelConfiguration, runProcess, transcriptChunks, summarizeVideo, resolveCodexBinary } from './knowledge-model.js';
 import { extractKnowledgeCases } from './mingli-knowledge-store.js';
+
+test('desktop CLI updates recover missing hashed paths without replacing explicit custom binaries', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge-codex-path-'));
+  const root = path.join(directory, 'OpenAI/Codex/bin');
+  const current = path.join(root, 'new-version/codex.exe'), old = path.join(root, 'old-version/codex.exe');
+  try {
+    await fs.mkdir(path.dirname(current), { recursive: true }); await fs.writeFile(current, 'fixture');
+    const options = { platform: 'win32', localAppData: directory };
+    assert.equal(resolveCodexBinary(old, options), current);
+    assert.equal(resolveCodexBinary(current, options), current);
+    const custom = path.join(directory, 'custom/codex.exe');
+    assert.equal(resolveCodexBinary(custom, options), custom);
+    assert.equal(resolveCodexBinary(old, { ...options, platform: 'linux' }), old);
+    await fs.rm(current);
+    assert.equal(resolveCodexBinary(old, options), old);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
 
 test('CLI arguments isolate source material and never interpolate it into a shell command', async () => {
   const args = codexArguments({ output: 'answer.md', cwd: 'job', images: ['slide with spaces.jpg'] });

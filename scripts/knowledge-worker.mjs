@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { downloadVideo } from '../portal/src/knowledge-download.js';
-import { runProcess, summarizeVideo, modelConfiguration } from '../portal/src/knowledge-model.js';
+import { runProcess, summarizeVideo, modelConfiguration, resolveCodexBinary } from '../portal/src/knowledge-model.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = path.resolve(process.argv[2] || path.join(repo, 'portal/knowledge-worker.config.json'));
@@ -41,7 +41,7 @@ async function capabilities() {
     result.media = { ready: true, model: config.asr?.model || 'small', detail: device };
   } catch { result.media = { ready: false, detail: '请检查 Python 转写依赖和 FFmpeg 路径' }; }
   try {
-    const binary = config.codex?.binary || (process.platform === 'win32' ? 'codex.exe' : 'codex');
+    const binary = resolveCodexBinary(config.codex?.binary);
     await runProcess(binary, ['login', 'status'], { timeout: 15000 });
     const help = await runProcess(binary, ['exec', '--help'], { timeout: 10000 });
     if (!help.includes('--ignore-user-config') || !help.includes('--ignore-rules')) throw new Error('Codex CLI 版本过旧');
@@ -90,6 +90,7 @@ async function processJob(job) {
         timeout: 8 * 3600000, onLine(line) {
           try {
             const data = JSON.parse(line); state = { stage: data.stage, progress: data.progress };
+            if (data.metrics) console.log(new Date().toISOString(), job.id, '素材耗时', JSON.stringify(data.metrics));
             if (Date.now() - lastProgress > 5000) update(state.stage, state.progress).catch(() => {});
           } catch { /* Library diagnostics are not protocol messages. */ }
         } });
