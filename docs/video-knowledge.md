@@ -18,7 +18,7 @@
 
 素材完成后，工作器以原租约持久化 `summary_wait`，释放转写位置，再申请总结位置；视频A总结时即可转写视频B，两个总结可同时执行。素材留在原工作器，没有阶段间额外的视频上传/下载。每台设备最多持有「转写上限 + 总结上限」个任务，避免提前领取大量任务。页面显示「正在转写/提取素材」「等待总结」「正在总结」，原有 `processing` 状态保持兼容；并发不改变模型配置和单任务内容。
 
-不同设备可以同时处理同账号的不同视频。空闲且支持相应后端的GPU工作器优先；GPU位置已满时，其他空闲工作器可领取新任务。每个任务仍有唯一租约，不转移正在运行的任务。旧版设备保持每台一次一个任务；Windows工作器空闲自动更新后启用分阶段并发，ECS在空闲时通过 `scripts/reload-knowledge-worker-when-idle.py --wait-and-restart` 单独重载。一次任务失败只释放自己的位置。
+不同设备可以同时处理同账号的不同视频。多台GPU工作器按各自空闲位置接单；只要有健康GPU在线且支持相应后端，CPU工作器就让出任务，防止小内存ECS同时加载语音模型影响网站。GPU离线后CPU仍可接续新任务。每个任务仍有唯一租约，不转移正在运行的任务。旧版设备保持每台一次一个任务；Windows工作器空闲自动更新后启用分阶段并发，ECS在空闲时通过 `scripts/reload-knowledge-worker-when-idle.py --wait-and-restart` 单独重载。一次任务失败只释放自己的位置。
 
 ## 总结后端
 
@@ -118,7 +118,7 @@ pm2 start scripts/knowledge-worker.mjs --name knowledge-worker -- portal/knowled
 - root 可使用 `codex-via-proxy` 启动已登录的 CLI；它读取 `/root/.config/cordcloud-proxy.env`，只影响本次进程。工作器使用私有配置中的 `codex.proxyUrl`。
 - ECS 工作器私有配置位于 `/etc/knowledge-worker/config.json`，任务缓存和预下载模型位于 `/var/lib/knowledge-worker/`。配置中的令牌须来自对应用户的知识库页面；更换网页令牌后同步更新此文件。
 - Python 3.11 与独立虚拟环境用于 CPU 转写，线程数为1。`scripts/knowledge-worker.service.example` 给出了开机服务及CPU/内存限制；配置、模型和目录准备好后，再将其安装为 `/etc/systemd/system/knowledge-worker.service` 并启用。服务在 Portal 以外运行，单独重启不会重启网站。
-- 同一账号的工作器共享队列，各设备按上述阶段并发限制独立领取。每台工作器分别记录身份和心跳；最近90秒内有健康、空闲且支持相应后端的CUDA工作器时优先使用GPU，GPU忙碌或离线后其他工作器可接新任务。已经开始的任务继续使用原租约，不迁移或重复执行；处理中断仍按15分钟租约超时提示失败并允许重试。
+- 同一账号的工作器共享队列，各设备按上述阶段并发限制独立领取。每台工作器分别记录身份和心跳；最近90秒内有健康且支持相应后端的CUDA工作器时CPU让出任务，即使GPU暂忙；多台GPU可独立接单，GPU离线后CPU可接新任务。已经开始的任务继续使用原租约，不迁移或重复执行；处理中断仍按15分钟租约超时提示失败并允许重试。
 - Windows 本机使用 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-knowledge-worker.ps1` 注册当前用户登录启动任务，并立即隐藏启动。无需密码，使用当前用户的私有工作器配置与CLI登录；退出后15秒重试，同一用户会话用互斥锁防重复。每日运行日志位于 `%LOCALAPPDATA%/Navigation/knowledge-worker/`。通过任务计划程序停止/禁用 `Navigation Knowledge GPU Worker` 可关闭自动启动。CUDA配置用 `asr.device: "cuda"`；健康检查会验证CUDA设备与Windows推理库，可用时才优先调度。
 
 运维检查：`systemctl status cordcloud-proxy knowledge-worker`；工作器日志为 `journalctl -u knowledge-worker`。代理是否在线与 CLI 是否登录需要分别验证；本次已通过服务器代理执行真实 CLI 短提示。
@@ -226,3 +226,5 @@ Portal使用B站元数据/播放接口下载当前账号可访问的视频，以
 新增`knowledge_bilibili_accounts`按`user_id`存储AES-256-GCM密文、公开状态和偏好；账号ID作为AAD防止跨账号交换密文。首次绑定时生成独立32字节密钥`portal/data/knowledge-bilibili.key`（Linux权限0600），可用`KNOWLEDGE_BILIBILI_KEY_FILE`指定位置。备份需同时保存该密钥与账号表，并分开保护；只有数据库备份无法恢复凭据。密钥和私有数据不得入Git、日志或聊天。解除绑定清除密文并保留画质偏好，不退出用户其它B站设备。
 
 权限为`knowledge:bilibili:view`（查看/检查自己的状态）、`knowledge:bilibili:edit`（扫码/解绑）、`knowledge:quality:edit`（默认清晰度），均位于首页/知识库/处理设置对应层级；预览、单次画质选择与导入继续使用链接导入权限。仅新增Node依赖`qrcode@1.5.4`用于本地生成二维码，不请求第三方二维码服务。
+
+数据库短暂写锁冲突返回 HTTP 503、`KNOWLEDGE_BUSY` 和 `Retry-After`；工作器只对这一明确可重试状态进行有界退避，不盲目重放网络失败的领单请求。完整结果写入本机缓存后，如入库失败，原笔记信息及模型设置一致时可复用结果重新提交，避免再次调用模型。

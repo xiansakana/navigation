@@ -190,7 +190,10 @@ export function createKnowledgeStore(db) {
         const worker = workers.find(w => w.id === workerId) || { id: workerId, capabilities: {} };
         if (!available(worker)) return null;
         const candidates = db.prepare("SELECT * FROM knowledge_documents WHERE user_id=? AND status='queued' ORDER BY created_at,id").all(uid);
-        const gpuWorkers = workers.filter(w => w.capabilities.media?.ready && w.capabilities.media.detail === 'cuda' && available(w));
+        // Small ECS hosts must not start a second ASR model just because a healthy
+        // desktop GPU is busy. Other GPUs can still claim their own stage slots.
+        const gpuWorkers = workers.filter(w => w.capabilities.media?.ready && w.capabilities.media.detail === 'cuda'
+          && (worker.capabilities.media?.detail !== 'cuda' || available(w)));
         const hasLocal = r => { const local = localInputs.get(uid, r.id); return local && local.worker_id === workerId && localDocuments.includes(r.id) && r.source_sha256 && local.sha256 === r.source_sha256; };
         const receivingLocal = r => { const local = localInputs.get(uid, r.id); return local && local.worker_id === workerId && !local.sha256 && local.expires > Date.now(); };
         const row = candidates.find(r => backends.includes(r.backend) && !receivingLocal(r) && (!sources.get(uid, r.id) || sources.get(uid, r.id).state === 'ready' || hasLocal(r) || imports.get(uid, r.id)?.state === 'done') &&

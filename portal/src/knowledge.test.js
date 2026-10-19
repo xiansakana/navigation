@@ -137,13 +137,15 @@ test('pipeline releases media before summary, enforces stage slots, supports ind
   assert.equal(store.get('a', independent.id).status, 'processing', 'one failure does not cancel other workers');
 }));
 
-test('legacy workers stay serial per worker; free CPU can work while GPU slots are occupied', async () => fixture(async ({ store }) => {
+test('legacy workers stay serial per worker and CPU fallback yields to a healthy busy GPU', async () => fixture(async ({ store, db }) => {
   const caps = { media: { ready: true, detail: 'cuda' }, codex: { ready: true } };
   store.heartbeatWorker('a', { workerId: 'gpu', capabilities: caps });
   for (let i = 0; i < 3; i++) { const d = store.create('a', upload()); store.enqueue('a', d.id); }
   const gpu = store.claim('a', ['codex'], 'gpu'); assert.ok(gpu);
   assert.equal(gpu.processingPhase, '', 'legacy stage labels remain accurate until runtime upgrades');
   assert.equal(store.claim('a', ['codex'], 'gpu'), null);
+  assert.equal(store.claim('a', ['codex'], 'cpu'), null, 'GPU work must not exhaust a small ECS host with concurrent CPU ASR');
+  db.prepare('UPDATE knowledge_worker_instances SET last_seen=? WHERE worker_id=?').run(new Date(Date.now() - 91000).toISOString(), 'gpu');
   const cpu = store.claim('a', ['codex'], 'cpu'); assert.ok(cpu); assert.notEqual(cpu.id, gpu.id);
   assert.equal(store.claim('a', ['codex'], 'cpu'), null);
   assert.ok(store.leased('a', gpu.id, gpu.lease));
