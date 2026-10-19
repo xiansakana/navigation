@@ -78,7 +78,8 @@ fi
 if [[ -f data/navigation.db && ! -f data/platform-runtime-v1.json ]]; then
     node scripts/configure-backup115.mjs
     bash scripts/backup-navigation-115.sh
-    node scripts/migrate-platform-runtime.mjs --apply
+    echo '首次切换已完成云备份。请先在异机完整恢复并校验，再执行 node scripts/migrate-platform-runtime.mjs --apply，然后重跑部署。'
+    exit 1
 fi
 
 if should_run qq-bot; then

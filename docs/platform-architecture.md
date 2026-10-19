@@ -66,7 +66,7 @@ python3 scripts/backup-navigation.py --verify backup.tar.gz
 
 首次切换必须先取得加密云备份并异机恢复验证，确认数据库管理员账号能用原密码登录；不得直接删除密码回退后再检查。
 
-`migrate-platform-runtime.mjs` 支持默认只检查和 `--apply`。它拒绝在 Codex/媒体任务运行时切换，拒绝数据库密码与配置密码不一致，迁移私有配置且不打印凭据。`ecs-update.sh` 首次迁移会备份，再执行配置迁移；之后按 SHA 校验和选定服务更新，并启动独立执行器、校验资源权限与模块目录。不要中断正在进行的知识库外部工作器。
+`migrate-platform-runtime.mjs` 支持默认只检查和 `--apply`。它拒绝在 Codex/媒体任务运行时切换，拒绝数据库密码与配置密码不一致，迁移私有配置且不打印凭据。`ecs-update.sh` 首次切换会备份并停止，避免把上传校验当作异机恢复演练；操作员完成异机恢复验证后执行迁移，再重跑部署。之后按 SHA 校验和选定服务更新，并启动独立执行器、校验资源权限与模块目录。不要中断正在进行的知识库外部工作器。
 
 共享库改动影响 Portal、qq-bot、stock-manage 和 qqq-dip；部署包含这些使用方。执行器改动还需要更新 portal-background 和 codex-worker。
 
