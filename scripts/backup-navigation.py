@@ -46,6 +46,7 @@ def verify(archive, restore=True):
                 compressed = target
                 target = Path(directory) / 'navigation.db'
                 with closing(sqlite3.connect(target)) as output, gzip.open(compressed, 'rt', encoding='utf-8') as sql:
+                    output.execute('PRAGMA cache_size=-65536')
                     statement = ''
                     for line in sql:
                         statement += line
@@ -55,6 +56,7 @@ def verify(archive, restore=True):
                     if statement.strip():
                         raise RuntimeError('Truncated logical backup')
             with closing(sqlite3.connect(f'{target.as_uri()}?mode=ro', uri=True)) as db:
+                db.execute('PRAGMA cache_size=-65536')
                 if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                     raise RuntimeError('Backup database integrity check failed')
                 if db.execute('PRAGMA foreign_key_check').fetchone():
