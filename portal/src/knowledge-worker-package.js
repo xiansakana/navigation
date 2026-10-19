@@ -38,7 +38,12 @@ let cached;
 export function knowledgeWorkerPackage(binding = null) {
   const stamp = workerPackageFiles.map(f => fs.statSync(path.join(root, f)).mtimeMs).join(':');
   if (!binding && cached?.stamp === stamp) return cached;
-  const entries = workerPackageFiles.map(f => [f, fs.readFileSync(path.join(root, f))]);
+  const entries = workerPackageFiles.map(f => {
+    let contents = fs.readFileSync(path.join(root, f));
+    // Windows PowerShell 5.1 needs a UTF-8 BOM to decode non-ASCII source reliably.
+    if (f.endsWith('.ps1') && !contents.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf]))) contents = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), contents]);
+    return [f, contents];
+  });
   entries.push(['package.json', JSON.stringify({ type: 'module', private: true })]);
   const version = crypto.createHash('sha256').update(Buffer.concat(entries.map(([, b]) => Buffer.from(b)))).digest('hex');
   entries.push(['worker-version.json', JSON.stringify({ version })]);

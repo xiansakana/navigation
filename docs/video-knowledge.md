@@ -93,6 +93,8 @@ pm2 start scripts/knowledge-worker.mjs --name knowledge-worker -- portal/knowled
 
 安装器通过`node --version`读取并校验主版本，兼容Windows PowerShell 5.1和PowerShell 7；不通过`node -p/-e`传含引号的JavaScript。已安装Node>=22直接复用；否则优先复用安装目录的便携Node，再按原SHA256校验流程下载。`-CheckOnly`只检查平台和实际Node主版本，不创建配置、不绑定设备、不下载依赖或启用启动任务。
 
+所有打包的`.ps1`采用带BOM的UTF-8，避免Windows PowerShell 5.1按系统代码页误读中文及字符串边界；注册任务脚本的引导文字保持ASCII。回归测试在隔离PowerShell进程中复现旧版`PositionalParameterNotFound`，并验证修复后任务名称、含空格/中文路径、当前用户低权限登录触发与启动调用，不实际修改测试机器任务。如果依赖已安装且仅在注册自启动阶段失败，可修复安装目录的注册脚本后，仅执行`install-knowledge-worker.ps1 -ConfigPath <安装目录/config.json> -NodePath <node.exe>`，无需重新配对或安装Python/CUDA依赖。
+
 安装器面向 Windows x64：优先使用已有 Node 22+，否则下载带官方 SHA256 校验的 Node 22.20.0；安装独立 Python 3.11.9 时核验 Python Software Foundation 数字签名，创建私有环境并安装固定的语音依赖、FFmpeg 和可选 CUDA 推理库。首次需要联网下载依赖和语音模型。已有 Codex 原生程序会复用其登录；否则按 [OpenAI Docs](https://learn.chatgpt.com/docs/codex/cli) 安装 CLI 并引导用户登录。网站账号与 Codex 账号授权独立，不在设备间复制 Codex 登录缓存。
 
 运行文件位于 `%LOCALAPPDATA%/Navigation/KnowledgeWorker/releases/`，私有配置为同目录下的 `config.json`，缓存、模型独立保存。设备凭据在服务端仅保存哈希，网页设备列表不返回凭据。设备有独立ID、名称、心跳和停用状态；停用只取消该设备的访问和正在持有的任务租约，不影响其他设备。旧版共享凭据收进高级设置，轮换不再撤销独立设备。

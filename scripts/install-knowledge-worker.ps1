@@ -12,6 +12,8 @@ $workerUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $workerTrigger = New-ScheduledTaskTrigger -AtLogOn -User $workerUser
 $workerPrincipal = New-ScheduledTaskPrincipal -UserId $workerUser -LogonType Interactive -RunLevel Limited
 $workerSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
-Register-ScheduledTask -TaskName 'Navigation Knowledge GPU Worker' -Action $workerAction -Trigger $workerTrigger -Principal $workerPrincipal -Settings $workerSettings -Description '本机视频知识库 GPU 工作器，登录后自动启动，异常退出自动重试。' -Force | Out-Null
+# Keep bootstrap text ASCII: Windows PowerShell 5.1 otherwise decodes a BOM-less
+# UTF-8 source using the system code page and can change string delimiters.
+Register-ScheduledTask -TaskName 'Navigation Knowledge GPU Worker' -Action $workerAction -Trigger $workerTrigger -Principal $workerPrincipal -Settings $workerSettings -Description 'Navigation knowledge GPU worker; start after sign-in and retry on failure.' -Force | Out-Null
 Start-ScheduledTask -TaskName 'Navigation Knowledge GPU Worker'
-Write-Output '本机 GPU 工作器已启动，并配置为当前用户登录后自动运行。'
+Write-Output 'Knowledge GPU worker started; automatic startup after Windows sign-in is enabled.'
