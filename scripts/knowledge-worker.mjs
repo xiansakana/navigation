@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { downloadVideo } from '../portal/src/knowledge-download.js';
 import { startLocalInputServer, localDocuments, verifyLocalInput, pruneLocalInputs } from '../portal/src/knowledge-local-input.js';
-import { runProcess, summarizeVideo, modelConfiguration, resolveCodexBinary } from '../portal/src/knowledge-model.js';
+import { runProcess, summarizeVideo, modelConfiguration, resolveCodexBinary, createStageGate } from '../portal/src/knowledge-model.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = path.resolve(process.argv[2] || path.join(repo, 'portal/knowledge-worker.config.json'));
@@ -21,8 +21,16 @@ const workRoot = path.resolve(config.workDir || path.join(repo, 'portal/data/kno
 await fsp.mkdir(workRoot, { recursive: true, mode: 0o700 });
 const python = config.python || (process.platform === 'win32' ? 'python.exe' : 'python3');
 const workerId = crypto.createHash('sha256').update(os.hostname() + ':' + configPath).digest('hex').slice(0, 32);
-let stopped = false, activeController = null;
-for (const event of ['SIGINT', 'SIGTERM']) process.on(event, () => { stopped = true; activeController?.abort(); });
+let stopped = false, mediaActive = 0;
+let limits = { mediaConcurrency: 1, summaryConcurrency: 2 };
+const activeControllers = new Set(), tasks = new Set(), summaryGate = createStageGate(2);
+function configurePipeline(value) {
+  if (Number.isSafeInteger(value?.mediaConcurrency) && value.mediaConcurrency >= 1 && value.mediaConcurrency <= 2
+    && Number.isSafeInteger(value?.summaryConcurrency) && value.summaryConcurrency >= 1 && value.summaryConcurrency <= 4) {
+    limits = value; summaryGate.setLimit(value.summaryConcurrency);
+  }
+}
+for (const event of ['SIGINT', 'SIGTERM']) process.on(event, () => { stopped = true; for (const controller of activeControllers) controller.abort(); });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function request(route, { data, method, lease, signal, raw = false, headers = {} } = {}) {
   const response = await fetch(new URL('/api/knowledge/worker' + route, portal), { method: method || (data === undefined ? 'GET' : 'POST'), redirect: 'error',
@@ -35,7 +43,7 @@ async function request(route, { data, method, lease, signal, raw = false, header
   return raw ? response : response.json();
 }
 async function capabilities() {
-  const result = {};
+  const result = { pipeline: { version: 1 } };
   try {
     const device = (await runProcess(python, [path.join(repo, 'portal/workers/video_runtime.py'), config.asr?.device || 'cpu'], { timeout: 20000 })).trim();
     await runProcess(config.ffmpeg || 'ffmpeg', ['-version'], { timeout: 10000 });
@@ -61,11 +69,13 @@ async function download(job, directory, signal) {
   return downloadVideo(job, path.join(directory, 'source'), range => request('/jobs/' + job.id + '/source', { lease: job.lease, raw: true, signal, headers: range ? { Range: range } : {} }), signal);
 }
 async function processJob(job) {
-  if (!/^[a-f0-9]{32}$/.test(job.id) || !Number.isSafeInteger(job.bytes) || job.bytes > 1024 ** 3) throw new Error('服务器任务格式无效');
+  if (!/^[a-f0-9]{32}$/.test(job.id) || !Number.isSafeInteger(job.bytes) || job.bytes > 1024 ** 3) { mediaActive--; throw new Error('服务器任务格式无效'); }
   const directory = path.join(workRoot, job.id);
-  await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
-  activeController = new AbortController();
-  const { signal } = activeController;
+  try { await fsp.mkdir(directory, { recursive: true, mode: 0o700 }); } catch (e) { mediaActive--; throw e; }
+  const controller = new AbortController(); activeControllers.add(controller);
+  const { signal } = controller;
+  let mediaHeld = true, releaseSummary;
+  const releaseMedia = () => { if (mediaHeld) { mediaHeld = false; mediaActive--; } };
   let state = { stage: '下载视频', progress: 2 }, lastProgress = 0;
   const update = async (stage, progress) => {
     state = { stage, progress };
@@ -79,7 +89,7 @@ async function processJob(job) {
     try {
       await request('/jobs/' + job.id + '/progress', { data: state, lease: job.lease, signal });
       await request('/heartbeat', { data: { workerId, label: config.label || os.hostname(), capabilities: cachedCapabilities }, signal });
-    } catch (e) { if ([401, 409].includes(e.status)) activeController?.abort(); }
+    } catch (e) { if ([401, 403, 409].includes(e.status)) controller.abort(); }
     finally { heartbeatBusy = false; }
   }, 20000);
   try {
@@ -112,6 +122,18 @@ async function processJob(job) {
     }
     if (job.storage?.provider === '115' && job.storage.state === 'ready') await fsp.rm(path.join(directory, 'source'), { force: true });
     const evidence = JSON.parse(await fsp.readFile(evidenceFile, 'utf8'));
+    // Persist the handoff before freeing the GPU slot. The same lease and local
+    // evidence stay with this worker; no video upload/download is added here.
+    await request('/jobs/' + job.id + '/phase', { data: { phase: 'summary_wait' }, lease: job.lease, signal });
+    state = { stage: '等待总结', progress: Math.max(state.progress, 60) };
+    releaseMedia();
+    releaseSummary = await summaryGate.acquire(signal);
+    while (true) {
+      const transition = await request('/jobs/' + job.id + '/phase', { data: { phase: 'summary' }, lease: job.lease, signal });
+      if (transition.accepted) break;
+      await sleep(1000); signal.throwIfAborted();
+    }
+    await update('正在总结', 65);
     const summary = await summarizeVideo({...config,onCodexCall:input=>request('/jobs/'+job.id+'/codex',{data:input,lease:job.lease,signal})}, job, evidence, directory, update, signal);
     const frames = [];
     for (const f of evidence.frames) frames.push({ time: f.time, data: (await fsp.readFile(path.join(directory, f.name))).toString('base64') });
@@ -129,7 +151,7 @@ async function processJob(job) {
   } catch (e) {
     console.error(new Date().toISOString(), '任务失败', job.id, e.message);
     try { await request('/jobs/' + job.id + '/fail', { data: { error: e.message }, lease: job.lease }); } catch { /* Expired jobs are recovered by the server. */ }
-  } finally { clearInterval(heartbeat); activeController = null; }
+  } finally { clearInterval(heartbeat); releaseMedia(); releaseSummary?.(); activeControllers.delete(controller); }
 }
 let cachedCapabilities = {}, checkedAt = 0;
 let localServer;
@@ -146,13 +168,23 @@ console.log('知识库工作器已启动：', portal.origin, '配置：', config
 while (!stopped) {
   try {
     if (Date.now() - checkedAt > 60000) { cachedCapabilities = await capabilities(); checkedAt = Date.now(); }
-    await request('/heartbeat', { data: { workerId, label: config.label || os.hostname(), capabilities: cachedCapabilities } });
+    const heartbeat = await request('/heartbeat', { data: { workerId, label: config.label || os.hostname(), capabilities: cachedCapabilities } });
+    configurePipeline(heartbeat.pipeline);
     const backends = cachedCapabilities.media?.ready ? ['codex', 'openai'].filter(b => cachedCapabilities[b]?.ready) : [];
-    const { job } = await request('/claim', { data: { backends, workerId, localDocuments: localServer ? await localDocuments(workRoot) : [] } });
-    if (job) await processJob(job);
+    const hasCapacity = mediaActive < limits.mediaConcurrency && tasks.size < limits.mediaConcurrency + limits.summaryConcurrency;
+    const { job } = hasCapacity ? await request('/claim', { data: { backends, workerId, localDocuments: localServer ? await localDocuments(workRoot) : [] } }) : { job: null };
+    if (stopped && job) {
+      await request('/jobs/' + job.id + '/fail', { data: { error: '工作器正在退出，请重试' }, lease: job.lease });
+      break;
+    }
+    if (job) {
+      mediaActive++;
+      const task = processJob(job).catch(e => console.error('任务启动失败', job.id, e.message));
+      tasks.add(task); task.finally(() => tasks.delete(task));
+    }
     else {
-      if (localServer && !localServer.isReceiving() && Date.now() - cacheCheckedAt > 3600000) { await pruneLocalInputs(workRoot); cacheCheckedAt = Date.now(); }
-      if (config.autoUpdate && !localServer?.isReceiving() && Date.now() - updateCheckedAt > 15 * 60000) {
+      if (!tasks.size && localServer && !localServer.isReceiving() && Date.now() - cacheCheckedAt > 3600000) { await pruneLocalInputs(workRoot); cacheCheckedAt = Date.now(); }
+      if (!tasks.size && config.autoUpdate && !localServer?.isReceiving() && Date.now() - updateCheckedAt > 15 * 60000) {
         updateCheckedAt = Date.now();
         try {
           const release = await request('/release');
@@ -160,12 +192,17 @@ while (!stopped) {
           if (release.version !== current.version) { process.exitCode = 75; break; }
         } catch { /* Keep processing when update checks are unavailable. */ }
       }
-      await sleep(5000);
+      await sleep(tasks.size ? 1000 : 5000);
     }
   } catch (e) {
     console.error(new Date().toISOString(), e.message);
-    if ([401, 403].includes(e.status)) { console.error('设备已停用或凭据失效，请重新运行安装程序连接。'); process.exitCode = 78; break; }
+    if ([401, 403].includes(e.status)) {
+      console.error('设备已停用或凭据失效，请重新运行安装程序连接。');
+      for (const controller of activeControllers) controller.abort();
+      process.exitCode = 78; break;
+    }
     await sleep(10000);
   }
 }
+await Promise.allSettled([...tasks]);
 localServer?.close();

@@ -12,6 +12,14 @@
 
 工作器可以运行在服务器，也可以运行在个人电脑；网页不依赖浏览器保持开启。CPU服务器建议单工作器、`base`/`small`、`int8`、1—2线程；本机有适配 CUDA 的 GPU 时可以使用 `cuda`。部署 Portal 不会自动安装大型语音模型或启动耗内存任务。
 
+### 分阶段并发
+
+「处理设置 → 并发设置」按账号保存、对每个工作器独立生效：默认转写/素材提取1路（可设1—2）、总结2路（可设1—4）。保存需要 `knowledge:settings:edit` 和 `knowledge:concurrency:edit`；工作器通过心跳获取设置，无需修改本机配置。降低并发只停止新增占位，不中断已运行的任务。
+
+素材完成后，工作器以原租约持久化 `summary_wait`，释放转写位置，再申请总结位置；视频A总结时即可转写视频B，两个总结可同时执行。素材留在原工作器，没有阶段间额外的视频上传/下载。每台设备最多持有「转写上限 + 总结上限」个任务，避免提前领取大量任务。页面显示「正在转写/提取素材」「等待总结」「正在总结」，原有 `processing` 状态保持兼容；并发不改变模型配置和单任务内容。
+
+不同设备可以同时处理同账号的不同视频。空闲且支持相应后端的GPU工作器优先；GPU位置已满时，其他空闲工作器可领取新任务。每个任务仍有唯一租约，不转移正在运行的任务。旧版设备保持每台一次一个任务；Windows工作器空闲自动更新后启用分阶段并发，ECS在空闲时通过 `scripts/reload-knowledge-worker-when-idle.py --wait-and-restart` 单独重载。一次任务失败只释放自己的位置。
+
 ## 总结后端
 
 网页「处理设置」切换 `Codex CLI` 和兼容 `OpenAI API`，默认值按用户保存在 SQLite。创建任务时固定所选后端，切换不改变已排队任务；失败重试使用当前选择。未配置的后端不会被工作器领取，页面显示其配置状态。
@@ -110,7 +118,7 @@ pm2 start scripts/knowledge-worker.mjs --name knowledge-worker -- portal/knowled
 - root 可使用 `codex-via-proxy` 启动已登录的 CLI；它读取 `/root/.config/cordcloud-proxy.env`，只影响本次进程。工作器使用私有配置中的 `codex.proxyUrl`。
 - ECS 工作器私有配置位于 `/etc/knowledge-worker/config.json`，任务缓存和预下载模型位于 `/var/lib/knowledge-worker/`。配置中的令牌须来自对应用户的知识库页面；更换网页令牌后同步更新此文件。
 - Python 3.11 与独立虚拟环境用于 CPU 转写，线程数为1。`scripts/knowledge-worker.service.example` 给出了开机服务及CPU/内存限制；配置、模型和目录准备好后，再将其安装为 `/etc/systemd/system/knowledge-worker.service` 并启用。服务在 Portal 以外运行，单独重启不会重启网站。
-- 同一账号的工作器共享队列，同一时间只领取一个任务。每台工作器分别记录身份和心跳；最近90秒有健康 CUDA 工作器在线且支持任务的总结后端时，CPU工作器让出该任务。GPU离线超过90秒后，ECS可领取后续任务。已经开始的任务继续使用原租约，不迁移或重复执行；处理中断仍按15分钟租约超时提示失败并允许重试。
+- 同一账号的工作器共享队列，各设备按上述阶段并发限制独立领取。每台工作器分别记录身份和心跳；最近90秒内有健康、空闲且支持相应后端的CUDA工作器时优先使用GPU，GPU忙碌或离线后其他工作器可接新任务。已经开始的任务继续使用原租约，不迁移或重复执行；处理中断仍按15分钟租约超时提示失败并允许重试。
 - Windows 本机使用 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-knowledge-worker.ps1` 注册当前用户登录启动任务，并立即隐藏启动。无需密码，使用当前用户的私有工作器配置与CLI登录；退出后15秒重试，同一用户会话用互斥锁防重复。每日运行日志位于 `%LOCALAPPDATA%/Navigation/knowledge-worker/`。通过任务计划程序停止/禁用 `Navigation Knowledge GPU Worker` 可关闭自动启动。CUDA配置用 `asr.device: "cuda"`；健康检查会验证CUDA设备与Windows推理库，可用时才优先调度。
 
 运维检查：`systemctl status cordcloud-proxy knowledge-worker`；工作器日志为 `journalctl -u knowledge-worker`。代理是否在线与 CLI 是否登录需要分别验证；本次已通过服务器代理执行真实 CLI 短提示。

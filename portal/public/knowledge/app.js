@@ -6,7 +6,7 @@ import { sendLocalInput } from './local-input.js?v=1';
 import { bindLinkImport } from './link-import.js?v=3';
 import { createBilibiliPanel } from './bilibili-account.js?v=2';
 const $ = id => document.getElementById(id);
-const state = { permissions: [], documents: [], selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
+const state = { permissions: [], documents: [], selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, concurrencyDirty: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
 const sourcePlayer = createSourcePlayer({ player: $('player'), frame: $('original-frame'), select: $('playback-source'), link: $('original-link'), hint: $('playback-hint'), allowed: () => can('source:view') });
 const text = (id, value) => { $(id).textContent = value || ''; };
@@ -14,6 +14,7 @@ const show = (id, yes) => { $(id).hidden = !yes; };
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const tags = value => value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
 const time = value => { const s = Math.floor(value || 0); return (s >= 3600 ? String(Math.floor(s / 3600)).padStart(2, '0') + ':' : '') + String(Math.floor(s / 60) % 60).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
+const phaseLabel = d => d.status === 'processing' ? ({ media: '正在转写/提取素材', summary_wait: '等待总结', summary: '正在总结' })[d.processingPhase] || '' : '';
 function error(e) { text('error', e.message || String(e)); show('error', true); }
 async function api(route, options = {}) {
   const response = await fetch('/api/knowledge' + route, { ...options, headers: { ...(options.body instanceof Blob ? {} : { 'Content-Type': 'application/json' }), ...options.headers } });
@@ -37,8 +38,13 @@ async function settings() {
   }
   $('summary-model').disabled = $('summary-effort').disabled = !can('model:edit') || !can('settings:edit');
   show('model-save', can('model:edit') && can('settings:edit'));
+  show('concurrency-settings', can('concurrency:edit') && can('settings:edit'));
+  if (!state.concurrencyDirty) {
+    $('media-concurrency').value = String(state.settings.mediaConcurrency);
+    $('summary-concurrency').value = String(state.settings.summaryConcurrency);
+  }
   const worker = state.settings.worker, c = worker.capabilities;
-  text('worker-status', worker.online ? `${worker.label || '工作器'} · 在线${worker.scheduling === 'gpu-first' ? ' · GPU 优先，离线后由服务器接手后续任务' : ''}` : worker.configured ? '工作器离线，等待连接。已上传的任务会保留在队列中。' : '尚未连接工作器。生成个人凭据后，可在服务器或本机启动处理。');
+  text('worker-status', worker.online ? `${worker.label || '工作器'} · 在线 · GPU优先，空闲工作器可独立接单 · ${c.pipeline?.version === 1 ? '分阶段并发已启用' : '当前设备为旧版，空闲更新后启用并发'}` : worker.configured ? '工作器离线，等待连接。已上传的任务会保留在队列中。' : '尚未连接工作器。生成个人凭据后，可在服务器或本机启动处理。');
   const info = c[state.settings.backend];
   text('backend-description', info ? `${info.ready ? '工作器已就绪' : '工作器未就绪'} · ${state.settings[prefix + 'Model'] || info.model || info.detail || ''} · 强度：${state.settings[prefix + 'Effort'] || '工作器默认'}` : '选择总结方式后，由已连接工作器执行。');
 }
@@ -56,6 +62,7 @@ function renderList() {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'kb-document' + (state.current?.id === d.id ? ' active' : '');
     button.innerHTML = `<strong>${escape(d.title)}</strong><small>${escape(d.topic || '未分类')} · ${escape(d.status === 'queued' && d.storage?.provider === '115' && d.storage.state !== 'ready' ? ({ waiting: '等待上传', pending: '等待保存至115', uploading: '正在保存至115', verifying: '校验原视频', verified: '清理临时原片', failed: '115保存待重试' })[d.storage.state] || d.stage : d.stage)}${d.status === 'processing' ? ' ' + d.progress + '%' : ''}</small><p>${escape(d.preview || d.originalName)}</p>`;
     button.addEventListener('click', () => open(d.id).catch(error));
+    if (phaseLabel(d)) { const phase = document.createElement('small'); phase.textContent = phaseLabel(d); button.append(phase); }
     if (can('publish:batch:edit') && can('publish:edit') && d.status === 'ready') {
       const row = document.createElement('div'); row.className = 'kb-document-row';
       const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.setAttribute('aria-label', '选择笔记：' + d.title);
@@ -117,7 +124,7 @@ function renderDocument(d) {
   $('document-visibility').value = d.visibility || 'private';
   text('document-meta', `${d.topic || '未分类'} · ${time(d.duration)} · ${d.originalName} · ${d.backend === 'codex' ? 'Codex CLI' : '兼容 API'} · ${new Date(d.updatedAt).toLocaleString('zh-CN')}`);
   $('document-tags').innerHTML = d.tags.map(t => '<span>' + escape(t) + '</span>').join('');
-  text('job-status', d.error || d.stage + (d.status === 'processing' ? ' · ' + d.progress + '%' : ''));
+  text('job-status', d.error || [phaseLabel(d), d.stage].filter(Boolean).join(' · ') + (d.status === 'processing' ? ' · ' + d.progress + '%' : ''));
   $('job-status').className = d.status;
   show('retry', d.status === 'failed' && can('process:edit')); show('resume-upload', d.status === 'uploading' && can('upload:edit'));
   show('edit', can('notes:edit') && ['ready', 'failed'].includes(d.status));
@@ -264,6 +271,16 @@ $('batch-save').onclick = async () => {
 };
 $('backend').onchange = async () => { try { await send('/settings', 'PUT', { backend: $('backend').value }); state.modelDirty = false; await settings(); text('message', '已切换默认总结方式。'); } catch (e) { error(e); } };
 $('summary-model').oninput = $('summary-effort').onchange = () => { state.modelDirty = true; };
+$('media-concurrency').onchange = $('summary-concurrency').onchange = () => { state.concurrencyDirty = true; };
+$('concurrency-save').onclick = async () => {
+  $('concurrency-save').disabled = true;
+  try {
+    await send('/settings', 'PUT', { mediaConcurrency: Number($('media-concurrency').value), summaryConcurrency: Number($('summary-concurrency').value) });
+    state.concurrencyDirty = false; await settings();
+    text('message', '并发设置已保存，每个工作器独立生效；降低并发不会中断已运行的任务。');
+  } catch (e) { error(e); }
+  finally { $('concurrency-save').disabled = false; }
+};
 $('model-save').onclick = async () => {
   const prefix = state.settings.backend === 'codex' ? 'codex' : 'api';
   try {

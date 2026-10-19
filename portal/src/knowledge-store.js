@@ -5,6 +5,7 @@ import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
 import { createKnowledgeDeviceStore } from './knowledge-devices.js';
 import { createLocalInputStore } from './knowledge-local-store.js';
 import { createImportStore } from './knowledge-import-store.js';
+import { pipelineSettings } from './knowledge-pipeline.js';
 
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
@@ -62,6 +63,8 @@ export function createKnowledgeStore(db) {
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'source_sha256')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN source_sha256 TEXT NOT NULL DEFAULT ''");
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'visibility')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private','public'))");
   db.exec('CREATE INDEX IF NOT EXISTS knowledge_public ON knowledge_documents(visibility,status,updated_at DESC)');
+  if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'processing_phase')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN processing_phase TEXT NOT NULL DEFAULT ''");
+  if (!db.prepare('PRAGMA table_info(knowledge_settings)').all().some(c => c.name === 'pipeline_json')) db.exec("ALTER TABLE knowledge_settings ADD COLUMN pipeline_json TEXT NOT NULL DEFAULT '{}'");
   const localInputs = createLocalInputStore(db);
   const imports = createImportStore(db);
   for (const table of ['knowledge_settings', 'knowledge_documents']) {
@@ -72,7 +75,7 @@ export function createKnowledgeStore(db) {
   const getRow = (uid, key) => db.prepare('SELECT * FROM knowledge_documents WHERE user_id=? AND id=?').get(uid, key);
   const read = row => row && ({ id: row.id, title: row.title, topic: row.topic, tags: JSON.parse(row.tags_json), sourceUrl: row.source_url,
     visibility: row.visibility || 'private', originalName: row.original_name, bytes: row.byte_size, mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, modelSettings: JSON.parse(row.model_settings_json || '{}'), status: row.status,
-    stage: row.stage, progress: row.progress, error: row.error, duration: row.duration, language: row.language, notes: row.notes,
+    stage: row.stage, processingPhase: row.processing_phase || '', progress: row.progress, error: row.error, duration: row.duration, language: row.language, notes: row.notes,
     transcript: JSON.parse(row.transcript_json), frames: JSON.parse(row.frames_json), provenance: JSON.parse(row.provenance_json),
     storage: sources.public(row.user_id, row.id), importState: imports.get(row.user_id, row.id)?.state || '',
     sourceMedia: JSON.parse(imports.get(row.user_id, row.id)?.media_json || '{}'), revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at });
@@ -84,12 +87,12 @@ export function createKnowledgeStore(db) {
     .map(r => ({ id: r.worker_id, label: r.label, lastSeen: r.last_seen, capabilities: JSON.parse(r.capabilities_json) }));
   return {
     get, getRow, expire, sources, devices, localInputs, imports, codexCalls:createKnowledgeCodexCalls(db),
-    settings(uid) { const row = db.prepare('SELECT * FROM knowledge_settings WHERE user_id=?').get(uid); return { backend: row?.backend || 'codex', ...modelSettings({}, JSON.parse(row?.model_settings_json || '{}')) }; },
+    settings(uid) { const row = db.prepare('SELECT * FROM knowledge_settings WHERE user_id=?').get(uid); return { backend: row?.backend || 'codex', ...modelSettings({}, JSON.parse(row?.model_settings_json || '{}')), ...pipelineSettings({}, JSON.parse(row?.pipeline_json || '{}')) }; },
     saveSettings(uid, raw) {
       if (typeof raw === 'string') raw = { backend: raw };
-      const previous = this.settings(uid), backend = backendName(raw.backend || previous.backend), selection = modelSettings(raw, previous);
-      db.prepare('INSERT INTO knowledge_settings(user_id,backend,model_settings_json) VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET backend=excluded.backend,model_settings_json=excluded.model_settings_json').run(uid, backend, JSON.stringify(selection));
-      return { backend, ...selection };
+      const previous = this.settings(uid), backend = backendName(raw.backend || previous.backend), selection = modelSettings(raw, previous), pipeline = pipelineSettings(raw, previous);
+      db.prepare('INSERT INTO knowledge_settings(user_id,backend,model_settings_json,pipeline_json) VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET backend=excluded.backend,model_settings_json=excluded.model_settings_json,pipeline_json=excluded.pipeline_json').run(uid, backend, JSON.stringify(selection), JSON.stringify(pipeline));
+      return { backend, ...selection, ...pipeline };
     },
     worker(uid) {
       const row = db.prepare('SELECT last_seen,label,capabilities_json FROM knowledge_workers WHERE user_id=?').get(uid);
@@ -113,6 +116,7 @@ export function createKnowledgeStore(db) {
         const c = raw.capabilities?.[key] || {};
         capabilities[key] = { ready: c.ready === true, model: String(c.model || '').slice(0, 120), detail: String(c.detail || '').slice(0, 160) };
       }
+      if (raw.capabilities?.pipeline?.version === 1) capabilities.pipeline = { version: 1 };
       db.prepare('UPDATE knowledge_workers SET last_seen=?,label=?,capabilities_json=? WHERE user_id=?').run(now(), String(raw.label || '').slice(0, 80), JSON.stringify(capabilities), uid);
       const workerId = /^[\w-]{1,80}$/.test(raw.workerId || '') ? raw.workerId : 'legacy-' + hashToken(String(raw.label || '')).slice(0, 24);
       db.prepare('INSERT INTO knowledge_worker_instances(user_id,worker_id,last_seen,label,capabilities_json) VALUES (?,?,?,?,?) ON CONFLICT(user_id,worker_id) DO UPDATE SET last_seen=excluded.last_seen,label=excluded.label,capabilities_json=excluded.capabilities_json')
@@ -128,7 +132,7 @@ export function createKnowledgeStore(db) {
       if (status) { where += ' AND status=?'; args.push(status); }
       const total = db.prepare('SELECT count(*) AS n FROM knowledge_documents WHERE ' + where).get(...args).n;
       const documents = db.prepare(`SELECT id,user_id,title,topic,tags_json,source_url,original_name,byte_size,mime_type,fingerprint,backend,model_settings_json,status,stage,progress,error,duration,language,
-        substr(notes,1,240) AS notes,'[]' AS transcript_json,'[]' AS frames_json,provenance_json,visibility,revision,attempt,created_at,updated_at,
+        substr(notes,1,240) AS notes,'[]' AS transcript_json,'[]' AS frames_json,provenance_json,visibility,processing_phase,revision,attempt,created_at,updated_at,
         json_array_length(frames_json) AS frame_count,json_array_length(transcript_json) AS segment_count
         FROM knowledge_documents WHERE ` + where + ' ORDER BY updated_at DESC,id LIMIT ? OFFSET ?').all(...args, limit, offset)
         .map(row => { const { notes, transcript, frames, ...d } = read(row); return { ...d, preview: notes.replace(/[#*`>]/g, '').slice(0, 180), frameCount: row.frame_count, segmentCount: row.segment_count }; });
@@ -174,17 +178,25 @@ export function createKnowledgeStore(db) {
     claim(uid, backends, workerId = '', localDocuments = []) {
       expire(uid);
       return db.transaction(() => {
-        if (db.prepare("SELECT 1 FROM knowledge_documents WHERE user_id=? AND status='processing'").get(uid)) return null;
-        const candidates = db.prepare("SELECT * FROM knowledge_documents WHERE user_id=? AND status='queued' ORDER BY created_at,id").all(uid);
+        const limits = pipelineSettings({}, this.settings(uid));
         const workers = onlineWorkers(uid);
-        const gpuWorkers = workers.filter(w => w.capabilities.media?.ready && w.capabilities.media.detail === 'cuda');
+        const active = db.prepare("SELECT worker_id,processing_phase FROM knowledge_documents WHERE user_id=? AND status='processing'").all(uid);
+        const available = worker => {
+          const own = active.filter(d => d.worker_id === worker.id);
+          if (worker.capabilities.pipeline?.version !== 1) return own.length === 0;
+          return own.length < limits.mediaConcurrency + limits.summaryConcurrency
+            && own.filter(d => !['summary_wait', 'summary'].includes(d.processing_phase)).length < limits.mediaConcurrency;
+        };
+        if (!available(workers.find(w => w.id === workerId) || { id: workerId, capabilities: {} })) return null;
+        const candidates = db.prepare("SELECT * FROM knowledge_documents WHERE user_id=? AND status='queued' ORDER BY created_at,id").all(uid);
+        const gpuWorkers = workers.filter(w => w.capabilities.media?.ready && w.capabilities.media.detail === 'cuda' && available(w));
         const hasLocal = r => { const local = localInputs.get(uid, r.id); return local && local.worker_id === workerId && localDocuments.includes(r.id) && r.source_sha256 && local.sha256 === r.source_sha256; };
         const receivingLocal = r => { const local = localInputs.get(uid, r.id); return local && local.worker_id === workerId && !local.sha256 && local.expires > Date.now(); };
         const row = candidates.find(r => backends.includes(r.backend) && !receivingLocal(r) && (!sources.get(uid, r.id) || sources.get(uid, r.id).state === 'ready' || hasLocal(r) || imports.get(uid, r.id)?.state === 'done') &&
           (!gpuWorkers.some(w => w.capabilities[r.backend]?.ready) || gpuWorkers.some(w => w.id === workerId && w.capabilities[r.backend]?.ready)));
         if (!row) return null;
         const lease = crypto.randomBytes(24).toString('hex'), time = now();
-        db.prepare("UPDATE knowledge_documents SET status='processing',stage='读取视频',progress=1,lease=?,heartbeat=?,updated_at=?,worker_id=?,attempt=attempt+1 WHERE id=? AND status='queued'").run(lease, time, time, workerId, row.id);
+        db.prepare("UPDATE knowledge_documents SET status='processing',processing_phase='media',stage='正在转写 · 准备视频素材',progress=1,lease=?,heartbeat=?,updated_at=?,worker_id=?,attempt=attempt+1 WHERE id=? AND status='queued'").run(lease, time, time, workerId, row.id);
         return { ...get(uid, row.id), localInput: !!hasLocal(row), sourceSha256: row.source_sha256 || sources.get(uid, row.id)?.sha256 || '', lease };
       }).immediate();
     },
@@ -198,6 +210,20 @@ export function createKnowledgeStore(db) {
       db.prepare('UPDATE knowledge_documents SET stage=?,progress=?,heartbeat=?,updated_at=? WHERE user_id=? AND id=? AND lease=?')
         .run(String(stage || '处理中').slice(0, 100), Math.max(1, Math.min(99, Math.floor(Number(progress) || 1))), now(), now(), uid, key, lease);
       return true;
+    },
+    phase(uid, key, lease, phase) {
+      if (!['summary_wait', 'summary'].includes(phase)) throw new Error('处理阶段无效');
+      return db.transaction(() => {
+        if (!this.leased(uid, key, lease)) throw Object.assign(new Error('任务已过期'), { status: 409 });
+        const row = getRow(uid, key);
+        if (row.processing_phase === phase) return true;
+        if (phase === 'summary_wait' && row.processing_phase !== 'media' || phase === 'summary' && row.processing_phase !== 'summary_wait')
+          throw Object.assign(new Error('处理阶段顺序无效'), { status: 409 });
+        if (phase === 'summary' && db.prepare("SELECT count(*) n FROM knowledge_documents WHERE user_id=? AND worker_id=? AND status='processing' AND processing_phase='summary'").get(uid, row.worker_id).n >= this.settings(uid).summaryConcurrency) return false;
+        db.prepare('UPDATE knowledge_documents SET processing_phase=?,stage=?,heartbeat=?,updated_at=? WHERE user_id=? AND id=? AND lease=?')
+          .run(phase, phase === 'summary_wait' ? '等待总结' : '正在总结', now(), now(), uid, key, lease);
+        return true;
+      }).immediate();
     },
     finish(uid, key, lease, result) {
       if (!this.leased(uid, key, lease)) return false;

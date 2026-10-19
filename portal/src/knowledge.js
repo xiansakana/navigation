@@ -130,7 +130,7 @@ export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = 
   try {
     if (route === '/package' && method === 'GET') return sendWorkerPackage(res);
     if (route === '/release' && method === 'GET') { const { version, sha256, bytes } = knowledgeWorkerPackage(); return json(res, 200, { ok: true, version, sha256, bytes }); }
-    if (route === '/heartbeat' && method === 'POST') { const raw = await body(req, 4096); store.heartbeatWorker(uid, device ? { ...raw, workerId: device.id, label: device.label } : raw); return json(res, 200, { ok: true }); }
+    if (route === '/heartbeat' && method === 'POST') { const raw = await body(req, 4096); store.heartbeatWorker(uid, device ? { ...raw, workerId: device.id, label: device.label } : raw); const { mediaConcurrency, summaryConcurrency } = store.settings(uid); return json(res, 200, { ok: true, pipeline: { mediaConcurrency, summaryConcurrency } }); }
     if (route === '/local-input' && method === 'POST') {
       const raw = await body(req, 4096), workerId = device?.id || raw.workerId;
       if (raw.action === 'forget') { store.localInputs.forget(uid, raw.documentId, workerId); return json(res, 200, { ok: true }); }
@@ -141,7 +141,7 @@ export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = 
       const backends = Array.isArray(raw.backends) ? raw.backends.filter(b => ['codex', 'openai'].includes(b)) : [];
       return json(res, 200, { ok: true, job: store.claim(uid, backends, device?.id || (typeof raw.workerId === 'string' ? raw.workerId : ''), Array.isArray(raw.localDocuments) ? raw.localDocuments.slice(0, 200).filter(id => /^[a-f0-9]{32}$/.test(id)) : []) });
     }
-    const match = /^\/jobs\/([a-f0-9]{32})\/(source|progress|complete|fail|codex)$/.exec(route);
+    const match = /^\/jobs\/([a-f0-9]{32})\/(source|progress|phase|complete|fail|codex)$/.exec(route);
     if (!match) return json(res, 404, { ok: false, error: '工作器接口不存在' });
     const [, id, action] = match, lease = req.headers['x-knowledge-lease'];
     return await lock(id, async () => {
@@ -153,6 +153,10 @@ export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = 
         store.codexCalls.record(uid,doc,input);return json(res,200,{ok:true});
       }
       if (action === 'source' && method === 'GET') return serveSource(req, res, store, uid, id);
+      if (action === 'phase' && method === 'POST') {
+        const input = await body(req, 1024);
+        return json(res, 200, { ok: true, accepted: store.phase(uid, id, lease, input.phase) });
+      }
       if (action === 'progress' && method === 'POST') {
         const input = await body(req, 4096); store.progress(uid, id, lease, input.stage, input.progress); return json(res, 200, { ok: true });
       }
@@ -276,6 +280,7 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
     if (route === '/settings' && method === 'PUT') {
       const input = await body(req, 4096);
       if (MODEL_FIELDS.some(key => Object.hasOwn(input, key)) && !canKnowledge(session, 'model:edit')) return json(res, 403, { ok: false, error: '没有模型和强度设置权限' });
+      if (['mediaConcurrency', 'summaryConcurrency'].some(key => Object.hasOwn(input, key)) && !canKnowledge(session, 'concurrency:edit')) return json(res, 403, { ok: false, error: '没有并发设置权限' });
       return json(res, 200, { ok: true, ...store.saveSettings(uid, input) });
     }
     if (route === '/worker-token' && method === 'POST') return json(res, 200, { ok: true, token: store.rotateToken(uid) });

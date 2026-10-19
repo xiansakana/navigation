@@ -24,6 +24,7 @@ const DEFAULT_PERSONAL_PERMISSIONS = Object.freeze([
     'knowledge:notes:edit',
     'knowledge:publish:edit',
     'knowledge:publish:batch:edit',
+    'knowledge:concurrency:edit',
     'knowledge:delete:edit',
     'knowledge:export:view',
     'knowledge:settings:edit',

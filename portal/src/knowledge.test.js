@@ -70,6 +70,66 @@ test('batch publication is atomic, versioned, account isolated and permission pr
   assert.equal(store.get('a', a.id).notes, 'test notes');
 }));
 
+test('pipeline settings validate limits, persist by owner and enforce their action permission', async () => fixture(async ({ call, store }) => {
+  assert.equal(store.settings('a').mediaConcurrency, 1); assert.equal(store.settings('a').summaryConcurrency, 2);
+  const limited = { userId: 'a', permissions: ['knowledge:view', 'knowledge:settings:edit'] };
+  assert.equal((await call('/settings', { method: 'PUT', session: limited, data: { mediaConcurrency: 2 } })).status, 403);
+  for (const data of [{ mediaConcurrency: 0 }, { mediaConcurrency: 3 }, { mediaConcurrency: '2' }, { summaryConcurrency: 5 }, { summaryConcurrency: 1.5 }])
+    assert.equal((await call('/settings', { method: 'PUT', data })).status, 400);
+  assert.equal((await call('/settings', { method: 'PUT', data: { mediaConcurrency: 2, summaryConcurrency: 3 } })).status, 200);
+  store.saveSettings('a', { codexModel: 'gpt-6-luna' });
+  assert.equal(store.settings('a').summaryConcurrency, 3); assert.equal(store.settings('a').mediaConcurrency, 2);
+  assert.equal(store.settings('b').mediaConcurrency, 1);
+  const token = store.rotateToken('a');
+  const heartbeat = await call('/worker/heartbeat', { method: 'POST', token, data: { workerId: 'gpu', capabilities: { pipeline: { version: 1 } } } });
+  assert.deepEqual(heartbeat.payload.pipeline, { mediaConcurrency: 2, summaryConcurrency: 3 });
+}));
+
+test('pipeline releases media before summary, enforces stage slots, supports independent workers and protects leases', async () => fixture(async ({ call, store }) => {
+  const token = store.rotateToken('a'), otherToken = store.rotateToken('b');
+  const caps = { pipeline: { version: 1 }, media: { ready: true, detail: 'cuda' }, codex: { ready: true } };
+  store.heartbeatWorker('a', { workerId: 'gpu', capabilities: caps });
+  const ids = [];
+  for (let i = 0; i < 5; i++) { const d = store.create('a', upload()); store.enqueue('a', d.id); ids.push(d.id); }
+  const first = store.claim('a', ['codex'], 'gpu');
+  assert.equal(store.claim('a', ['codex'], 'gpu'), null, 'one media slot by default');
+  const phase = (job, value, options = {}) => call('/worker/jobs/' + job.id + '/phase', { method: 'POST', token, lease: job.lease, data: { phase: value }, ...options });
+  assert.equal((await phase(first, 'summary_wait', { token: otherToken })).status, 409);
+  assert.equal((await phase(first, 'summary_wait', { lease: 'wrong' })).status, 409);
+  assert.equal((await phase(first, 'summary')).status, 409, 'cannot skip the persisted handoff');
+  assert.equal((await phase(first, 'invented')).status, 400);
+  assert.equal((await phase(first, 'summary_wait')).payload.accepted, true);
+  assert.equal((await phase(first, 'summary')).payload.accepted, true);
+  const second = store.claim('a', ['codex'], 'gpu'); assert.ok(second);
+  await phase(second, 'summary_wait'); await phase(second, 'summary');
+  const third = store.claim('a', ['codex'], 'gpu'); assert.ok(third);
+  await phase(third, 'summary_wait');
+  assert.equal((await phase(third, 'summary')).payload.accepted, false, 'only two simultaneous summaries');
+  assert.equal(store.claim('a', ['codex'], 'gpu'), null, 'bounded prefetch even when media slot is free');
+  store.heartbeatWorker('a', { workerId: 'other-gpu', capabilities: caps });
+  const independent = store.claim('a', ['codex'], 'other-gpu'); assert.ok(independent); assert.notEqual(independent.id, third.id);
+  assert.equal(store.get('a', first.id).processingPhase, 'summary');
+  assert.equal(store.list('a').documents.find(d => d.id === third.id).processingPhase, 'summary_wait');
+  store.saveSettings('a', { summaryConcurrency: 1 });
+  store.fail('a', first.id, first.lease, 'test failure');
+  assert.equal((await phase(third, 'summary')).payload.accepted, false, 'lower limit drains active work');
+  assert.ok(store.finish('a', second.id, second.lease, result()));
+  assert.equal((await phase(third, 'summary')).payload.accepted, true);
+  assert.equal((await phase(third, 'summary_wait')).status, 409, 'cannot return to an earlier stage');
+  assert.equal(store.get('a', independent.id).status, 'processing', 'one failure does not cancel other workers');
+}));
+
+test('legacy workers stay serial per worker; free CPU can work while GPU slots are occupied', async () => fixture(async ({ store }) => {
+  const caps = { media: { ready: true, detail: 'cuda' }, codex: { ready: true } };
+  store.heartbeatWorker('a', { workerId: 'gpu', capabilities: caps });
+  for (let i = 0; i < 3; i++) { const d = store.create('a', upload()); store.enqueue('a', d.id); }
+  const gpu = store.claim('a', ['codex'], 'gpu'); assert.ok(gpu);
+  assert.equal(store.claim('a', ['codex'], 'gpu'), null);
+  const cpu = store.claim('a', ['codex'], 'cpu'); assert.ok(cpu); assert.notEqual(cpu.id, gpu.id);
+  assert.equal(store.claim('a', ['codex'], 'cpu'), null);
+  assert.ok(store.leased('a', gpu.id, gpu.lease));
+}));
+
 test('knowledge routes, per-action permissions, default member grants and guest isolation', async () => {
   const permissions = SYSTEM_PERMISSIONS.filter(p => p.id.startsWith('knowledge:'));
   assert.ok(permissions.length >= 12);
