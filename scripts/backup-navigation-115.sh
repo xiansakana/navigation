@@ -11,7 +11,7 @@ fi
 [[ -n "$PYTHON" ]] || { echo 'Python >=3.8 is required for backups' >&2; exit 1; }
 install -d -m 700 "$DESTINATION"
 exec 9>"$DESTINATION/.115-backup.lock"
-flock -n 9 || exit 0
+flock -n 9 || { echo 'Backup already in progress; verification has not completed' >&2; exit 75; }
 # Retry pending archives first. A failed upload never deletes the only local copy.
 shopt -s nullglob
 pending=("$DESTINATION"/navigation-*.tar.gz)
