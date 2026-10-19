@@ -187,7 +187,8 @@ export function createKnowledgeStore(db) {
           return own.length < limits.mediaConcurrency + limits.summaryConcurrency
             && own.filter(d => !['summary_wait', 'summary'].includes(d.processing_phase)).length < limits.mediaConcurrency;
         };
-        if (!available(workers.find(w => w.id === workerId) || { id: workerId, capabilities: {} })) return null;
+        const worker = workers.find(w => w.id === workerId) || { id: workerId, capabilities: {} };
+        if (!available(worker)) return null;
         const candidates = db.prepare("SELECT * FROM knowledge_documents WHERE user_id=? AND status='queued' ORDER BY created_at,id").all(uid);
         const gpuWorkers = workers.filter(w => w.capabilities.media?.ready && w.capabilities.media.detail === 'cuda' && available(w));
         const hasLocal = r => { const local = localInputs.get(uid, r.id); return local && local.worker_id === workerId && localDocuments.includes(r.id) && r.source_sha256 && local.sha256 === r.source_sha256; };
@@ -196,7 +197,8 @@ export function createKnowledgeStore(db) {
           (!gpuWorkers.some(w => w.capabilities[r.backend]?.ready) || gpuWorkers.some(w => w.id === workerId && w.capabilities[r.backend]?.ready)));
         if (!row) return null;
         const lease = crypto.randomBytes(24).toString('hex'), time = now();
-        db.prepare("UPDATE knowledge_documents SET status='processing',processing_phase='media',stage='正在转写 · 准备视频素材',progress=1,lease=?,heartbeat=?,updated_at=?,worker_id=?,attempt=attempt+1 WHERE id=? AND status='queued'").run(lease, time, time, workerId, row.id);
+        db.prepare("UPDATE knowledge_documents SET status='processing',processing_phase=?,stage='正在转写 · 准备视频素材',progress=1,lease=?,heartbeat=?,updated_at=?,worker_id=?,attempt=attempt+1 WHERE id=? AND status='queued'")
+          .run(worker.capabilities.pipeline?.version === 1 ? 'media' : '', lease, time, time, workerId, row.id);
         return { ...get(uid, row.id), localInput: !!hasLocal(row), sourceSha256: row.source_sha256 || sources.get(uid, row.id)?.sha256 || '', lease };
       }).immediate();
     },

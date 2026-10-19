@@ -124,6 +124,7 @@ test('legacy workers stay serial per worker; free CPU can work while GPU slots a
   store.heartbeatWorker('a', { workerId: 'gpu', capabilities: caps });
   for (let i = 0; i < 3; i++) { const d = store.create('a', upload()); store.enqueue('a', d.id); }
   const gpu = store.claim('a', ['codex'], 'gpu'); assert.ok(gpu);
+  assert.equal(gpu.processingPhase, '', 'legacy stage labels remain accurate until runtime upgrades');
   assert.equal(store.claim('a', ['codex'], 'gpu'), null);
   const cpu = store.claim('a', ['codex'], 'cpu'); assert.ok(cpu); assert.notEqual(cpu.id, gpu.id);
   assert.equal(store.claim('a', ['codex'], 'cpu'), null);
