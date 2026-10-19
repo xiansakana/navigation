@@ -13,6 +13,7 @@ import { sendWorkerExe } from './knowledge-worker-exe.js';
 import { inspectBilibili, inspectBilibiliQuality, qualityLabel } from './knowledge-bilibili.js';
 import { bilibiliAccount, qualitySettings } from './knowledge-bilibili-account.js';
 import { handlePublicKnowledge, handleKnowledgeVisibility, handleKnowledgeBatchVisibility } from './knowledge-public.js';
+import { createUploadQueue } from './knowledge-upload-queue.js';
 
 const root = () => path.resolve(process.env.KNOWLEDGE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/knowledge'));
 export function knowledgeDirectory(id) {
@@ -104,6 +105,7 @@ export function validateKnowledgeResult(raw) {
 }
 
 function knowledgeFailure(res, json, error) {
+  if (error.code === 'KNOWLEDGE_CAPACITY') return json(res, 409, { ok: false, code: error.code, error: error.message });
   if (/^SQLITE_(BUSY|LOCKED)/.test(error.code || '')) {
     res.setHeader('Retry-After', '1');
     return json(res, 503, { ok: false, code: 'KNOWLEDGE_BUSY', retryable: true, error: '知识库正在写入，请稍后重试' });
@@ -196,6 +198,8 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
 async function knowledgeApi(req, res, url, session, json) {
   res.setHeader('Cache-Control', 'no-store');
   if (!canKnowledge(session)) return json(res, 403, { ok: false, error: '请登录并获取知识库权限' });
+  if (req.headers['x-knowledge-owner'] && req.headers['x-knowledge-owner'] !== session.userId)
+    return json(res, 409, { ok: false, code: 'KNOWLEDGE_ACCOUNT_CHANGED', error: '登录账号已变化，请回到原账号继续或刷新页面' });
   if (url.pathname.startsWith('/api/knowledge/public/')) {
     if (!canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '无权查看公开笔记' });
     try { return handlePublicKnowledge(req, res, url, json, getDatabase()); }
@@ -217,6 +221,8 @@ async function knowledgeApi(req, res, url, session, json) {
   const route = url.pathname.slice('/api/knowledge'.length), method = req.method;
   const document = /^\/documents\/([a-f0-9]{32})(?:\/(parts|complete|local-input|retry|storage-retry|source|export|frames)(?:\/([a-z0-9.-]+))?)?$/.exec(route);
   const action = route === '/settings' ? method === 'GET' ? 'view' : 'settings:edit'
+    : route === '/upload-queue' ? method === 'GET' ? 'queue:view' : method === 'POST' ? 'queue:edit' : null
+    : /^\/upload-queue\/[a-f0-9]{32}\/(retry|cancel)$/.test(route) && method === 'POST' ? 'queue:manage'
     : (route === '/bilibili' && method === 'GET' || route === '/bilibili/check' && method === 'POST') ? 'bilibili:view'
     : (route === '/bilibili' && method === 'DELETE' || ['/bilibili/login/start', '/bilibili/login/poll'].includes(route) && method === 'POST') ? 'bilibili:edit'
     : route === '/bilibili/settings' && method === 'PUT' ? 'quality:edit'
@@ -239,6 +245,19 @@ async function knowledgeApi(req, res, url, session, json) {
   const store = createKnowledgeStore(getDatabase()), uid = session.userId;
   const visible = d => d && ({ ...d, transcript: canKnowledge(session, 'transcript:view') ? d.transcript : [], frames: canKnowledge(session, 'frames:view') ? d.frames : [] });
   try {
+    if (route.startsWith('/upload-queue')) {
+      const queue = createUploadQueue(getDatabase());
+      if (route === '/upload-queue' && method === 'GET') return json(res, 200, { ok: true, ...queue.list(uid, Math.min(100000, Math.max(0, Math.floor(Number(url.searchParams.get('offset')) || 0)))) });
+      if (!route.endsWith('/cancel') && !['import:edit', 'upload:edit', 'process:edit'].every(a => canKnowledge(session, a))) return json(res, 403, { ok: false, error: '需要链接导入、上传和生成笔记权限' });
+      if (route === '/upload-queue' && method === 'POST') {
+        const input = await body(req, 180000), defaults = store.settings(uid);
+        return json(res, 202, { ok: true, ...queue.add(uid, input, { ...defaults, quality: bilibiliAccount(getDatabase()).public(uid), modelSettings: Object.fromEntries(MODEL_FIELDS.map(key => [key, defaults[key]])) }) });
+      }
+      const match = /^\/upload-queue\/([a-f0-9]{32})\/(retry|cancel)$/.exec(route);
+      if (!queue.get(uid, match[1])) return json(res, 404, { ok: false, error: '队列任务不存在' });
+      if (!queue.change(uid, match[1], match[2])) return json(res, 409, { ok: false, error: '任务已进入下载处理，请在对应笔记中管理' });
+      return json(res, 200, { ok: true });
+    }
     if (route.startsWith('/bilibili')) {
       const account = bilibiliAccount(getDatabase());
       if (route === '/bilibili' && method === 'GET') return json(res, 200, { ok: true, account: account.public(uid) });

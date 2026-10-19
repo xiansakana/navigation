@@ -1,9 +1,11 @@
 import { uploadParts } from './upload.js?v=1';
 import { createDevicePanel } from './devices.js?v=4';
 import { createSourcePlayer } from './source.js?v=1';
-import { bindVideoDrop } from './drop.js?v=1';
+import { bindVideoDrop } from './drop.js?v=2';
 import { sendLocalInput } from './local-input.js?v=1';
-import { bindLinkImport } from './link-import.js?v=3';
+import { bindLinkImport } from './link-import.js?v=4';
+import { createUploadQueuePanel, parseBatchLinks } from './queue.js?v=1';
+import { createFileQueue } from './file-queue.js?v=1';
 import { createBilibiliPanel } from './bilibili-account.js?v=2';
 const $ = id => document.getElementById(id);
 const state = { permissions: [], documents: [], selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, concurrencyDirty: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
@@ -17,14 +19,30 @@ const time = value => { const s = Math.floor(value || 0); return (s >= 3600 ? St
 const phaseLabel = d => d.status === 'processing' ? ({ media: '正在转写/提取素材', summary_wait: '等待总结', summary: '正在总结' })[d.processingPhase] || '' : '';
 function error(e) { text('error', e.message || String(e)); show('error', true); }
 async function api(route, options = {}) {
-  const response = await fetch('/api/knowledge' + route, { ...options, headers: { ...(options.body instanceof Blob ? {} : { 'Content-Type': 'application/json' }), ...options.headers } });
+  const response = await fetch('/api/knowledge' + route, { ...options, headers: { ...(options.body instanceof Blob ? {} : { 'Content-Type': 'application/json' }), ...(state.owner ? { 'X-Knowledge-Owner': state.owner } : {}), ...options.headers } });
   if (response.redirected) throw new Error('登录已过期，请刷新页面重新登录');
   const payload = await response.json();
-  if (!response.ok || !payload.ok) throw new Error(payload.error || '请求失败');
+  if (!response.ok || !payload.ok) throw Object.assign(new Error(payload.error || '请求失败'), { status: response.status, code: payload.code });
   return payload;
 }
 const send = (route, method, data = {}) => api(route, { method, body: JSON.stringify(data) });
-const linkImport = bindLinkImport({ element: $, can: () => can('import:edit'), send, busy: () => state.uploading, onError: error });
+const linkImport = bindLinkImport({ element: $, can: () => can('import:edit'), canBatch: () => can('queue:edit') && can('import:edit'), send, busy: () => state.uploading, onError: error });
+const uploadQueue = createUploadQueuePanel({ element: $, can, api, send, onError: error, openDocument: open });
+const localQueue = createFileQueue({ capacity: () => state.uploading ? Promise.resolve({ active: 5, capacity: 5, blocked: true }) : api('/upload-queue'), upload: (entry, report) => uploadFile(entry.file, entry.metadata, entry, report), changed: renderLocalQueue });
+function renderLocalQueue() {
+  const list = $('file-queue-list'); list.replaceChildren();
+  for (const entry of localQueue.entries) {
+    const row = document.createElement('div'); row.className = 'kb-queue-row';
+    const title = document.createElement('strong'), status = document.createElement('p'); title.textContent = entry.name; status.textContent = entry.message;
+    row.append(title, status);
+    if (can('queue:manage')) for (const [action, label, allowed] of [['retry', '重试上传', entry.state === 'failed'], ['cancel', '取消等待', ['waiting', 'failed'].includes(entry.state)]]) {
+      if (!allowed) continue;
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'btn ghost'; button.textContent = label;
+      button.onclick = () => localQueue[action](entry.id); row.append(button);
+    }
+    list.append(row);
+  }
+}
 async function settings() {
   state.settings = await api('/settings');
   linkImport.defaults(state.settings.linkDefaults);
@@ -169,40 +187,67 @@ async function open(id, quiet = false) {
 async function upload(event) {
   event.preventDefault(); show('error', false);
   if (state.uploading) return;
-  if ($('upload-mode').value === 'link') {
+  if (['link', 'batch'].includes($('upload-mode').value)) {
     state.uploading = true; $('upload-submit').disabled = true; $('upload-mode').disabled = true;
     text('upload-status', '正在提交链接导入任务…');
     try {
-      const result = await send('/imports', 'POST', { url: $('video-link').value, title: $('upload-title').value,
-        topic: $('upload-topic').value, tags: tags($('upload-tags').value), sourceUrl: $('upload-source').value, backend: state.settings.backend, ...linkImport.selection() });
-      state.resume = null; show('upload-panel', false); $('upload-form').reset(); linkImport.mode();
+      const batch = $('upload-mode').value === 'batch', queued = can('queue:edit');
+      const rawLinks = batch ? parseBatchLinks($('batch-links').value) : [$('video-link').value];
+      const result = await send(queued ? '/upload-queue' : '/imports', 'POST', {
+        ...(queued ? { urls: rawLinks } : { url: rawLinks[0] }),
+        ...(!batch ? { title: $('upload-title').value, sourceUrl: $('upload-source').value } : {}),
+        topic: $('upload-topic').value, tags: tags($('upload-tags').value), backend: state.settings.backend, ...linkImport.selection() });
+      if (queued) {
+        const duplicates = result.results.filter(r => r.status === 'duplicate').length;
+        const invalid = result.results.filter(r => r.status === 'invalid');
+        text('queue-submit-result', `已加入 ${result.accepted} 条；重复跳过 ${duplicates} 条；无效 ${invalid.length} 条。` + invalid.map(r => `第${r.index + 1}条：${r.error}`).join(' '));
+        if (invalid.length) $('batch-links').value = invalid.map(r => rawLinks[r.index]).join('\n');
+        await uploadQueue.reset();
+      }
+      state.resume = null;
+      if (!result.results?.some(r => r.status === 'invalid')) { show('upload-panel', false); $('upload-form').reset(); linkImport.mode(); }
       text('message', '视频已加入链接下载队列。可关闭页面，下载、生成笔记和115归档会在后台继续。'); text('upload-status', '链接已提交');
-      await load(); await open(result.document.id);
+      await load(); if (result.document) await open(result.document.id);
     } catch (e) { error(e); text('upload-status', '链接未提交，请检查后重试。'); }
     finally { state.uploading = false; $('upload-submit').disabled = false; $('upload-mode').disabled = false; }
     return;
   }
-  const file = $('video-file').files[0]; if (!file) return;
-  if (file.size > state.settings.maxBytes) return error(new Error('视频超过1GB限制'));
+  const files = Array.from($('video-file').files); if (!files.length) return;
+  const metadata = { title: $('upload-title').value, topic: $('upload-topic').value, tags: tags($('upload-tags').value), sourceUrl: $('upload-source').value, backend: state.settings.backend };
+  if (can('queue:edit') && can('queue:view')) {
+    try {
+      if (state.resume && files.length !== 1) throw new Error('续传时请只选择对应原视频');
+      const added = localQueue.add(files, metadata, state.resume); state.resume = null;
+      text('message', added ? `已加入 ${added} 个本地视频。请保持页面打开，处理位置空闲后自动上传。` : '所选视频已在本地上传队列中。');
+    } catch (e) { error(e); }
+  } else await uploadFile(files[0], metadata).catch(error);
+}
+async function uploadFile(file, metadata, entry = null, report = () => {}) {
+
+  if (file.size > state.settings.maxBytes) throw new Error('视频超过1GB限制');
   state.uploading = true; $('upload-submit').disabled = true; $('upload-mode').disabled = true; $('video-file').disabled = true; show('upload-progress', true);
   $('upload-progress').value = 0; text('upload-status', '正在检查文件和续传进度…');
   try {
     const stamp = new Blob([file.slice(0, 1048576), file.slice(Math.max(0, file.size - 1048576)), String(file.size)]);
     const fingerprint = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await stamp.arrayBuffer()))].map(b => b.toString(16).padStart(2, '0')).join('');
-    let item = state.resume;
+    let item = entry ? entry.resume : state.resume;
+    if (item && can('notes:view')) {
+      const latest = (await api('/documents/' + item.id)).document;
+      if (latest.status !== 'uploading') { if (entry) entry.resume = null; return latest; }
+    }
     if (item && (item.bytes !== file.size || item.originalName !== file.name)) throw new Error('请选择同名、同大小的原始视频文件');
     if (item?.fingerprint && item.fingerprint !== fingerprint) throw new Error('文件内容与原上传文件不同，请选择原始视频');
     if (!item) {
       const extension = file.name.split('.').pop().toLowerCase(), mimeType = ({ mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime' })[extension];
-      const result = await send('/documents', 'POST', { title: $('upload-title').value, topic: $('upload-topic').value, tags: tags($('upload-tags').value), sourceUrl: $('upload-source').value,
-        bytes: file.size, mimeType, fingerprint, originalName: file.name, backend: state.settings.backend });
-      item = result.document; state.resume = item;
+      const result = await send('/documents', 'POST', { title: metadata.title, topic: metadata.topic, tags: metadata.tags, sourceUrl: metadata.sourceUrl,
+        bytes: file.size, mimeType, fingerprint, originalName: file.name, backend: metadata.backend });
+      item = result.document; state.resume = item; if (entry) entry.resume = item;
     }
     const { parts, chunkBytes } = await api('/documents/' + item.id + '/parts');
     const localTransfer = can('local-input:edit') ? sendLocalInput({ file, documentId: item.id, send, status: value => text('local-input-status', value) }) : Promise.resolve(false);
     const transfer = await uploadParts({ file, parts, chunkBytes, url: `/api/knowledge/documents/${item.id}/parts/`, onProgress(p) {
       const progress = Math.min(99, Math.floor(p.loaded / p.total * 100));
-      $('upload-progress').value = progress;
+      $('upload-progress').value = progress; report('上传中 · ' + progress + '%');
       text('upload-status', `上传到服务器 ${progress}% · ${(p.speed / 1024 ** 2).toFixed(2)} MB/s · ${p.remaining === null ? '正在测算剩余时间' : p.loaded === p.total ? '等待服务器确认' : '预计剩余 ' + time(Math.ceil(p.remaining))} · 已用 ${time(p.elapsed)}`);
     } });
     text('upload-status', '分片已传完，正在合并视频…');
@@ -211,15 +256,18 @@ async function upload(event) {
     await send('/documents/' + item.id + '/complete', 'POST'); state.resume = null;
     const elapsed = `本次上传用时 ${time(transfer.elapsedMs / 1000)}，合并用时 ${time((performance.now() - mergeStarted) / 1000)}。`;
     text('message', elapsed + (localReady ? '已启用本机原视频处理，无需等待115归档或下载；归档在后台独立继续。' : state.settings.storage?.provider === '115' ? '接下来保存至115并校验，之后自动生成笔记。' : '视频已保存，工作器将按队列生成笔记。')); $('upload-progress').value = 100; text('upload-status', '上传完成'); show('upload-panel', false); $('upload-form').reset();
-    await load(); await open(item.id);
-  } catch (e) { error(e); text('upload-status', '上传未完成，可重新提交继续上传。'); await load().catch(() => {}); }
-  finally { state.uploading = false; $('upload-submit').disabled = false; $('upload-mode').disabled = false; $('video-file').disabled = false; }
+    await load(); await open(item.id); if (entry) entry.resume = null; return item;
+  } catch (e) { error(e); text('upload-status', '上传未完成，可重新提交继续上传。'); await load().catch(() => {}); throw e; }
+  finally { if (entry) state.resume = null; state.uploading = false; $('upload-submit').disabled = false; $('upload-mode').disabled = false; $('video-file').disabled = false; linkImport.mode(); }
 }
 async function boot() {
   const meResponse = await fetch('/api/me'); if (meResponse.redirected) return location.assign('/login/');
-  const me = await meResponse.json(); state.permissions = me.permissions || [];
+  const me = await meResponse.json(); state.permissions = me.permissions || []; state.owner = me.userId;
   if (me.isGuest || !can('view')) throw new Error('请登录具备知识库权限的账号');
   show('upload-toggle', can('upload:edit') && can('process:edit')); show('worker-token', can('worker:edit'));
+  $('upload-batch-option').hidden = !can('queue:edit') || !can('import:edit');
+  $('video-file').multiple = can('queue:edit') && can('queue:view');
+  await uploadQueue.refresh();
   show('upload-mode-label', can('import:edit') && can('upload:edit') && can('process:edit')); linkImport.mode();
   createDevicePanel({ can, api, send, onError: error });
   const bilibili = createBilibiliPanel({ element: $, can, api, send, onError: error, onDefaults: s => linkImport.defaults(s) });
@@ -237,7 +285,8 @@ async function boot() {
     if (document.hidden || state.uploading) return;
     try {
       await settings();
-      if (can('notes:view') && (state.current?.storage?.provider === '115' && state.current.storage.state !== 'ready' || state.documents.some(d => ['queued', 'processing', 'uploading', 'importing'].includes(d.status) || d.storage?.provider === '115' && d.storage.state !== 'ready'))) await load();
+      const queueState = await uploadQueue.refresh();
+      if (can('notes:view') && (queueState?.active > 0 || state.current?.storage?.provider === '115' && state.current.storage.state !== 'ready' || state.documents.some(d => ['queued', 'processing', 'uploading', 'importing'].includes(d.status) || d.storage?.provider === '115' && d.storage.state !== 'ready'))) await load();
       if (!state.editing && state.current && (['queued', 'processing', 'importing'].includes(state.current.status) || state.current.storage?.provider === '115' && state.current.storage.state !== 'ready')) await open(state.current.id, true);
     } catch { /* Keep existing content during temporary connection loss. */ }
   }, 5000);
@@ -247,10 +296,11 @@ $('upload-toggle').onclick = () => { state.resume = null; text('upload-heading',
 $('upload-close').onclick = () => show('upload-panel', false);
 $('upload-form').onsubmit = upload;
 bindVideoDrop({ zone: $('video-drop'), input: $('video-file'), busy: () => state.uploading,
+  multiple: () => can('queue:edit') && can('queue:view'),
   maxBytes: () => state.settings?.maxBytes || 1024 ** 3, error,
-  selected: file => { show('error', false); text('selected-video', file.name + ' · ' + (file.size / 1024 ** 2).toFixed(1) + ' MB'); if (!state.resume) $('upload-title').value = file.name.replace(/\.[^.]+$/, '').slice(0, 160); }
+  selected: (file, files) => { show('error', false); text('selected-video', (files.length > 1 ? '已选 ' + files.length + ' 个视频 · ' : '') + file.name + ' · ' + (file.size / 1024 ** 2).toFixed(1) + ' MB'); if (!state.resume) $('upload-title').value = file.name.replace(/\.[^.]+$/, '').slice(0, 160); }
 });
-$('upload-form').addEventListener('reset', () => { text('selected-video', '支持拖拽一个视频，也可点击选择文件'); queueMicrotask(() => linkImport.reset()); });
+$('upload-form').addEventListener('reset', () => { text('selected-video', '支持拖拽或多选视频，每批最多100个'); queueMicrotask(() => linkImport.reset()); });
 $('search-form').onsubmit = event => { event.preventDefault(); load().catch(error); };
 $('topic-filter').onchange = $('status-filter').onchange = () => load().catch(error);
 $('more').onclick = () => load(true).catch(error);
@@ -321,5 +371,5 @@ $('edit-form').onsubmit = async event => {
   event.preventDefault();
   try { const result = await send('/documents/' + state.current.id, 'PUT', { title: $('edit-title').value, topic: $('edit-topic').value, tags: tags($('edit-tags').value), sourceUrl: $('edit-source').value, notes: $('edit-notes').value, revision: state.current.revision }); renderDocument(result.document); text('message', '笔记已保存。'); await load(); } catch (e) { error(e); }
 };
-window.addEventListener('beforeunload', event => { if (state.editing || state.uploading) { event.preventDefault(); event.returnValue = ''; } });
+window.addEventListener('beforeunload', event => { if (state.editing || state.uploading || localQueue.pending()) { event.preventDefault(); event.returnValue = ''; } });
 boot().catch(error);

@@ -111,6 +111,8 @@ B站链接导入随Portal进程运行，需现有FFmpeg（可设`KNOWLEDGE_IMPOR
 
 视频分阶段并发自动新增 `knowledge_documents.processing_phase` 和 `knowledge_settings.pipeline_json`；无需重建队列。默认每台设备转写1路、总结2路，可在知识库处理设置中调整。Portal部署后，Windows工作器通过原有空闲自动更新取得新运行包；ECS工作器需使用 `python3 scripts/reload-knowledge-worker-when-idle.py --wait-and-restart` 单独空闲重载，不能直接中断活跃转写。新版服务兼容旧工作器（每台单任务），阶段交接仍保留原租约、原始材料和用户隔离。
 
+上传队列随Portal部署，自动新增 `knowledge_upload_queue` 表与账号/状态索引；备份需包含该表。批量B站链接每批100条、等待/失败上限500条；后台导入循环只在账号活跃任务不足5个时提升下一条，不提高下载或转写并发。元数据解析使用两分钟租约，服务重启后可回收过期解析，处理权限再次核验。本地多文件排队在浏览器内存中进行，页面需保持打开。无需升级GPU工作器、改变代理或增加公网端口。
+
 B站扫码与画质更新仍只部署`portal`，安装Node依赖qrcode并使用FFprobe核实实际宽高（可设`KNOWLEDGE_IMPORT_FFPROBE`）。新增`knowledge_bilibili_accounts`及导入表`settings_json/media_json`字段；首次绑定生成0600权限的`portal/data/knowledge-bilibili.key`（可设`KNOWLEDGE_BILIBILI_KEY_FILE`）。备份账号表时同时备份并单独保护该密钥；不得提交Git。新导入默认1080p严格模式，旧导入快照保留自动降级；网页登录后扫码确认即可，无需迁移浏览器Cookie或升级GPU工作器。
 
 在 `portal/config.json` 的 `services` 增加卡片；新服务放在本仓库根目录（与 `qq-bot` 平级），独立端口 + pm2，仅 portal :80 对外。

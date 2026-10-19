@@ -1,13 +1,19 @@
-export function bindLinkImport({ element, can, send, busy, onError }) {
+export function bindLinkImport({ element, can, canBatch = () => false, send, busy, onError }) {
   const $ = element;
   let sequence = 0, loading = '', dirty = false, queued = false, savedDefaults = null;
   const selection = () => ({ quality: Number($('link-quality').value || 80), strict: $('link-mode').value !== 'auto' });
   const mode = () => {
     if (!can()) $('upload-mode').value = 'file';
+    if ($('upload-mode').value === 'batch' && !canBatch()) $('upload-mode').value = can() ? 'link' : 'file';
     const link = $('upload-mode').value === 'link' && can();
-    $('video-drop').hidden = link; $('video-file').disabled = link; $('video-file').required = !link;
-    $('video-link-controls').hidden = !link; $('video-link').required = link;
-    $('upload-submit').textContent = link ? '导入并生成笔记' : '上传并生成笔记';
+    const batch = $('upload-mode').value === 'batch' && canBatch();
+    $('video-drop').hidden = link || batch; $('video-file').disabled = link || batch; $('video-file').required = !link && !batch;
+    $('video-link-controls').hidden = !link && !batch; $('video-link').required = link;
+    $('video-link-single').hidden = batch; $('video-link-preview').hidden = batch; $('video-link-status').hidden = batch;
+    $('batch-links-label').hidden = !batch; $('batch-links').required = batch;
+    $('upload-title').disabled = $('upload-source').disabled = batch; $('upload-title').required = !batch;
+    $('upload-title-label').hidden = $('upload-source-label').hidden = batch;
+    $('upload-submit').textContent = batch ? '加入批量导入队列' : link ? '导入并生成笔记' : '加入上传队列';
   };
   $('upload-mode').onchange = () => { if (!busy()) mode(); };
   async function preview() {

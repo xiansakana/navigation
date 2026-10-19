@@ -1,14 +1,15 @@
-export function bindVideoDrop({ zone, input, busy, maxBytes, selected, error }) {
+export function bindVideoDrop({ zone, input, busy, maxBytes, selected, error, multiple = () => false }) {
   function validate(files) {
-    if (files.length !== 1) throw new Error('请一次选择一个视频文件');
-    const file = files[0];
-    if (!/\.(mp4|webm|mov)$/i.test(file.name)) throw new Error('请选择 MP4、WebM 或 MOV 视频');
-    if (!file.size) throw new Error('视频文件不能为空');
-    if (file.size > maxBytes()) throw new Error('视频超过上传大小限制');
-    return file;
+    if (!files.length || files.length > (multiple() ? 100 : 1)) throw new Error(multiple() ? '每次最多选择100个视频' : '请一次选择一个视频文件');
+    for (const file of files) {
+      if (!/\.(mp4|webm|mov)$/i.test(file.name)) throw new Error('请选择 MP4、WebM 或 MOV 视频');
+      if (!file.size) throw new Error('视频文件不能为空');
+      if (file.size > maxBytes()) throw new Error('视频超过上传大小限制');
+    }
+    return Array.from(files);
   }
   input.addEventListener('change', () => {
-    try { selected(validate(input.files)); } catch (e) { input.value = ''; error(e); }
+    try { const files = validate(input.files); selected(files[0], files); } catch (e) { input.value = ''; error(e); }
   });
   let depth = 0;
   const isFile = event => Array.from(event.dataTransfer?.types || []).includes('Files');
@@ -26,8 +27,8 @@ export function bindVideoDrop({ zone, input, busy, maxBytes, selected, error }) 
     event.preventDefault(); depth = 0; zone.classList.remove('is-dragging');
     if (busy()) return;
     try {
-      const file = validate(event.dataTransfer.files), transfer = new DataTransfer();
-      transfer.items.add(file); input.files = transfer.files; selected(file);
+      const files = validate(event.dataTransfer.files), transfer = new DataTransfer();
+      for (const file of files) transfer.items.add(file); input.files = transfer.files; selected(files[0], files);
     } catch (e) { error(e); }
   });
 }

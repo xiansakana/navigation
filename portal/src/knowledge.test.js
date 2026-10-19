@@ -44,6 +44,27 @@ async function fixture(fn) {
   }
 }
 
+test('persistent upload queue accepts more than five links without resolving them and enforces owner, CSRF and action permissions', async () => fixture(async ({ call, store }) => {
+  const urls = Array.from({ length: 7 }, (_, i) => 'https://www.bilibili.com/video/BV1LTpi69Efh/' + (i ? '?p=' + (i + 1) : ''));
+  const data = { urls };
+  assert.equal((await call('/upload-queue', { method: 'POST', data, headers: { 'X-Knowledge-Owner': 'different-user' } })).payload.code, 'KNOWLEDGE_ACCOUNT_CHANGED');
+  assert.equal((await call('/upload-queue', { session: { userId: 'a', permissions: ['knowledge:view'] } })).status, 403);
+  assert.equal((await call('/upload-queue', { method: 'POST', data, session: { userId: 'a', permissions: ['knowledge:view', 'knowledge:queue:edit'] } })).status, 403);
+  assert.equal((await call('/upload-queue', { method: 'POST', data, headers: { origin: 'https://evil.test' } })).status, 403);
+  assert.equal((await call('/upload-queue', { method: 'POST', data: { urls: Array(101).fill(urls[0]) } })).status, 400);
+  for (let i = 0; i < 5; i++) store.create('a', upload());
+  const response = await call('/upload-queue', { method: 'POST', data });
+  assert.equal(response.status, 202); assert.equal(response.payload.accepted, 7);
+  assert.equal((await call('/upload-queue')).payload.counts.pending, 7);
+  assert.equal((await call('/upload-queue', { session: member('b') })).payload.total, 0);
+  const id = response.payload.results[0].id;
+  assert.equal((await call('/upload-queue/' + id + '/cancel', { method: 'POST', session: member('b') })).status, 404);
+  assert.equal((await call('/upload-queue/' + id + '/cancel', { method: 'POST', session: { userId: 'a', permissions: ['knowledge:view', 'knowledge:queue:view'] } })).status, 403);
+  assert.equal((await call('/upload-queue/' + id + '/cancel', { method: 'POST', session: { userId: 'a', permissions: ['knowledge:view', 'knowledge:queue:manage'] } })).status, 200);
+  assert.equal((await call('/upload-queue/' + id + '/retry', { method: 'POST' })).status, 409);
+  assert.equal((await call('/documents', { method: 'POST', data: upload() })).payload.code, 'KNOWLEDGE_CAPACITY');
+}));
+
 test('SQLite writer contention returns retryable 503 rather than marking valid worker requests as HTTP 400', async () => fixture(async ({ call, store, db }) => {
   const token = store.rotateToken('a'), item = store.create('a', upload()); store.enqueue('a', item.id);
   const writer = new db.constructor(db.name);

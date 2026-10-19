@@ -150,7 +150,8 @@ export function createKnowledgeStore(db) {
       if (fingerprint && !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('文件指纹无效');
       const quota = db.prepare("SELECT count(*) AS n,coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE user_id=?").get(uid);
       const pending = db.prepare("SELECT count(*) AS n FROM knowledge_documents WHERE user_id=? AND status IN ('uploading','importing','queued','processing')").get(uid).n;
-      if (pending >= 5 || quota.bytes + size > 20 * MAX_VIDEO_BYTES || quota.n >= 2000) throw new Error('最多5个待处理任务、20GB视频或2000篇笔记，请先清理或完成已有任务');
+      if (pending >= 5) throw Object.assign(new Error('已有5个待处理任务，请等待空闲位置'), { code: 'KNOWLEDGE_CAPACITY', status: 409 });
+      if (quota.bytes + size > 20 * MAX_VIDEO_BYTES || quota.n >= 2000) throw new Error('最多20GB视频或2000篇笔记，请先清理已有内容');
       const key = id(), time = now();
       db.prepare('INSERT INTO knowledge_documents(id,user_id,title,topic,tags_json,source_url,original_name,byte_size,mime_type,fingerprint,backend,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(key, uid, m.title, m.topic, JSON.stringify(m.tags), m.sourceUrl, name, size, mime, fingerprint, backend, time, time);

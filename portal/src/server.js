@@ -739,10 +739,10 @@ server.listen(port, host, function() {
     resumeVideoJobs(getDatabase(), config);
     startThumbnailWorker(getDatabase());
     }
-    startKnowledgeImports(getDatabase(), knowledgeDirectory, uid => {
+    startKnowledgeImports(getDatabase(), knowledgeDirectory, (uid, batch = false) => {
         const ctx = resolveSessionUser({ userId: uid }, config);
         const s = ctx && { userId: uid, permissions: ctx.permissions, isGuest: ctx.user.username === (config.auth?.guestUsername || 'guest') };
-        return ['view', 'import:edit', 'upload:edit', 'process:edit'].every(action => canKnowledge(s, action));
+        return ['view', 'import:edit', 'upload:edit', 'process:edit', ...(batch ? ['queue:edit'] : [])].every(action => canKnowledge(s, action));
     });
     console.log('服务导航门户已启动: http://' + (host === '0.0.0.0' ? '127.0.0.1' : host) + ':' + port);
     if (host === '0.0.0.0' && port === 80) {
