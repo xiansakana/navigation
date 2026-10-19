@@ -196,6 +196,7 @@ var SYSTEM_PERMISSIONS = [
         ['local-input:edit', '将上传的视频直送本机GPU处理', ['上传视频', '本机GPU直送']],
         ['process:edit', '生成笔记和重试失败任务', ['生成笔记']],
         ['notes:edit', '编辑标题、分类、标签和笔记', ['笔记', '编辑']],
+        ['publish:edit', '公开和撤回自己笔记的正文', ['笔记', '可见范围']],
         ['delete:edit', '删除自己的视频和笔记', ['笔记', '删除']],
         ['export:view', '导出自己的 Markdown 笔记', ['笔记', '导出']],
         ['settings:edit', '切换默认总结后端', ['设置', '总结后端']],
@@ -348,6 +349,7 @@ function ensureGuestAccess(data, config) {
     var guestUsername = config?.auth?.guestUsername || 'guest';
 
     var guestRole = data.roles.find(function(r) { return r.id === 'role_guest'; });
+    var newGuestRole = !guestRole;
     if (!guestRole) {
         var initialPermissions = new Set(buildDefaultGuestPermissions(config?.services));
         [
@@ -365,6 +367,13 @@ function ensureGuestAccess(data, config) {
             permissions: Array.from(initialPermissions)
         };
         data.roles.push(guestRole);
+    }
+    // Grant the safe public surfaces once; later administrator revocations remain effective.
+    if (newGuestRole || !data.guestModuleBrowsingVersion) {
+        guestRole.permissions = Array.from(new Set((guestRole.permissions || []).concat(
+            'codex-cli:view', 'knowledge:view', 'knowledge:notes:view', 'mingli:view', 'mingli:chart:calculate'
+        )));
+        data.guestModuleBrowsingVersion = 1;
     }
     guestRole.permissions = (guestRole.permissions || []).filter(function(permission) {
         return permission !== stockManageFeaturePermissionId('cash', 'view')
@@ -627,7 +636,7 @@ export function getVisibleMenus(data, userPerms) {
     return (data.menus || [])
         .filter(function(menu) { return menu.enabled !== false; })
         // Advertise these entries to everyone; their pages and APIs enforce access separately.
-        .filter(function(menu) { return ['resources', 'bookkeeping'].includes(menu.serviceId) || hasPermission(userPerms, menu.permission); })
+        .filter(function(menu) { return ['resources', 'bookkeeping', 'codex-cli', 'knowledge', 'mingli'].includes(menu.serviceId) || hasPermission(userPerms, menu.permission); })
         .sort(function(a, b) { return (a.sort || 0) - (b.sort || 0); });
 }
 

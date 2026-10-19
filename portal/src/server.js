@@ -594,12 +594,13 @@ async function handleRequest(req, res) {
         return serveStatic(path.join(PUBLIC_DIR, 'resources', 'index.html'), res);
     }
 
-    if (['/knowledge', '/knowledge/', '/knowledge/index.html'].includes(path.posix.normalize(url.pathname))) {
+    if (['/knowledge', '/knowledge/', '/knowledge/index.html', '/knowledge/public', '/knowledge/public/', '/knowledge/public.html', '/knowledge/public/index.html'].includes(path.posix.normalize(url.pathname))) {
         const knowledgeSession = requireAuth(req, res);
         if (!knowledgeSession) return;
         res.setHeader('Cache-Control', 'no-store');
         if (!canKnowledge(knowledgeSession)) return sendError(req, res, url, 403, '请登录具备知识库权限的账号', { title: '无权访问知识库' });
-        return serveStatic(path.join(PUBLIC_DIR, 'knowledge', 'index.html'), res);
+        const publicReader = knowledgeSession.isGuest || url.pathname.startsWith('/knowledge/public');
+        return serveStatic(path.join(PUBLIC_DIR, 'knowledge', publicReader ? 'public.html' : 'index.html'), res);
     }
 
     if (['/mingli', '/mingli/', '/mingli/index.html'].includes(path.posix.normalize(url.pathname))) {
@@ -623,11 +624,13 @@ async function handleRequest(req, res) {
     }
 
     if (url.pathname === '/codex-cli' || url.pathname.startsWith('/codex-cli/')) {
-        var codexSession = requireAuth(req,res,{requireLogin:true});
+        var codexSession = requireAuth(req,res);
         if (!codexSession) return;
         if (!canCodexCli(codexSession)) return sendError(req,res,url,403,'无权访问Codex CLI模块');
         var codexFile = url.pathname.replace(/^\/codex-cli\/?/,'') || 'index.html';
-        if (!['index.html','app.js','style.css','chat.js','chat.css','todos.js','todos.css'].includes(codexFile)) return json(res,404,{ok:false,error:'Not Found'});
+        if (codexSession.isGuest && !['index.html','public.html','public.js','style.css'].includes(codexFile)) return json(res,403,{ok:false,error:'请登录后访问会话工作台'});
+        if (codexSession.isGuest && codexFile === 'index.html') codexFile = 'public.html';
+        if (!['index.html','app.js','style.css','chat.js','chat.css','todos.js','todos.css','public.html','public.js'].includes(codexFile)) return json(res,404,{ok:false,error:'Not Found'});
         return serveStatic(path.join(PUBLIC_DIR,'codex-cli',codexFile),res);
     }
 

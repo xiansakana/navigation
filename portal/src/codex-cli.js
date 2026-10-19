@@ -8,7 +8,7 @@ import { hasPermission } from './rbac.js';
 import { handleCodexConversationsApi } from './codex-conversations.js';
 import { handleCodexTodosApi } from './codex-todos.js';
 
-export const canCodexCli=session=>!!session?.userId&&!session.isGuest&&hasPermission(session.permissions || [],'codex-cli:view');
+export const canCodexCli=session=>!!session?.userId&&hasPermission(session.permissions || [],'codex-cli:view');
 export function codexServerSetup(uid){
   const raw={codex:codexConfig()};if(!raw.codex)throw new Error('服务器Codex执行配置不可用');
   const user=raw.codex?.allowedUsers?.find(u=>u.userId===uid);
@@ -23,6 +23,11 @@ export async function handleCodexCliApi(req,res,url,session,json,dependencies={}
   res.setHeader('Cache-Control','no-store');
   const can=permission=>!!session?.userId&&!session.isGuest&&hasPermission(session.permissions || [],permission);
   if(!canCodexCli(session))return json(res,403,{ok:false,error:'无权访问Codex CLI模块'});
+  if (url.pathname === '/api/codex-cli/public-status' && req.method === 'GET') {
+    return json(res, 200, { ok: true, mode: 'public', service: 'available',
+      description: 'Codex 支持项目问答、代码修改和任务执行。登录并获得授权后可使用会话与任务功能。' });
+  }
+  if (session.isGuest) return json(res, 403, { ok: false, error: '请登录并获取对应的 Codex 权限' });
   if(url.pathname.startsWith('/api/codex-cli/todos'))return handleCodexTodosApi(req,res,url,session,json,{setup:codexServerSetup,...dependencies});
   if(url.pathname.startsWith('/api/codex-cli/conversations'))return handleCodexConversationsApi(req,res,url,session,json,{setup:codexServerSetup,...dependencies});
   const routes=['/api/codex-cli/status','/api/codex-cli/usage','/api/codex-cli/settings','/api/codex-cli/runtime'];

@@ -50,7 +50,7 @@ test('knowledge routes, per-action permissions, default member grants and guest 
   for (const p of permissions) { assert.deepEqual(p.permissionPath.slice(0, 2), ['首页', '知识库']); assert.ok(member('a').permissions.includes(p.id)); }
   const menus = buildMenusFromServices([]);
   assert.equal(getVisibleMenus({ menus }, member('a').permissions).find(m => m.serviceId === 'knowledge').path, '/knowledge/');
-  assert.ok(!getVisibleMenus({ menus }, []).some(m => m.serviceId === 'knowledge'));
+  assert.ok(getVisibleMenus({ menus }, []).some(m => m.serviceId === 'knowledge'));
   for (const route of ['/knowledge', '/knowledge/', '/knowledge/index.html']) {
     assert.equal(canonicalPortalPagePath(route), '/knowledge/');
     assert.equal(resolveRoute([], route, 'GET', '', { referer: 'https://site/napcat/' }).kind, 'pass');

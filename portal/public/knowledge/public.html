@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>公开知识库 · 服务导航</title>
+  <link rel="stylesheet" href="/portal.css?v=layout-20261018"><link rel="stylesheet" href="/experience.css"><link rel="stylesheet" href="/knowledge/style.css?v=1">
+  <script defer src="/ui/back-to-top.js?v=1"></script>
+</head>
+<body class="portal-experience has-navbar portal-layout-enabled">
+  <header class="navbar"><div class="navbar-inner"><a class="navbar-brand" href="/">服务导航</a><span class="navbar-title">公开知识库</span><div class="navbar-actions"><button type="button" class="btn ghost navbar-layout-btn"><span class="label">全宽</span></button><button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题"><span class="navbar-theme-icon">☀️</span><span class="label navbar-theme-label">日间</span></button></div></div></header>
+  <main class="kb-shell" data-layout-container>
+    <header class="kb-heading"><div><a href="/">← 我的服务</a><h1>公开知识库</h1><p class="kb-muted">阅读作者主动公开的学习笔记。原视频、转写和私人资料不在公开范围内。</p></div><a id="private-library" class="btn primary" href="/login/">登录管理自己的笔记</a></header>
+    <p id="public-error" role="status" class="kb-hint"></p>
+    <div class="kb-workspace"><aside class="kb-library kb-panel"><h2>公开笔记 <small id="public-total"></small></h2><form id="public-search-form"><label>搜索标题、分类、标签或正文<input id="public-search" type="search" maxlength="120"></label><button class="btn ghost" type="submit">搜索</button></form><div id="public-documents" class="kb-documents"></div><button id="public-more" class="btn ghost" hidden>加载更多</button></aside>
+      <article class="kb-reading kb-panel"><h2 id="public-title">选择一篇公开笔记</h2><p id="public-meta" class="kb-hint"></p><div id="public-notes" class="kb-markdown"></div></article></div>
+  </main>
+  <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script><script src="/vendor/marked.js"></script><script src="/vendor/purify.js"></script><script src="/knowledge/public.js?v=1"></script>
+</body></html>

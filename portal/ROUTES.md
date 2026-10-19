@@ -26,6 +26,12 @@
 | 通知管理 | `/notifications/` |
 | 笔记分享 | `https://share.saoyu.fun/dashboard`（独立站点） |
 
+## 游客浏览
+
+公开知识库使用 `/knowledge/public/`，游客访问 `/knowledge/` 时自动显示此浏览页。
+Codex CLI 的游客入口只提供公开说明和入口状态。游客浏览权限与资料公开范围见
+[`docs/guest-module-browsing.md`](../docs/guest-module-browsing.md)。
+
 ## 旧地址兼容
 
 `/login`、`/login.html`、`/login/index.html` 永久跳转（308）到 `/login/`。

@@ -61,7 +61,7 @@ async function run(fn) {
   try { await fn(); } catch (e) { error(e.message); status(); }
   finally { busy = false; syncActions(); }
 }
-async function discard() { return !dirty || await window.portalDialog.confirm('当前修改尚未保存，确定离开当前案例吗？', { title: '未保存的修改' }); }
+async function discard() { return !dirty || !can('cases:edit') || await window.portalDialog.confirm('当前修改尚未保存，确定离开当前案例吗？', { title: '未保存的修改' }); }
 function tab(name) {
   for (const t of ['chart', 'cases', 'knowledge']) { $(t + '-view').hidden = t !== name; $(t + '-tab').classList.toggle('active', t === name); $(t + '-tab').setAttribute('aria-pressed', t === name ? 'true' : 'false'); }
   document.querySelector('.ml-shell').classList.toggle('ml-reading', readingLayout && name === 'chart');
@@ -293,11 +293,12 @@ $('delete-case').addEventListener('click', () => run(async () => {
   if (!current || !await window.portalDialog.confirm(`确定删除案例「${current.name}」及其笔记？`, { title: '删除案例', danger: true })) return;
   await api('/cases/' + current.id, 'DELETE'); current = null; dirty = true; $('saved-at').textContent = '案例已删除，当前命盘尚未保存'; status('案例已删除。');
 }));
-window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', e => { if (dirty && can('cases:edit')) { e.preventDefault(); e.returnValue = ''; } });
 run(async () => {
   const response = await fetch('/api/me'); const me = await response.json();
-  if (!response.ok || !me.ok || me.isGuest) throw new Error('请先登录后使用命理模块');
+  if (!response.ok || !me.ok) throw new Error('无法读取命理模块权限');
   permissions = me.permissions || [];
+  if (me.isGuest) permissions = permissions.filter(p => ['mingli:view', 'mingli:chart:calculate'].includes(p));
   knowledgeCases.permissions(permissions);
   if (!can('view')) throw new Error('当前账号没有命理模块权限');
   $('cases-tab').hidden = !can('cases:view'); $('save-case').hidden = !can('cases:edit');
@@ -308,5 +309,5 @@ run(async () => {
   $('case-category-label').hidden = !can('categories:view');
   $('bulk-classify').hidden = !can('cases:classify') || !can('categories:view');
   await loadCategories();
-  syncCalendar(); status('出生时间按北京时间录入，案例仅当前账号可见。');
+  syncCalendar(); status(me.isGuest ? '游客排盘体验：出生信息仅用于本次计算，不保存案例。登录后可使用获授权的个人案例功能。' : '出生时间按北京时间录入，案例仅当前账号可见。');
 });

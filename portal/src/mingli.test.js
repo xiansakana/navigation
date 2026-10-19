@@ -25,7 +25,7 @@ test('member permissions, menu, protected aliases and API routing', () => {
   }
   const menus = buildMenusFromServices([]);
   assert.equal(getVisibleMenus({ menus }, session.permissions).find(m => m.serviceId === 'mingli').path, '/mingli/');
-  assert.ok(!getVisibleMenus({ menus }, []).some(m => m.serviceId === 'mingli'));
+  assert.ok(getVisibleMenus({ menus }, []).some(m => m.serviceId === 'mingli'));
   const services = [{ id: 'napcat', type: 'proxy', path: '/napcat', internalUrl: 'http://localhost:6099' }];
   for (const p of ['/mingli', '/mingli/', '/mingli/index.html']) {
     assert.equal(canonicalPortalPagePath(p), '/mingli/');

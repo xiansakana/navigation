@@ -48,10 +48,10 @@ test('Codex management APIs enforce read/write permissions, CSRF, own scopes and
 test('Codex CLI has an independent permissioned menu and reserved page/API routing',()=>{
  const menus=buildMenusFromServices([],[]),menu=menus.find(m=>m.serviceId==='codex-cli');
  assert.equal(menu.path,'/codex-cli/');assert.equal(menu.permission,'codex-cli:view');
- assert.ok(!getVisibleMenus({menus},[]).some(m=>m.serviceId==='codex-cli'));
+ assert.ok(getVisibleMenus({menus},[]).some(m=>m.serviceId==='codex-cli'));
  assert.ok(getVisibleMenus({menus},['codex-cli:view']).some(m=>m.serviceId==='codex-cli'));
  assert.equal(canCodexCli({userId:'owner',permissions:['codex-cli:view']}),true);
- assert.equal(canCodexCli({userId:'guest',isGuest:true,permissions:['*']}),false);
+ assert.equal(canCodexCli({userId:'guest',isGuest:true,permissions:['*']}),true);
  for(const p of SYSTEM_PERMISSIONS.filter(p=>p.id.startsWith('codex-cli:')))assert.deepEqual(p.permissionPath.slice(0,2),['首页','Codex CLI']);
  assert.equal(canonicalPortalPagePath('/codex-cli/index.html'),'/codex-cli/');
  const services=[{id:'napcat',path:'/napcat/',type:'proxy'}];

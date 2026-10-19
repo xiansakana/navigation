@@ -12,6 +12,7 @@ import { knowledgeWorkerPackage, sendWorkerPackage } from './knowledge-worker-pa
 import { sendWorkerExe } from './knowledge-worker-exe.js';
 import { inspectBilibili, inspectBilibiliQuality, qualityLabel } from './knowledge-bilibili.js';
 import { bilibiliAccount, qualitySettings } from './knowledge-bilibili-account.js';
+import { handlePublicKnowledge, handleKnowledgeVisibility } from './knowledge-public.js';
 
 const root = () => path.resolve(process.env.KNOWLEDGE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/knowledge'));
 export function knowledgeDirectory(id) {
@@ -19,7 +20,8 @@ export function knowledgeDirectory(id) {
   return path.join(root(), id);
 }
 export function canKnowledge(session, action = 'view') {
-  return !!session?.userId && !session.isGuest && hasPermission(session.permissions || [], 'knowledge:' + action);
+  return !!session?.userId && (!session.isGuest || ['view', 'notes:view'].includes(action))
+    && hasPermission(session.permissions || [], 'knowledge:' + action);
 }
 async function bytes(req, max) {
   const chunks = []; let size = 0;
@@ -174,6 +176,19 @@ export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = 
 export async function handleKnowledgeApi(req, res, url, session, json) {
   res.setHeader('Cache-Control', 'no-store');
   if (!canKnowledge(session)) return json(res, 403, { ok: false, error: '请登录并获取知识库权限' });
+  if (url.pathname.startsWith('/api/knowledge/public/')) {
+    if (!canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '无权查看公开笔记' });
+    try { return handlePublicKnowledge(req, res, url, json, getDatabase()); }
+    catch { return json(res, 503, { ok: false, error: '公开笔记暂不可用，请稍后重试' }); }
+  }
+  // Never route a guest through personal settings, worker, import, media or document APIs.
+  if (session.isGuest) return json(res, 403, { ok: false, error: '游客仅可浏览公开笔记' });
+  const visibility = /^\/api\/knowledge\/documents\/([a-f0-9]{32})\/visibility$/.exec(url.pathname);
+  if (visibility) {
+    if (!canKnowledge(session, 'publish:edit') || !canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '无权修改笔记可见范围' });
+    try { return await handleKnowledgeVisibility(req, res, url, session, json, getDatabase(), visibility[1]); }
+    catch { return json(res, 503, { ok: false, error: '可见范围暂不可用，请稍后重试' }); }
+  }
   const route = url.pathname.slice('/api/knowledge'.length), method = req.method;
   const document = /^\/documents\/([a-f0-9]{32})(?:\/(parts|complete|local-input|retry|storage-retry|source|export|frames)(?:\/([a-z0-9.-]+))?)?$/.exec(route);
   const action = route === '/settings' ? method === 'GET' ? 'view' : 'settings:edit'

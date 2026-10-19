@@ -87,6 +87,8 @@ function renderDocument(d) {
   state.current = d; state.editing = false; show('empty', false); show('detail', true); show('edit-form', false); show('tabs', true);
   renderStorage(d);
   text('document-title', d.title);
+  show('publication', can('publish:edit') && d.status === 'ready');
+  $('document-visibility').value = d.visibility || 'private';
   text('document-meta', `${d.topic || '未分类'} · ${time(d.duration)} · ${d.originalName} · ${d.backend === 'codex' ? 'Codex CLI' : '兼容 API'} · ${new Date(d.updatedAt).toLocaleString('zh-CN')}`);
   $('document-tags').innerHTML = d.tags.map(t => '<span>' + escape(t) + '</span>').join('');
   text('job-status', d.error || d.stage + (d.status === 'processing' ? ' · ' + d.progress + '%' : ''));
@@ -245,6 +247,17 @@ $('edit').onclick = () => {
   tab('notes'); show('notes-view', false); show('tabs', false); show('edit-form', true);
 };
 $('cancel-edit').onclick = () => renderDocument(state.current);
+$('visibility-save').onclick = async () => {
+  const value = $('document-visibility').value;
+  if (value === 'public' && state.current.visibility !== 'public'
+    && !window.confirm('公开后，任何有浏览权限的访客都能读取这篇笔记的标题、分类、标签和完整正文。请确认正文不含私人信息。继续公开？')) return;
+  $('visibility-save').disabled = true;
+  try {
+    await send('/documents/' + state.current.id + '/visibility', 'PUT', { visibility: value, revision: state.current.revision });
+    await open(state.current.id); text('message', value === 'public' ? '笔记正文已公开，可在公开知识库中浏览。' : '已撤回公开，笔记恢复为私有。');
+  } catch (e) { error(e); }
+  finally { $('visibility-save').disabled = false; }
+};
 $('edit-form').onsubmit = async event => {
   event.preventDefault();
   try { const result = await send('/documents/' + state.current.id, 'PUT', { title: $('edit-title').value, topic: $('edit-topic').value, tags: tags($('edit-tags').value), sourceUrl: $('edit-source').value, notes: $('edit-notes').value, revision: state.current.revision }); renderDocument(result.document); text('message', '笔记已保存。'); await load(); } catch (e) { error(e); }

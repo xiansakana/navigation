@@ -8,7 +8,8 @@ import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
 import { canKnowledge } from './knowledge.js';
 
 export function canMingli(session, action = 'view') {
-  return !!session?.userId && !session.isGuest && hasPermission(session.permissions || [], 'mingli:' + action);
+  return !!session?.userId && (!session.isGuest || ['view', 'chart:calculate'].includes(action))
+    && hasPermission(session.permissions || [], 'mingli:' + action);
 }
 
 async function body(req, maxSize = 128 * 1024) {
@@ -26,6 +27,7 @@ export async function handleMingliApi(req, res, url, session, json) {
   res.setHeader('Cache-Control', 'no-store');
   if (!canMingli(session)) return json(res, 403, { ok: false, error: '请登录并获取命理模块权限' });
   const route = url.pathname.slice('/api/mingli'.length), method = req.method;
+  if (session.isGuest && (route !== '/chart' || method !== 'POST')) return json(res, 403, { ok: false, error: '游客仅可体验排盘，个人案例需登录后访问' });
   const match = /^\/cases\/([a-f0-9]{32})$/.exec(route);
   const category = /^\/categories\/([a-f0-9]{32})$/.exec(route);
   const knowledgeCase = /^\/knowledge-cases\/([a-f0-9]{32})$/.exec(route);
@@ -53,7 +55,7 @@ export async function handleMingliApi(req, res, url, session, json) {
       return json(res, 200, { ok: true, ...store.list(uid, { search: url.searchParams.get('search') || '', documentId: url.searchParams.get('documentId') || '', filters,
         offset: Math.min(100000, Math.max(0, Math.floor(Number(url.searchParams.get('offset')) || 0))), limit: Math.max(1, Math.min(100, Math.floor(Number(url.searchParams.get('limit')) || 30))) }) });
     }
-    if (route === '/chart') return json(res, 200, { ok: true, chart: calculateChart(await body(req)) });
+    if (route === '/chart') return json(res, 200, { ok: true, chart: calculateChart(await body(req, session.isGuest ? 4096 : 128 * 1024)) });
     const store = createMingliStore(getDatabase()), uid = session.userId;
     if (route === '/categories' && method === 'GET') return json(res, 200, { ok: true, ...store.categories.list(uid) });
     if (action === 'categories:edit') {

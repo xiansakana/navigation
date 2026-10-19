@@ -60,6 +60,8 @@ export function createKnowledgeStore(db) {
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'fingerprint')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''");
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'worker_id')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN worker_id TEXT NOT NULL DEFAULT ''");
   if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'source_sha256')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN source_sha256 TEXT NOT NULL DEFAULT ''");
+  if (!db.prepare('PRAGMA table_info(knowledge_documents)').all().some(c => c.name === 'visibility')) db.exec("ALTER TABLE knowledge_documents ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private' CHECK(visibility IN ('private','public'))");
+  db.exec('CREATE INDEX IF NOT EXISTS knowledge_public ON knowledge_documents(visibility,status,updated_at DESC)');
   const localInputs = createLocalInputStore(db);
   const imports = createImportStore(db);
   for (const table of ['knowledge_settings', 'knowledge_documents']) {
@@ -69,7 +71,7 @@ export function createKnowledgeStore(db) {
   const sources = createSourceStore(db);
   const getRow = (uid, key) => db.prepare('SELECT * FROM knowledge_documents WHERE user_id=? AND id=?').get(uid, key);
   const read = row => row && ({ id: row.id, title: row.title, topic: row.topic, tags: JSON.parse(row.tags_json), sourceUrl: row.source_url,
-    originalName: row.original_name, bytes: row.byte_size, mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, modelSettings: JSON.parse(row.model_settings_json || '{}'), status: row.status,
+    visibility: row.visibility || 'private', originalName: row.original_name, bytes: row.byte_size, mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, modelSettings: JSON.parse(row.model_settings_json || '{}'), status: row.status,
     stage: row.stage, progress: row.progress, error: row.error, duration: row.duration, language: row.language, notes: row.notes,
     transcript: JSON.parse(row.transcript_json), frames: JSON.parse(row.frames_json), provenance: JSON.parse(row.provenance_json),
     storage: sources.public(row.user_id, row.id), importState: imports.get(row.user_id, row.id)?.state || '',
