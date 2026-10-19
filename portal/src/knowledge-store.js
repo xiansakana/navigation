@@ -128,7 +128,7 @@ export function createKnowledgeStore(db) {
       if (status) { where += ' AND status=?'; args.push(status); }
       const total = db.prepare('SELECT count(*) AS n FROM knowledge_documents WHERE ' + where).get(...args).n;
       const documents = db.prepare(`SELECT id,user_id,title,topic,tags_json,source_url,original_name,byte_size,mime_type,fingerprint,backend,model_settings_json,status,stage,progress,error,duration,language,
-        substr(notes,1,240) AS notes,'[]' AS transcript_json,'[]' AS frames_json,provenance_json,revision,attempt,created_at,updated_at,
+        substr(notes,1,240) AS notes,'[]' AS transcript_json,'[]' AS frames_json,provenance_json,visibility,revision,attempt,created_at,updated_at,
         json_array_length(frames_json) AS frame_count,json_array_length(transcript_json) AS segment_count
         FROM knowledge_documents WHERE ` + where + ' ORDER BY updated_at DESC,id LIMIT ? OFFSET ?').all(...args, limit, offset)
         .map(row => { const { notes, transcript, frames, ...d } = read(row); return { ...d, preview: notes.replace(/[#*`>]/g, '').slice(0, 180), frameCount: row.frame_count, segmentCount: row.segment_count }; });

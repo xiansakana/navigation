@@ -3,3 +3,5 @@
 @media(max-width:700px){.kb-workspace,.kb-settings-grid{grid-template-columns:1fr}.kb-library{position:static}.kb-documents{max-height:300px}.kb-empty{padding:60px 10px}.kb-heading h1{font-size:22px}.kb-reading{padding:18px;min-height:350px}.kb-segment{grid-template-columns:56px 1fr;gap:8px}.kb-markdown{font-size:14px}.kb-tabs{gap:0}.kb-shell{padding:18px 10px}.kb-heading{gap:18px}}
 
 .kb-file.is-dragging{border-color:var(--accent);background:var(--hover-bg);outline:2px solid var(--accent);outline-offset:2px}.kb-playback-toolbar{display:flex;align-items:center;gap:20px;flex-wrap:wrap}.kb-playback-toolbar label{min-width:180px;margin-bottom:0}#original-frame{width:100%;height: min(65vh,640px);min-height:300px;border:0;border-radius:9px;background:#000}
+
+.kb-document-row{display:flex;align-items:flex-start;gap:6px}.kb-document-row>input{width:18px;height:18px;flex:0 0 18px;margin:18px 0 0;accent-color:var(--accent)}.kb-batch{padding:12px 0;margin-bottom:12px;border-bottom:1px solid var(--border)}.kb-batch .btn{font-size:12px}.kb-batch label{margin-top:12px}

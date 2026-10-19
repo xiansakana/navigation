@@ -44,6 +44,32 @@ async function fixture(fn) {
   }
 }
 
+test('batch publication is atomic, versioned, account isolated and permission protected', async () => fixture(async ({ call, store, db }) => {
+  const a = store.create('a', upload()), b = store.create('a', upload()), foreign = store.create('b', upload());
+  db.prepare("UPDATE knowledge_documents SET status='ready',notes='test notes' WHERE id IN (?,?)").run(a.id, b.id);
+  const batch = (documents, visibility = 'public', options = {}) => call('/documents/visibility', { method: 'PUT', data: { documents, visibility }, ...options });
+  const docs = [a, b].map(d => ({ id: d.id, revision: d.revision }));
+  assert.equal((await batch(docs, 'public', { session: { userId: 'a', permissions: ['knowledge:view', 'knowledge:notes:view', 'knowledge:publish:edit'] } })).status, 403);
+  assert.equal((await batch(docs, 'public', { headers: { origin: 'https://evil.test' } })).status, 403);
+  assert.equal((await batch([docs[0], { id: foreign.id, revision: foreign.revision }])).status, 404);
+  assert.equal(store.get('a', a.id).visibility, 'private');
+  assert.equal((await batch([docs[0], { ...docs[1], revision: 99 }])).status, 409);
+  assert.equal(store.get('a', a.id).visibility, 'private');
+  db.prepare("UPDATE knowledge_documents SET status='processing' WHERE id=?").run(b.id);
+  assert.equal((await batch(docs)).status, 409);
+  db.prepare("UPDATE knowledge_documents SET status='ready' WHERE id=?").run(b.id);
+  for (const invalid of [[], [docs[0], docs[0]], Array(101).fill(docs[0]), [{ id: 'bad', revision: 0 }]]) assert.equal((await batch(invalid)).status, 400);
+  assert.equal((await batch(docs, 'invalid')).status, 400);
+  const response = await batch(docs); assert.equal(response.status, 200); assert.equal(response.payload.count, 2);
+  assert.ok(store.list('a').documents.every(d => d.visibility === 'public'), 'list includes the stored visibility');
+  const published = await call('/public/documents'); assert.equal(published.payload.total, 2);
+  assert.equal(published.payload.documents[0].transcript, undefined);
+  assert.equal((await batch(docs, 'private')).status, 409, 'stale selection cannot overwrite newer changes');
+  assert.equal((await batch(docs.map(d => ({ ...d, revision: d.revision + 1 })), 'private')).status, 200);
+  assert.equal((await call('/public/documents')).payload.total, 0);
+  assert.equal(store.get('a', a.id).notes, 'test notes');
+}));
+
 test('knowledge routes, per-action permissions, default member grants and guest isolation', async () => {
   const permissions = SYSTEM_PERMISSIONS.filter(p => p.id.startsWith('knowledge:'));
   assert.ok(permissions.length >= 12);

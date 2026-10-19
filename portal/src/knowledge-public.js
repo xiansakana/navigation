@@ -58,3 +58,30 @@ export async function handleKnowledgeVisibility(req, res, url, session, json, db
     return json(res, 200, { ok: true, visibility: input.visibility, revision: input.revision + 1 });
   } catch { return json(res, 400, { ok: false, error: '请检查可见范围和版本；仅可公开已生成的笔记' }); }
 }
+
+export async function handleKnowledgeBatchVisibility(req, res, session, json, db) {
+  if (req.method !== 'PUT') return json(res, 405, { ok: false, error: '请使用 PUT 更新可见范围' });
+  if (!sameOriginWrite(req)) return json(res, 403, { ok: false, error: '不允许跨站写入' });
+  try {
+    let size = 0; const chunks = [];
+    for await (const chunk of req) { size += chunk.length; if (size > 24000) throw new Error('请求过长'); chunks.push(chunk); }
+    const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (!input || !['private', 'public'].includes(input.visibility) || !Array.isArray(input.documents)
+      || !input.documents.length || input.documents.length > 100
+      || input.documents.some(d => !d || !/^[a-f0-9]{32}$/.test(d.id) || !Number.isSafeInteger(d.revision))
+      || new Set(input.documents.map(d => d.id)).size !== input.documents.length) throw new Error('请选择1至100篇笔记，并检查可见范围和版本');
+    const store = createKnowledgeStore(db);
+    db.transaction(() => {
+      for (const d of input.documents) {
+        const item = store.get(session.userId, d.id);
+        if (!item) throw Object.assign(new Error('部分笔记不存在，请刷新列表'), { status: 404 });
+        if (item.revision !== d.revision || input.visibility === 'public' && item.status !== 'ready')
+          throw Object.assign(new Error('部分笔记已更新或尚未生成，整批未修改，请刷新后重试'), { status: 409 });
+      }
+      const update = db.prepare('UPDATE knowledge_documents SET visibility=?,revision=revision+1,updated_at=? WHERE user_id=? AND id=?');
+      const time = new Date().toISOString();
+      for (const d of input.documents) update.run(input.visibility, time, session.userId, d.id);
+    }).immediate();
+    return json(res, 200, { ok: true, count: input.documents.length, visibility: input.visibility });
+  } catch (e) { return json(res, e.status || 400, { ok: false, error: e.code?.startsWith('SQLITE_') ? '知识库存储失败' : e.message }); }
+}

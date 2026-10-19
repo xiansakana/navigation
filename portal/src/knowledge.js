@@ -12,7 +12,7 @@ import { knowledgeWorkerPackage, sendWorkerPackage } from './knowledge-worker-pa
 import { sendWorkerExe } from './knowledge-worker-exe.js';
 import { inspectBilibili, inspectBilibiliQuality, qualityLabel } from './knowledge-bilibili.js';
 import { bilibiliAccount, qualitySettings } from './knowledge-bilibili-account.js';
-import { handlePublicKnowledge, handleKnowledgeVisibility } from './knowledge-public.js';
+import { handlePublicKnowledge, handleKnowledgeVisibility, handleKnowledgeBatchVisibility } from './knowledge-public.js';
 
 const root = () => path.resolve(process.env.KNOWLEDGE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/knowledge'));
 export function knowledgeDirectory(id) {
@@ -183,6 +183,11 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
   }
   // Never route a guest through personal settings, worker, import, media or document APIs.
   if (session.isGuest) return json(res, 403, { ok: false, error: '游客仅可浏览公开笔记' });
+  if (url.pathname === '/api/knowledge/documents/visibility') {
+    if (!canKnowledge(session, 'publish:batch:edit') || !canKnowledge(session, 'publish:edit') || !canKnowledge(session, 'notes:view'))
+      return json(res, 403, { ok: false, error: '无权批量修改笔记可见范围' });
+    return handleKnowledgeBatchVisibility(req, res, session, json, getDatabase());
+  }
   const visibility = /^\/api\/knowledge\/documents\/([a-f0-9]{32})\/visibility$/.exec(url.pathname);
   if (visibility) {
     if (!canKnowledge(session, 'publish:edit') || !canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '无权修改笔记可见范围' });

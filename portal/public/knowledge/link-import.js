@@ -3,6 +3,7 @@ export function bindLinkImport({ element, can, send, busy, onError }) {
   let sequence = 0, loading = '', dirty = false, queued = false, savedDefaults = null;
   const selection = () => ({ quality: Number($('link-quality').value || 80), strict: $('link-mode').value !== 'auto' });
   const mode = () => {
+    if (!can()) $('upload-mode').value = 'file';
     const link = $('upload-mode').value === 'link' && can();
     $('video-drop').hidden = link; $('video-file').disabled = link; $('video-file').required = !link;
     $('video-link-controls').hidden = !link; $('video-link').required = link;
@@ -36,5 +37,5 @@ export function bindLinkImport({ element, can, send, busy, onError }) {
   $('video-link').addEventListener('input', () => { sequence++; $('video-link-status').textContent = '链接已改变，请读取视频信息后确认标题等字段。'; });
   $('link-quality').onchange = $('link-mode').onchange = () => { dirty = true; sequence++; preview(); };
   const defaults = s => { if (s) savedDefaults = s; if (!dirty && s) { $('link-quality').value = String(s.quality); $('link-mode').value = s.strict ? 'strict' : 'auto'; } };
-  return { mode, preview, selection, defaults, reset() { dirty = false; sequence++; defaults(savedDefaults); } };
+  return { mode, preview, selection, defaults, reset() { dirty = false; sequence++; defaults(savedDefaults); mode(); } };
 }

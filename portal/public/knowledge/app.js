@@ -3,10 +3,10 @@ import { createDevicePanel } from './devices.js?v=4';
 import { createSourcePlayer } from './source.js?v=1';
 import { bindVideoDrop } from './drop.js?v=1';
 import { sendLocalInput } from './local-input.js?v=1';
-import { bindLinkImport } from './link-import.js?v=2';
+import { bindLinkImport } from './link-import.js?v=3';
 import { createBilibiliPanel } from './bilibili-account.js?v=2';
 const $ = id => document.getElementById(id);
-const state = { permissions: [], documents: [], current: null, settings: null, editing: false, modelDirty: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
+const state = { permissions: [], documents: [], selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
 const sourcePlayer = createSourcePlayer({ player: $('player'), frame: $('original-frame'), select: $('playback-source'), link: $('original-link'), hint: $('playback-hint'), allowed: () => can('source:view') });
 const text = (id, value) => { $(id).textContent = value || ''; };
@@ -42,6 +42,12 @@ async function settings() {
   const info = c[state.settings.backend];
   text('backend-description', info ? `${info.ready ? '工作器已就绪' : '工作器未就绪'} · ${state.settings[prefix + 'Model'] || info.model || info.detail || ''} · 强度：${state.settings[prefix + 'Effort'] || '工作器默认'}` : '选择总结方式后，由已连接工作器执行。');
 }
+function renderBatch() {
+  show('batch-publication', can('publish:batch:edit') && can('publish:edit') && can('notes:view'));
+  text('batch-count', '已选 ' + state.selected.size + ' 篇（最多100篇）');
+  $('batch-save').disabled = state.batchBusy || !state.selected.size;
+  $('batch-all').disabled = $('batch-clear').disabled = state.batchBusy;
+}
 function renderList() {
   text('total', state.total + ' 篇');
   const list = $('documents'); list.replaceChildren();
@@ -49,16 +55,36 @@ function renderList() {
   for (const d of state.documents) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'kb-document' + (state.current?.id === d.id ? ' active' : '');
     button.innerHTML = `<strong>${escape(d.title)}</strong><small>${escape(d.topic || '未分类')} · ${escape(d.status === 'queued' && d.storage?.provider === '115' && d.storage.state !== 'ready' ? ({ waiting: '等待上传', pending: '等待保存至115', uploading: '正在保存至115', verifying: '校验原视频', verified: '清理临时原片', failed: '115保存待重试' })[d.storage.state] || d.stage : d.stage)}${d.status === 'processing' ? ' ' + d.progress + '%' : ''}</small><p>${escape(d.preview || d.originalName)}</p>`;
-    button.addEventListener('click', () => open(d.id).catch(error)); list.append(button);
+    button.addEventListener('click', () => open(d.id).catch(error));
+    if (can('publish:batch:edit') && can('publish:edit') && d.status === 'ready') {
+      const row = document.createElement('div'); row.className = 'kb-document-row';
+      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.setAttribute('aria-label', '选择笔记：' + d.title);
+      checkbox.checked = state.selected.has(d.id); checkbox.disabled = state.batchBusy;
+      checkbox.onchange = () => {
+        if (checkbox.checked && state.selected.size >= 100) { checkbox.checked = false; return error(new Error('每批最多选择100篇笔记')); }
+        if (checkbox.checked) state.selected.set(d.id, d.revision); else state.selected.delete(d.id);
+        renderBatch();
+      };
+      const badge = document.createElement('span'); badge.className = 'kb-hint'; badge.textContent = d.visibility === 'public' ? '公开' : '私有'; button.append(badge);
+      row.append(checkbox, button); list.append(row);
+    } else list.append(button);
   }
+  renderBatch();
   show('more', state.documents.length < state.total);
 }
 async function load(more = false) {
   const query = ++state.query, offset = more ? state.documents.length : 0;
   const params = new URLSearchParams({ search: $('search').value, topic: $('topic-filter').value, status: $('status-filter').value, offset });
+  const filter = JSON.stringify([$('search').value, $('topic-filter').value, $('status-filter').value]);
   const result = await api('/documents?' + params);
   if (query !== state.query) return;
   state.documents = more ? [...state.documents, ...result.documents] : result.documents; state.total = result.total;
+  if (filter !== state.filter) state.selected.clear();
+  state.filter = filter;
+  for (const [id, revision] of state.selected) {
+    const item = state.documents.find(d => d.id === id);
+    if (!item || item.status !== 'ready' || item.revision !== revision) state.selected.delete(id);
+  }
   const topic = $('topic-filter').value;
   $('topic-filter').innerHTML = '<option value="">全部分类</option>' + result.topics.map(t => `<option value="${escape(t.topic)}">${escape(t.topic)} (${t.count})</option>`).join('');
   $('topic-filter').value = topic;
@@ -221,6 +247,21 @@ $('upload-form').addEventListener('reset', () => { text('selected-video', '支�
 $('search-form').onsubmit = event => { event.preventDefault(); load().catch(error); };
 $('topic-filter').onchange = $('status-filter').onchange = () => load().catch(error);
 $('more').onclick = () => load(true).catch(error);
+$('batch-all').onclick = () => { for (const d of state.documents) if (d.status === 'ready' && state.selected.size < 100) state.selected.set(d.id, d.revision); renderList(); };
+$('batch-clear').onclick = () => { state.selected.clear(); renderList(); };
+$('batch-save').onclick = async () => {
+  if (state.batchBusy || !state.selected.size) return;
+  const visibility = $('batch-visibility').value, documents = [...state.selected].map(([id, revision]) => ({ id, revision }));
+  if (!window.confirm(`将选中的 ${documents.length} 篇笔记设为${visibility === 'public' ? '公开' : '私有'}？` + (visibility === 'public' ? '访客将能读取标题、分类、标签和完整正文，请确认不含私人信息。' : '公开知识库将不再展示这些笔记。'))) return;
+  state.batchBusy = true; renderList();
+  try {
+    const result = await send('/documents/visibility', 'PUT', { visibility, documents });
+    state.selected.clear(); await load();
+    if (state.current && documents.some(d => d.id === state.current.id) && !state.editing) await open(state.current.id);
+    text('message', `已将 ${result.count} 篇笔记设为${visibility === 'public' ? '公开' : '私有'}。`);
+  } catch (e) { error(e); }
+  finally { state.batchBusy = false; renderList(); }
+};
 $('backend').onchange = async () => { try { await send('/settings', 'PUT', { backend: $('backend').value }); state.modelDirty = false; await settings(); text('message', '已切换默认总结方式。'); } catch (e) { error(e); } };
 $('summary-model').oninput = $('summary-effort').onchange = () => { state.modelDirty = true; };
 $('model-save').onclick = async () => {
@@ -255,6 +296,7 @@ $('visibility-save').onclick = async () => {
   try {
     await send('/documents/' + state.current.id + '/visibility', 'PUT', { visibility: value, revision: state.current.revision });
     await open(state.current.id); text('message', value === 'public' ? '笔记正文已公开，可在公开知识库中浏览。' : '已撤回公开，笔记恢复为私有。');
+    await load();
   } catch (e) { error(e); }
   finally { $('visibility-save').disabled = false; }
 };
