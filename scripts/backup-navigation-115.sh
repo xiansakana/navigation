@@ -12,13 +12,24 @@ fi
 install -d -m 700 "$DESTINATION"
 exec 9>"$DESTINATION/.115-backup.lock"
 flock -n 9 || { echo 'Backup already in progress; verification has not completed' >&2; exit 75; }
+upload() {
+  local archive="$1" attempt
+  for attempt in 1 2 3; do
+    if node "$ROOT/scripts/backup-115.mjs" upload "$archive"; then return 0; fi
+    if ((attempt < 3)); then
+      echo "Upload attempt $attempt failed; resuming in 15 seconds" >&2
+      sleep 15
+    fi
+  done
+  return 1
+}
 # Retry pending archives first. A failed upload never deletes the only local copy.
 shopt -s nullglob
 pending=("$DESTINATION"/navigation-*.tar.gz)
 if ((${#pending[@]})); then
-  for archive in "${pending[@]}"; do node "$ROOT/scripts/backup-115.mjs" upload "$archive"; done
+  for archive in "${pending[@]}"; do upload "$archive"; done
   # Completing a retry is this run's backup; avoid immediately exporting another large archive.
   exit 0
 fi
 archive="$("$PYTHON" "$ROOT/scripts/backup-navigation.py" --destination "$DESTINATION" --keep 3 --logical)"
-node "$ROOT/scripts/backup-115.mjs" upload "$archive"
+upload "$archive"
