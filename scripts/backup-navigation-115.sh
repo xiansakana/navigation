@@ -17,6 +17,8 @@ shopt -s nullglob
 pending=("$DESTINATION"/navigation-*.tar.gz)
 if ((${#pending[@]})); then
   for archive in "${pending[@]}"; do node "$ROOT/scripts/backup-115.mjs" upload "$archive"; done
+  # Completing a retry is this run's backup; avoid immediately exporting another large archive.
+  exit 0
 fi
 archive="$("$PYTHON" "$ROOT/scripts/backup-navigation.py" --destination "$DESTINATION" --keep 3 --logical)"
 node "$ROOT/scripts/backup-115.mjs" upload "$archive"
