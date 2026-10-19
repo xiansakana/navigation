@@ -32,7 +32,7 @@ export class OpenListStorage {
         method: options.method || 'POST', redirect: 'error',
         headers: { Authorization: this.config.token, 'User-Agent': agent, 'Content-Type': 'application/json', ...options.headers },
         body: options.body || JSON.stringify(data), duplex: options.body ? 'half' : undefined,
-        signal: AbortSignal.timeout(options.body ? 3600000 : 60000)
+        signal: AbortSignal.timeout(options.timeoutMs || (options.body ? 3600000 : 60000))
       });
       const result = await response.json();
       if (!response.ok || result.code !== 200) throw Object.assign(new Error('115操作失败'), { missing: result.code === 404 });
