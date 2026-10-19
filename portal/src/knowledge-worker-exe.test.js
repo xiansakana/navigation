@@ -7,6 +7,8 @@ import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { knowledgeWorkerExe } from './knowledge-worker-exe.js';
+import { knowledgeWorkerPackage } from './knowledge-worker-package.js';
+import { extractWorkerPackage } from '../../scripts/knowledge-worker-launcher.mjs';
 
 test('EXE contains a valid PE bootstrap, verified public ZIP and isolated one-use binding', () => {
   const binding = { portalUrl: 'https://example.test', deviceCode: 'f'.repeat(64), expiresAt: Date.now() + 600000 };
@@ -20,6 +22,23 @@ test('EXE contains a valid PE bootstrap, verified public ZIP and isolated one-us
   assert.equal(crypto.createHash('sha256').update(zip).digest('hex'), meta.sha256);
   assert.deepEqual(meta.binding, binding);
   assert.equal(JSON.parse(knowledgeWorkerExe().subarray(-16 - Buffer.byteLength(JSON.stringify({ sha256: meta.sha256, binding: null })), -16)).binding, null);
+});
+
+test('packaged setup detects existing Node using Windows PowerShell 5.1 and PowerShell 7 without eval or downloads', { skip: process.platform !== 'win32' }, async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge setup check '));
+  try {
+    await extractWorkerPackage(knowledgeWorkerPackage().buffer, directory);
+    const shells = [path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), process.env.CURRENT_PWSH || 'pwsh.exe'];
+    for (const shell of shells) {
+      const { stdout, stderr } = await promisify(execFile)(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(directory, 'scripts/setup-knowledge-worker.ps1'), '-CheckOnly'], { timeout: 20000, windowsHide: true });
+      assert.match(stdout, /Node major: (?:2[2-9]|[3-9]\d)/);
+      assert.doesNotMatch(stdout + stderr, /SyntaxError|Downloading|Expression expected/);
+      assert.equal(stderr.trim(), '');
+    }
+  } finally {
+    assert.equal(path.dirname(directory), os.tmpdir());
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('Windows executes the actual EXE and extracts the complete installer without starting a worker', { skip: process.platform !== 'win32' }, async () => {

@@ -89,6 +89,10 @@ pm2 start scripts/knowledge-worker.mjs --name knowledge-worker -- portal/knowled
 
 知识库“处理设置”提供“安装并连接这台电脑”，需要 `knowledge:devices:install`、`knowledge:devices:edit` 和 `knowledge:process:edit` 权限。下载 `Navigation-Knowledge-Worker-Setup.exe` 后双击运行，安装界面显示进度及日志，自动解包并执行安装流程；浏览器不能静默执行本机程序。EXE 引导程序兼容 Windows 10/11 内置的 .NET Framework，绑定数据以独立尾部载荷附加，公共引导程序不包含账号凭据。源代码在 `scripts/windows-worker/Installer.cs`，通过 `scripts/build-knowledge-worker-exe.ps1` 构建；服务端同时核对源码及二进制哈希。用于自动更新的 ZIP 接口保持不变。安装包仅附带10分钟有效、只能使用一次的账号绑定授权，不包含长期凭据、服务器登录或源视频。请勿转发仍有效的个人安装包。过期时安装程序显示配对码并打开知识库，登录后核对设备名称及配对码再确认。
 
+若Chrome拦截EXE，可在同处点击“下载脚本安装包（ZIP）”。这是真实的脚本源码安装包，不是改名封装的EXE；需额外`knowledge:devices:install-zip`权限，服务端同时验证原安装、设备绑定和处理权限。全部解压后双击`scripts/knowledge-worker-setup.cmd`，执行同一套安装流程；10分钟内自动绑定，过期需网页确认。不要直接从压缩包内运行，也不要转发尚未使用的配对授权。无需关闭Safe Browsing、Defender或修改浏览器策略；ZIP不保证在所有组织安全策略下都可下载。EXE尚无受信发布者签名，不能承诺消除浏览器拦截，具体拦截原因需依据Chrome安全检测结果判断。
+
+安装器通过`node --version`读取并校验主版本，兼容Windows PowerShell 5.1和PowerShell 7；不通过`node -p/-e`传含引号的JavaScript。已安装Node>=22直接复用；否则优先复用安装目录的便携Node，再按原SHA256校验流程下载。`-CheckOnly`只检查平台和实际Node主版本，不创建配置、不绑定设备、不下载依赖或启用启动任务。
+
 安装器面向 Windows x64：优先使用已有 Node 22+，否则下载带官方 SHA256 校验的 Node 22.20.0；安装独立 Python 3.11.9 时核验 Python Software Foundation 数字签名，创建私有环境并安装固定的语音依赖、FFmpeg 和可选 CUDA 推理库。首次需要联网下载依赖和语音模型。已有 Codex 原生程序会复用其登录；否则按 [OpenAI Docs](https://learn.chatgpt.com/docs/codex/cli) 安装 CLI 并引导用户登录。网站账号与 Codex 账号授权独立，不在设备间复制 Codex 登录缓存。
 
 运行文件位于 `%LOCALAPPDATA%/Navigation/KnowledgeWorker/releases/`，私有配置为同目录下的 `config.json`，缓存、模型独立保存。设备凭据在服务端仅保存哈希，网页设备列表不返回凭据。设备有独立ID、名称、心跳和停用状态；停用只取消该设备的访问和正在持有的任务租约，不影响其他设备。旧版共享凭据收进高级设置，轮换不再撤销独立设备。

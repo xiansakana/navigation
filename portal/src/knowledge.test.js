@@ -318,6 +318,32 @@ test('device APIs enforce permissions, CSRF, authenticated pairing, and per-devi
 }));
 
 
+test('ZIP setup download has separate permission and a one-use automatic pairing grant, never an existing token', async () => fixture(async ({ call, store, root }) => {
+  const session = { userId: 'a', permissions: ['knowledge:view', 'knowledge:devices:install', 'knowledge:devices:edit', 'knowledge:process:edit'] };
+  assert.equal((await call('/worker-install', { method: 'POST', data: { format: 'zip' }, session })).status, 403);
+  assert.equal((await call('/worker-install', { method: 'POST', data: { format: 'bad' } })).status, 400);
+  assert.equal((await call('/worker-install', { method: 'POST', data: { format: 'zip' }, headers: { origin: 'https://evil.example' } })).status, 403);
+  const existing = store.rotateToken('a');
+  const response = await call('/worker-install', { method: 'POST', data: { format: 'zip' } });
+  assert.equal(response.status, 200); assert.equal(response.headers.get('content-type'), 'application/zip');
+  assert.ok(!response.payload.includes(Buffer.from(existing)));
+  // The auto-updater deliberately rejects installer grants; read this ordinary
+  // uncompressed ZIP without weakening its public-runtime allowlist.
+  const entries = new Map(); let offset = 0;
+  while (response.payload.readUInt32LE(offset) === 0x04034b50) {
+    assert.equal(response.payload.readUInt16LE(offset + 8), 0);
+    const size = response.payload.readUInt32LE(offset + 18), length = response.payload.readUInt16LE(offset + 26), extra = response.payload.readUInt16LE(offset + 28);
+    const name = response.payload.subarray(offset + 30, offset + 30 + length).toString('utf8'), start = offset + 30 + length + extra;
+    entries.set(name, response.payload.subarray(start, start + size)); offset = start + size;
+  }
+  const grant = JSON.parse(entries.get('worker-pairing.json').toString('utf8'));
+  assert.match(entries.get('scripts/setup-knowledge-worker.ps1').toString('utf8'), /Get-WorkerNodeMajor/);
+  assert.ok(grant.expiresAt > Date.now()); assert.ok(grant.expiresAt <= Date.now() + 600000);
+  const paired = await call('/worker/pair/poll', { method: 'POST', data: { deviceCode: grant.deviceCode, label: 'ZIP device' } });
+  assert.equal(paired.payload.status, 'approved'); assert.equal(store.workerUser(paired.payload.token), 'a');
+  assert.equal((await call('/worker/pair/poll', { method: 'POST', data: { deviceCode: grant.deviceCode } })).payload.status, 'expired');
+}));
+
 test('worker Codex call reporting requires its own current lease and cannot spoof ownership or modify finished turns',async()=>fixture(async({call,store,db})=>{
   const token=store.rotateToken('a'),other=store.rotateToken('b'),d=store.create('a',upload());store.enqueue('a',d.id);const job=store.claim('a',['codex']);
   const route='/worker/jobs/'+d.id+'/codex',data={id:crypto.randomUUID(),prompt:'Quoted transcript',result:'',state:'running',model:'test',sessionId:''};

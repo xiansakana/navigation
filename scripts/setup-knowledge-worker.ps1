@@ -15,8 +15,18 @@ $uri = [Uri]$PortalUrl
 if ($uri.Scheme -ne 'https' -and -not ($uri.Scheme -eq 'http' -and $uri.Host -in @('localhost','127.0.0.1'))) { throw 'HTTPS portal required.' }
 if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { throw 'This package requires Windows x64.' }
 $nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
+function Get-WorkerNodeMajor([string]$Binary) {
+  # Windows PowerShell 5.1 strips embedded quotes in native -p/-e arguments.
+  # Read the executable version instead of passing JavaScript through a shell.
+  $versionOutput = & $Binary --version
+  if ($LASTEXITCODE -ne 0) { throw 'Unable to check Node version. Repair Node or retry setup.' }
+  $versionText = ($versionOutput -join '').Trim()
+  if ($versionText -notmatch '^v([0-9]+)\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$') { throw 'Node returned an invalid version string.' }
+  return [int]$Matches[1]
+}
 if ($CheckOnly) {
   Write-Output ('Windows x64 ready; Node installed: ' + [bool]$nodeCommand)
+  if ($nodeCommand) { Write-Output ('Node major: ' + (Get-WorkerNodeMajor $nodeCommand.Source)) }
   Write-Output ('Install location: ' + $InstallDirectory)
   exit 0
 }
@@ -33,7 +43,8 @@ Assert-NativeExit 'Private directory permissions'
 $runtime = Join-Path $appRoot 'runtime'
 New-Item -ItemType Directory -Path $runtime -Force | Out-Null
 $node = if ($nodeCommand) { $nodeCommand.Source } else { '' }
-if ($node) { $major = & $node -p 'Number(process.versions.node.split(".")[0])'; if ([int]$major -lt 22) { $node = '' } }
+if (-not $node -and (Test-Path -LiteralPath (Join-Path $runtime 'node-v22.20.0-win-x64/node.exe'))) { $node = Join-Path $runtime 'node-v22.20.0-win-x64/node.exe' }
+if ($node) { if ((Get-WorkerNodeMajor $node) -lt 22) { $node = '' } }
 if (-not $node) {
   $nodeArchive = 'node-v22.20.0-win-x64.zip'
   $zip = Join-Path $runtime $nodeArchive

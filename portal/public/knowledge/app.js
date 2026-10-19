@@ -1,5 +1,5 @@
 import { uploadParts } from './upload.js?v=1';
-import { createDevicePanel } from './devices.js?v=3';
+import { createDevicePanel } from './devices.js?v=4';
 import { createSourcePlayer } from './source.js?v=1';
 import { bindVideoDrop } from './drop.js?v=1';
 import { sendLocalInput } from './local-input.js?v=1';

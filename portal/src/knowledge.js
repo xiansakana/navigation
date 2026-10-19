@@ -250,8 +250,12 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
     }
     if (route === '/worker-install') {
       if (!canKnowledge(session, 'devices:edit') || !canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要设备绑定和视频处理权限' });
+      const input = await body(req, 1024), format = input.format || 'exe';
+      if (!['exe', 'zip'].includes(format)) throw new Error('安装包格式无效');
+      if (format === 'zip' && !canKnowledge(session, 'devices:install-zip')) return json(res, 403, { ok: false, error: '需要ZIP脚本安装包下载权限' });
       const pairing = store.devices.start('Windows 视频工作器'); store.devices.approve(uid, pairing.userCode);
-      return sendWorkerExe(res, { portalUrl: process.env.KNOWLEDGE_PUBLIC_URL || 'https://saoyu.fun', deviceCode: pairing.deviceCode, expiresAt: Date.now() + 600000 });
+      const binding = { portalUrl: process.env.KNOWLEDGE_PUBLIC_URL || 'https://saoyu.fun', deviceCode: pairing.deviceCode, expiresAt: Date.now() + 600000 };
+      return format === 'zip' ? sendWorkerPackage(res, binding) : sendWorkerExe(res, binding);
     }
     if (route === '/worker-package') return sendWorkerPackage(res);
     if (route === '/devices' && method === 'GET') return json(res, 200, { ok: true, devices: store.devices.list(uid) });

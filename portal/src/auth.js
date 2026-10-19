@@ -30,6 +30,7 @@ const DEFAULT_PERSONAL_PERMISSIONS = Object.freeze([
     'knowledge:worker:edit',
     'knowledge:devices:view',
     'knowledge:devices:install',
+    'knowledge:devices:install-zip',
     'knowledge:devices:edit',
     'mingli:categories:view',
     'mingli:categories:edit',

@@ -2,6 +2,7 @@ export function createDevicePanel({ can, api, send, onError }) {
   const $ = id => document.getElementById(id);
   const mayInstall = can('devices:install') && can('devices:edit') && can('process:edit');
   $('worker-install').hidden = !mayInstall;
+  $('worker-install-zip').hidden = !mayInstall || !can('devices:install-zip');
   $('device-manager').hidden = !can('devices:view');
   $('device-pair-form').hidden = !can('devices:edit');
   let pendingCode = '';
@@ -26,17 +27,19 @@ export function createDevicePanel({ can, api, send, onError }) {
       list.append(row);
     }
   }
-  $('worker-install').onclick = async () => {
-    const button = $('worker-install'); button.disabled = true;
+  async function downloadInstaller(format) {
+    const zip = format === 'zip', button = $(zip ? 'worker-install-zip' : 'worker-install'); button.disabled = true;
     try {
-      const r = await fetch('/api/knowledge/worker-install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      if (!r.ok || !r.headers.get('content-type')?.includes('application/vnd.microsoft.portable-executable')) { const d = await r.json().catch(() => ({})); throw new Error(d.error || '安装包下载失败，请重新登录后重试'); }
+      const r = await fetch('/api/knowledge/worker-install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ format }) });
+      if (!r.ok || !r.headers.get('content-type')?.includes(zip ? 'application/zip' : 'application/vnd.microsoft.portable-executable')) { const d = await r.json().catch(() => ({})); throw new Error(d.error || '安装包下载失败，请重新登录后重试'); }
       const blob = await r.blob(), url = URL.createObjectURL(blob), link = document.createElement('a');
-      link.href = url; link.download = 'Navigation-Knowledge-Worker-Setup.exe'; document.body.append(link); link.click(); link.remove();
+      link.href = url; link.download = zip ? 'Navigation-Knowledge-Worker-Windows.zip' : 'Navigation-Knowledge-Worker-Setup.exe'; document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
-      $('device-install-status').textContent = 'EXE 安装程序已下载，双击运行即可，无需解压。10分钟内运行可自动绑定当前账号，超时会打开网页确认。首次安装会下载依赖；Codex 未登录时会引导登录。';
+      $('device-install-status').textContent = (zip ? 'ZIP 脚本安装包已准备：先全部解压，再双击 scripts/knowledge-worker-setup.cmd，不要在压缩包内直接运行。' : '已请求下载EXE；如Chrome拦截，请改用ZIP脚本安装包。') + '10分钟内运行可自动绑定当前账号，超时会打开网页确认。首次安装需下载依赖；Codex 未登录时会引导登录。';
     } catch (e) { onError(e); } finally { button.disabled = false; }
-  };
+  }
+  $('worker-install').onclick = () => downloadInstaller('exe');
+  $('worker-install-zip').onclick = () => downloadInstaller('zip');
   async function inspect() {
     const code = $('device-pair-code').value.trim().toUpperCase();
     const pair = await api('/device-pair?code=' + encodeURIComponent(code)); pendingCode = code;
