@@ -6,6 +6,7 @@ import { createKnowledgeDeviceStore } from './knowledge-devices.js';
 import { createLocalInputStore } from './knowledge-local-store.js';
 import { createImportStore } from './knowledge-import-store.js';
 import { pipelineSettings } from './knowledge-pipeline.js';
+import { storageConfig } from './knowledge-storage.js';
 
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
@@ -151,7 +152,10 @@ export function createKnowledgeStore(db) {
       const quota = db.prepare("SELECT count(*) AS n,coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE user_id=?").get(uid);
       const pending = db.prepare("SELECT count(*) AS n FROM knowledge_documents WHERE user_id=? AND status IN ('uploading','importing','queued','processing')").get(uid).n;
       if (pending >= 5) throw Object.assign(new Error('已有5个待处理任务，请等待空闲位置'), { code: 'KNOWLEDGE_CAPACITY', status: 409 });
-      if (quota.bytes + size > 20 * MAX_VIDEO_BYTES || quota.n >= 2000) throw new Error('最多20GB视频或2000篇笔记，请先清理已有内容');
+      if (quota.n >= 2000) throw new Error('最多2000篇笔记，请先清理已有内容');
+      // Cloud archives do not consume a lifetime ECS video quota. Upload routes
+      // still check free disk space before accepting temporary video files.
+      if (!storageConfig(uid) && quota.bytes + size > 20 * MAX_VIDEO_BYTES) throw new Error('服务器存储最多20GB视频，请先清理已有内容');
       const key = id(), time = now();
       db.prepare('INSERT INTO knowledge_documents(id,user_id,title,topic,tags_json,source_url,original_name,byte_size,mime_type,fingerprint,backend,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
         .run(key, uid, m.title, m.topic, JSON.stringify(m.tags), m.sourceUrl, name, size, mime, fingerprint, backend, time, time);
