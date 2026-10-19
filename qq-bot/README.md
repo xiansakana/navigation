@@ -100,7 +100,7 @@ curl -X POST http://127.0.0.1:8787/notify ^
 ## 5. 迁移到云服务器
 
 1. 在云服务器安装 NapCat 并保持 QQ 在线
-2. 将 `qq-bot` 目录上传并执行 `npm install`（Node 18+）
+2. 通过仓库 Git 部署流程更新 `qq-bot` 并执行 `npm install`（Node 20+）
 3. `config.json` 中：
    - `napcat.baseUrl` 改为 `http://127.0.0.1:3000`（Bot 与 NapCat 同机）
    - `server.host` 保持 `127.0.0.1`，由 Portal 统一反向代理

@@ -5,7 +5,7 @@
   "description": "QQ、邮件等消息渠道的统一配置与通知服务",
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "test:send": "node src/send-test.js",
@@ -15,7 +15,12 @@
   "dependencies": {
     "marked": "15.0.12",
     "node-notifier": "^10.0.1",
-    "nodemailer": "^9.1.1",
+    "nodemailer": "10.1.7",
     "ws": "^8.22.0"
+  },
+  "overrides": {
+    "node-notifier": {
+      "uuid": "11.1.1"
+    }
   }
 }
