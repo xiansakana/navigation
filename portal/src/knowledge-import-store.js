@@ -13,6 +13,8 @@ export function createImportStore(db) {
     get,
     add(uid, id, url, settings = { quality: 80, strict: true }) { db.prepare('INSERT INTO knowledge_imports(document_id,user_id,url,created_at,settings_json) VALUES (?,?,?,?,?)').run(id, uid, url, Date.now(), JSON.stringify(settings)); },
     claim() {
+      if (!db.prepare(`SELECT 1 FROM knowledge_imports i JOIN knowledge_documents d ON d.id=i.document_id AND d.user_id=i.user_id
+        WHERE d.status='importing' AND (i.state='pending' OR i.state='downloading' AND i.heartbeat<?) LIMIT 1`).get(Date.now() - 120000)) return null;
       return db.transaction(() => {
         const row = db.prepare(`SELECT i.* FROM knowledge_imports i JOIN knowledge_documents d ON d.id=i.document_id AND d.user_id=i.user_id
           WHERE d.status='importing' AND (i.state='pending' OR i.state='downloading' AND i.heartbeat<?) ORDER BY i.created_at LIMIT 1`).get(Date.now() - 120000);

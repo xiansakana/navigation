@@ -20,6 +20,18 @@ async function fixture(fn) {
   finally { db.close(); await fs.rm(directory, { recursive: true, force: true }); }
 }
 
+test('idle and capacity-blocked polling never waits for an unrelated database writer', async () => fixture(async ({ db, store, queue }) => {
+  const writer = new Database(db.name); db.pragma('busy_timeout = 1');
+  try {
+    writer.exec('BEGIN IMMEDIATE');
+    assert.equal(queue.claim(), null); assert.equal(store.imports.claim(), null);
+    writer.exec('ROLLBACK');
+    queue.add('a', { urls: [url(1)] }, defaults);
+    for (let i = 0; i < 5; i++) store.create('a', { title: 'occupied', bytes: 24, mimeType: 'video/mp4', originalName: 'a.mp4' });
+    writer.exec('BEGIN IMMEDIATE'); assert.equal(queue.claim(), null);
+  } finally { if (writer.inTransaction) writer.exec('ROLLBACK'); writer.close(); }
+}));
+
 test('batch submissions persist beyond five slots; FIFO promotion resumes and preserves metadata/model/quality snapshots', async () => fixture(async ({ db, store, queue, run }) => {
   const result = queue.add('a', { urls: Array.from({ length: 8 }, (_, i) => url(i + 1)), tags: ['共同标签'] }, defaults);
   assert.equal(result.accepted, 8);

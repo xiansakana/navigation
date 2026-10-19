@@ -60,6 +60,12 @@ export function createUploadQueue(db) {
         .run(action === 'retry' ? 'pending' : 'cancelled', Date.now(), uid, id, ...states).changes > 0;
     },
     claim() {
+      // Idle/full queues must remain read-only. Acquiring SQLite's writer lock
+      // every polling tick can otherwise stall unrelated uploads and heartbeats.
+      if (!db.prepare(`SELECT 1 FROM knowledge_upload_queue q
+        WHERE (q.state='pending' OR q.state='resolving' AND q.expires<?)
+          AND (SELECT count(*) FROM knowledge_documents d WHERE d.user_id=q.user_id AND d.status IN ('uploading','importing','queued','processing'))
+            + (SELECT count(*) FROM knowledge_upload_queue r WHERE r.user_id=q.user_id AND r.state='resolving' AND r.expires>=?) < 5 LIMIT 1`).get(Date.now(), Date.now())) return null;
       return db.transaction(() => {
         db.prepare("UPDATE knowledge_upload_queue SET state='pending',lease=NULL WHERE state='resolving' AND expires<?").run(Date.now());
         const row = db.prepare(`SELECT q.* FROM knowledge_upload_queue q WHERE q.state='pending'
