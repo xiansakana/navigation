@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { downloadVideo } from '../portal/src/knowledge-download.js';
 import { startLocalInputServer, localDocuments, verifyLocalInput, pruneLocalInputs } from '../portal/src/knowledge-local-input.js';
-import { runProcess, summarizeVideo, modelConfiguration, resolveCodexBinary, createStageGate } from '../portal/src/knowledge-model.js';
+import { runProcess, summarizeVideo, modelConfiguration, resolveCodexBinary, createStageGate, workerPortalRequest } from '../portal/src/knowledge-model.js';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = path.resolve(process.argv[2] || path.join(repo, 'portal/knowledge-worker.config.json'));
@@ -33,13 +33,9 @@ function configurePipeline(value) {
 for (const event of ['SIGINT', 'SIGTERM']) process.on(event, () => { stopped = true; for (const controller of activeControllers) controller.abort(); });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function request(route, { data, method, lease, signal, raw = false, headers = {} } = {}) {
-  const response = await fetch(new URL('/api/knowledge/worker' + route, portal), { method: method || (data === undefined ? 'GET' : 'POST'), redirect: 'error',
+  const response = await workerPortalRequest(new URL('/api/knowledge/worker' + route, portal), { method: method || (data === undefined ? 'GET' : 'POST'), redirect: 'error',
     headers: { ...headers, Authorization: 'Bearer ' + token, ...(lease ? { 'X-Knowledge-Lease': lease } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },
-    body: data === undefined ? undefined : JSON.stringify(data), signal: AbortSignal.any([AbortSignal.timeout(raw ? 900000 : 60000), ...(signal ? [signal] : [])]) });
-  if (!response.ok) {
-    const error = new Error('Portal 返回 HTTP ' + response.status);
-    error.status = response.status; throw error;
-  }
+    body: data === undefined ? undefined : JSON.stringify(data), signal: AbortSignal.any([AbortSignal.timeout(raw ? 900000 : 120000), ...(signal ? [signal] : [])]) });
   return raw ? response : response.json();
 }
 async function capabilities() {
@@ -134,10 +130,20 @@ async function processJob(job) {
       await sleep(1000); signal.throwIfAborted();
     }
     await update('正在总结', 65);
-    const summary = await summarizeVideo({...config,onCodexCall:input=>request('/jobs/'+job.id+'/codex',{data:input,lease:job.lease,signal})}, job, evidence, directory, update, signal);
-    const frames = [];
-    for (const f of evidence.frames) frames.push({ time: f.time, data: (await fsp.readFile(path.join(directory, f.name))).toString('base64') });
-    const result = { ...evidence, ...summary, frames };
+    const defaults = config[job.backend === 'codex' ? 'codex' : 'openai'] || {};
+    const selection = JSON.stringify({ id: job.id, title: job.title, topic: job.topic, tags: job.tags, sourceUrl: job.sourceUrl, backend: job.backend, modelSettings: job.modelSettings,
+      workerModel: { model: defaults.model || '', reasoningEffort: defaults.reasoningEffort || '', vision: defaults.vision } });
+    let result;
+    try {
+      const cached = JSON.parse(await fsp.readFile(path.join(directory, 'result.json'), 'utf8'));
+      if (cached.workerSelection === selection) { result = cached; console.log('复用已完成笔记，仅重新提交入库', job.id); }
+    } catch { /* A missing or incomplete result must be generated normally. */ }
+    if (!result) {
+      const summary = await summarizeVideo({...config,onCodexCall:input=>request('/jobs/'+job.id+'/codex',{data:input,lease:job.lease,signal})}, job, evidence, directory, update, signal);
+      const frames = [];
+      for (const f of evidence.frames) frames.push({ time: f.time, data: (await fsp.readFile(path.join(directory, f.name))).toString('base64') });
+      result = { ...evidence, ...summary, frames, workerSelection: selection };
+    }
     await fsp.writeFile(path.join(directory, 'result.json'), JSON.stringify(result), { mode: 0o600 });
     await update('保存知识库', 98);
     let saved = false;

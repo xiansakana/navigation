@@ -191,3 +191,28 @@ export function createStageGate(initialLimit) {
     }
   };
 }
+
+// Retry only an explicit server busy response. Retrying an ambiguous claim after
+// a network failure could leave a committed lease without its worker.
+export async function workerPortalRequest(url, options, { fetch: fetchRequest = globalThis.fetch, retries = 6, wait = null } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    options.signal?.throwIfAborted();
+    const response = await fetchRequest(url, options);
+    if (response.ok) return response;
+    let payload = {};
+    try { payload = await response.json(); } catch { /* Gateways may return HTML. */ }
+    if (response.status === 503 && payload.code === 'KNOWLEDGE_BUSY' && attempt < retries) {
+      const delay = Math.min(1000 * 2 ** attempt, 5000);
+      if (wait) await wait(delay);
+      else await new Promise((resolve, reject) => {
+        const signal = options.signal;
+        const abort = () => { clearTimeout(timer); reject(signal.reason || new Error('处理已取消')); };
+        const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, delay);
+        if (signal?.aborted) abort(); else signal?.addEventListener('abort', abort, { once: true });
+      });
+      continue;
+    }
+    const detail = typeof payload.error === 'string' ? payload.error.replace(/(?:sk-|nkw_)[\w-]+/g, '[已隐藏]').slice(0, 240) : '';
+    throw Object.assign(new Error(`Portal ${new URL(url).pathname} 返回 HTTP ${response.status}${detail ? '：' + detail : ''}`), { status: response.status, code: payload.code });
+  }
+}

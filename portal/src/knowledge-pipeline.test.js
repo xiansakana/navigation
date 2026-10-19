@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createStageGate } from './knowledge-model.js';
+import { createStageGate, workerPortalRequest } from './knowledge-model.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +10,22 @@ import { once } from 'node:events';
 import { getDatabase, closeDatabase } from '../../shared/db/index.js';
 import { createKnowledgeStore } from './knowledge-store.js';
 import { handleKnowledgeWorkerApi } from './knowledge.js';
+
+test('worker retries explicit storage busy responses using identical payload, but never blindly repeats claims', async () => {
+  const options = { method: 'POST', body: '{"backends":["codex"]}' }, delays = [], requests = [];
+  const r = await workerPortalRequest('https://test/api/knowledge/worker/claim', options, { wait: async ms => delays.push(ms), fetch: async (url, input) => {
+    requests.push(input.body);
+    return requests.length < 3 ? new Response(JSON.stringify({ code: 'KNOWLEDGE_BUSY' }), { status: 503 }) : new Response('{"ok":true}');
+  } });
+  assert.equal(r.status, 200); assert.deepEqual(delays, [1000, 2000]); assert.equal(new Set(requests).size, 1);
+  let calls = 0;
+  await assert.rejects(workerPortalRequest('https://test/claim', options, { fetch: async () => { calls++; return new Response('{"error":"bad input"}', { status: 400 }); } }), /400：bad input/);
+  assert.equal(calls, 1);
+  calls = 0;
+  await assert.rejects(workerPortalRequest('https://test/claim', options, { fetch: async () => { calls++; throw new Error('network'); } }), /network/);
+  assert.equal(calls, 1);
+  await assert.rejects(workerPortalRequest('https://test/phase', options, { retries: 1, wait: async () => {}, fetch: async () => new Response('{"code":"KNOWLEDGE_BUSY"}', { status: 503 }) }), /503/);
+});
 
 test('summary slots are FIFO, cancelled waiters do not block others and lower limits drain safely', async () => {
   const gate = createStageGate(2), first = await gate.acquire(), second = await gate.acquire();
@@ -36,12 +52,18 @@ test('real worker loop overlaps next video media with two summaries and isolates
   const previous = { db: process.env.NAVIGATION_DB_PATH, media: process.env.KNOWLEDGE_DATA_DIR };
   process.env.NAVIGATION_DB_PATH = path.join(root, 'db.sqlite'); process.env.KNOWLEDGE_DATA_DIR = path.join(root, 'media');
   const media = [], summaries = [], errors = [];
+  let failFirstComplete = true;
   const store = createKnowledgeStore(getDatabase()), token = store.rotateToken('a');
   const ids = [];
   for (let i = 0; i < 3; i++) { const d = store.create('a', { title: 'lesson ' + i, bytes: 24, mimeType: 'video/mp4', originalName: 'lesson.mp4' }); store.enqueue('a', d.id); ids.push(d.id); }
   const server = http.createServer(async (req, res) => {
     if (req.url.startsWith('/test/media')) { media.push(res); return; }
     if (req.url.startsWith('/test/summary')) { summaries.push(res); return; }
+    if (req.url === '/api/knowledge/worker/jobs/' + ids[0] + '/complete' && failFirstComplete) {
+      failFirstComplete = false;
+      for await (const chunk of req) { /* Consume the failed submission. */ }
+      res.writeHead(400, { 'Content-Type': 'application/json' }); res.end('{"error":"injected submission failure"}'); return;
+    }
     const json = (r, status, data) => { r.writeHead(status, { 'Content-Type': 'application/json' }); r.end(JSON.stringify(data)); };
     try { await handleKnowledgeWorkerApi(req, res, new URL(req.url, 'http://' + req.headers.host), json, () => true); }
     catch (e) { errors.push(e.message); json(res, 500, { error: e.message }); }
@@ -66,6 +88,7 @@ test('real worker loop overlaps next video media with two summaries and isolates
     await fs.writeFile(path.join(root, 'portal/src/knowledge-model.js'), `
 import fs from 'node:fs/promises'; import path from 'node:path';
 export const createStageGate = ${gateSource};
+export const workerPortalRequest = ${workerPortalRequest.toString()};
 export const resolveCodexBinary = () => 'stub';
 export const modelConfiguration = () => { throw new Error('No API'); };
 export async function runProcess(binary, args, options = {}) {
@@ -99,7 +122,11 @@ export async function summarizeVideo(config, job) {
     await waitFor(() => summaries.length === 3 && store.get('a', ids[1]).status === 'failed');
     assert.equal(store.get('a', ids[0]).status, 'processing');
     summaries[0].end('ok'); summaries[2].end('ok');
-    await waitFor(() => store.get('a', ids[0]).status === 'ready' && store.get('a', ids[2]).status === 'ready');
+    await waitFor(() => store.get('a', ids[0]).status === 'failed' && store.get('a', ids[2]).status === 'ready');
+    assert.ok(store.retry('a', ids[0], 'codex'));
+    await waitFor(() => store.get('a', ids[0]).status === 'ready');
+    assert.equal(media.length, 3, 'completed media is reused');
+    assert.equal(summaries.length, 3, 'completed summary is resubmitted without another model call');
     assert.deepEqual(errors, []);
   } finally {
     if (child && child.exitCode == null) { const exit = once(child, 'exit'); child.kill(); await exit; }

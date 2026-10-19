@@ -44,6 +44,24 @@ async function fixture(fn) {
   }
 }
 
+test('SQLite writer contention returns retryable 503 rather than marking valid worker requests as HTTP 400', async () => fixture(async ({ call, store, db }) => {
+  const token = store.rotateToken('a'), item = store.create('a', upload()); store.enqueue('a', item.id);
+  const writer = new db.constructor(db.name);
+  db.pragma('busy_timeout = 10');
+  try {
+    writer.exec('BEGIN IMMEDIATE');
+    for (const route of ['/worker/heartbeat', '/worker/claim']) {
+      const response = await call(route, { method: 'POST', token, data: { workerId: 'gpu', backends: ['codex'] } });
+      assert.equal(response.status, 503); assert.equal(response.payload.code, 'KNOWLEDGE_BUSY');
+      assert.equal(response.payload.retryable, true); assert.equal(response.headers.get('retry-after'), '1');
+    }
+    assert.equal(store.get('a', item.id).status, 'queued');
+    writer.exec('ROLLBACK');
+    assert.equal((await call('/worker/heartbeat', { method: 'POST', token, data: { workerId: 'gpu' } })).status, 200);
+    assert.equal((await call('/worker/claim', { method: 'POST', token, data: { workerId: 'gpu', backends: ['codex'] } })).payload.job.id, item.id);
+  } finally { if (writer.inTransaction) writer.exec('ROLLBACK'); writer.close(); db.pragma('busy_timeout = 5000'); }
+}));
+
 test('batch publication is atomic, versioned, account isolated and permission protected', async () => fixture(async ({ call, store, db }) => {
   const a = store.create('a', upload()), b = store.create('a', upload()), foreign = store.create('b', upload());
   db.prepare("UPDATE knowledge_documents SET status='ready',notes='test notes' WHERE id IN (?,?)").run(a.id, b.id);

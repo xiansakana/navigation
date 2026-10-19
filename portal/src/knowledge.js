@@ -103,7 +103,19 @@ export function validateKnowledgeResult(raw) {
   return { duration: raw.duration, language: String(raw.language || '').slice(0, 30), notes: raw.notes.trim(), transcript, frames, provenance };
 }
 
+function knowledgeFailure(res, json, error) {
+  if (/^SQLITE_(BUSY|LOCKED)/.test(error.code || '')) {
+    res.setHeader('Retry-After', '1');
+    return json(res, 503, { ok: false, code: 'KNOWLEDGE_BUSY', retryable: true, error: '知识库正在写入，请稍后重试' });
+  }
+  return json(res, error.status || 400, { ok: false, error: error.code?.startsWith('SQLITE_') ? '知识库存储失败' : error.message });
+}
+
 export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = () => false) {
+  try { return await workerApi(req, res, url, json, authorize); }
+  catch (e) { return knowledgeFailure(res, json, e); }
+}
+async function workerApi(req, res, url, json, authorize) {
   res.setHeader('Cache-Control', 'no-store');
   const route = url.pathname.slice('/api/knowledge/worker'.length), method = req.method;
   const store = createKnowledgeStore(getDatabase());
@@ -174,10 +186,14 @@ export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = 
       }
       return json(res, 405, { ok: false, error: '不支持此请求方法' });
     });
-  } catch (e) { return json(res, e.status || 400, { ok: false, error: e.code?.startsWith('SQLITE_') ? '知识库存储失败' : e.message }); }
+  } catch (e) { return knowledgeFailure(res, json, e); }
 }
 
 export async function handleKnowledgeApi(req, res, url, session, json) {
+  try { return await knowledgeApi(req, res, url, session, json); }
+  catch (e) { return knowledgeFailure(res, json, e); }
+}
+async function knowledgeApi(req, res, url, session, json) {
   res.setHeader('Cache-Control', 'no-store');
   if (!canKnowledge(session)) return json(res, 403, { ok: false, error: '请登录并获取知识库权限' });
   if (url.pathname.startsWith('/api/knowledge/public/')) {
@@ -385,5 +401,5 @@ export async function handleKnowledgeApi(req, res, url, session, json) {
       }
       return json(res, 404, { ok: false, error: '接口或资源不存在' });
     });
-  } catch (e) { return json(res, e.status || 400, { ok: false, error: e.code?.startsWith('SQLITE_') ? '知识库存储失败' : e.message }); }
+  } catch (e) { return knowledgeFailure(res, json, e); }
 }
