@@ -2,8 +2,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
+import { restartWithWorkerProxy } from './knowledge-worker-launcher.mjs';
 
 async function main() {
+if (await restartWithWorkerProxy()) return;
 const configPath = path.resolve(process.argv[2]), bundle = path.resolve(process.argv[3]);
 const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
 const portal = new URL(config.portalUrl);

@@ -43,17 +43,20 @@ Assert-NativeExit 'Private directory permissions'
 $runtime = Join-Path $appRoot 'runtime'
 New-Item -ItemType Directory -Path $runtime -Force | Out-Null
 $node = if ($nodeCommand) { $nodeCommand.Source } else { '' }
-if (-not $node -and (Test-Path -LiteralPath (Join-Path $runtime 'node-v22.20.0-win-x64/node.exe'))) { $node = Join-Path $runtime 'node-v22.20.0-win-x64/node.exe' }
-if ($node) { if ((Get-WorkerNodeMajor $node) -lt 22) { $node = '' } }
+if (-not $node -and (Test-Path -LiteralPath (Join-Path $runtime 'node-v22.23.2-win-x64/node.exe'))) { $node = Join-Path $runtime 'node-v22.23.2-win-x64/node.exe' }
+if ($node) {
+  if ((Get-WorkerNodeMajor $node) -lt 22) { $node = '' }
+  elseif (-not ((& $node --help) -match '--use-env-proxy')) { $node = '' }
+}
 if (-not $node) {
-  $nodeArchive = 'node-v22.20.0-win-x64.zip'
+  $nodeArchive = 'node-v22.23.2-win-x64.zip'
   $zip = Join-Path $runtime $nodeArchive
-  Download-File ('https://nodejs.org/dist/v22.20.0/' + $nodeArchive) $zip
-  $sums = (Invoke-WebRequest -UseBasicParsing -Uri 'https://nodejs.org/dist/v22.20.0/SHASUMS256.txt').Content
+  Download-File ('https://nodejs.org/dist/v22.23.2/' + $nodeArchive) $zip
+  $sums = (Invoke-WebRequest -UseBasicParsing -Uri 'https://nodejs.org/dist/v22.23.2/SHASUMS256.txt').Content
   $expected = ($sums -split "`n" | Where-Object { $_.Trim().EndsWith('  ' + $nodeArchive) }) -replace '\s+.*$', ''
   if (-not $expected -or (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower() -ne $expected.Trim().ToLower()) { throw 'Node download checksum mismatch.' }
   Expand-Archive -LiteralPath $zip -DestinationPath $runtime -Force
-  $node = Join-Path $runtime 'node-v22.20.0-win-x64/node.exe'
+  $node = Join-Path $runtime 'node-v22.23.2-win-x64/node.exe'
 }
 $previous = $null
 $configPath = Join-Path $appRoot 'config.json'

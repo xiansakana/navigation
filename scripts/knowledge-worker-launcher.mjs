@@ -1,8 +1,50 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+export function workerProxyEnvironment({ env = process.env, platform = process.platform, readProxy = () => JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "$p=Get-ItemProperty 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Internet Settings'; @{enabled=$p.ProxyEnable;server=$p.ProxyServer}|ConvertTo-Json -Compress"], { encoding: 'utf8', windowsHide: true, timeout: 5000 })) } = {}) {
+  if (platform !== 'win32' || env.NAVIGATION_WORKER_PROXY_READY === '1') return null;
+  const next = { ...env };
+  if (!next.HTTPS_PROXY && !next.https_proxy && !next.HTTP_PROXY && !next.http_proxy) {
+    let proxy;
+    try { proxy = readProxy(); } catch { return null; }
+    if (!proxy.enabled || !proxy.server) return null;
+    const entries = String(proxy.server).split(';').map(s => s.trim()).filter(Boolean);
+    for (const protocol of ['http', 'https']) {
+      const entry = entries.find(s => s.startsWith(protocol + '='))?.slice(protocol.length + 1) || entries.find(s => !s.includes('='));
+      if (!entry) continue;
+      try {
+        const url = new URL(entry.includes('://') ? entry : 'http://' + entry);
+        if (['http:', 'https:'].includes(url.protocol) && url.hostname) next[protocol.toUpperCase() + '_PROXY'] = url.href;
+      } catch { /* Ignore unsupported system proxy entries. */ }
+    }
+  }
+  if (!next.HTTPS_PROXY && !next.https_proxy && !next.HTTP_PROXY && !next.http_proxy) return null;
+  next.NO_PROXY = [next.NO_PROXY || next.no_proxy, 'localhost', '127.0.0.1', '[::1]', '::1'].filter(Boolean).join(',');
+  next.no_proxy = next.NO_PROXY;
+  next.NODE_USE_ENV_PROXY = '1';
+  next.NAVIGATION_WORKER_PROXY_READY = '1';
+  return next;
+}
+
+// Fetch reads proxy configuration at Node startup. Re-execute once so pairing,
+// updates, heartbeats and video downloads all use the same Windows proxy.
+export async function restartWithWorkerProxy() {
+  const env = workerProxyEnvironment();
+  if (!env) return false;
+  if (!process.allowedNodeEnvironmentFlags.has('--use-env-proxy')) throw new Error('Node does not support system proxy networking. Run the latest worker installer.');
+  console.log('Worker networking uses the configured system proxy; loopback stays direct.');
+  process.exitCode = await new Promise(resolve => {
+    const child = spawn(process.execPath, ['--use-env-proxy', ...process.argv.slice(1)], { env, windowsHide: true, stdio: 'inherit' });
+    const stop = () => child.kill();
+    for (const event of ['SIGINT', 'SIGTERM']) process.once(event, stop);
+    const finish = code => { for (const event of ['SIGINT', 'SIGTERM']) process.removeListener(event, stop); resolve(code ?? 1); };
+    child.once('error', () => finish(1)); child.once('exit', finish);
+  });
+  return true;
+}
 
 const allowed = new Set(['package.json', 'README.txt', 'worker-version.json',
   'scripts/knowledge-worker.mjs', 'scripts/start-knowledge-worker.ps1', 'scripts/install-knowledge-worker.ps1',
@@ -44,6 +86,7 @@ export async function updateWorker(config, configPath) {
   return destination;
 }
 async function main() {
+  if (await restartWithWorkerProxy()) return;
   const configPath = path.resolve(process.argv[2]);
   while (true) {
     const config = JSON.parse(await fs.readFile(configPath, 'utf8'));

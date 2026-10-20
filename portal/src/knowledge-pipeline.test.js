@@ -81,6 +81,7 @@ test('real worker loop overlaps next video media with two summaries and isolates
   try {
     await fs.mkdir(path.join(root, 'scripts'), { recursive: true }); await fs.mkdir(path.join(root, 'portal/src'), { recursive: true });
     await fs.copyFile(new URL('../../scripts/knowledge-worker.mjs', import.meta.url), path.join(root, 'scripts/knowledge-worker.mjs'));
+    await fs.copyFile(new URL('../../scripts/knowledge-worker-launcher.mjs', import.meta.url), path.join(root, 'scripts/knowledge-worker-launcher.mjs'));
     await fs.writeFile(path.join(root, 'package.json'), '{"type":"module"}');
     // Only external media/model work is stubbed; run the real worker loop, lease API,
     // database slot admission, phase handoff, result validation and failure path.

@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { downloadVideo } from '../portal/src/knowledge-download.js';
 import { startLocalInputServer, localDocuments, verifyLocalInput, pruneLocalInputs } from '../portal/src/knowledge-local-input.js';
 import { runProcess, summarizeVideo, modelConfiguration, resolveCodexBinary, createStageGate, workerPortalRequest } from '../portal/src/knowledge-model.js';
+import { restartWithWorkerProxy } from './knowledge-worker-launcher.mjs';
+
+if (await restartWithWorkerProxy()) process.exit(process.exitCode || 0);
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = path.resolve(process.argv[2] || path.join(repo, 'portal/knowledge-worker.config.json'));
