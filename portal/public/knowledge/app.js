@@ -7,8 +7,9 @@ import { bindLinkImport } from './link-import.js?v=4';
 import { createUploadQueuePanel, parseBatchLinks } from './queue.js?v=1';
 import { createFileQueue } from './file-queue.js?v=1';
 import { createBilibiliPanel } from './bilibili-account.js?v=2';
+import { createNotePager } from './pagination.js?v=1';
 const $ = id => document.getElementById(id);
-const state = { permissions: [], documents: [], selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, concurrencyDirty: false, resume: null, uploading: false, offset: 0, total: 0, query: 0 };
+const state = { permissions: [], documents: [], selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, concurrencyDirty: false, resume: null, uploading: false, offset: 0, total: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
 const sourcePlayer = createSourcePlayer({ player: $('player'), frame: $('original-frame'), select: $('playback-source'), link: $('original-link'), hint: $('playback-hint'), allowed: () => can('source:view') });
 const text = (id, value) => { $(id).textContent = value || ''; };
@@ -26,6 +27,7 @@ async function api(route, options = {}) {
   return payload;
 }
 const send = (route, method, data = {}) => api(route, { method, body: JSON.stringify(data) });
+const notePager = createNotePager(params => api('/documents?' + new URLSearchParams(params)));
 const linkImport = bindLinkImport({ element: $, can: () => can('import:edit'), canBatch: () => can('queue:edit') && can('import:edit'), send, busy: () => state.uploading, onError: error });
 const uploadQueue = createUploadQueuePanel({ element: $, can, api, send, onError: error, openDocument: open });
 const localQueue = createFileQueue({ capacity: () => state.uploading ? Promise.resolve({ active: 5, capacity: 5, blocked: true }) : api('/upload-queue'), upload: (entry, report) => uploadFile(entry.file, entry.metadata, entry, report), changed: renderLocalQueue });
@@ -74,7 +76,7 @@ function renderBatch() {
 }
 function renderList() {
   text('total', state.total + ' 篇');
-  const list = $('documents'); list.replaceChildren();
+  const list = $('documents'), scrollTop = list.scrollTop; list.replaceChildren();
   if (!state.documents.length) { const p = document.createElement('p'); p.className = 'kb-hint'; p.textContent = '还没有符合条件的内容。上传视频后会出现在这里。'; list.append(p); }
   for (const d of state.documents) {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'kb-document' + (state.current?.id === d.id ? ' active' : '');
@@ -95,20 +97,22 @@ function renderList() {
     } else list.append(button);
   }
   renderBatch();
-  show('more', state.documents.length < state.total);
+  list.scrollTop = scrollTop;
+  show('notes-pagination', can('notes:view'));
+  text('notes-page', `第 ${Math.floor(state.offset / 30) + 1} / ${Math.max(1, Math.ceil(state.total / 30))} 页 · 共 ${state.total} 篇`);
+  $('notes-prev').disabled = state.offset === 0;
+  $('notes-next').disabled = state.offset + 30 >= state.total;
 }
-async function load(more = false) {
-  const query = ++state.query, offset = more ? state.documents.length : 0;
-  const params = new URLSearchParams({ search: $('search').value, topic: $('topic-filter').value, status: $('status-filter').value, offset });
-  const filter = JSON.stringify([$('search').value, $('topic-filter').value, $('status-filter').value]);
-  const result = await api('/documents?' + params);
-  if (query !== state.query) return;
-  state.documents = more ? [...state.documents, ...result.documents] : result.documents; state.total = result.total;
-  if (filter !== state.filter) state.selected.clear();
-  state.filter = filter;
+async function load(offset, quiet = false) {
+  const result = await (quiet ? notePager.refresh() : notePager.load({ search: $('search').value, topic: $('topic-filter').value, status: $('status-filter').value }, offset));
+  if (!result) return;
+  if (result.offset !== state.offset || result.filterChanged) $('documents').scrollTop = 0;
+  state.offset = result.offset; state.documents = result.documents; state.total = result.total;
+  if (result.filterChanged) state.selected.clear();
+  state.filter = result.filterKey;
   for (const [id, revision] of state.selected) {
     const item = state.documents.find(d => d.id === id);
-    if (!item || item.status !== 'ready' || item.revision !== revision) state.selected.delete(id);
+    if (item && (item.status !== 'ready' || item.revision !== revision)) state.selected.delete(id);
   }
   const topic = $('topic-filter').value;
   $('topic-filter').innerHTML = '<option value="">全部分类</option>' + result.topics.map(t => `<option value="${escape(t.topic)}">${escape(t.topic)} (${t.count})</option>`).join('');
@@ -286,7 +290,7 @@ async function boot() {
     try {
       await settings();
       const queueState = await uploadQueue.refresh();
-      if (can('notes:view') && (queueState?.active > 0 || state.current?.storage?.provider === '115' && state.current.storage.state !== 'ready' || state.documents.some(d => ['queued', 'processing', 'uploading', 'importing'].includes(d.status) || d.storage?.provider === '115' && d.storage.state !== 'ready'))) await load();
+      if (can('notes:view') && (queueState?.active > 0 || state.current?.storage?.provider === '115' && state.current.storage.state !== 'ready' || state.documents.some(d => ['queued', 'processing', 'uploading', 'importing'].includes(d.status) || d.storage?.provider === '115' && d.storage.state !== 'ready'))) await load(undefined, true);
       if (!state.editing && state.current && (['queued', 'processing', 'importing'].includes(state.current.status) || state.current.storage?.provider === '115' && state.current.storage.state !== 'ready')) await open(state.current.id, true);
     } catch { /* Keep existing content during temporary connection loss. */ }
   }, 5000);
@@ -301,9 +305,10 @@ bindVideoDrop({ zone: $('video-drop'), input: $('video-file'), busy: () => state
   selected: (file, files) => { show('error', false); text('selected-video', (files.length > 1 ? '已选 ' + files.length + ' 个视频 · ' : '') + file.name + ' · ' + (file.size / 1024 ** 2).toFixed(1) + ' MB'); if (!state.resume) $('upload-title').value = file.name.replace(/\.[^.]+$/, '').slice(0, 160); }
 });
 $('upload-form').addEventListener('reset', () => { text('selected-video', '支持拖拽或多选视频，每批最多100个'); queueMicrotask(() => linkImport.reset()); });
-$('search-form').onsubmit = event => { event.preventDefault(); load().catch(error); };
-$('topic-filter').onchange = $('status-filter').onchange = () => load().catch(error);
-$('more').onclick = () => load(true).catch(error);
+$('search-form').onsubmit = event => { event.preventDefault(); load(0).catch(error); };
+$('topic-filter').onchange = $('status-filter').onchange = () => load(0).catch(error);
+$('notes-prev').onclick = () => { if (can('notes:view')) load(state.offset - 30).catch(error); };
+$('notes-next').onclick = () => { if (can('notes:view')) load(state.offset + 30).catch(error); };
 $('batch-all').onclick = () => { for (const d of state.documents) if (d.status === 'ready' && state.selected.size < 100) state.selected.set(d.id, d.revision); renderList(); };
 $('batch-clear').onclick = () => { state.selected.clear(); renderList(); };
 $('batch-save').onclick = async () => {
@@ -348,7 +353,7 @@ $('retry').onclick = async () => { try { await send('/documents/' + state.curren
 $('resume-upload').onclick = () => { $('upload-mode').value = 'file'; linkImport.mode(); state.resume = state.current; $('upload-title').value = state.current.title; text('upload-heading', '继续上传：' + state.current.title); show('upload-panel', true); $('video-file').click(); };
 $('delete').onclick = async () => {
   if (!window.confirm('删除这篇笔记及其原视频、转写和截图？')) return;
-  try { await api('/documents/' + state.current.id, { method: 'DELETE' }); state.current = null; state.editing = false; sourcePlayer.reset(null); show('detail', false); show('empty', true); await load(); } catch (e) { error(e); }
+  try { await api('/documents/' + state.current.id, { method: 'DELETE' }); state.selected.delete(state.current.id); state.current = null; state.editing = false; sourcePlayer.reset(null); show('detail', false); show('empty', true); await load(); } catch (e) { error(e); }
 };
 $('edit').onclick = () => {
   const d = state.current; state.editing = true; $('edit-title').value = d.title; $('edit-topic').value = d.topic; $('edit-tags').value = d.tags.join(', '); $('edit-source').value = d.sourceUrl; $('edit-notes').value = d.notes;

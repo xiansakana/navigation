@@ -183,7 +183,7 @@ var SYSTEM_PERMISSIONS = [
     { id: 'qq-codex:execute', name: '通过QQ执行Codex任务', group: '通知管理', serviceId: NOTIFICATIONS_SERVICE_ID, action: 'edit', permissionPath: ['首页', '通知管理', 'QQ Codex', '执行任务'] },
     ...[
         ['view', '进入和检索自己的知识库', []],
-        ['notes:view', '查看和搜索自己的学习笔记', ['笔记']],
+        ['notes:view', '查看、搜索和分页浏览自己的学习笔记', ['笔记']],
         ['storage:edit', '重试保存自己的原视频', ['笔记', '原视频', '重试保存']],
         ['source:view', '回看自己的原视频', ['笔记', '原视频']],
         ['transcript:view', '查看和搜索时间线转写', ['笔记', '时间线转写']],
