@@ -120,7 +120,8 @@ test('worker completion records cases immediately and same chart from separate s
   try {
     const knowledge = createKnowledgeStore(db), cases = createKnowledgeCaseStore(db);
     const doc = knowledge.create('a', upload); knowledge.enqueue('a', doc.id);
-    const job = knowledge.claim('a', ['codex']); assert.ok(job);
+    knowledge.heartbeatWorker('a', { workerId: 'gpu', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } });
+    const job = knowledge.claim('a', ['codex'], 'gpu'); assert.ok(job);
     assert.equal(knowledge.finish('a', doc.id, job.lease, { notes, duration: 90, language: 'zh', transcript: [], frames: [], provenance: {} }), true);
     assert.equal(db.prepare('SELECT count(*) AS n FROM mingli_knowledge_cases').get().n, 2);
     ready(db, knowledge); assert.equal(cases.list('a').total, 4); assert.equal(cases.list('a').uniqueCharts, 2);

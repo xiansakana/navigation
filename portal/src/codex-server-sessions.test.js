@@ -14,7 +14,8 @@ const options={config:{binary:'test-history-'+Math.random()},all:true,canKnowled
 test('knowledge call records preserve attempts, reject changed identities, and keep deleted/other owners private',async()=>{
   const db=new Database(':memory:');createCodexStore(db);const k=createKnowledgeStore(db),s=createServerSessions(db);
   try{
-    const d=k.create('owner',upload);k.enqueue('owner',d.id);const job=k.claim('owner',['codex']);
+    k.heartbeatWorker('owner',{workerId:'gpu',capabilities:{media:{ready:true,detail:'cuda'},codex:{ready:true}}});
+    const d=k.create('owner',upload);k.enqueue('owner',d.id);const job=k.claim('owner',['codex'],'gpu');
     k.codexCalls.record('owner',job,input);k.codexCalls.record('owner',job,{...input,state:'succeeded',result:'Saved answer',sessionId:'thread'});
     k.codexCalls.record('owner',job,input);
     assert.throws(()=>k.codexCalls.record('owner',job,{...input,prompt:'changed'}));
@@ -23,7 +24,7 @@ test('knowledge call records preserve attempts, reject changed identities, and k
     assert.equal(await s.detail('other','knowledge-'+d.id,own),null);
     const detail=await s.detail('owner','knowledge-'+d.id,own);assert.equal(detail.jobs.length,1);assert.equal(detail.jobs[0].result,'Saved answer');assert.equal(detail.jobs[0].state,'succeeded');assert.equal(detail.conversation.readOnly,true);
     const restricted=await s.detail('owner','knowledge-'+d.id,{...own,canKnowledgePrompts:false});assert.doesNotMatch(JSON.stringify(restricted),/PRIVATE TRANSCRIPT|Saved answer/);
-    db.prepare("UPDATE knowledge_documents SET status='failed' WHERE id=?").run(d.id);k.retry('owner',d.id,'codex');const retry=k.claim('owner',['codex']);k.codexCalls.record('owner',retry,input);
+    db.prepare("UPDATE knowledge_documents SET status='failed' WHERE id=?").run(d.id);k.retry('owner',d.id,'codex');const retry=k.claim('owner',['codex'],'gpu');k.codexCalls.record('owner',retry,input);
     assert.equal((await s.detail('owner','knowledge-'+d.id,own)).jobs.length,2);
     k.fail('owner',d.id,retry.lease,'failed');k.remove('owner',d.id);
     assert.equal((await s.list('owner',own)).conversations.length,0);assert.equal(db.prepare('SELECT count(*) AS n FROM knowledge_codex_calls').get().n,0);

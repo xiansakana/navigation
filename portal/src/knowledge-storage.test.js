@@ -60,7 +60,8 @@ async function fixture(fn) {
 
 test('cloud queue waits for verified source, protects owner, and survives lease expiry', async () => fixture(async ({ db, store, item }) => {
   store.enqueue('owner', item.id);
-  assert.equal(store.claim('owner', ['codex']), null);
+  store.heartbeatWorker('owner', { workerId: 'test-gpu', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } });
+  assert.equal(store.claim('owner', ['codex'], 'test-gpu'), null);
   assert.equal(store.sources.get('other', item.id), undefined);
   assert.equal(store.sources.retry('other', item.id), false);
   const s = store.sources.claim(); assert.ok(s.lease); assert.equal(store.sources.claim(), null);
@@ -69,7 +70,7 @@ test('cloud queue waits for verified source, protects owner, and survives lease 
   const resumed = store.sources.claim(); assert.notEqual(s.lease, resumed.lease);
   assert.equal(store.sources.update(s, { state: 'ready' }), false);
   store.sources.update(resumed, { state: 'ready', sha256: 'a'.repeat(64) }); store.sources.release(resumed);
-  assert.equal(store.claim('owner', ['codex']).sourceSha256, 'a'.repeat(64));
+  assert.equal(store.claim('owner', ['codex'], 'test-gpu').sourceSha256, 'a'.repeat(64));
 }));
 
 test('streamed upload requires full SHA256 verification before local cleanup; retries reuse remote object', async () => fixture(async ({ store, item, file, data, storage, corrupt, uploads }) => {

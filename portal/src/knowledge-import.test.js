@@ -10,6 +10,7 @@ import { runKnowledgeImport } from './knowledge-import.js';
 async function fixture(fn) {
   const db = new Database(':memory:'), directory = await fs.mkdtemp(path.join(os.tmpdir(), 'link-queue-'));
   const store = createKnowledgeStore(db);
+  store.heartbeatWorker('a', { workerId: 'test-gpu', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } });
   const add = (uid = 'a') => db.transaction(() => {
     const d = store.create(uid, { title: '自动标题', topic: '命理', tags: ['八字'], sourceUrl: 'https://www.bilibili.com/video/BV1LTpi69Efh/', bytes: MAX_VIDEO_BYTES, mimeType: 'video/mp4', originalName: 'video.mp4' });
     store.imports.add(uid, d.id, d.sourceUrl);
@@ -33,12 +34,12 @@ test('durable link import becomes a hashed queued source; worker can read before
   assert.match(store.getRow('a', d.id).source_sha256, /^[a-f0-9]{64}$/);
   assert.equal(store.get('b', d.id), null);
   assert.equal(store.claim('b', ['codex']), null);
-  assert.equal(store.claim('a', ['codex']).id, d.id);
+  assert.equal(store.claim('a', ['codex'], 'test-gpu').id, d.id);
 }));
 test('import failures and revoked authorization do not reach processing; retry re-enters download, not model queue', async () => fixture(async ({ db, store, directory, add }) => {
   const d = add();
   await runKnowledgeImport(db, () => directory, () => false, { download() { assert.fail('must not download'); } });
-  assert.equal(store.get('a', d.id).status, 'failed'); assert.equal(store.claim('a', ['codex']), null);
+  assert.equal(store.get('a', d.id).status, 'failed'); assert.equal(store.claim('a', ['codex'], 'test-gpu'), null);
   assert.equal(store.retry('a', d.id, 'codex'), true); assert.equal(store.get('a', d.id).status, 'importing');
   await runKnowledgeImport(db, () => directory, () => true, { download() { throw new Error('video unavailable'); } });
   assert.equal(store.get('a', d.id).error, 'video unavailable');

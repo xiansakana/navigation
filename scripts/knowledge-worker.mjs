@@ -41,7 +41,7 @@ async function request(route, { data, method, lease, signal, raw = false, header
 async function capabilities() {
   const result = { pipeline: { version: 1 } };
   try {
-    const device = (await runProcess(python, [path.join(repo, 'portal/workers/video_runtime.py'), config.asr?.device || 'cpu'], { timeout: 20000 })).trim();
+    const device = (await runProcess(python, [path.join(repo, 'portal/workers/video_runtime.py'), 'cuda'], { timeout: 20000 })).trim();
     await runProcess(config.ffmpeg || 'ffmpeg', ['-version'], { timeout: 10000 });
     result.media = { ready: true, model: config.asr?.model || 'small', detail: device };
   } catch { result.media = { ready: false, detail: '请检查 Python 转写依赖和 FFmpeg 路径' }; }
@@ -103,7 +103,7 @@ async function processJob(job) {
         console.log(new Date().toISOString(), '直接使用本机原视频', job.id);
       } else input = await download(job, directory, signal);
       const args = [path.join(repo, 'portal/workers/video_evidence.py'), '--input', input, '--output', directory,
-        '--ffmpeg', config.ffmpeg || 'ffmpeg', '--model', config.asr?.model || 'small', '--device', config.asr?.device || 'cpu',
+        '--ffmpeg', config.ffmpeg || 'ffmpeg', '--model', config.asr?.model || 'small', '--device', 'cuda',
         '--threads', String(config.asr?.threads || 2)];
       if (config.asr?.language) args.push('--language', config.asr.language);
       if (config.asr?.modelCache) args.push('--model-cache', path.resolve(config.asr.modelCache));

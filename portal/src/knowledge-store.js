@@ -81,7 +81,7 @@ export function createKnowledgeStore(db) {
     storage: sources.public(row.user_id, row.id), importState: imports.get(row.user_id, row.id)?.state || '',
     sourceMedia: JSON.parse(imports.get(row.user_id, row.id)?.media_json || '{}'), revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at });
   const get = (uid, key) => { const row = getRow(uid, key); return row && row.status !== 'deleting' ? read(row) : null; };
-  const expire = uid => db.prepare("UPDATE knowledge_documents SET status='failed',stage='处理已中断',error='工作器超过15分钟未响应，请检查本机工作器后重试',lease=NULL,updated_at=? WHERE user_id=? AND status='processing' AND heartbeat<?")
+  const expire = uid => db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待GPU工作器恢复',error='',lease=NULL,worker_id='',processing_phase='',progress=0,updated_at=? WHERE user_id=? AND status='processing' AND heartbeat<?")
     .run(now(), uid, new Date(Date.now() - 15 * 60000).toISOString());
   const onlineWorkers = uid => db.prepare('SELECT worker_id,label,last_seen,capabilities_json FROM knowledge_worker_instances WHERE user_id=? AND last_seen>?')
     .all(uid, new Date(Date.now() - 90000).toISOString())
@@ -98,10 +98,10 @@ export function createKnowledgeStore(db) {
     worker(uid) {
       const row = db.prepare('SELECT last_seen,label,capabilities_json FROM knowledge_workers WHERE user_id=?').get(uid);
       const workers = onlineWorkers(uid);
-      const preferred = workers.find(w => w.capabilities.media?.ready && w.capabilities.media.detail === 'cuda' && w.capabilities[this.settings(uid).backend]?.ready) || workers[0];
-      return row ? { configured: true, online: workers.length > 0 || !!row.last_seen && Date.now() - Date.parse(row.last_seen) < 90000,
+      const preferred = workers.find(w => w.capabilities.media?.ready && w.capabilities.media.detail === 'cuda' && w.capabilities[this.settings(uid).backend]?.ready);
+      return row ? { configured: true, online: !!preferred,
         lastSeen: preferred?.lastSeen || row.last_seen, label: preferred?.label || row.label,
-        capabilities: preferred?.capabilities || JSON.parse(row.capabilities_json), workers, scheduling: 'gpu-first' } : { configured: false, online: false, capabilities: {} };
+        capabilities: preferred?.capabilities || JSON.parse(row.capabilities_json), workers, scheduling: 'gpu-only' } : { configured: false, online: false, capabilities: {}, scheduling: 'gpu-only' };
     },
     rotateToken(uid) {
       const token = 'nkw_' + crypto.randomBytes(32).toString('hex');
@@ -174,7 +174,7 @@ export function createKnowledgeStore(db) {
     },
     enqueue(uid, key, sha256 = '') {
       return db.transaction(() => {
-        const changed = db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待工作器',progress=0,error='',updated_at=? WHERE user_id=? AND id=? AND status='uploading'").run(now(), uid, key).changes > 0;
+        const changed = db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待GPU工作器',progress=0,error='',updated_at=? WHERE user_id=? AND id=? AND status='uploading'").run(now(), uid, key).changes > 0;
         if (changed) sources.enqueue(uid, key);
         if (changed && /^[a-f0-9]{64}$/.test(sha256)) db.prepare('UPDATE knowledge_documents SET source_sha256=? WHERE user_id=? AND id=?').run(sha256, uid, key);
         return changed;
@@ -193,16 +193,13 @@ export function createKnowledgeStore(db) {
             && own.filter(d => !['summary_wait', 'summary'].includes(d.processing_phase)).length < limits.mediaConcurrency;
         };
         const worker = workers.find(w => w.id === workerId) || { id: workerId, capabilities: {} };
+        if (!worker.capabilities.media?.ready || worker.capabilities.media.detail !== 'cuda') return null;
         if (!available(worker)) return null;
         const candidates = db.prepare("SELECT * FROM knowledge_documents WHERE user_id=? AND status='queued' ORDER BY created_at,id").all(uid);
-        // Small ECS hosts must not start a second ASR model just because a healthy
-        // desktop GPU is busy. Other GPUs can still claim their own stage slots.
-        const gpuWorkers = workers.filter(w => w.capabilities.media?.ready && w.capabilities.media.detail === 'cuda'
-          && (worker.capabilities.media?.detail !== 'cuda' || available(w)));
         const hasLocal = r => { const local = localInputs.get(uid, r.id); return local && local.worker_id === workerId && localDocuments.includes(r.id) && r.source_sha256 && local.sha256 === r.source_sha256; };
         const receivingLocal = r => { const local = localInputs.get(uid, r.id); return local && local.worker_id === workerId && !local.sha256 && local.expires > Date.now(); };
         const row = candidates.find(r => backends.includes(r.backend) && !receivingLocal(r) && (!sources.get(uid, r.id) || sources.get(uid, r.id).state === 'ready' || hasLocal(r) || imports.get(uid, r.id)?.state === 'done') &&
-          (!gpuWorkers.some(w => w.capabilities[r.backend]?.ready) || gpuWorkers.some(w => w.id === workerId && w.capabilities[r.backend]?.ready)));
+          worker.capabilities[r.backend]?.ready);
         if (!row) return null;
         const lease = crypto.randomBytes(24).toString('hex'), time = now();
         db.prepare("UPDATE knowledge_documents SET status='processing',processing_phase=?,stage='正在转写 · 准备视频素材',progress=1,lease=?,heartbeat=?,updated_at=?,worker_id=?,attempt=attempt+1 WHERE id=? AND status='queued'")
@@ -260,7 +257,7 @@ export function createKnowledgeStore(db) {
             .run(backend, JSON.stringify(modelSettings({}, this.settings(uid))), now(), uid, key).changes > 0;
         })();
       }
-      return db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待工作器',backend=?,model_settings_json=?,progress=0,error='',lease=NULL,updated_at=? WHERE user_id=? AND id=? AND status='failed'").run(backend, JSON.stringify(modelSettings({}, this.settings(uid))), now(), uid, key).changes > 0;
+      return db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待GPU工作器',backend=?,model_settings_json=?,progress=0,error='',lease=NULL,updated_at=? WHERE user_id=? AND id=? AND status='failed'").run(backend, JSON.stringify(modelSettings({}, this.settings(uid))), now(), uid, key).changes > 0;
     },
     edit(uid, key, raw) {
       const previous = get(uid, key);

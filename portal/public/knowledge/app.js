@@ -62,9 +62,9 @@ async function settings() {
     $('summary-concurrency').value = String(state.settings.summaryConcurrency);
   }
   const worker = state.settings.worker, c = worker.capabilities;
-  text('worker-status', worker.online ? `${worker.label || '工作器'} · 在线 · GPU优先，空闲工作器可独立接单 · ${c.pipeline?.version === 1 ? '分阶段并发已启用' : '当前设备为旧版，空闲更新后启用并发'}` : worker.configured ? '工作器离线，等待连接。已上传的任务会保留在队列中。' : '尚未连接工作器。生成个人凭据后，可在服务器或本机启动处理。');
+  text('worker-status', worker.online ? `${worker.label || 'GPU工作器'} · 在线 · 仅GPU处理，已禁用CPU接单 · ${c.pipeline?.version === 1 ? '分阶段并发已启用' : '当前设备为旧版，空闲更新后启用并发'}` : worker.configured ? '等待本机GPU工作器就绪，任务已暂停等待；不会切换到CPU。' : '尚未连接GPU工作器，请安装并配对本机工作器。任务会保留在队列中等待。');
   const info = c[state.settings.backend];
-  text('backend-description', info ? `${info.ready ? '工作器已就绪' : '工作器未就绪'} · ${state.settings[prefix + 'Model'] || info.model || info.detail || ''} · 强度：${state.settings[prefix + 'Effort'] || '工作器默认'}` : '选择总结方式后，由已连接工作器执行。');
+  text('backend-description', info ? `${worker.online && info.ready ? '工作器已就绪' : '工作器未就绪'} · ${state.settings[prefix + 'Model'] || info.model || info.detail || ''} · 强度：${state.settings[prefix + 'Effort'] || '工作器默认'}` : '选择总结方式后，由已连接工作器执行。');
 }
 function renderBatch() {
   show('batch-publication', can('publish:batch:edit') && can('publish:edit') && can('notes:view'));

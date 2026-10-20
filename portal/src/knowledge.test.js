@@ -78,7 +78,7 @@ test('SQLite writer contention returns retryable 503 rather than marking valid w
     }
     assert.equal(store.get('a', item.id).status, 'queued');
     writer.exec('ROLLBACK');
-    assert.equal((await call('/worker/heartbeat', { method: 'POST', token, data: { workerId: 'gpu' } })).status, 200);
+    assert.equal((await call('/worker/heartbeat', { method: 'POST', token, data: { workerId: 'gpu', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } } })).status, 200);
     assert.equal((await call('/worker/claim', { method: 'POST', token, data: { workerId: 'gpu', backends: ['codex'] } })).payload.job.id, item.id);
   } finally { if (writer.inTransaction) writer.exec('ROLLBACK'); writer.close(); db.pragma('busy_timeout = 5000'); }
 }));
@@ -158,7 +158,7 @@ test('pipeline releases media before summary, enforces stage slots, supports ind
   assert.equal(store.get('a', independent.id).status, 'processing', 'one failure does not cancel other workers');
 }));
 
-test('legacy workers stay serial per worker and CPU fallback yields to a healthy busy GPU', async () => fixture(async ({ store, db }) => {
+test('legacy GPU workers stay serial and CPU fallback stays disabled while GPUs are busy or offline', async () => fixture(async ({ store, db }) => {
   const caps = { media: { ready: true, detail: 'cuda' }, codex: { ready: true } };
   store.heartbeatWorker('a', { workerId: 'gpu', capabilities: caps });
   for (let i = 0; i < 3; i++) { const d = store.create('a', upload()); store.enqueue('a', d.id); }
@@ -167,7 +167,7 @@ test('legacy workers stay serial per worker and CPU fallback yields to a healthy
   assert.equal(store.claim('a', ['codex'], 'gpu'), null);
   assert.equal(store.claim('a', ['codex'], 'cpu'), null, 'GPU work must not exhaust a small ECS host with concurrent CPU ASR');
   db.prepare('UPDATE knowledge_worker_instances SET last_seen=? WHERE worker_id=?').run(new Date(Date.now() - 91000).toISOString(), 'gpu');
-  const cpu = store.claim('a', ['codex'], 'cpu'); assert.ok(cpu); assert.notEqual(cpu.id, gpu.id);
+  assert.equal(store.claim('a', ['codex'], 'cpu'), null, 'GPU disconnection never enables CPU fallback');
   assert.equal(store.claim('a', ['codex'], 'cpu'), null);
   assert.ok(store.leased('a', gpu.id, gpu.lease));
 }));
@@ -253,7 +253,8 @@ test('model settings are scoped, permission-checked, validated, and snapshotted 
   assert.equal(store.settings('b').codexModel, '');
   const doc = store.create('a', upload()); store.enqueue('a', doc.id);
   store.saveSettings('a', { codexModel: 'gpt-6.1-sol', codexEffort: 'medium' });
-  const job = store.claim('a', ['codex']);
+  store.heartbeatWorker('a', { workerId: 'test-gpu', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true }, openai: { ready: true } } });
+  const job = store.claim('a', ['codex'], 'test-gpu');
   assert.equal(job.modelSettings.codexModel, 'gpt-6-luna'); assert.equal(job.modelSettings.codexEffort, 'low');
   assert.equal(job.modelSettings.apiModel, 'custom');
   store.fail('a', doc.id, job.lease, 'test'); store.retry('a', doc.id, 'codex');
@@ -321,7 +322,8 @@ test('upload, range playback, durable jobs, owner isolation, worker leases, edit
   assert.equal((await call('/worker/claim', { method: 'POST', data: {} })).status, 401);
   const bToken = store.rotateToken('b');
   assert.equal((await call('/worker/claim', { method: 'POST', token: bToken, data: { backends: ['codex'] } })).payload.job, null);
-  const claimed = await call('/worker/claim', { method: 'POST', token, data: { backends: ['codex'] } }); const job = claimed.payload.job;
+  await call('/worker/heartbeat', { method: 'POST', token, data: { workerId: 'gpu', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } } });
+  const claimed = await call('/worker/claim', { method: 'POST', token, data: { workerId: 'gpu', backends: ['codex'] } }); const job = claimed.payload.job;
   assert.equal(job.id, id); assert.ok(job.lease);
   assert.equal((await call('/worker/claim', { method: 'POST', token, data: { backends: ['codex'] } })).payload.job, null);
   assert.equal((await call('/worker/jobs/' + id + '/complete', { method: 'POST', token: bToken, lease: job.lease, data: result() })).status, 409);
@@ -347,12 +349,12 @@ test('upload, range playback, durable jobs, owner isolation, worker leases, edit
 
 test('expired and revoked worker leases cannot overwrite retried or deleted documents', async () => fixture(async ({ store, db, call }) => {
   const d = store.create('a', upload()); store.enqueue('a', d.id);
-  const old = store.claim('a', ['codex']);
+  store.heartbeatWorker('a', { workerId: 'test-gpu', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true }, openai: { ready: true } } });
+  const old = store.claim('a', ['codex'], 'test-gpu');
   db.prepare('UPDATE knowledge_documents SET heartbeat=? WHERE id=?').run('2000-01-01T00:00:00Z', d.id);
-  store.expire('a'); assert.equal(store.get('a', d.id).status, 'failed');
-  assert.ok(store.retry('a', d.id, 'openai'));
-  assert.equal(store.claim('a', ['codex']), null);
-  const current = store.claim('a', ['openai']); assert.notEqual(current.lease, old.lease);
+  store.expire('a'); assert.equal(store.get('a', d.id).status, 'queued');
+  assert.equal(store.get('a', d.id).stage, '等待GPU工作器恢复');
+  const current = store.claim('a', ['codex'], 'test-gpu'); assert.notEqual(current.lease, old.lease);
   assert.equal(store.finish('a', d.id, old.lease, result()), false);
   store.rotateToken('a'); assert.equal(store.get('a', d.id).status, 'failed');
   assert.equal(store.progress('a', d.id, current.lease, '迟到进度', 80), false);
@@ -378,7 +380,7 @@ test('a slow chunk body does not block another chunk and merged playback remains
   assert.deepEqual((await call(route + '/source')).payload, data);
 }));
 
-test('GPU heartbeat reserves queued work, CPU fallback resumes after 90 seconds without taking active leases', async () => fixture(async ({ store, db, call }) => {
+test('GPU-only scheduling waits through disconnection, never hands work to CPU and resumes after GPU reconnects', async () => fixture(async ({ store, db, call }) => {
   const token = store.rotateToken('a');
   const caps = device => ({ media: { ready: true, detail: device }, codex: { ready: true }, openai: { ready: false } });
   await call('/worker/heartbeat', { method: 'POST', token, data: { workerId: 'gpu', label: '本机 GPU', capabilities: caps('cuda') } });
@@ -387,29 +389,36 @@ test('GPU heartbeat reserves queued work, CPU fallback resumes after 90 seconds 
   assert.equal(store.worker('a').workers.length, 2);
   const d = store.create('a', upload()); store.enqueue('a', d.id);
   assert.equal(store.claim('a', ['codex'], 'cpu'), null);
-  assert.equal(store.claim('a', ['codex']), null, 'old CPU clients also yield to the GPU');
+  assert.equal(store.claim('a', ['codex']), null, 'unannounced workers cannot bypass the GPU requirement');
   const claimed = await call('/worker/claim', { method: 'POST', token, data: { workerId: 'gpu', backends: ['codex'] } });
   assert.equal(claimed.payload.job.id, d.id);
   db.prepare('UPDATE knowledge_worker_instances SET last_seen=? WHERE worker_id=?').run(new Date(Date.now() - 91000).toISOString(), 'gpu');
   assert.equal(store.claim('a', ['codex'], 'cpu'), null, 'an active lease is never transferred');
   assert.ok(store.finish('a', d.id, claimed.payload.job.lease, result()));
   const next = store.create('a', upload()); store.enqueue('a', next.id);
-  assert.equal(store.claim('a', ['codex'], 'cpu').id, next.id);
+  assert.equal(store.claim('a', ['codex'], 'cpu'), null);
+  assert.equal(store.get('a', next.id).status, 'queued');
+  assert.equal(store.worker('a').online, false);
+  assert.equal(store.worker('a').scheduling, 'gpu-only');
+  await call('/worker/heartbeat', { method: 'POST', token, data: { workerId: 'gpu', capabilities: caps('cuda') } });
+  assert.equal(store.claim('a', ['codex'], 'gpu').id, next.id);
   store.rotateToken('a');
   assert.equal(store.worker('a').workers.length, 0);
 }));
 
-test('GPU priority respects account isolation, readiness and backend compatibility', async () => fixture(async ({ store }) => {
+test('GPU-only admission respects account isolation, readiness and backend compatibility', async () => fixture(async ({ store }) => {
   store.rotateToken('a'); store.rotateToken('b');
   store.heartbeatWorker('a', { workerId: 'gpu', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } });
   const other = store.create('b', upload()); store.enqueue('b', other.id);
-  assert.equal(store.claim('b', ['codex'], 'cpu').id, other.id);
+  assert.equal(store.claim('b', ['codex'], 'cpu'), null, 'another account GPU cannot enable processing');
   const api = store.create('a', upload({ backend: 'openai' })); store.enqueue('a', api.id);
-  assert.equal(store.claim('a', ['openai'], 'cpu').id, api.id, 'GPU without this backend cannot reserve it');
+  assert.equal(store.claim('a', ['openai'], 'cpu'), null);
+  assert.equal(store.claim('a', ['openai'], 'gpu'), null, 'GPU must support the selected backend');
   store.rotateToken('a');
   store.heartbeatWorker('a', { workerId: 'gpu', capabilities: { media: { ready: false, detail: 'cuda' }, codex: { ready: true } } });
   const d = store.create('a', upload()); store.enqueue('a', d.id);
-  assert.equal(store.claim('a', ['codex'], 'cpu').id, d.id, 'an unhealthy GPU does not block CPU');
+  assert.equal(store.claim('a', ['codex'], 'cpu'), null);
+  assert.equal(store.claim('a', ['codex'], 'gpu'), null, 'unhealthy GPU keeps work queued');
 }));
 
 test('validation rejects bad formats, excessive video sizes and fabricated timestamps', () => {
@@ -473,7 +482,7 @@ test('ZIP setup download has separate permission and a one-use automatic pairing
 }));
 
 test('worker Codex call reporting requires its own current lease and cannot spoof ownership or modify finished turns',async()=>fixture(async({call,store,db})=>{
-  const token=store.rotateToken('a'),other=store.rotateToken('b'),d=store.create('a',upload());store.enqueue('a',d.id);const job=store.claim('a',['codex']);
+  const token=store.rotateToken('a'),other=store.rotateToken('b'),d=store.create('a',upload());store.enqueue('a',d.id);store.heartbeatWorker('a',{workerId:'test-gpu',capabilities:{media:{ready:true,detail:'cuda'},codex:{ready:true}}});const job=store.claim('a',['codex'],'test-gpu');
   const route='/worker/jobs/'+d.id+'/codex',data={id:crypto.randomUUID(),prompt:'Quoted transcript',result:'',state:'running',model:'test',sessionId:''};
   assert.equal((await call(route,{method:'POST',token:other,lease:job.lease,data})).status,409);
   assert.equal((await call(route,{method:'POST',token,lease:'bad',data})).status,409);
