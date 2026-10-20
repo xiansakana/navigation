@@ -16,7 +16,12 @@ async function fixture(extra={},permissions=['*']) {
     const entries=entry?[entry]:[],settings={budgets:{},rates:{CNY:1,USD:7}},analysis=analyzeBookkeeping(entries,entries,accounts,settings,{},'2026-10-17');
     return {ok:true,entries,accounts,summary:summarize(entries),equivalentSummary:analysis.equivalentSummary,analysis,settings,fx:{rates:settings.rates,quotes:{}},books:['个人账本'],categories:['餐饮'],categoryTree:[{id:'cat',name:'餐饮',kind:'expense',parentId:null,icon:'◈',count:1}],accountGroups:[{id:'group',name:'资金账户',count:2}],count:entries.length};
   };
-  w.HTMLElement.prototype.scrollIntoView=function(){};
+  let scrollY=1800;
+  Object.defineProperty(w,'scrollY',{get:()=>scrollY});
+  w.scrollTo=options=>{scrollY=options.top;};
+  w.requestAnimationFrame=callback=>w.setTimeout(callback,0);
+  w.HTMLElement.prototype.scrollIntoView=function(){scrollY=0;};
+  w.HTMLElement.prototype.getBoundingClientRect=function(){return {top:this.matches('[data-entry]')?1960-scrollY:0};};
   w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
   w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');this.dispatchEvent(new w.Event('close'));};
   w.initQqBookkeeping=()=>{};
@@ -73,6 +78,28 @@ test('compact transfer editor preserves actual foreign receipt and both owned ac
     f.edit('fee');f.$('editor-form').elements.fee.value='2.50';await f.submit();
     assert.equal(f.writes[0].toAmount,'7');assert.equal(f.writes[0].amount,'10');
     assert.equal(f.writes[0].accountId,'cash');assert.equal(f.writes[0].toAccountId,'usd');
+  } finally {f.dom.window.close();}
+});
+
+test('return from details restores the same bill position after editing refreshes the list',async()=>{
+  const f=await fixture();
+  try {
+    assert.equal(f.w.scrollY,0);
+    f.edit('amount');f.$('editor-form').elements.amount.value='12.34';await f.submit();
+    f.$('entry-detail-view').querySelector('[data-detail-action="back"]').click();
+    await f.wait(()=>f.w.scrollY===1800);
+    assert.equal(f.w.document.activeElement.dataset.entry,'a'.repeat(32));
+    assert.equal(f.$('entry-list').querySelector('[data-entry]').getBoundingClientRect().top,160);
+  } finally {f.dom.window.close();}
+});
+
+test('deleting the selected bill restores the saved list position without the row',async()=>{
+  const f=await fixture();
+  try {
+    f.$('entry-detail-view').querySelector('[data-detail-action="delete"]').click();
+    await f.wait(()=>f.w.scrollY===1800);
+    assert.equal(f.$('entry-list').querySelector('[data-entry]'),null);
+    assert.equal(f.$('entry-detail-view').classList.contains('hidden'),true);
   } finally {f.dom.window.close();}
 });
 

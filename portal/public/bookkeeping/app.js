@@ -138,10 +138,12 @@
     } catch (e) { $('error').textContent = e.message; $('error').classList.remove('hidden'); }
   }
   function tab(name) {
+    const previousTab=activeTab;
     activeTab = name;
     document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active',b.dataset.tab===(name==='entry-detail'?'entries':name)));
     document.querySelectorAll('.bk-view').forEach(v => v.classList.toggle('hidden',v.id!==name+'-view'));
     $('filters').classList.toggle('hidden',['accounts','catalog','entry-detail'].includes(name));$('period-selector').classList.toggle('hidden',['catalog','entry-detail'].includes(name));
+    if(name==='entries' && previousTab==='entry-detail')details.restoreList(()=>activeTab==='entries');
   }
   function field(name, label, value = '', extra = '') { return '<label>' + esc(label) + '<input name="' + name + '" value="' + esc(value) + '" ' + extra + '></label>'; }
   function select(name, label, values, selected = '', empty = null) { return '<label>' + esc(label) + '<select name="' + name + '" aria-label="' + esc(label) + '">' + options(values,selected,empty) + '</select></label>'; }
@@ -191,7 +193,7 @@
       }
       t.addEventListener('change',update); update();
       form.elements.accountId.addEventListener('change',()=>{ const a=state.accounts.find(a=>a.id===form.elements.accountId.value); if(a) form.elements.currency.value=a.currency; });
-      if(detailGroup){const control=form.elements[window.bookkeepingDetailGroups[detailGroup].fields[0]];control?.focus();if(control?.name==='amount')control.select();}
+      if(detailGroup){const control=form.elements[window.bookkeepingDetailGroups[detailGroup].fields[0]];control?.focus({preventScroll:true});if(control?.name==='amount')control.select();}
     }
   }
   $('editor-form').addEventListener('submit',async event=>{
