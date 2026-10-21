@@ -9,8 +9,6 @@ import { startLocalInputServer, localDocuments, verifyLocalInput, pruneLocalInpu
 import { runProcess, summarizeVideo, modelConfiguration, resolveCodexBinary, createStageGate, workerPortalRequest } from '../portal/src/knowledge-model.js';
 import { restartWithWorkerProxy } from './knowledge-worker-launcher.mjs';
 
-if (await restartWithWorkerProxy()) process.exit(process.exitCode || 0);
-
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configPath = path.resolve(process.argv[2] || path.join(repo, 'portal/knowledge-worker.config.json'));
 let config;
@@ -18,6 +16,7 @@ try { config = JSON.parse(await fsp.readFile(configPath, 'utf8')); }
 catch { console.error('请先复制 portal/knowledge-worker.config.example.json 为私有配置，并填写网页生成的工作器凭据。'); process.exit(1); }
 const portal = new URL(config.portalUrl || 'http://127.0.0.1:8080');
 if (portal.username || portal.password || portal.search || portal.hash || portal.pathname !== '/' || !['http:', 'https:'].includes(portal.protocol) || portal.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(portal.hostname)) throw new Error('Portal 必须是 HTTPS 站点根地址（本机回环地址可用 HTTP）');
+if (await restartWithWorkerProxy({ portalUrl: portal.href })) process.exit(process.exitCode || 0);
 const token = process.env.KNOWLEDGE_WORKER_TOKEN || config.token;
 if (!/^nkw_[a-f0-9]{64}$/.test(token || '')) throw new Error('工作器凭据无效，请在知识库设置中生成');
 const workRoot = path.resolve(config.workDir || path.join(repo, 'portal/data/knowledge-worker'));
@@ -234,7 +233,7 @@ while (!stopped) {
       await sleep(tasks.size ? 1000 : 5000);
     }
   } catch (e) {
-    console.error(new Date().toISOString(), e.message);
+    console.error(new Date().toISOString(), e.message, e.cause?.code ? '网络错误：' + e.cause.code + '。请检查服务器直连与代理连接；不代表GPU故障。' : '');
     if ([401, 403].includes(e.status)) {
       console.error('设备已停用或凭据失效，请重新运行安装程序连接。');
       for (const controller of activeControllers) controller.abort();

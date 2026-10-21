@@ -5,10 +5,10 @@ import { spawn } from 'node:child_process';
 import { restartWithWorkerProxy } from './knowledge-worker-launcher.mjs';
 
 async function main() {
-if (await restartWithWorkerProxy()) return;
 const configPath = path.resolve(process.argv[2]), bundle = path.resolve(process.argv[3]);
 const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
 const portal = new URL(config.portalUrl);
+if (await restartWithWorkerProxy({ portalUrl: portal.href })) return;
 if (portal.protocol !== 'https:' && !(portal.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(portal.hostname))) throw new Error('HTTPS required');
 if (config.deviceId && config.token) {
   const check = await fetch(new URL('/api/knowledge/worker/release', portal), { redirect: 'error', headers: { Authorization: 'Bearer ' + config.token }, signal: AbortSignal.timeout(30000) });

@@ -41,3 +41,36 @@ test('worker Node fetch reaches a proxy-only hostname while local GPU endpoints 
     for (const server of [upstream, proxy, local]) { server.closeAllConnections(); server.close(); }
   }
 });
+
+
+test('Portal bypass is exact, preserves model proxies and upgrades an already-proxied parent once', () => {
+  const readProxy = () => ({ enabled: 1, server: '127.0.0.1:7890' });
+  const options = { platform: 'win32', portalUrl: 'https://saoyu.fun', readProxy };
+  const env = workerProxyEnvironment({ ...options, env: { no_proxy: 'internal.test' } });
+  assert.ok(env.NO_PROXY.split(',').includes('saoyu.fun'));
+  assert.ok(!env.NO_PROXY.split(',').includes('*'));
+  assert.equal(env.HTTPS_PROXY, 'http://127.0.0.1:7890/');
+  assert.equal(workerProxyEnvironment({ ...options, env }), null);
+  const old = { HTTP_PROXY: 'http://127.0.0.1:7890', NAVIGATION_WORKER_PROXY_READY: '1', NO_PROXY: 'localhost' };
+  const upgraded = workerProxyEnvironment({ ...options, env: old });
+  assert.ok(upgraded.NO_PROXY.split(',').includes('saoyu.fun'));
+  assert.equal(workerProxyEnvironment({ ...options, env: upgraded }), null);
+});
+
+test('a broken proxy cannot intercept Portal traffic but still handles external model hosts', { skip: !process.allowedNodeEnvironmentFlags.has('--use-env-proxy') }, async () => {
+  let direct = 0, tunnels = 0;
+  const portal = http.createServer((req, res) => { direct++; res.end('portal-direct'); });
+  const proxy = http.createServer();
+  proxy.on('connect', (_req, socket) => { tunnels++; socket.destroy(); });
+  portal.listen(0, '127.0.0.2'); proxy.listen(0, '127.0.0.1');
+  await Promise.all([once(portal, 'listening'), once(proxy, 'listening')]);
+  try {
+    const env = workerProxyEnvironment({ platform: 'win32', portalUrl: 'http://127.0.0.2:' + portal.address().port,
+      env: { ...process.env, HTTP_PROXY: '', HTTPS_PROXY: '', http_proxy: '', https_proxy: '', NAVIGATION_WORKER_PROXY_READY: '', NO_PROXY: '', no_proxy: '' },
+      readProxy: () => ({ enabled: 1, server: '127.0.0.1:' + proxy.address().port }) });
+    const code = `const r=await fetch('http://127.0.0.2:${portal.address().port}',{signal:AbortSignal.timeout(2000)});const value=await r.text();let external=false;try{await fetch('https://model-proxy.invalid',{signal:AbortSignal.timeout(2000)})}catch{external=true}console.log(JSON.stringify({value,external}));process.exit(0);`;
+    const { stdout } = await promisify(execFile)(process.execPath, ['--use-env-proxy', '--input-type=module', '-e', code], { env, timeout: 10000, windowsHide: true });
+    assert.deepEqual(JSON.parse(stdout), { value: 'portal-direct', external: true });
+    assert.equal(direct, 1); assert.ok(tunnels >= 1);
+  } finally { for (const server of [portal, proxy]) { server.closeAllConnections(); server.close(); } }
+});

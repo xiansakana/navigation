@@ -4,8 +4,12 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export function workerProxyEnvironment({ env = process.env, platform = process.platform, readProxy = () => JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "$p=Get-ItemProperty 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Internet Settings'; @{enabled=$p.ProxyEnable;server=$p.ProxyServer}|ConvertTo-Json -Compress"], { encoding: 'utf8', windowsHide: true, timeout: 5000 })) } = {}) {
-  if (platform !== 'win32' || env.NAVIGATION_WORKER_PROXY_READY === '1') return null;
+export function workerProxyEnvironment({ env = process.env, platform = process.platform, portalUrl = '', readProxy = () => JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "$p=Get-ItemProperty 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Internet Settings'; @{enabled=$p.ProxyEnable;server=$p.ProxyServer}|ConvertTo-Json -Compress"], { encoding: 'utf8', windowsHide: true, timeout: 5000 })) } = {}) {
+  if (platform !== 'win32') return null;
+  let portalHost = '';
+  try { if (portalUrl) portalHost = new URL(portalUrl).hostname; } catch { throw new Error('Invalid Portal URL'); }
+  const bypass = String(env.NO_PROXY || env.no_proxy || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (env.NAVIGATION_WORKER_PROXY_READY === '1' && (!portalHost || bypass.includes(portalHost))) return null;
   const next = { ...env };
   if (!next.HTTPS_PROXY && !next.https_proxy && !next.HTTP_PROXY && !next.http_proxy) {
     let proxy;
@@ -22,20 +26,20 @@ export function workerProxyEnvironment({ env = process.env, platform = process.p
     }
   }
   if (!next.HTTPS_PROXY && !next.https_proxy && !next.HTTP_PROXY && !next.http_proxy) return null;
-  next.NO_PROXY = [next.NO_PROXY || next.no_proxy, 'localhost', '127.0.0.1', '[::1]', '::1'].filter(Boolean).join(',');
+  next.NO_PROXY = [...new Set([...bypass, 'localhost', '127.0.0.1', '[::1]', '::1', portalHost].filter(Boolean))].join(',');
   next.no_proxy = next.NO_PROXY;
   next.NODE_USE_ENV_PROXY = '1';
   next.NAVIGATION_WORKER_PROXY_READY = '1';
   return next;
 }
 
-// Fetch reads proxy configuration at Node startup. Re-execute once so pairing,
-// updates, heartbeats and video downloads all use the same Windows proxy.
-export async function restartWithWorkerProxy() {
-  const env = workerProxyEnvironment();
+// Fetch reads proxy configuration at Node startup. Re-execute once to keep
+// Portal traffic direct while model services retain the Windows proxy.
+export async function restartWithWorkerProxy({ portalUrl = '' } = {}) {
+  const env = workerProxyEnvironment({ portalUrl });
   if (!env) return false;
   if (!process.allowedNodeEnvironmentFlags.has('--use-env-proxy')) throw new Error('Node does not support system proxy networking. Run the latest worker installer.');
-  console.log('Worker networking uses the configured system proxy; loopback stays direct.');
+  console.log('Worker networking: Portal and loopback connect directly; model services retain the configured proxy.');
   process.exitCode = await new Promise(resolve => {
     const child = spawn(process.execPath, ['--use-env-proxy', ...process.argv.slice(1)], { env, windowsHide: true, stdio: 'inherit' });
     const stop = () => child.kill();
@@ -86,8 +90,9 @@ export async function updateWorker(config, configPath) {
   return destination;
 }
 async function main() {
-  if (await restartWithWorkerProxy()) return;
   const configPath = path.resolve(process.argv[2]);
+  const initial = JSON.parse(await fs.readFile(configPath, 'utf8'));
+  if (await restartWithWorkerProxy({ portalUrl: initial.portalUrl })) return;
   while (true) {
     const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
     let root = config.releaseRoot || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
