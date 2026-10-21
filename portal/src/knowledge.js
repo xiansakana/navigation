@@ -52,7 +52,7 @@ async function inspectImport(uid, url) {
   const rate = importRequests.get(uid) || { since: time, count: 0, busy: false };
   if (rate.busy || rate.count >= 20 || importRequests.size > 10000) throw Object.assign(new Error('视频信息读取过于频繁，请稍后重试'), { status: 429 });
   rate.count++; rate.busy = true; importRequests.set(uid, rate);
-  try { return await inspectBilibili(url); } finally { rate.busy = false; }
+  try { const cookie = await bilibiliAccount(getDatabase()).credentials(uid); return await inspectBilibili(url, { cookie }); } finally { rate.busy = false; }
 }
 async function lock(key, fn) {
   const previous = locks.get(key) || Promise.resolve();

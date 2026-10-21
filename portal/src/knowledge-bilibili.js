@@ -35,7 +35,11 @@ async function resolveUrl(input, fetcher, signal) {
 }
 async function api(route, fetcher, signal, cookie = '') {
   const response = await fetcher('https://api.bilibili.com' + route, { headers: { ...headers, ...(cookie ? { Cookie: cookie } : {}) }, redirect: 'error', signal });
-  if (!response.ok) { await response.body?.cancel(); throw new Error('B站接口暂时不可用（HTTP ' + response.status + '），请稍后重试'); }
+  if (!response.ok) {
+    await response.body?.cancel();
+    if (response.status === 412) throw Object.assign(new Error('B站风控暂时拦截了请求（HTTP 412）。请勿连续重试；可在处理设置中检查B站绑定状态，稍后再试或上传本地视频。'), { code: 'BILIBILI_RISK_CONTROL' });
+    throw new Error('B站接口暂时不可用（HTTP ' + response.status + '），请稍后重试');
+  }
   // Metadata is bounded too; never buffer an unbounded remote response.
   const chunks = []; let size = 0;
   for await (const chunk of response.body) { size += chunk.length; if (size > 2 * 1024 ** 2) throw new Error('B站元数据超过限制'); chunks.push(Buffer.from(chunk)); }
@@ -51,16 +55,16 @@ export function suggestedTopic(title, tags, category = '') {
   if (/股票|期权|金融|投资|基金|交易/.test(text)) return '投资';
   return String(category || '视频学习').trim().slice(0, 60);
 }
-export async function inspectBilibili(input, { fetcher = fetch, signal = AbortSignal.timeout(25000) } = {}) {
+export async function inspectBilibili(input, { fetcher = fetch, cookie = '', signal = AbortSignal.timeout(25000) } = {}) {
   const sourceUrl = await resolveUrl(input, fetcher, signal), u = new URL(sourceUrl);
   const id = u.pathname.split('/')[2], part = Number(u.searchParams.get('p') || 1);
-  const data = await api('/x/web-interface/view?' + (id.toLowerCase().startsWith('av') ? 'aid=' + id.slice(2) : 'bvid=' + id), fetcher, signal);
+  const data = await api('/x/web-interface/view?' + (id.toLowerCase().startsWith('av') ? 'aid=' + id.slice(2) : 'bvid=' + id), fetcher, signal, cookie);
   const page = data.pages?.find(p => p.page === part);
   if (!page || !Number.isSafeInteger(page.cid) || !/^BV[A-Za-z0-9]{10}$/.test(data.bvid)) throw new Error('B站分P不存在或视频信息不完整');
   const duration = Number(page.duration || data.duration);
   if (!(duration > 0 && duration <= 14400)) throw new Error('视频需在4小时以内');
   let tags = [], tagsUnavailable = false;
-  try { tags = (await api('/x/tag/archive/tags?bvid=' + data.bvid, fetcher, signal)).map(t => String(t.tag_name || '').trim()).filter(Boolean); }
+  try { tags = (await api('/x/tag/archive/tags?bvid=' + data.bvid, fetcher, signal, cookie)).map(t => String(t.tag_name || '').trim()).filter(Boolean); }
   catch { tagsUnavailable = true; }
   tags = [...new Set(tags)].filter(t => t.length <= 30).slice(0, 20);
   const title = (String(data.title || '') + (data.pages.length > 1 ? ' · P' + part + ' ' + page.part : '')).slice(0, 160).trim();
@@ -131,7 +135,7 @@ async function download(url, file, budget, fetcher, signal, progress) {
   await pipeline(Readable.fromWeb(response.body), limit, fs.createWriteStream(file, { mode: 0o600 }), { signal });
 }
 export async function downloadBilibili(input, directory, { fetcher = fetch, signal, cookie = '', quality = 80, strict = true, progress = () => {}, run = runProcess } = {}) {
-  const meta = await inspectBilibili(input, { fetcher, signal });
+  const meta = await inspectBilibili(input, { fetcher, signal, cookie });
   const data = await playback(meta, qualitySettings({ quality, strict }), fetcher, signal, cookie);
   const media = selectBilibiliMedia(data, { quality, strict }), urls = media.urls, budget = { remaining: IMPORT_LIMIT, downloaded: 0 };
   const temp = path.join(directory, 'link-download');

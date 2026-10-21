@@ -90,12 +90,12 @@ export async function runUploadQueue(db, directoryFor, authorize, { inspect = in
   const uid = job.user_id;
   try {
     if (!authorize(uid)) throw new Error('账号或批量导入权限已撤销');
-    const info = await inspect(job.url), selection = JSON.parse(job.settings_json);
+    const cookie = await bilibiliAccount(db).credentials(uid);
+    const info = await inspect(job.url, { cookie }), selection = JSON.parse(job.settings_json);
     if (queue.get(uid, job.id)?.lease !== job.lease) return true;
     // Short URL aliases are deduplicated again after resolving to their video page.
     const existing = queue.duplicate(uid, info.sourceUrl, job.id);
     if (existing) { queue.settle(job, 'duplicate', '', existing.document_id || '', existing.title || info.title); return true; }
-    const cookie = await bilibiliAccount(db).credentials(uid);
     const playback = await quality(info, selection, { cookie });
     if (!playback.canImport) throw new Error(playback.reason);
     const base = path.dirname(directoryFor('0'.repeat(32)));

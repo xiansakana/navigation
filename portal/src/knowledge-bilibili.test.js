@@ -70,3 +70,32 @@ test('strict quality refuses 480p before downloading; explicit downgrade selects
     assert.ok(seen.every(([u]) => !u.includes('test.bilivideo.com')));
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
+
+
+test('bound credentials cover metadata and playback but never shortlink redirects or media CDNs', async () => {
+  const cookie = 'SESSDATA=test-account', seen = [];
+  const authFetch = (u, options) => {
+    seen.push([u, options.headers.Cookie]);
+    if (u.startsWith('https://b23.tv/')) return new Response(null, { status: 302, headers: { location: url } });
+    if (u.startsWith('https://api.bilibili.com/') && options.headers.Cookie !== cookie) return new Response('', { status: 412 });
+    return fetcher(u, options);
+  };
+  const info = await inspectBilibili('https://b23.tv/test', { fetcher: authFetch, cookie });
+  assert.equal(info.bvid, view.bvid); assert.equal(info.tags.length, 2);
+  assert.equal(seen[0][1], undefined);
+  assert.ok(seen.filter(([u]) => u.startsWith('https://api.bilibili.com/')).every(([, c]) => c === cookie));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'bili-account-'));
+  try {
+    const result = await downloadBilibili(url, directory, { fetcher: authFetch, cookie, async run(binary, input) {
+      if (binary.includes('ffprobe')) return JSON.stringify({ streams: [{ codec_type: 'video', width: 1920, height: 1080 }, { codec_type: 'audio' }] });
+      await fs.writeFile(input.at(-1), Buffer.alloc(32));
+    } });
+    assert.ok(seen.filter(([u]) => u.startsWith('https://api.bilibili.com/')).every(([, c]) => c === cookie));
+    assert.ok(seen.some(([u]) => u.includes('bilivideo.com')));
+    assert.ok(seen.filter(([u]) => u.includes('bilivideo.com')).every(([, c]) => c === undefined));
+    await result.cleanup();
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+  let attempts = 0;
+  await assert.rejects(inspectBilibili(url, { fetcher: () => { attempts++; return new Response('', { status: 412 }); } }), e => e.code === 'BILIBILI_RISK_CONTROL' && /请勿连续重试/.test(e.message));
+  assert.equal(attempts, 1);
+});

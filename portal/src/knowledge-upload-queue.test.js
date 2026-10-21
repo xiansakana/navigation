@@ -11,7 +11,7 @@ import { parseBatchLinks } from '../public/knowledge/queue.js';
 
 const url = i => 'https://www.bilibili.com/video/BV1LTpi69Efh/' + (i > 1 ? '?p=' + i : '');
 const defaults = { backend: 'codex', quality: { quality: 80, strict: true }, modelSettings: { codexModel: 'gpt-6-luna', codexEffort: 'high', apiModel: '', apiEffort: '', asrModel: 'turbo', asrLanguage: 'zh', asrProfile: 'bazi', asrHotwords: '印绶' } };
-const metadata = async link => ({ sourceUrl: link, title: '视频 ' + link, topic: '命理', tags: ['自动标签'] });
+const metadata = async (link, options) => { assert.equal(typeof options.cookie, 'string'); return ({ sourceUrl: link, title: '视频 ' + link, topic: '命理', tags: ['自动标签'] }); };
 async function fixture(fn) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge-submission-'));
   const db = new Database(path.join(directory, 'test.sqlite')), store = createKnowledgeStore(db), queue = createUploadQueue(db);
@@ -74,11 +74,11 @@ test('failure of one video, revoked permission, cancellation while resolving and
   await run({ quality: async () => ({ canImport: false, reason: '需要1080p' }) });
   assert.equal(queue.get('a', added.results[0].id).state, 'failed');
   await run(); assert.equal(queue.get('a', added.results[1].id).state, 'submitted');
-  await run({ inspect: async () => metadata(url(2)) });
+  await run({ inspect: async (_link, options) => metadata(url(2), options) });
   assert.equal(queue.get('a', added.results[2].id).state, 'duplicate');
   assert.equal(store.list('a').total, 1);
   const cancelled = queue.add('a', { urls: [url(3)] }, defaults).results[0];
-  await run({ inspect: async link => { queue.change('a', cancelled.id, 'cancel'); return metadata(link); } });
+  await run({ inspect: async (link, options) => { queue.change('a', cancelled.id, 'cancel'); return metadata(link, options); } });
   assert.equal(store.list('a').total, 1);
   const denied = queue.add('a', { urls: [url(4)] }, defaults).results[0];
   await run({}, () => false); assert.match(queue.get('a', denied.id).error, /权限/);
