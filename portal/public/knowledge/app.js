@@ -9,7 +9,7 @@ import { createFileQueue } from './file-queue.js?v=1';
 import { createBilibiliPanel } from './bilibili-account.js?v=2';
 import { createNotePager } from './pagination.js?v=1';
 import { failureMessage } from './failure.js?v=1';
-import { createReanalysisPanel } from './reanalysis.js?v=1';
+import { createReanalysisPanel } from './reanalysis.js?v=2';
 const $ = id => document.getElementById(id);
 const state = { permissions: [], documents: [], statusCounts: {}, selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, concurrencyDirty: false, resume: null, uploading: false, offset: 0, total: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);

@@ -1,11 +1,11 @@
 export function createReanalysisPanel({ element: $, can, state, api, send, onError, onDone }) {
-  let target = null, previewItems = [], busy = false, versions = [], previewSequence = 0, historySequence = 0, historyDocument = '';
+  let target = null, previewItems = [], busy = false, versions = [], previewSequence = 0, historySequence = 0, historyDocument = '', historyRevision = -1;
   const dialog = $('reanalysis-dialog');
   function refresh(d = state.current) {
     $('reanalyze-batch').hidden = !can('reanalysis:batch:edit') || !can('reanalysis:edit') || !can('process:edit') || !can('notes:view');
     $('reanalyze').hidden = !d?.notes || !['ready', 'failed'].includes(d.status) || !can('reanalysis:edit') || !can('process:edit');
     $('history-panel').hidden = !d || !can('history:view');
-    if ($('history-panel').open && d) loadHistory().catch(onError);
+    if ($('history-panel').open && d && (historyDocument !== d.id || historyRevision !== d.revision)) loadHistory().catch(onError);
   }
   async function preview() {
     const ticket = ++previewSequence;
@@ -52,6 +52,7 @@ export function createReanalysisPanel({ element: $, can, state, api, send, onErr
   async function loadHistory() {
     const id = state.current?.id; if (!id || !can('history:view')) return;
     const ticket = ++historySequence;
+    historyRevision = state.current.revision;
     if (historyDocument !== id) { historyDocument = id; versions = []; $('history-select').replaceChildren(); renderVersion(); }
     const selected = $('history-select').value;
     const result = await api('/documents/' + id + '/versions');
