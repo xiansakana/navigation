@@ -9,7 +9,7 @@ import { createFileQueue } from './file-queue.js?v=1';
 import { createBilibiliPanel } from './bilibili-account.js?v=2';
 import { createNotePager } from './pagination.js?v=1';
 const $ = id => document.getElementById(id);
-const state = { permissions: [], documents: [], selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, concurrencyDirty: false, resume: null, uploading: false, offset: 0, total: 0 };
+const state = { permissions: [], documents: [], statusCounts: {}, selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, concurrencyDirty: false, resume: null, uploading: false, offset: 0, total: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
 const sourcePlayer = createSourcePlayer({ player: $('player'), frame: $('original-frame'), select: $('playback-source'), link: $('original-link'), hint: $('playback-hint'), allowed: () => can('source:view') });
 const text = (id, value) => { $(id).textContent = value || ''; };
@@ -115,6 +115,12 @@ async function load(offset, quiet = false) {
   if (!result) return;
   if (result.offset !== state.offset || result.filterChanged) $('documents').scrollTop = 0;
   state.offset = result.offset; state.documents = result.documents; state.total = result.total;
+  state.statusCounts = result.statusCounts || {};
+  const statusLabels = { '': '全部状态', ready: '已生成', queued: '等待处理', processing: '处理中', failed: '失败', uploading: '上传中', importing: '链接下载中' };
+  for (const option of $('status-filter').options) {
+    const count = option.value ? state.statusCounts[option.value] || 0 : Object.values(state.statusCounts).reduce((sum, n) => sum + n, 0);
+    option.textContent = statusLabels[option.value] + '（' + count + '）';
+  }
   if (result.filterChanged) state.selected.clear();
   state.filter = result.filterKey;
   for (const [id, revision] of state.selected) {
@@ -301,7 +307,7 @@ async function boot() {
     try {
       await settings();
       const queueState = await uploadQueue.refresh();
-      if (can('notes:view') && (queueState?.active > 0 || state.current?.storage?.provider === '115' && state.current.storage.state !== 'ready' || state.documents.some(d => ['queued', 'processing', 'uploading', 'importing'].includes(d.status) || d.storage?.provider === '115' && d.storage.state !== 'ready'))) await load(undefined, true);
+      if (can('notes:view') && (queueState?.active > 0 || ['queued', 'processing', 'uploading', 'importing'].some(status => state.statusCounts[status] > 0) || state.current?.storage?.provider === '115' && state.current.storage.state !== 'ready' || state.documents.some(d => d.storage?.provider === '115' && d.storage.state !== 'ready'))) await load(undefined, true);
       if (!state.editing && state.current && (['queued', 'processing', 'importing'].includes(state.current.status) || state.current.storage?.provider === '115' && state.current.storage.state !== 'ready')) await open(state.current.id, true);
     } catch { /* Keep existing content during temporary connection loss. */ }
   }, 5000);

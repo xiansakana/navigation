@@ -44,6 +44,24 @@ async function fixture(fn) {
   }
 }
 
+test('document status counts span pages and selected statuses but respect owner, search, topic and deletion', async () => fixture(async ({ call, store, db }) => {
+  for (const [status, topic, title] of [['ready', '课程', '甲'], ['ready', '课程', '乙'], ['failed', '课程', '甲'], ['queued', '其他', '甲'], ['deleting', '课程', '甲']]) {
+    const item = store.create('a', upload({ topic, title }));
+    db.prepare('UPDATE knowledge_documents SET status=? WHERE id=?').run(status, item.id);
+  }
+  store.create('b', upload());
+  const all = await call('/documents?status=ready&offset=1');
+  assert.equal(all.payload.total, 2); assert.equal(all.payload.documents.length, 1);
+  assert.deepEqual(all.payload.statusCounts, { ready: 2, failed: 1, queued: 1 });
+  const filtered = await call('/documents?status=ready&topic=' + encodeURIComponent('课程') + '&search=' + encodeURIComponent('甲'));
+  assert.equal(filtered.payload.total, 1);
+  assert.deepEqual(filtered.payload.statusCounts, { ready: 1, failed: 1 });
+  const empty = await call('/documents?search=unmatched');
+  assert.deepEqual(empty.payload.statusCounts, {});
+  const other = await call('/documents', { session: member('b') });
+  assert.deepEqual(other.payload.statusCounts, { uploading: 1 });
+}));
+
 test('source duplicates are blocked across preview, legacy import and file upload before network or disk checks, without leaking another owner', async () => fixture(async ({ call, store, db }) => {
   const sourceUrl = 'http://m.bilibili.com/video/BV1LTpi69Efh?p=1&share_source=copy';
   const saved = store.create('a', upload({ sourceUrl }));
