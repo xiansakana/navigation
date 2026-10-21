@@ -9,4 +9,4 @@
 #upload-queue-panel{margin-bottom:20px}.kb-queue-list{max-height:350px;overflow:auto}.kb-queue-row{padding:12px 0;border-bottom:1px solid var(--border);overflow-wrap:anywhere}.kb-queue-row strong{font-size:13px}.kb-queue-row p,.kb-queue-row a{font-size:12px;line-height:1.7}.kb-queue-row .btn{font-size:12px;margin-top:8px}#upload-queue-panel summary{cursor:pointer;font-weight:600}
 
 .kb-pagination{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px;align-items:center;margin-top:12px}.kb-pagination .btn{font-size:12px;padding:8px}.kb-pagination span{text-align:center;line-height:1.6}
-#status-filter{flex-basis:150px;min-width:150px}
+#topic-filter{flex-basis:110px;min-width:110px}#status-filter{flex-basis:150px;min-width:150px}
