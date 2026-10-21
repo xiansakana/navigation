@@ -17,6 +17,8 @@ import { createUploadQueue } from './knowledge-upload-queue.js';
 import { duplicateSourceError } from './knowledge-source-dedupe.js';
 import { retryKnowledgeDocument } from './knowledge-retry.js';
 import { failureMessage } from '../public/knowledge/failure.js';
+import { reanalysisTargets, scheduleReanalysis } from './knowledge-reanalysis.js';
+import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
 
 const root = () => path.resolve(process.env.KNOWLEDGE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/knowledge'));
 export function knowledgeDirectory(id) {
@@ -158,7 +160,7 @@ async function workerApi(req, res, url, json, authorize) {
       const backends = Array.isArray(raw.backends) ? raw.backends.filter(b => ['codex', 'openai'].includes(b)) : [];
       return json(res, 200, { ok: true, job: store.claim(uid, backends, device?.id || (typeof raw.workerId === 'string' ? raw.workerId : ''), Array.isArray(raw.localDocuments) ? raw.localDocuments.slice(0, 200).filter(id => /^[a-f0-9]{32}$/.test(id)) : []) });
     }
-    const match = /^\/jobs\/([a-f0-9]{32})\/(source|progress|phase|complete|fail|codex)$/.exec(route);
+    const match = /^\/jobs\/([a-f0-9]{32})\/(source|evidence|progress|phase|complete|fail|codex)$/.exec(route);
     if (!match) return json(res, 404, { ok: false, error: '工作器接口不存在' });
     const [, id, action] = match, lease = req.headers['x-knowledge-lease'];
     return await lock(id, async () => {
@@ -170,6 +172,16 @@ async function workerApi(req, res, url, json, authorize) {
         store.codexCalls.record(uid,doc,input);return json(res,200,{ok:true});
       }
       if (action === 'source' && method === 'GET') return serveSource(req, res, store, uid, id);
+      if (action === 'evidence' && method === 'GET') {
+        const d = store.get(uid, id), run = store.reanalysis.get(uid, id);
+        if (run?.state !== 'pending' || run.mode !== 'reuse') return json(res, 409, { ok: false, error: '此任务未请求复用素材' });
+        const frames = [];
+        for (const f of d.frames) {
+          if (!/^[a-z0-9.-]+\.jpg$/.test(f.name)) throw new Error('画面文件名无效');
+          frames.push({ ...f, data: (await fsp.readFile(path.join(knowledgeDirectory(id), f.name))).toString('base64') });
+        }
+        return json(res, 200, { ok: true, evidence: { duration: d.duration, language: d.language, transcript: d.transcript, frames, asrModel: d.provenance.asrModel || '', warnings: ['本次复用已有转写与抽样画面，未重新提取原视频。'] } });
+      }
       if (action === 'phase' && method === 'POST') {
         const input = await body(req, 1024);
         return json(res, 200, { ok: true, accepted: store.phase(uid, id, lease, input.phase) });
@@ -181,9 +193,18 @@ async function workerApi(req, res, url, json, authorize) {
         const input = await body(req, 4096); store.fail(uid, id, lease, failureMessage(String(input.error || '工作器处理失败'), String(input.stage || store.getRow(uid, id)?.stage || '').slice(0, 120))); return json(res, 200, { ok: true });
       }
       if (action === 'complete' && method === 'POST') {
-        const result = validateKnowledgeResult(await body(req, 18 * 1024 * 1024));
+        const raw = await body(req, 18 * 1024 * 1024), result = validateKnowledgeResult(raw);
         const directory = knowledgeDirectory(id);
         await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
+        const run = store.reanalysis.get(uid, id);
+        if (run?.state === 'pending') {
+          for (let i = 0; i < result.frames.length; i++) {
+            const oldName = raw.frames[i].name || result.frames[i].name;
+            const name = `frame-${run.runId}-${i + 1}.jpg`;
+            if (/^[a-z0-9.-]+\.jpg$/.test(oldName)) result.notes = result.notes.split('/frames/' + oldName).join('/frames/' + name);
+            result.frames[i].name = name;
+          }
+        }
         for (const f of result.frames) await fsp.writeFile(path.join(directory, f.name), f.data);
         result.frames = result.frames.map(({ data, ...f }) => f);
         if (!store.finish(uid, id, lease, result)) return json(res, 409, { ok: false, error: '任务已过期' });
@@ -222,9 +243,10 @@ async function knowledgeApi(req, res, url, session, json) {
     catch { return json(res, 503, { ok: false, error: '可见范围暂不可用，请稍后重试' }); }
   }
   const route = url.pathname.slice('/api/knowledge'.length), method = req.method;
-  const document = /^\/documents\/([a-f0-9]{32})(?:\/(parts|complete|local-input|retry|storage-retry|source|export|frames)(?:\/([a-z0-9.-]+))?)?$/.exec(route);
+  const document = /^\/documents\/([a-f0-9]{32})(?:\/(parts|complete|local-input|retry|storage-retry|reanalyze|versions|restore|source|export|frames)(?:\/([a-z0-9.-]+))?)?$/.exec(route);
   const action = route === '/settings' ? method === 'GET' ? 'view' : 'settings:edit'
     : route === '/documents/retry-failed' && method === 'POST' ? 'process:batch:edit'
+    : route === '/reanalysis' && method === 'POST' ? 'reanalysis:batch:edit'
     : route === '/upload-queue' ? method === 'GET' ? 'queue:view' : method === 'POST' ? 'queue:edit' : null
     : /^\/upload-queue\/[a-f0-9]{32}\/(retry|cancel)$/.test(route) && method === 'POST' ? 'queue:manage'
     : (route === '/bilibili' && method === 'GET' || route === '/bilibili/check' && method === 'POST') ? 'bilibili:view'
@@ -238,7 +260,8 @@ async function knowledgeApi(req, res, url, session, json) {
     : route === '/device-pair' ? method === 'GET' ? 'devices:view' : method === 'POST' ? 'devices:edit' : null
     : route === '/worker-token' && method === 'POST' ? 'worker:edit'
       : route === '/documents' ? method === 'GET' ? 'view' : 'upload:edit'
-        : document ? method === 'GET' ? document[2] === 'export' ? 'export:view' : 'view'
+        : document ? method === 'GET' ? document[2] === 'versions' ? 'history:view' : document[2] === 'export' ? 'export:view' : 'view'
+          : document[2] === 'reanalyze' ? 'reanalysis:edit' : document[2] === 'restore' ? 'history:restore'
           : method === 'DELETE' ? 'delete:edit' : document[2] === 'local-input' ? 'local-input:edit' : document[2] === 'storage-retry' ? 'storage:edit' : document[2] === 'retry' ? 'process:edit'
             : document[2] ? 'upload:edit' : 'notes:edit' : null;
   if (!action) return json(res, 404, { ok: false, error: '知识库接口不存在' });
@@ -331,6 +354,11 @@ async function knowledgeApi(req, res, url, session, json) {
       return json(res, 200, { ok: true, ...store.saveSettings(uid, input) });
     }
     if (route === '/worker-token' && method === 'POST') return json(res, 200, { ok: true, token: store.rotateToken(uid) });
+    if (route === '/reanalysis' && method === 'POST') {
+      if (!canKnowledge(session, 'reanalysis:edit') || !canKnowledge(session, 'process:edit') || !canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '需要重新分析、生成笔记和查看笔记权限' });
+      const input = await body(req, 256000), items = reanalysisTargets(store, uid, input, canKnowledge(session, 'transcript:view'));
+      return json(res, 202, { ok: true, ...scheduleReanalysis(store, uid, items, input.mode || 'reuse', knowledgeDirectory, input.preview === true) });
+    }
     if (route === '/documents/retry-failed' && method === 'POST') {
       if (!canKnowledge(session, 'process:edit') || !canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '需要查看笔记和生成笔记权限' });
       await body(req, 4096);
@@ -375,6 +403,16 @@ async function knowledgeApi(req, res, url, session, json) {
       store.expire(uid);
       const item = store.get(uid, id);
       if (!item) return json(res, 404, { ok: false, error: '笔记不存在' });
+      if (operation === 'versions' && method === 'GET') return json(res, 200, { ok: true, versions: store.reanalysis.list(uid, id) });
+      if (['reanalyze', 'restore'].includes(operation) && method === 'POST') {
+        if (!canKnowledge(session, 'process:edit') || !canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '需要生成笔记和查看笔记权限' });
+        const input = await body(req, 4096);
+        if (operation === 'reanalyze') return json(res, 202, { ok: true, ...scheduleReanalysis(store, uid, [{ id, revision: input.revision }], input.mode || 'reuse', knowledgeDirectory, input.preview === true) });
+        if (!/^[a-f0-9]{32}$/.test(input.versionId || '')) throw new Error('历史版本无效');
+        store.reanalysis.restore(uid, id, input.versionId, input.revision);
+        createKnowledgeCaseStore(getDatabase()).syncDocument(store.getRow(uid, id));
+        return json(res, 200, { ok: true, document: visible(store.get(uid, id)) });
+      }
       const directory = knowledgeDirectory(id);
       if (operation === 'local-input' && method === 'POST') {
         if (!canKnowledge(session, 'upload:edit') || !canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要上传和生成笔记权限' });
@@ -384,7 +422,7 @@ async function knowledgeApi(req, res, url, session, json) {
       }
       if (!operation && method === 'GET') return json(res, 200, { ok: true, document: visible(item) });
       if (!operation && method === 'PUT') {
-        if (item.status === 'processing') return json(res, 409, { ok: false, error: '请等待当前任务完成后编辑' });
+        if (item.status === 'processing' || item.status === 'queued' && item.reanalysis?.state === 'pending') return json(res, 409, { ok: false, error: '请等待当前任务完成后编辑' });
         return json(res, 200, { ok: true, document: visible(store.edit(uid, id, await body(req))) });
       }
       if (!operation && method === 'DELETE') {

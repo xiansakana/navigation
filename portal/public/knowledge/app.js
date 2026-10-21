@@ -9,6 +9,7 @@ import { createFileQueue } from './file-queue.js?v=1';
 import { createBilibiliPanel } from './bilibili-account.js?v=2';
 import { createNotePager } from './pagination.js?v=1';
 import { failureMessage } from './failure.js?v=1';
+import { createReanalysisPanel } from './reanalysis.js?v=1';
 const $ = id => document.getElementById(id);
 const state = { permissions: [], documents: [], statusCounts: {}, selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, concurrencyDirty: false, resume: null, uploading: false, offset: 0, total: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
@@ -38,6 +39,7 @@ const send = (route, method, data = {}) => api(route, { method, body: JSON.strin
 const notePager = createNotePager(params => api('/documents?' + new URLSearchParams(params)));
 const linkImport = bindLinkImport({ element: $, can: () => can('import:edit'), canBatch: () => can('queue:edit') && can('import:edit'), send, busy: () => state.uploading, onError: error, clearError: () => show('error', false) });
 const uploadQueue = createUploadQueuePanel({ element: $, can, api, send, onError: error, openDocument: open });
+const reanalysisPanel = createReanalysisPanel({ element: $, can, state, api, send, onError: error, onDone: async () => { if (state.current) await open(state.current.id); await load(); } });
 const localQueue = createFileQueue({ capacity: () => state.uploading ? Promise.resolve({ active: 5, capacity: 5, blocked: true }) : api('/upload-queue'), upload: (entry, report) => uploadFile(entry.file, entry.metadata, entry, report), changed: renderLocalQueue });
 function renderLocalQueue() {
   const list = $('file-queue-list'); list.replaceChildren();
@@ -83,6 +85,7 @@ function renderBatch() {
   $('batch-all').disabled = $('batch-clear').disabled = state.batchBusy;
 }
 function renderList() {
+  reanalysisPanel.refresh();
   show('retry-failed', can('process:batch:edit') && can('process:edit') && can('notes:view'));
   $('retry-failed').disabled = retrying;
   text('total', state.total + ' 篇');
@@ -93,7 +96,7 @@ function renderList() {
     button.innerHTML = `<strong>${escape(d.title)}</strong><small>${escape(d.topic || '未分类')} · ${escape(d.status === 'queued' && d.storage?.provider === '115' && d.storage.state !== 'ready' ? ({ waiting: '等待上传', pending: '等待保存至115', uploading: '正在保存至115', verifying: '校验原视频', verified: '清理临时原片', failed: '115保存待重试' })[d.storage.state] || d.stage : d.stage)}${d.status === 'processing' ? ' ' + d.progress + '%' : ''}</small><p>${escape(d.preview || d.originalName)}</p>`;
     button.addEventListener('click', () => open(d.id).catch(error));
     if (phaseLabel(d)) { const phase = document.createElement('small'); phase.textContent = phaseLabel(d); button.append(phase); }
-    if (can('publish:batch:edit') && can('publish:edit') && d.status === 'ready') {
+    if ((can('publish:batch:edit') && can('publish:edit') || can('reanalysis:batch:edit') && can('reanalysis:edit')) && d.status === 'ready') {
       const row = document.createElement('div'); row.className = 'kb-document-row';
       const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.setAttribute('aria-label', '选择笔记：' + d.title);
       checkbox.checked = state.selected.has(d.id); checkbox.disabled = state.batchBusy;
@@ -156,6 +159,7 @@ function renderStorage(d) {
 }
 function renderDocument(d) {
   state.current = d; state.editing = false; show('empty', false); show('detail', true); show('edit-form', false); show('tabs', true);
+  reanalysisPanel.refresh(d);
   renderStorage(d);
   text('document-title', d.title);
   show('publication', can('publish:edit') && d.status === 'ready');

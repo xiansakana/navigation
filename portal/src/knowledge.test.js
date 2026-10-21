@@ -44,6 +44,75 @@ async function fixture(fn) {
   }
 }
 
+test('reanalysis previews, queues once, reuses evidence, preserves old images and restores history without changing ownership', async () => fixture(async ({ call, store, db, root }) => {
+  const token = store.rotateToken('a'), doc = store.create('a', upload()), directory = path.join(root, 'media', doc.id);
+  fs.mkdirSync(directory, { recursive: true });
+  const oldImage = Buffer.alloc(24, 1); oldImage[0] = 255; oldImage[1] = 216; oldImage[2] = 255;
+  fs.writeFileSync(path.join(directory, 'frame-1.jpg'), oldImage);
+  const original = result({ frames: [{ name: 'frame-1.jpg', time: 5 }] });
+  db.prepare("UPDATE knowledge_documents SET status='ready',notes=?,transcript_json=?,frames_json=?,duration=90 WHERE id=?").run(original.notes, JSON.stringify(original.transcript), JSON.stringify(original.frames), doc.id);
+  const prefix = '/documents/' + doc.id, revision = store.get('a', doc.id).revision;
+  const preview = await call(prefix + '/reanalyze', { method: 'POST', data: { revision, mode: 'reuse', preview: true } });
+  assert.equal(preview.payload.accepted, 1); assert.equal(store.get('a', doc.id).status, 'ready');
+  assert.equal(store.reanalysis.list('a', doc.id).length, 0);
+  const denied = { userId: 'a', permissions: ['knowledge:view', 'knowledge:notes:view', 'knowledge:process:edit'] };
+  assert.equal((await call(prefix + '/reanalyze', { method: 'POST', data: { revision }, session: denied })).status, 403);
+  assert.equal((await call(prefix + '/reanalyze', { method: 'POST', data: { revision }, session: member('b') })).status, 404);
+  assert.equal((await call(prefix + '/reanalyze', { method: 'POST', data: { revision }, headers: { Origin: 'https://evil.test' } })).status, 403);
+  assert.equal((await call(prefix + '/reanalyze', { method: 'POST', data: { revision } })).payload.accepted, 1);
+  assert.equal((await call(prefix + '/reanalyze', { method: 'POST', data: { revision } })).payload.skipped, 1);
+  assert.equal(store.get('a', doc.id).notes, original.notes);
+  assert.equal((await call(prefix, { method: 'PUT', data: { ...upload(), notes: '不能覆盖排队中的重新分析', revision: store.get('a', doc.id).revision } })).status, 409);
+  const oldWorker = { workerId: 'gpu', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true }, pipeline: { version: 1 } } };
+  store.heartbeatWorker('a', oldWorker); assert.equal(store.claim('a', ['codex'], 'gpu'), null);
+  store.heartbeatWorker('a', { ...oldWorker, capabilities: { ...oldWorker.capabilities, reanalysis: { version: 1 } } });
+  const job = store.claim('a', ['codex'], 'gpu'); assert.equal(job.reanalysis.mode, 'reuse');
+  const evidence = await call('/worker/jobs/' + doc.id + '/evidence', { token, lease: job.lease });
+  assert.deepEqual(evidence.payload.evidence.transcript, original.transcript);
+  assert.equal(evidence.payload.evidence.frames[0].data, oldImage.toString('base64'));
+  let versions = (await call(prefix + '/versions')).payload.versions;
+  assert.equal(versions.length, 1); assert.equal(versions[0].notes, original.notes); assert.equal(versions[0].transcript, undefined);
+  assert.equal((await call(prefix + '/versions', { session: denied })).status, 403);
+  assert.equal((await call(prefix + '/versions', { session: member('b') })).status, 404);
+  assert.equal((await call(prefix + '/restore', { method: 'POST', data: { versionId: versions[0].id, revision: job.revision } })).status, 409);
+  const completed = result({ notes: '# 新版完整笔记\n\n新规则把多个命盘分别识别，保留对应人物与性别，不把画面中的对比命盘合并为一个人。\n[截图](/api/knowledge/documents/' + doc.id + '/frames/frame-1.jpg)', frames: [{ name: 'frame-1.jpg', time: 5, data: oldImage.toString('base64') }] });
+  assert.equal((await call('/worker/jobs/' + doc.id + '/complete', { method: 'POST', token, lease: job.lease, data: completed })).status, 200);
+  const current = store.get('a', doc.id); assert.equal(current.status, 'ready'); assert.equal(current.reanalysis.state, 'done');
+  assert.notEqual(current.frames[0].name, 'frame-1.jpg'); assert.match(current.notes, new RegExp(current.frames[0].name));
+  assert.deepEqual(fs.readFileSync(path.join(directory, 'frame-1.jpg')), oldImage);
+  assert.equal((await call(prefix + '/restore', { method: 'POST', data: { versionId: versions[0].id, revision } })).status, 409);
+  const restored = await call(prefix + '/restore', { method: 'POST', data: { versionId: versions[0].id, revision: current.revision } });
+  assert.equal(restored.status, 200); assert.equal(restored.payload.document.notes, original.notes);
+  assert.equal(restored.payload.document.frames[0].name, 'frame-1.jpg');
+  assert.equal(store.reanalysis.list('a', doc.id).length, 2);
+}));
+
+test('batch reanalysis binds its preview revisions, respects search and raw evidence permissions, and skips missing sources', async () => fixture(async ({ call, store, db }) => {
+  const docs = [];
+  for (const title of ['目标课程', '其他课程']) {
+    const d = store.create('a', upload({ title }));
+    db.prepare("UPDATE knowledge_documents SET status='ready',notes=?,duration=90,transcript_json=? WHERE id=?").run(result().notes, JSON.stringify(result().transcript), d.id); docs.push(store.get('a', d.id));
+  }
+  const batch = (data, session) => call('/reanalysis', { method: 'POST', data, session });
+  const preview = await batch({ preview: true, search: '目标', mode: 'reuse' });
+  assert.equal(preview.payload.accepted, 1);
+  const items = preview.payload.results.map(({ id, revision }) => ({ id, revision }));
+  assert.equal((await batch({ items, mode: 'full' })).payload.skipped, 1);
+  assert.equal((await batch({ items, mode: 'reuse' }, { userId: 'b', permissions: ['*'] })).payload.accepted, 0);
+  assert.equal((await batch({ mode: 'reuse' })).status, 400);
+  assert.equal((await batch({ items, mode: 'reuse' })).payload.accepted, 1);
+  assert.equal((await batch({ items, mode: 'reuse' })).payload.skipped, 1);
+  assert.equal(store.get('a', docs[1].id).status, 'ready');
+  const restricted = { userId: 'a', permissions: ['knowledge:view', 'knowledge:notes:view', 'knowledge:process:edit', 'knowledge:reanalysis:edit', 'knowledge:reanalysis:batch:edit'] };
+  assert.equal((await batch({ preview: true, search: '独有检索词' }, restricted)).payload.accepted, 0);
+  for (let i = 0; i < 12; i++) {
+    const d = store.get('a', docs[1].id); store.reanalysis.schedule('a', d.id, d.revision, 'reuse', store.settings('a'));
+    db.prepare("UPDATE knowledge_documents SET status='ready' WHERE id=?").run(d.id);
+  }
+  assert.equal(store.reanalysis.list('a', docs[1].id).length, 10);
+  store.remove('a', docs[1].id); assert.equal(store.reanalysis.list('a', docs[1].id).length, 0);
+}));
+
 test('worker failures retain interruption stage even for older workers reporting only terminated', async () => fixture(async ({ call, store }) => {
   const token = store.rotateToken('a'), doc = store.create('a', upload()); store.enqueue('a', doc.id);
   store.heartbeatWorker('a', { workerId: 'gpu', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } });

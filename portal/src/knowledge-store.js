@@ -8,6 +8,7 @@ import { createImportStore } from './knowledge-import-store.js';
 import { pipelineSettings } from './knowledge-pipeline.js';
 import { storageConfig } from './knowledge-storage.js';
 import { sourceKey, findSourceDuplicate, duplicateSourceError } from './knowledge-source-dedupe.js';
+import { createReanalysisStore } from './knowledge-reanalysis-store.js';
 
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
@@ -74,10 +75,11 @@ export function createKnowledgeStore(db) {
   }
   const devices = createKnowledgeDeviceStore(db);
   const sources = createSourceStore(db);
+  const reanalysis = createReanalysisStore(db);
   const getRow = (uid, key) => db.prepare('SELECT * FROM knowledge_documents WHERE user_id=? AND id=?').get(uid, key);
   const read = row => row && ({ id: row.id, title: row.title, topic: row.topic, tags: JSON.parse(row.tags_json), sourceUrl: row.source_url,
     visibility: row.visibility || 'private', originalName: row.original_name, bytes: row.byte_size, mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, modelSettings: JSON.parse(row.model_settings_json || '{}'), status: row.status,
-    stage: row.stage, processingPhase: row.processing_phase || '', progress: row.progress, error: row.error, duration: row.duration, language: row.language, notes: row.notes,
+    stage: row.stage, reanalysis: reanalysis.get(row.user_id, row.id), processingPhase: row.processing_phase || '', progress: row.progress, error: row.error, duration: row.duration, language: row.language, notes: row.notes,
     transcript: JSON.parse(row.transcript_json), frames: JSON.parse(row.frames_json), provenance: JSON.parse(row.provenance_json),
     storage: sources.public(row.user_id, row.id), importState: imports.get(row.user_id, row.id)?.state || '',
     sourceMedia: JSON.parse(imports.get(row.user_id, row.id)?.media_json || '{}'), revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at });
@@ -88,7 +90,7 @@ export function createKnowledgeStore(db) {
     .all(uid, new Date(Date.now() - 90000).toISOString())
     .map(r => ({ id: r.worker_id, label: r.label, lastSeen: r.last_seen, capabilities: JSON.parse(r.capabilities_json) }));
   return {
-    get, getRow, expire, sources, devices, localInputs, imports, codexCalls:createKnowledgeCodexCalls(db),
+    get, getRow, expire, sources, devices, localInputs, imports, reanalysis, codexCalls:createKnowledgeCodexCalls(db),
     settings(uid) { const row = db.prepare('SELECT * FROM knowledge_settings WHERE user_id=?').get(uid); return { backend: row?.backend || 'codex', ...modelSettings({}, JSON.parse(row?.model_settings_json || '{}')), ...pipelineSettings({}, JSON.parse(row?.pipeline_json || '{}')) }; },
     saveSettings(uid, raw) {
       if (typeof raw === 'string') raw = { backend: raw };
@@ -119,6 +121,7 @@ export function createKnowledgeStore(db) {
         capabilities[key] = { ready: c.ready === true, model: String(c.model || '').slice(0, 120), detail: String(c.detail || '').slice(0, 160) };
       }
       if (raw.capabilities?.pipeline?.version === 1) capabilities.pipeline = { version: 1 };
+      if (raw.capabilities?.reanalysis?.version === 1) capabilities.reanalysis = { version: 1 };
       db.prepare('UPDATE knowledge_workers SET last_seen=?,label=?,capabilities_json=? WHERE user_id=?').run(now(), String(raw.label || '').slice(0, 80), JSON.stringify(capabilities), uid);
       const workerId = /^[\w-]{1,80}$/.test(raw.workerId || '') ? raw.workerId : 'legacy-' + hashToken(String(raw.label || '')).slice(0, 24);
       db.prepare('INSERT INTO knowledge_worker_instances(user_id,worker_id,last_seen,label,capabilities_json) VALUES (?,?,?,?,?) ON CONFLICT(user_id,worker_id) DO UPDATE SET last_seen=excluded.last_seen,label=excluded.label,capabilities_json=excluded.capabilities_json')
@@ -205,8 +208,12 @@ export function createKnowledgeStore(db) {
         const candidates = db.prepare("SELECT * FROM knowledge_documents WHERE user_id=? AND status='queued' ORDER BY created_at,id").all(uid);
         const hasLocal = r => { const local = localInputs.get(uid, r.id); return local && local.worker_id === workerId && localDocuments.includes(r.id) && r.source_sha256 && local.sha256 === r.source_sha256; };
         const receivingLocal = r => { const local = localInputs.get(uid, r.id); return local && local.worker_id === workerId && !local.sha256 && local.expires > Date.now(); };
-        const row = candidates.find(r => backends.includes(r.backend) && !receivingLocal(r) && (!sources.get(uid, r.id) || sources.get(uid, r.id).state === 'ready' || hasLocal(r) || imports.get(uid, r.id)?.state === 'done') &&
-          worker.capabilities[r.backend]?.ready);
+        const row = candidates.find(r => {
+          const rerun = reanalysis.get(uid, r.id);
+          if (rerun?.state === 'pending' && worker.capabilities.reanalysis?.version !== 1) return false;
+          return backends.includes(r.backend) && !receivingLocal(r) && (rerun?.state === 'pending' && rerun.mode === 'reuse' || !sources.get(uid, r.id) || sources.get(uid, r.id).state === 'ready' || hasLocal(r) || imports.get(uid, r.id)?.state === 'done') &&
+          worker.capabilities[r.backend]?.ready;
+        });
         if (!row) return null;
         const lease = crypto.randomBytes(24).toString('hex'), time = now();
         db.prepare("UPDATE knowledge_documents SET status='processing',processing_phase=?,stage='正在转写 · 准备视频素材',progress=1,lease=?,heartbeat=?,updated_at=?,worker_id=?,attempt=attempt+1 WHERE id=? AND status='queued'")
@@ -247,6 +254,7 @@ export function createKnowledgeStore(db) {
         db.prepare("UPDATE knowledge_documents SET status='ready',stage='笔记已生成',progress=100,error='',duration=?,language=?,notes=?,transcript_json=?,frames_json=?,provenance_json=?,revision=revision+1,lease=NULL,updated_at=? WHERE user_id=? AND id=? AND lease=?")
           .run(result.duration, result.language, result.notes, JSON.stringify(result.transcript), JSON.stringify(result.frames), JSON.stringify(provenance), now(), uid, key, lease);
         createKnowledgeCaseStore(db).syncDocument(getRow(uid, key));
+        reanalysis.complete(uid, key);
         return true;
       })();
     },
@@ -288,6 +296,7 @@ export function createKnowledgeStore(db) {
         if (!getRow(uid, key)) return false;
         createKnowledgeCaseStore(db).removeDocument(uid, key);
         sources.remove(uid, key);
+        reanalysis.remove(uid, key);
         localInputs.remove(uid, key);
         imports.remove(uid, key);
         db.prepare('DELETE FROM knowledge_codex_calls WHERE user_id=? AND document_id=?').run(uid,key);

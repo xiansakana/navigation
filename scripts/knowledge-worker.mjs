@@ -42,7 +42,7 @@ async function request(route, { data, method, lease, signal, raw = false, header
   return raw ? response : response.json();
 }
 async function capabilities() {
-  const result = { pipeline: { version: 1 } };
+  const result = { pipeline: { version: 1 }, reanalysis: { version: 1 } };
   try {
     const device = (await runProcess(python, [path.join(repo, 'portal/workers/video_runtime.py'), 'cuda'], { timeout: 20000 })).trim();
     await runProcess(config.ffmpeg || 'ffmpeg', ['-version'], { timeout: 10000 });
@@ -94,6 +94,24 @@ async function processJob(job) {
   try {
     console.log(new Date().toISOString(), '领取任务', job.id, job.backend);
     const evidenceFile = path.join(directory, 'evidence.json');
+    if (job.reanalysis?.state === 'pending') {
+      const stamp = path.join(directory, 'reanalysis-run.txt');
+      const previous = await fsp.readFile(stamp, 'utf8').catch(() => '');
+      if (previous !== job.reanalysis.runId) {
+        await fsp.rm(evidenceFile, { force: true }); await fsp.rm(path.join(directory, 'result.json'), { force: true });
+        await fsp.writeFile(stamp, job.reanalysis.runId);
+      }
+      if (job.reanalysis.mode === 'reuse' && !fs.existsSync(evidenceFile)) {
+        await update('复用已有转写与关键画面 · 无需下载原视频', 60);
+        const { evidence } = await request('/jobs/' + job.id + '/evidence', { lease: job.lease, signal });
+        for (const f of evidence.frames) {
+          if (!/^[a-z0-9.-]+\.jpg$/.test(f.name)) throw new Error('画面文件名无效');
+          await fsp.writeFile(path.join(directory, f.name), Buffer.from(f.data, 'base64'));
+        }
+        evidence.frames = evidence.frames.map(({ data, ...f }) => f);
+        await fsp.writeFile(evidenceFile, JSON.stringify(evidence));
+      }
+    }
     if (!fs.existsSync(evidenceFile)) {
       let input;
       if (job.localInput) {
@@ -134,7 +152,7 @@ async function processJob(job) {
     }
     await update('正在总结', 65);
     const defaults = config[job.backend === 'codex' ? 'codex' : 'openai'] || {};
-    const selection = JSON.stringify({ id: job.id, title: job.title, topic: job.topic, tags: job.tags, sourceUrl: job.sourceUrl, backend: job.backend, modelSettings: job.modelSettings,
+    const selection = JSON.stringify({ id: job.id, runId: job.reanalysis?.runId || '', title: job.title, topic: job.topic, tags: job.tags, sourceUrl: job.sourceUrl, backend: job.backend, modelSettings: job.modelSettings,
       workerModel: { model: defaults.model || '', reasoningEffort: defaults.reasoningEffort || '', vision: defaults.vision } });
     let result;
     try {
@@ -144,7 +162,7 @@ async function processJob(job) {
     if (!result) {
       const summary = await summarizeVideo({...config,onCodexCall:input=>request('/jobs/'+job.id+'/codex',{data:input,lease:job.lease,signal})}, job, evidence, directory, update, signal);
       const frames = [];
-      for (const f of evidence.frames) frames.push({ time: f.time, data: (await fsp.readFile(path.join(directory, f.name))).toString('base64') });
+      for (const f of evidence.frames) frames.push({ name: f.name, time: f.time, data: (await fsp.readFile(path.join(directory, f.name))).toString('base64') });
       result = { ...evidence, ...summary, frames, workerSelection: selection };
     }
     await fsp.writeFile(path.join(directory, 'result.json'), JSON.stringify(result), { mode: 0o600 });

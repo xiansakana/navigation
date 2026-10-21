@@ -97,7 +97,7 @@ export async function runProcess(binary, args, options = {}) {
   if (String(args[0]).endsWith('video_evidence.py')) {
     await fetch(process.env.PIPELINE_TEST_ORIGIN + '/test/media');
     const directory = args[args.indexOf('--output') + 1];
-    await fs.writeFile(path.join(directory, 'evidence.json'), JSON.stringify({duration:30, language:'zh', transcript:[], frames:[]}));
+    await fs.writeFile(path.join(directory, 'evidence.json'), JSON.stringify({duration:30, language:'zh', transcript:[{start:0,end:5,text:'Saved original transcript'}], frames:[]}));
     options.onLine(JSON.stringify({stage:'素材提取完成',progress:65}));
   }
   return '--ignore-user-config --ignore-rules';
@@ -128,6 +128,14 @@ export async function summarizeVideo(config, job) {
     await waitFor(() => store.get('a', ids[0]).status === 'ready');
     assert.equal(media.length, 3, 'completed media is reused');
     assert.equal(summaries.length, 3, 'completed summary is resubmitted without another model call');
+    const before = store.get('a', ids[2]);
+    store.reanalysis.schedule('a', before.id, before.revision, 'reuse', store.settings('a'));
+    await waitFor(() => summaries.length === 4);
+    assert.equal(media.length, 3, 'reanalysis never downloads or transcribes the original video');
+    assert.equal(store.reanalysis.list('a', before.id)[0].notes, before.notes);
+    summaries[3].end('ok'); await waitFor(() => store.get('a', before.id).status === 'ready');
+    assert.equal(store.get('a', before.id).reanalysis.state, 'done');
+    assert.ok(store.get('a', before.id).revision > before.revision);
     assert.deepEqual(errors, []);
   } finally {
     if (child && child.exitCode == null) { const exit = once(child, 'exit'); child.kill(); await exit; }
