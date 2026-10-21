@@ -86,6 +86,17 @@ test('explicit comparison subjects separate same-pillar people and join their ma
   assert.equal(matching.length, 1); assert.equal(matching[0].gender, 1);
   const ambiguous = extractKnowledgeCases('四柱：壬辰、壬寅、甲寅、庚午。\n' + text);
   assert.equal(ambiguous.length, 3); assert.match(ambiguous[0].validation, /未明确归属/);
+  const neighbour = extractKnowledgeCases('四柱：壬辰、壬寅、甲寅、庚午。\n对比对象：女方\n女命四柱：丁巳、辛亥、壬午、乙巳。');
+  assert.equal(neighbour[0].subject, ''); assert.equal(neighbour[1].subject, '女方');
+  const db = new Database(':memory:');
+  try {
+    const knowledge = createKnowledgeStore(db), indexed = createKnowledgeCaseStore(db);
+    ready(db, knowledge, 'a', text);
+    const result = indexed.list('a');
+    assert.equal(result.total, 2); assert.equal(result.uniqueCharts, 1);
+    assert.deepEqual(result.cases.map(c => c.subject).sort(), ['女方', '男方']);
+    assert.equal(indexed.list('b').total, 0);
+  } finally { db.close(); }
 });
 
 test('read 元男/元女 from the day pillar cell in four-column and labelled-row tables', () => {

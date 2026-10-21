@@ -31,14 +31,10 @@ function genderEvidence(lines, offsets, index, start, end) {
   return evidence;
 }
 function resolveGender(evidence) { const values = new Set(evidence.map(e => e.gender)); return { gender: values.size === 1 ? [...values][0] : null, genderConflict: values.size > 1 }; }
-function comparisonSubject(lines, index, start, end) {
+function comparisonSubject(lines, index, start) {
   const candidates = [];
   for (let j = index - 1; j >= Math.max(start, index - 4); j--) {
     if (/四柱|八字|^\s*#/.test(lines[j]) && j !== start) break;
-    candidates.push(lines[j]);
-  }
-  for (let j = index; j < Math.min(end, index + 5); j++) {
-    if (j > index && /四柱|八字|^\s*#/.test(lines[j])) break;
     candidates.push(lines[j]);
   }
   for (const line of candidates) {
@@ -96,7 +92,7 @@ export function extractKnowledgeCases(notes) {
     const title = heading >= 0 ? clean(lines[heading].replace(/^#+\s*/, '')).slice(0, 160) : '八字案例 ' + values.join(' ');
     const valid = values.every(p => flowPillar(p, values[2][0]));
     const reference = { title, offset: offsets[i], sectionOffset: offsets[start], anchor: scope?.anchor || '' };
-    candidates.push({ baseKey: values.join(''), subject: comparisonSubject(lines, i, start, end), title, pairs: values, ...gender, genderEvidence: evidence, context, offset: offsets[i], occurrences: [offsets[i]], references: [reference],
+    candidates.push({ baseKey: values.join(''), subject: comparisonSubject(lines, i, start), title, pairs: values, ...gender, genderEvidence: evidence, context, offset: offsets[i], occurrences: [offsets[i]], references: [reference],
       anchor: scope?.anchor || '', excerptTruncated: contextEnd - contextStart > 30000,
       timeLabel: context.match(/(?:讲解[：:]?\s*)?(\d{1,2}:\d{2}(?::\d{2})?(?:[—–~-]\d{1,2}:\d{2}(?::\d{2})?)?)/)?.[1] || '',
       validation: valid ? '四柱干支有效；自动提取，尚未人工核对' : '存在无效干支，需对照原文核对' });
@@ -198,7 +194,7 @@ export function createKnowledgeCaseStore(db) {
       // Both tables have notes; evaluate advanced clauses against the derived case only.
       for (const clause of advanced.clauses) where += ' AND (' + clause.replace(/\bnotes\b/g, 'c.notes') + ')';
       args.push(...advanced.args);
-      const counts = db.prepare('SELECT count(*) AS total,count(DISTINCT c.case_key) AS uniqueCharts' + where).get(...args);
+      const counts = db.prepare('SELECT count(*) AS total,count(DISTINCT substr(c.case_key,1,8)) AS uniqueCharts' + where).get(...args);
       const cases = db.prepare('SELECT c.*,d.title AS document_title,d.topic,d.source_url' + where + ' ORDER BY c.updated_at DESC,c.id LIMIT ? OFFSET ?').all(...args, limit, offset).map(read);
       const documents = db.prepare('SELECT d.id,d.title,count(*) AS count' + joined + ' GROUP BY d.id ORDER BY d.title').all(uid);
       return { cases, ...counts, documents, offset, limit };
