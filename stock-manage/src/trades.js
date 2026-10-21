@@ -1,4 +1,5 @@
 import { tradeAssetType } from '../public/js/trade-asset-type.js';
+import { dateTimeFormatter } from './date-formatters.js';
 import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
 import {
   normalizeSymbol,
@@ -80,7 +81,7 @@ export function undoCashDelta(cashState, trade) {
 export const APP_TIME_ZONE = process.env.STOCK_TZ || 'Asia/Shanghai';
 
 export function zonedDateKey(date = new Date(), timeZone = APP_TIME_ZONE) {
-  return new Intl.DateTimeFormat('en-CA', {
+  return dateTimeFormatter('en-CA', {
     timeZone,
     year: 'numeric',
     month: '2-digit',
@@ -100,7 +101,7 @@ export function tradeCalendarDate(iso, timeZone = APP_TIME_ZONE) {
 export function formatZonedDateTime(iso, timeZone = APP_TIME_ZONE) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso || '');
-  const parts = new Intl.DateTimeFormat('en-GB', {
+  const parts = dateTimeFormatter('en-GB', {
     timeZone,
     year: 'numeric',
     month: '2-digit',

@@ -1,5 +1,7 @@
+import { dateTimeFormatter } from './date-formatters.js';
+
 function etParts(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-US', {
+  const parts = dateTimeFormatter('en-US', {
     timeZone: 'America/New_York', weekday: 'short', hour12: false,
     hour: '2-digit', minute: '2-digit'
   }).formatToParts(date);

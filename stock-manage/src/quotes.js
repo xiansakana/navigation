@@ -5,6 +5,7 @@ import {
   normalizeSymbol
 } from './markets.js';
 import { yoloMarketDate } from './yolo-time.js';
+import { dateTimeFormatter } from './date-formatters.js';
 import { fetchQuoteResource } from '../../shared/quote-network.js';
 import { createForeignExchangeService } from '../../shared/foreign-exchange.js';
 
@@ -628,7 +629,7 @@ export function createQuoteService(config) {
   }
 
   function qqqChainDate() {
-    return new Intl.DateTimeFormat('en-CA', {
+    return dateTimeFormatter('en-CA', {
       timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit'
     }).format(new Date());
   }
@@ -637,7 +638,7 @@ export function createQuoteService(config) {
     const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
     if (!match) return null;
     const wallClockUtc = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]));
-    const parts = new Intl.DateTimeFormat('en-US', {
+    const parts = dateTimeFormatter('en-US', {
       timeZone: 'America/New_York', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit',
       hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
     }).formatToParts(new Date(wallClockUtc));
