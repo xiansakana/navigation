@@ -18,3 +18,26 @@ test('opposite screen markers for the same pillars preserve a visible conflict',
   const c = extractKnowledgeCases(visualChartAppendix(charts, 'a'.repeat(32)))[0];
   assert.equal(c.gender, null); assert.equal(c.genderConflict, true);
 });
+
+test('two comparison charts on one frame stay distinct even with identical natal pillars', () => {
+  const charts = ['元男', '元女'].map((marker, i) => ({ pillars, marker, frame: 'frame-9.jpg', subject: i ? '女方' : '男方', position: i ? '右盘' : '左盘', relation: 'comparison' }));
+  const parsed = parseVisualEvidence(JSON.stringify({ notes: '同屏合婚对比', charts }), frames);
+  assert.equal(parsed.charts.length, 2);
+  const appendix = visualChartAppendix(parsed.charts, 'a'.repeat(32)), cases = extractKnowledgeCases(appendix);
+  assert.equal(cases.length, 2);
+  assert.deepEqual(cases.map(c => c.gender), [1, 0]);
+  assert.ok(cases.every(c => !c.genderConflict));
+  assert.deepEqual(cases.map(c => c.subject), ['男方', '女方']);
+  assert.match(appendix, /左盘/); assert.match(appendix, /右盘/);
+  assert.equal((appendix.match(/frames\/frame-9.jpg/g) || []).length, 2);
+});
+
+test('same-person versions retain contradictions and unknown relations never fabricate comparison identities', () => {
+  for (const relation of ['same_person_versions', 'unknown', 'invalid']) {
+    const charts = ['元男', '元女'].map((marker, i) => ({ pillars, marker, frame: 'frame-9.jpg', subject: '命主', position: i ? '右盘' : '左盘', relation }));
+    const parsed = parseVisualEvidence(JSON.stringify({ notes: '不同版本', charts }), frames);
+    const appendix = visualChartAppendix(parsed.charts, 'a'.repeat(32));
+    assert.doesNotMatch(appendix, /对比对象：/);
+    assert.equal(extractKnowledgeCases(appendix)[0].genderConflict, true);
+  }
+});

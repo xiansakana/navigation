@@ -77,6 +77,17 @@ test('later visual proof fills unknown gender while contradictory proof stays un
   assert.equal(conflict.genderEvidence.length, 2);
 });
 
+test('explicit comparison subjects separate same-pillar people and join their matching visual proof', () => {
+  const text = '## 案例一 男方\n对比对象：男方\n男命四柱：壬辰、壬寅、甲寅、庚午。\n## 案例二 女方\n对比对象：女方\n女命四柱：壬辰、壬寅、甲寅、庚午。\n## 画面案例 男方\n对比对象：男方\n四柱：壬辰、壬寅、甲寅、庚午。\n画面性别标记：元男。';
+  const cases = extractKnowledgeCases(text);
+  assert.equal(cases.length, 2); assert.equal(cases[0].gender, 1); assert.equal(cases[1].gender, 0);
+  assert.equal(cases[0].references.length, 2); assert.ok(cases.every(c => !c.genderConflict));
+  const matching = extractKnowledgeCases('## 案例一\n四柱：壬辰、壬寅、甲寅、庚午。\n## 画面案例 男方\n对比对象：男方\n四柱：壬辰、壬寅、甲寅、庚午。\n画面性别标记：元男。');
+  assert.equal(matching.length, 1); assert.equal(matching[0].gender, 1);
+  const ambiguous = extractKnowledgeCases('四柱：壬辰、壬寅、甲寅、庚午。\n' + text);
+  assert.equal(ambiguous.length, 3); assert.match(ambiguous[0].validation, /未明确归属/);
+});
+
 test('read 元男/元女 from the day pillar cell in four-column and labelled-row tables', () => {
   const a = extractKnowledgeCases('| 年柱 | 月柱 | 日柱 | 时柱 |\n|---|---|---|---|\n|壬辰|壬寅|甲寅|庚午|\n|偏印|偏印|元男|七杀|')[0];
   assert.equal(a.gender, 1); assert.match(a.genderEvidence[0].text, /元男/);

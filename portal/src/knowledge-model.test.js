@@ -103,6 +103,29 @@ test('visual gender evidence survives final summarization even when the model om
 });
 
 
+test('comparison identities pass through visual extraction, transcript notes and final summary without merging people', async () => {
+  const prompts = [];
+  const server = http.createServer(async (req, res) => {
+    const chunks = []; for await (const c of req) chunks.push(c);
+    const body = JSON.parse(Buffer.concat(chunks)), prompt = body.messages[1].content[0].text; prompts.push(prompt);
+    const charts = ['元男', '元女'].map((marker, i) => ({ frame: 'frame-1.jpg', pillars: ['壬辰', '壬寅', '甲寅', '庚午'], marker, subject: i ? '女方' : '男方', position: i ? '右盘' : '左盘', relation: 'comparison' }));
+    const content = prompt.includes('只输出JSON对象') ? JSON.stringify({ notes: '左右两盘对比，各自讲解。', charts }) : '## 命盘对比\n分别保留男方与女方的分析，具体四柱见画面依据。';
+    res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content } }] }));
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge-comparison-'));
+  try {
+    await fs.writeFile(path.join(directory, 'frame-1.jpg'), Buffer.from([255, 216, 255, 1]));
+    const result = await summarizeVideo({ openai: { baseUrl: 'http://127.0.0.1:' + server.address().port, model: 'test', vision: true } }, { id: 'a'.repeat(32), title: '对比案例', backend: 'openai' }, { frames: [{ name: 'frame-1.jpg', time: 10 }], transcript: [{ start: 0, end: 5, text: '比较左右命盘' }], duration: 60 }, directory, async () => {});
+    assert.ok(prompts.every(p => p.includes('不能默认都是同一人的冲突版本')));
+    assert.match(prompts.at(-1), /逐盘结构化画面依据/);
+    assert.match(prompts.at(-1), /女方/); assert.match(prompts.at(-1), /男方/);
+    const cases = extractKnowledgeCases(result.notes);
+    assert.equal(cases.length, 2); assert.deepEqual(cases.map(c => c.gender), [1, 0]);
+    assert.ok(cases.every(c => !c.genderConflict));
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await fs.rm(directory, { recursive: true, force: true }); }
+});
+
 test('ephemeral CLI calls report durable start/completion and thread identity without enabling tools',async()=>{
   const directory=await fs.mkdtemp(path.join(os.tmpdir(),'knowledge-codex-calls-')),seen=[];
   const config={codex:{model:'test'},onCodexCall:async event=>seen.push({...event})};

@@ -3,7 +3,7 @@ import { flowPillar } from '../public/mingli/chart-presentation.js';
 import { STEMS, BRANCHES, PILLARS } from '../public/mingli/filter-options.js';
 import { caseFilterSql } from './mingli-filters.js';
 
-const VERSION = 'knowledge-bazi-v3';
+const VERSION = 'knowledge-bazi-v4';
 const hash = text => crypto.createHash('sha256').update(text).digest('hex');
 const pair = `[${STEMS}][${BRANCHES}]`;
 const clean = text => text.replace(/[*`_]/g, '');
@@ -31,6 +31,22 @@ function genderEvidence(lines, offsets, index, start, end) {
   return evidence;
 }
 function resolveGender(evidence) { const values = new Set(evidence.map(e => e.gender)); return { gender: values.size === 1 ? [...values][0] : null, genderConflict: values.size > 1 }; }
+function comparisonSubject(lines, index, start, end) {
+  const candidates = [];
+  for (let j = index - 1; j >= Math.max(start, index - 4); j--) {
+    if (/四柱|八字|^\s*#/.test(lines[j]) && j !== start) break;
+    candidates.push(lines[j]);
+  }
+  for (let j = index; j < Math.min(end, index + 5); j++) {
+    if (j > index && /四柱|八字|^\s*#/.test(lines[j])) break;
+    candidates.push(lines[j]);
+  }
+  for (const line of candidates) {
+    const match = /^\s*(?:[-+>]\s*)?对比对象\s*[:：]\s*(.+?)\s*$/.exec(clean(line));
+    if (match && !/待核对|不明|未确认/.test(match[1])) return match[1].replace(/[^\p{L}\p{N} （）()-]/gu, '').trim().slice(0, 60);
+  }
+  return '';
+}
 
 // Extract only explicitly ordered natal pillars. Dates, luck rows and ASR fragments are not inferred.
 export function extractKnowledgeCases(notes) {
@@ -46,7 +62,7 @@ export function extractKnowledgeCases(notes) {
     }
     scopes[i] = stack.findLast(s => s.isCase);
   }
-  const found = new Map();
+  const candidates = [];
   for (let i = 0; i < lines.length; i++) {
     const line = clean(lines[i]), next = lines.slice(i, i + 4).map(clean).join('\n');
     let values;
@@ -70,7 +86,6 @@ export function extractKnowledgeCases(notes) {
       }
     }
     if (!values) continue;
-    const key = values.join(''), previous = found.get(key);
     const scope = scopes[i], heading = scope?.index ?? -1;
     const start = heading < 0 ? Math.max(0, i - 2) : heading;
     const end = scope?.end ?? Math.min(lines.length, i + 24);
@@ -81,21 +96,33 @@ export function extractKnowledgeCases(notes) {
     const title = heading >= 0 ? clean(lines[heading].replace(/^#+\s*/, '')).slice(0, 160) : '八字案例 ' + values.join(' ');
     const valid = values.every(p => flowPillar(p, values[2][0]));
     const reference = { title, offset: offsets[i], sectionOffset: offsets[start], anchor: scope?.anchor || '' };
-    if (previous) {
-      previous.occurrences.push(offsets[i]);
-      if (!previous.references.some(r => r.sectionOffset === reference.sectionOffset)) {
-        previous.references.push(reference);
-        const combined = previous.context + '\n\n--- 同一四柱的另一处来源 ---\n\n' + context;
-        previous.context = combined.slice(0, 30000); previous.excerptTruncated ||= combined.length > 30000;
-      }
-      previous.genderEvidence.push(...evidence);
-      Object.assign(previous, resolveGender(previous.genderEvidence));
-      continue;
-    }
-    found.set(key, { key, title, pairs: values, ...gender, genderEvidence: evidence, context, offset: offsets[i], occurrences: [offsets[i]], references: [reference],
+    candidates.push({ baseKey: values.join(''), subject: comparisonSubject(lines, i, start, end), title, pairs: values, ...gender, genderEvidence: evidence, context, offset: offsets[i], occurrences: [offsets[i]], references: [reference],
       anchor: scope?.anchor || '', excerptTruncated: contextEnd - contextStart > 30000,
       timeLabel: context.match(/(?:讲解[：:]?\s*)?(\d{1,2}:\d{2}(?::\d{2})?(?:[—–~-]\d{1,2}:\d{2}(?::\d{2})?)?)/)?.[1] || '',
       validation: valid ? '四柱干支有效；自动提取，尚未人工核对' : '存在无效干支，需对照原文核对' });
+  }
+  const subjects = new Map(), found = new Map();
+  for (const item of candidates) {
+    if (!subjects.has(item.baseKey)) subjects.set(item.baseKey, new Set());
+    if (item.subject) subjects.get(item.baseKey).add(item.subject);
+  }
+  for (const item of candidates) {
+    const names = subjects.get(item.baseKey);
+    const subject = item.subject || (names.size === 1 ? [...names][0] : '');
+    const key = item.baseKey + (subject ? ':' + subject : ''), previous = found.get(key);
+    if (previous) {
+      previous.occurrences.push(...item.occurrences);
+      if (!previous.references.some(r => r.sectionOffset === item.references[0].sectionOffset)) {
+        previous.references.push(...item.references);
+        const combined = previous.context + '\n\n--- 同一四柱的另一处来源 ---\n\n' + item.context;
+        previous.context = combined.slice(0, 30000); previous.excerptTruncated ||= combined.length > 30000;
+      }
+      previous.genderEvidence.push(...item.genderEvidence);
+      Object.assign(previous, resolveGender(previous.genderEvidence));
+      continue;
+    }
+    found.set(key, { ...item, key, subject, title: subject ? item.title + ' · ' + subject : item.title,
+      validation: item.validation + (!subject && names.size > 1 ? '；有多个对比对象，此处未明确归属，需核对' : '') });
   }
   return [...found.values()].map(item => ({ ...item, validation: item.validation + (item.genderConflict ? '；性别依据冲突，需核对' : '') }));
 }
@@ -134,7 +161,7 @@ export function createKnowledgeCaseStore(db) {
       for (const item of cases) {
         const id = hash(row.user_id + ':' + row.id + ':' + item.key).slice(0, 32), now = new Date().toISOString();
         const chart = { dayMaster: item.pairs[2][0], pillars: item.pairs.map((p, i) => ({ ...(flowPillar(p, item.pairs[2][0]) || { ganZhi: p, gan: p[0], zhi: p[1] }), label: PILLARS[i] })) };
-        const metadata = { validation: item.validation, genderEvidence: item.genderEvidence, genderConflict: item.genderConflict, timeLabel: item.timeLabel, offset: item.offset, anchor: item.anchor, excerptTruncated: item.excerptTruncated, occurrences: item.occurrences, references: item.references, tags: JSON.parse(row.tags_json), parserVersion: VERSION };
+        const metadata = { subject: item.subject, validation: item.validation, genderEvidence: item.genderEvidence, genderConflict: item.genderConflict, timeLabel: item.timeLabel, offset: item.offset, anchor: item.anchor, excerptTruncated: item.excerptTruncated, occurrences: item.occurrences, references: item.references, tags: JSON.parse(row.tags_json), parserVersion: VERSION };
         db.prepare(`INSERT INTO mingli_knowledge_cases(id,user_id,document_id,case_key,title,birth_json,chart_json,notes,metadata_json,created_at,updated_at)
           VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,document_id,case_key) DO UPDATE SET title=excluded.title,birth_json=excluded.birth_json,
           chart_json=excluded.chart_json,notes=excluded.notes,metadata_json=excluded.metadata_json,updated_at=excluded.updated_at`)
