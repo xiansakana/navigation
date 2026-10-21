@@ -19,6 +19,7 @@ import { retryKnowledgeDocument } from './knowledge-retry.js';
 import { failureMessage } from '../public/knowledge/failure.js';
 import { reanalysisTargets, scheduleReanalysis } from './knowledge-reanalysis.js';
 import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
+import { ASR_FIELDS } from './knowledge-asr.js';
 
 const root = () => path.resolve(process.env.KNOWLEDGE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/knowledge'));
 export function knowledgeDirectory(id) {
@@ -93,7 +94,8 @@ export function validateKnowledgeResult(raw) {
   const transcript = raw.transcript.map(s => {
     if (!Number.isFinite(s.start) || !Number.isFinite(s.end) || s.start < 0 || s.start < previous || s.end < s.start || s.end > raw.duration + 2 || typeof s.text !== 'string' || s.text.length > 12000) throw new Error('转写时间戳或文本无效');
     previous = s.start;
-    return { start: s.start, end: s.end, text: s.text };
+    if (s.rawText !== undefined && (typeof s.rawText !== 'string' || s.rawText.length > 12000)) throw new Error('原始转写文字无效');
+    return { start: s.start, end: s.end, text: s.rawText ?? s.text };
   });
   if (!Array.isArray(raw.frames) || raw.frames.length > 36) throw new Error('画面数量超过限制');
   const frames = raw.frames.map((f, i) => {
@@ -270,7 +272,7 @@ async function knowledgeApi(req, res, url, session, json) {
   if (document && ['source', 'frames'].includes(document[2]) && !canKnowledge(session, document[2] + ':view')) return json(res, 403, { ok: false, error: '无权查看此原始材料' });
   if (!['GET', 'HEAD'].includes(method) && (!sameOriginWrite(req))) return json(res, 403, { ok: false, error: '不允许跨站写入' });
   const store = createKnowledgeStore(getDatabase()), uid = session.userId;
-  const visible = d => d && ({ ...d, transcript: canKnowledge(session, 'transcript:view') ? d.transcript : [], frames: canKnowledge(session, 'frames:view') ? d.frames : [] });
+  const visible = d => d && ({ ...d, transcript: canKnowledge(session, 'transcript:view') ? d.transcript.map(({ rawText, ...s }) => ({ ...s, ...(canKnowledge(session, 'transcript:script:view') ? { rawText } : {}) })) : [], frames: canKnowledge(session, 'frames:view') ? d.frames : [] });
   try {
     if (route.startsWith('/upload-queue')) {
       const queue = createUploadQueue(getDatabase());
@@ -278,7 +280,7 @@ async function knowledgeApi(req, res, url, session, json) {
       if (!route.endsWith('/cancel') && !['import:edit', 'upload:edit', 'process:edit'].every(a => canKnowledge(session, a))) return json(res, 403, { ok: false, error: '需要链接导入、上传和生成笔记权限' });
       if (route === '/upload-queue' && method === 'POST') {
         const input = await body(req, 180000), defaults = store.settings(uid);
-        const result = queue.add(uid, input, { ...defaults, quality: bilibiliAccount(getDatabase()).public(uid), modelSettings: Object.fromEntries(MODEL_FIELDS.map(key => [key, defaults[key]])) });
+        const result = queue.add(uid, input, { ...defaults, quality: bilibiliAccount(getDatabase()).public(uid), modelSettings: Object.fromEntries([...MODEL_FIELDS, ...ASR_FIELDS].map(key => [key, defaults[key]])) });
         if (!canKnowledge(session, 'notes:view')) result.results = result.results.map(({ documentId, title, ...rest }) => rest);
         return json(res, 202, { ok: true, ...result });
       }
@@ -350,6 +352,7 @@ async function knowledgeApi(req, res, url, session, json) {
     if (route === '/settings' && method === 'PUT') {
       const input = await body(req, 4096);
       if (MODEL_FIELDS.some(key => Object.hasOwn(input, key)) && !canKnowledge(session, 'model:edit')) return json(res, 403, { ok: false, error: '没有模型和强度设置权限' });
+      if (ASR_FIELDS.some(key => Object.hasOwn(input, key)) && !canKnowledge(session, 'asr:edit')) return json(res, 403, { ok: false, error: '没有语音转写设置权限' });
       if (['mediaConcurrency', 'summaryConcurrency'].some(key => Object.hasOwn(input, key)) && !canKnowledge(session, 'concurrency:edit')) return json(res, 403, { ok: false, error: '没有并发设置权限' });
       return json(res, 200, { ok: true, ...store.saveSettings(uid, input) });
     }

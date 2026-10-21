@@ -9,6 +9,7 @@ import { pipelineSettings } from './knowledge-pipeline.js';
 import { storageConfig } from './knowledge-storage.js';
 import { sourceKey, findSourceDuplicate, duplicateSourceError } from './knowledge-source-dedupe.js';
 import { createReanalysisStore } from './knowledge-reanalysis-store.js';
+import { asrSettings, readableTranscript } from './knowledge-asr.js';
 
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
@@ -23,7 +24,7 @@ export function modelSettings(raw, previous = {}) {
     result[key] = value;
   }
   for (const prefix of ['codex', 'api']) if (/^gpt-(6|5\.6)-luna$/.test(result[prefix + 'Model']) && result[prefix + 'Effort'] === 'ultra') throw new Error('Luna最高支持max，请降低推理强度');
-  return result;
+  return { ...result, ...asrSettings(raw, previous) };
 }
 export const backendName = value => {
   if (!['codex', 'openai'].includes(value)) throw new Error('请选择 Codex CLI 或兼容 API');
@@ -80,7 +81,7 @@ export function createKnowledgeStore(db) {
   const read = row => row && ({ id: row.id, title: row.title, topic: row.topic, tags: JSON.parse(row.tags_json), sourceUrl: row.source_url,
     visibility: row.visibility || 'private', originalName: row.original_name, bytes: row.byte_size, mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, modelSettings: JSON.parse(row.model_settings_json || '{}'), status: row.status,
     stage: row.stage, reanalysis: reanalysis.get(row.user_id, row.id), processingPhase: row.processing_phase || '', progress: row.progress, error: row.error, duration: row.duration, language: row.language, notes: row.notes,
-    transcript: JSON.parse(row.transcript_json), frames: JSON.parse(row.frames_json), provenance: JSON.parse(row.provenance_json),
+    transcript: readableTranscript(JSON.parse(row.transcript_json)), frames: JSON.parse(row.frames_json), provenance: JSON.parse(row.provenance_json),
     storage: sources.public(row.user_id, row.id), importState: imports.get(row.user_id, row.id)?.state || '',
     sourceMedia: JSON.parse(imports.get(row.user_id, row.id)?.media_json || '{}'), revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at });
   const get = (uid, key) => { const row = getRow(uid, key); return row && row.status !== 'deleting' ? read(row) : null; };

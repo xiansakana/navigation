@@ -13,6 +13,8 @@ const DEFAULT_PERSONAL_PERMISSIONS = Object.freeze([
     'knowledge:storage:edit',
     'knowledge:source:view',
     'knowledge:transcript:view',
+    'knowledge:transcript:script:view',
+    'knowledge:asr:edit',
     'knowledge:frames:view',
     'knowledge:upload:edit',
     'knowledge:import:edit',

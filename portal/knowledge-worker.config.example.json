@@ -5,7 +5,7 @@
   "workDir": "",
   "python": "python3",
   "ffmpeg": "ffmpeg",
-  "asr": { "model": "small", "device": "cpu", "threads": 2, "language": "", "modelCache": "" },
+  "asr": { "model": "turbo", "device": "cuda", "threads": 2, "language": "zh", "modelCache": "" },
   "codex": { "binary": "codex", "model": "", "proxyUrl": "" },
   "openai": {
     "baseUrl": "https://api.openai.com/v1",

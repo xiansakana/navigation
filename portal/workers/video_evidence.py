@@ -44,9 +44,11 @@ def main():
     parser.add_argument('--input', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--ffmpeg', default='ffmpeg')
-    parser.add_argument('--model', default='small')
+    parser.add_argument('--model', default='turbo')
+    parser.add_argument('--profile', choices=['general', 'bazi'], default='general')
+    parser.add_argument('--hotwords', default='')
     parser.add_argument('--model-cache', default='')
-    parser.add_argument('--device', choices=['cpu', 'cuda', 'auto'], default='cpu')
+    parser.add_argument('--device', choices=['cuda'], default='cuda')
     parser.add_argument('--language', default='')
     parser.add_argument('--threads', type=int, default=2)
     parser.add_argument('--max-duration', type=int, default=14400)
@@ -55,9 +57,9 @@ def main():
     import av
     import numpy as np
     from PIL import Image, ImageChops, ImageStat
-    from faster_whisper import WhisperModel, BatchedInferencePipeline
+    from faster_whisper import WhisperModel
     import ctranslate2
-    from video_runtime import prepare_cuda
+    from video_runtime import prepare_cuda, speech_prompt, gpu_asr_slot
     handles = prepare_cuda()
     out = pathlib.Path(args.output).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -113,49 +115,56 @@ def main():
         emit('提取音频', 12)
         audio_path = out / 'audio.wav'
         command(ff + ['-vn', '-ac', '1', '-ar', '16000', '-threads', '1', str(audio_path)])
-        emit('加载语音模型（首次需下载）', 15)
-        model_started = perf_counter()
-        device = args.device
-        if device == 'auto':
-            device = 'cuda' if ctranslate2.get_cuda_device_count() else 'cpu'
-        model = WhisperModel(args.model, device=device, compute_type='float16' if device == 'cuda' else 'int8',
-                             cpu_threads=max(1, min(8, args.threads)), download_root=args.model_cache or None)
-        model_seconds = perf_counter() - model_started
-        asr_started = perf_counter()
-        hardware = 'GPU CUDA' if device == 'cuda' else 'CPU'
-        emit('语音转写 · ' + hardware + ' · 准备音频批次', 18)
-        # Decode WAV ourselves to avoid PyAV version-specific metadata options.
-        pipeline = BatchedInferencePipeline(model=model)
-        # Bounded 10-minute windows prevent multi-hour WAVs from exhausting server RAM.
-        with wave.open(str(audio_path), 'rb') as wav:
-            total = wav.getnframes()
-            start = 0
-            while start < total:
-                wav.setpos(start)
-                audio = np.frombuffer(wav.readframes(16000 * 600), dtype=np.int16).astype(np.float32) / 32768.0
-                offset = start / 16000
-                segments, info = pipeline.transcribe(audio, language=args.language or detected or None,
-                    batch_size=4 if device == 'cuda' else 1, beam_size=3, vad_filter=True,
-                    repetition_penalty=1.15, no_repeat_ngram_size=4, condition_on_previous_text=False)
-                detected = info.language
-                for segment in segments:
-                    absolute_start, absolute_end = offset + segment.start, offset + segment.end
-                    append_segment(transcript, absolute_start, absolute_end, segment.text, duration)
-                    emit(f'语音转写 · {hardware} · {clock(absolute_end)}/{clock(duration)} · 已用{clock(perf_counter() - asr_started)}',
-                         18 + min(45, int(absolute_end / duration * 45)))
-                if start + len(audio) >= total:
-                    break
-                start += 16000 * 598  # overlap: skip fully covered segments, retain new speech
-        emit('语音转写完成 · ' + hardware, 63, metrics={
-            'device': device, 'audioSeconds': round(duration, 3), 'modelLoadSeconds': round(model_seconds, 3),
-            'asrSeconds': round(perf_counter() - asr_started, 3), 'segments': len(transcript)})
-        audio_path.unlink(missing_ok=True)
+        with gpu_asr_slot(lambda: emit('等待GPU转写槽位 · 防止多模型占满显存', 15)):
+            emit('加载语音模型 ' + args.model + '（首次需下载）', 15)
+            model_started = perf_counter()
+            device = args.device
+            if not ctranslate2.get_cuda_device_count():
+                raise RuntimeError('GPU不可用，任务需等待GPU恢复后重试；不允许回退CPU')
+            model = WhisperModel(args.model, device=device, compute_type='int8_float16',
+                                 cpu_threads=max(1, min(8, args.threads)), download_root=args.model_cache or None)
+            model_seconds = perf_counter() - model_started
+            asr_started = perf_counter()
+            hardware = 'GPU CUDA' if device == 'cuda' else 'CPU'
+            emit('语音转写 · ' + hardware + ' · 准备音频', 18)
+            # Decode WAV ourselves to avoid PyAV version-specific metadata options.
+            # Bounded terminology context, without duplicating it as hotwords.
+            # Sequential decoding avoids observed batch omissions on dense speech.
+            prompt_tokens = model.hf_tokenizer.encode(' ' + speech_prompt(args.profile, args.hotwords), add_special_tokens=False).ids[:96]
+            # Bounded 10-minute windows prevent multi-hour WAVs from exhausting server RAM.
+            with wave.open(str(audio_path), 'rb') as wav:
+                total = wav.getnframes()
+                start = 0
+                while start < total:
+                    wav.setpos(start)
+                    audio = np.frombuffer(wav.readframes(16000 * 600), dtype=np.int16).astype(np.float32) / 32768.0
+                    offset = start / 16000
+                    if not detected:
+                        detected = model.detect_language(audio=audio, vad_filter=True)[0]
+                    segments, info = model.transcribe(audio, language=args.language or detected or None,
+                        beam_size=5, vad_filter=True,
+                        hotwords=model.hf_tokenizer.decode(prompt_tokens) if (args.language or detected) == 'zh' else None,
+                        temperature=0, repetition_penalty=1.0, no_repeat_ngram_size=0, condition_on_previous_text=False)
+                    detected = info.language
+                    for segment in segments:
+                        absolute_start, absolute_end = offset + segment.start, offset + segment.end
+                        append_segment(transcript, absolute_start, absolute_end, segment.text, duration)
+                        emit(f'语音转写 · {hardware} · {clock(absolute_end)}/{clock(duration)} · 已用{clock(perf_counter() - asr_started)}',
+                             18 + min(45, int(absolute_end / duration * 45)))
+                    if start + len(audio) >= total:
+                        break
+                    start += 16000 * 598  # overlap: skip fully covered segments, retain new speech
+            emit('语音转写完成 · ' + hardware, 63, metrics={
+                'device': device, 'audioSeconds': round(duration, 3), 'modelLoadSeconds': round(model_seconds, 3),
+                'asrSeconds': round(perf_counter() - asr_started, 3), 'segments': len(transcript)})
+            audio_path.unlink(missing_ok=True)
+            del model
         if not transcript:
             warnings.append('未识别到有效语音；笔记仅能依据抽取画面。')
     else:
         warnings.append('视频没有音轨；笔记仅能依据抽取画面。')
     result = {'duration': duration, 'language': detected, 'frames': frames, 'transcript': transcript,
-              'asrModel': args.model, 'warnings': warnings}
+              'asrModel': args.model, 'asrProfile': args.profile, 'warnings': warnings}
     (out / 'evidence.json').write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
     emit('素材提取完成', 65, metrics={'extractionSeconds': round(perf_counter() - started_at, 3)})
 

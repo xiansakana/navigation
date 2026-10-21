@@ -68,7 +68,8 @@ test('reanalysis previews, queues once, reuses evidence, preserves old images an
   store.heartbeatWorker('a', { ...oldWorker, capabilities: { ...oldWorker.capabilities, reanalysis: { version: 1 } } });
   const job = store.claim('a', ['codex'], 'gpu'); assert.equal(job.reanalysis.mode, 'reuse');
   const evidence = await call('/worker/jobs/' + doc.id + '/evidence', { token, lease: job.lease });
-  assert.deepEqual(evidence.payload.evidence.transcript, original.transcript);
+  assert.deepEqual(evidence.payload.evidence.transcript.map(({ rawText, ...s }) => s), original.transcript);
+  assert.equal(evidence.payload.evidence.transcript[0].rawText, original.transcript[0].text);
   assert.equal(evidence.payload.evidence.frames[0].data, oldImage.toString('base64'));
   let versions = (await call(prefix + '/versions')).payload.versions;
   assert.equal(versions.length, 1); assert.equal(versions[0].notes, original.notes); assert.equal(versions[0].transcript, undefined);
@@ -651,4 +652,45 @@ test('worker Codex call reporting requires its own current lease and cannot spoo
   assert.equal((await call(route,{method:'POST',token,lease:job.lease,data})).status,200);
   const row=db.prepare('SELECT * FROM knowledge_codex_calls').get();assert.equal(row.user_id,'a');assert.equal(row.result,'Answer');assert.equal(row.state,'succeeded');
   store.fail('a',d.id,job.lease,'done');assert.equal((await call(route,{method:'POST',token,lease:job.lease,data})).status,409);
+}));
+
+
+test('ASR settings are isolated, validated and permission-checked; retries take the current snapshot', async () => fixture(async ({ call, store }) => {
+  assert.equal(store.settings('a').asrModel, 'turbo');
+  const limited = { userId: 'a', permissions: ['knowledge:view', 'knowledge:settings:edit'] };
+  assert.equal((await call('/settings', { method: 'PUT', session: limited, data: { asrModel: 'turbo' } })).status, 403);
+  const noSettings = { userId: 'a', permissions: ['knowledge:view', 'knowledge:asr:edit'] };
+  assert.equal((await call('/settings', { method: 'PUT', session: noSettings, data: { asrModel: 'turbo' } })).status, 403);
+  for (const data of [{ asrModel: '../../model' }, { asrLanguage: 'invalid' }, { asrProfile: 'invented' }, { asrHotwords: {} }, { asrHotwords: 'x'.repeat(121) }, { asrHotwords: 'a\nb' }]) {
+    assert.equal((await call('/settings', { method: 'PUT', data })).status, 400);
+  }
+  const chosen = { asrModel: 'turbo', asrLanguage: 'zh', asrProfile: 'bazi', asrHotwords: '印绶，禄神' };
+  assert.equal((await call('/settings', { method: 'PUT', data: chosen })).status, 200);
+  assert.equal(store.settings('b').asrHotwords, '');
+  const doc = store.create('a', upload()); store.enqueue('a', doc.id);
+  store.saveSettings('a', { asrModel: 'large-v3' });
+  assert.equal(store.get('a', doc.id).modelSettings.asrModel, 'turbo');
+  store.heartbeatWorker('a', { workerId: 'gpu', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } });
+  const job = store.claim('a', ['codex'], 'gpu');
+  assert.equal(job.modelSettings.asrHotwords, chosen.asrHotwords);
+  store.fail('a', doc.id, job.lease, 'test'); store.retry('a', doc.id, 'codex');
+  assert.equal(store.get('a', doc.id).modelSettings.asrModel, 'large-v3');
+}));
+
+test('existing raw transcripts display in simplified Chinese without modifying evidence or timestamps, and respect permissions', async () => fixture(async ({ call, store, db }) => {
+  const doc = store.create('a', upload());
+  const original = [{ start: 1.125, end: 8.75, text: '乾造與坤造，正印護身，官殺與財星。' }];
+  db.prepare("UPDATE knowledge_documents SET status='ready',transcript_json=?,duration=90 WHERE id=?").run(JSON.stringify(original), doc.id);
+  const prefix = '/documents/' + doc.id;
+  const response = await call(prefix), s = response.payload.document.transcript[0];
+  assert.equal(s.text, '乾造与坤造，正印护身，官杀与财星。');
+  assert.equal(s.rawText, original[0].text); assert.equal(s.start, 1.125); assert.equal(s.end, 8.75);
+  assert.deepEqual(JSON.parse(store.getRow('a', doc.id).transcript_json), original);
+  const session = { userId: 'a', permissions: ['knowledge:view', 'knowledge:notes:view', 'knowledge:transcript:view'] };
+  assert.equal((await call(prefix, { session })).payload.document.transcript[0].rawText, undefined);
+  session.permissions.pop(); assert.deepEqual((await call(prefix, { session })).payload.document.transcript, []);
+  assert.equal((await call(prefix, { session: member('b') })).status, 404);
+  const reused = validateKnowledgeResult(result({ transcript: [s] }));
+  assert.deepEqual(reused.transcript, original);
+  assert.throws(() => validateKnowledgeResult(result({ transcript: [{ ...s, rawText: {} }] })));
 }));

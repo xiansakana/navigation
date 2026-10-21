@@ -11,7 +11,7 @@ import { createNotePager } from './pagination.js?v=1';
 import { failureMessage } from './failure.js?v=1';
 import { createReanalysisPanel } from './reanalysis.js?v=2';
 const $ = id => document.getElementById(id);
-const state = { permissions: [], documents: [], statusCounts: {}, selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, concurrencyDirty: false, resume: null, uploading: false, offset: 0, total: 0 };
+const state = { permissions: [], documents: [], statusCounts: {}, selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, asrDirty: false, concurrencyDirty: false, resume: null, uploading: false, offset: 0, total: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
 const sourcePlayer = createSourcePlayer({ player: $('player'), frame: $('original-frame'), select: $('playback-source'), link: $('original-link'), hint: $('playback-hint'), allowed: () => can('source:view') });
 const text = (id, value) => { $(id).textContent = value || ''; };
@@ -68,6 +68,8 @@ async function settings() {
   }
   $('summary-model').disabled = $('summary-effort').disabled = !can('model:edit') || !can('settings:edit');
   show('model-save', can('model:edit') && can('settings:edit'));
+  show('asr-settings', can('asr:edit') && can('settings:edit'));
+  if (!state.asrDirty) for (const [id, key] of [['asr-model', 'asrModel'], ['asr-language', 'asrLanguage'], ['asr-profile', 'asrProfile'], ['asr-hotwords', 'asrHotwords']]) $(id).value = state.settings[key] || '';
   show('concurrency-settings', can('concurrency:edit') && can('settings:edit'));
   if (!state.concurrencyDirty) {
     $('media-concurrency').value = String(state.settings.mediaConcurrency);
@@ -157,6 +159,18 @@ function renderStorage(d) {
   }
   show('storage-retry', source.state === 'failed' && can('storage:edit'));
 }
+function renderTranscript(d) {
+  text('asr-provenance', `语音模型：${d.provenance.asrModel || '历史记录未保存'} · 语言：${d.language || '未记录'}`);
+  show('transcript-script-label', can('transcript:script:view') && can('transcript:view'));
+  $('transcript').replaceChildren();
+  for (const s of d.transcript) {
+    const row = document.createElement('div'); row.className = 'kb-segment';
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = time(s.start); button.disabled = !can('source:view');
+    button.addEventListener('click', () => { tab('source'); sourcePlayer.seek(s.start); });
+    const p = document.createElement('p'); p.textContent = $('transcript-script').value === 'raw' && can('transcript:script:view') ? s.rawText || s.text : s.text; row.append(button, p); $('transcript').append(row);
+  }
+}
+$('transcript-script').onchange = () => { if (state.current) renderTranscript(state.current); };
 function renderDocument(d) {
   state.current = d; state.editing = false; show('empty', false); show('detail', true); show('edit-form', false); show('tabs', true);
   reanalysisPanel.refresh(d);
@@ -186,13 +200,7 @@ function renderDocument(d) {
     const link = document.createElement('a'); link.href = '#' + h.id; link.textContent = h.textContent; $('outline').append(link);
   });
   sourcePlayer.reset(d);
-  $('transcript').replaceChildren();
-  for (const s of d.transcript) {
-    const row = document.createElement('div'); row.className = 'kb-segment';
-    const button = document.createElement('button'); button.type = 'button'; button.textContent = time(s.start); button.disabled = !can('source:view');
-    button.addEventListener('click', () => { tab('source'); sourcePlayer.seek(s.start); });
-    const p = document.createElement('p'); p.textContent = s.text; row.append(button, p); $('transcript').append(row);
-  }
+  renderTranscript(d);
   $('frames').replaceChildren();
   for (const f of d.frames) {
     const figure = document.createElement('figure'), image = document.createElement('img'), caption = document.createElement('figcaption');
@@ -359,6 +367,17 @@ $('concurrency-save').onclick = async () => {
     text('message', '并发设置已保存，每个工作器独立生效；降低并发不会中断已运行的任务。');
   } catch (e) { error(e); }
   finally { $('concurrency-save').disabled = false; }
+};
+for (const id of ['asr-model', 'asr-language', 'asr-profile', 'asr-hotwords']) $(id).oninput = () => { state.asrDirty = true; };
+$('asr-save').onclick = async () => {
+  if (!can('asr:edit') || !can('settings:edit')) return;
+  $('asr-save').disabled = true;
+  try {
+    await send('/settings', 'PUT', { asrModel: $('asr-model').value, asrLanguage: $('asr-language').value, asrProfile: $('asr-profile').value, asrHotwords: $('asr-hotwords').value.trim() });
+    state.asrDirty = false; await settings();
+    text('message', '语音设置已保存，用于新任务、失败重试和重新提取原视频；复用已有素材不会重新转写。首次使用新模型需要下载，请耐心等待。');
+  } catch (e) { error(e); }
+  finally { $('asr-save').disabled = false; }
 };
 $('model-save').onclick = async () => {
   const prefix = state.settings.backend === 'codex' ? 'codex' : 'api';

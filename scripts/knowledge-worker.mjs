@@ -46,7 +46,7 @@ async function capabilities() {
   try {
     const device = (await runProcess(python, [path.join(repo, 'portal/workers/video_runtime.py'), 'cuda'], { timeout: 20000 })).trim();
     await runProcess(config.ffmpeg || 'ffmpeg', ['-version'], { timeout: 10000 });
-    result.media = { ready: true, model: config.asr?.model || 'small', detail: device };
+    result.media = { ready: true, model: config.asr?.model || 'turbo', detail: device, asrSettingsVersion: 1 };
   } catch { result.media = { ready: false, detail: '请检查 Python 转写依赖和 FFmpeg 路径' }; }
   try {
     const binary = resolveCodexBinary(config.codex?.binary);
@@ -112,6 +112,16 @@ async function processJob(job) {
         await fsp.writeFile(evidenceFile, JSON.stringify(evidence));
       }
     }
+    const speech = job.modelSettings || {};
+    const profile = speech.asrProfile === 'bazi' || (speech.asrProfile || 'auto') === 'auto' && /八字|命理|盲派|四柱|乾造|坤造/.test([job.title, job.topic, ...(job.tags || [])].join(' ')) ? 'bazi' : 'general';
+    const language = speech.asrLanguage === 'auto' ? '' : speech.asrLanguage || config.asr?.language || 'zh';
+    const asrSelection = JSON.stringify({ version: 2, model: speech.asrModel || config.asr?.model || 'turbo', language, profile, hotwords: speech.asrHotwords || '' });
+    if (job.reanalysis?.mode !== 'reuse' && fs.existsSync(evidenceFile)) {
+      const cached = JSON.parse(await fsp.readFile(evidenceFile, 'utf8'));
+      if (cached.asrSelection !== asrSelection) {
+        await fsp.rm(evidenceFile, { force: true }); await fsp.rm(path.join(directory, 'result.json'), { force: true });
+      }
+    }
     if (!fs.existsSync(evidenceFile)) {
       let input;
       if (job.localInput) {
@@ -124,9 +134,10 @@ async function processJob(job) {
         console.log(new Date().toISOString(), '直接使用本机原视频', job.id);
       } else input = await download(job, directory, signal);
       const args = [path.join(repo, 'portal/workers/video_evidence.py'), '--input', input, '--output', directory,
-        '--ffmpeg', config.ffmpeg || 'ffmpeg', '--model', config.asr?.model || 'small', '--device', 'cuda',
+        '--ffmpeg', config.ffmpeg || 'ffmpeg', '--model', speech.asrModel || config.asr?.model || 'turbo', '--device', 'cuda',
+        '--profile', profile, '--hotwords', speech.asrHotwords || '',
         '--threads', String(config.asr?.threads || 2)];
-      if (config.asr?.language) args.push('--language', config.asr.language);
+      if (language) args.push('--language', language);
       if (config.asr?.modelCache) args.push('--model-cache', path.resolve(config.asr.modelCache));
       await runProcess(python, args, { cwd: directory, signal, env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
         timeout: 8 * 3600000, onLine(line) {
@@ -139,6 +150,7 @@ async function processJob(job) {
     }
     if (job.storage?.provider === '115' && job.storage.state === 'ready') await fsp.rm(path.join(directory, 'source'), { force: true });
     const evidence = JSON.parse(await fsp.readFile(evidenceFile, 'utf8'));
+    if (job.reanalysis?.mode !== 'reuse') { evidence.asrSelection = asrSelection; await fsp.writeFile(evidenceFile, JSON.stringify(evidence)); }
     // Persist the handoff before freeing the GPU slot. The same lease and local
     // evidence stay with this worker; no video upload/download is added here.
     await request('/jobs/' + job.id + '/phase', { data: { phase: 'summary_wait' }, lease: job.lease, signal });

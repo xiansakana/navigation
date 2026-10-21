@@ -10,7 +10,7 @@ import { createFileQueue } from '../public/knowledge/file-queue.js';
 import { parseBatchLinks } from '../public/knowledge/queue.js';
 
 const url = i => 'https://www.bilibili.com/video/BV1LTpi69Efh/' + (i > 1 ? '?p=' + i : '');
-const defaults = { backend: 'codex', quality: { quality: 80, strict: true }, modelSettings: { codexModel: 'gpt-6-luna', codexEffort: 'high', apiModel: '', apiEffort: '' } };
+const defaults = { backend: 'codex', quality: { quality: 80, strict: true }, modelSettings: { codexModel: 'gpt-6-luna', codexEffort: 'high', apiModel: '', apiEffort: '', asrModel: 'turbo', asrLanguage: 'zh', asrProfile: 'bazi', asrHotwords: '印绶' } };
 const metadata = async link => ({ sourceUrl: link, title: '视频 ' + link, topic: '命理', tags: ['自动标签'] });
 async function fixture(fn) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge-submission-'));
@@ -42,6 +42,7 @@ test('batch submissions persist beyond five slots; FIFO promotion resumes and pr
   const first = store.list('a').documents.find(d => d.sourceUrl === url(1));
   assert.deepEqual(first.tags, ['共同标签', '自动标签']); assert.equal(first.topic, '命理');
   assert.equal(first.modelSettings.codexModel, 'gpt-6-luna');
+  assert.equal(first.modelSettings.asrModel, 'turbo'); assert.equal(first.modelSettings.asrHotwords, '印绶');
   assert.equal(JSON.parse(store.imports.get('a', first.id).settings_json).strict, true);
   db.prepare("UPDATE knowledge_documents SET status='ready',byte_size=24 WHERE id=?").run(first.id);
   assert.equal(await run(), true);
