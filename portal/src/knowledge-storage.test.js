@@ -135,6 +135,26 @@ test('failed cloud deletion keeps object and can retry without broad directory r
   await storage.remove(source.object_path); assert.equal(remote.size, 0);
 }));
 
+test('terminated video transfers retry from saved bytes and stop after bounded attempts', async () => fixture(async ({ root, data, item }) => {
+  const target = path.join(root, 'automatic-resume'), split = 13007;
+  const job = { ...item, sourceSha256: crypto.createHash('sha256').update(data).digest('hex') };
+  await fs.writeFile(target + '.tmp', data.subarray(0, split));
+  let calls = 0;
+  await downloadVideo(job, target, async range => {
+    calls++; assert.equal(range, 'bytes=' + split + '-');
+    if (calls === 1) throw new TypeError('terminated');
+    return new Response(data.subarray(split), { status: 206, headers: { 'Content-Range': `bytes ${split}-${data.length - 1}/${data.length}` } });
+  });
+  assert.equal(calls, 2); assert.deepEqual(await fs.readFile(target), data);
+  calls = 0;
+  await assert.rejects(downloadVideo(job, target + '-failed', async () => { calls++; throw new TypeError('terminated'); }), /已自动续传重试2次/);
+  assert.equal(calls, 3);
+  calls = 0;
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(downloadVideo(job, target + '-aborted', async () => { calls++; throw new TypeError('terminated'); }, controller.signal), /terminated/);
+  assert.equal(calls, 1);
+}));
+
 test('interrupted download leaves reusable bytes and handles servers ignoring Range', async () => fixture(async ({ root, data, item }) => {
   const target = path.join(root, 'interrupted'), split = 13007;
   const job = { ...item, sourceSha256: crypto.createHash('sha256').update(data).digest('hex') };

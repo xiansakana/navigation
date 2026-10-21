@@ -44,6 +44,52 @@ async function fixture(fn) {
   }
 }
 
+test('worker failures retain interruption stage even for older workers reporting only terminated', async () => fixture(async ({ call, store }) => {
+  const token = store.rotateToken('a'), doc = store.create('a', upload()); store.enqueue('a', doc.id);
+  store.heartbeatWorker('a', { workerId: 'gpu', capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } });
+  const job = store.claim('a', ['codex'], 'gpu');
+  store.progress('a', doc.id, job.lease, '下载视频', 2);
+  const failed = await call('/worker/jobs/' + doc.id + '/fail', { method: 'POST', token, lease: job.lease, data: { error: 'terminated' } });
+  assert.equal(failed.status, 200);
+  assert.match(store.get('a', doc.id).error, /下载视频/);
+  assert.match(store.get('a', doc.id).error, /网络连接在传输完成前中断/);
+}));
+
+test('bulk retry only requeues owned failures, enforces permissions and is safe to repeat', async () => fixture(async ({ call, store, db }) => {
+  const ids = [];
+  for (let i = 0; i < 33; i++) {
+    const doc = store.create('a', upload()); ids.push(doc.id);
+    db.prepare("UPDATE knowledge_documents SET status='failed',error='terminated' WHERE id=?").run(doc.id);
+  }
+  const other = store.create('b', upload());
+  db.prepare("UPDATE knowledge_documents SET status='failed' WHERE id=?").run(other.id);
+  const ready = store.create('a', upload());
+  db.prepare("UPDATE knowledge_documents SET status='ready' WHERE id=?").run(ready.id);
+  const route = '/documents/retry-failed';
+  const permissions = ['knowledge:view', 'knowledge:notes:view', 'knowledge:process:edit'];
+  assert.equal((await call(route, { method: 'POST', data: {}, session: { userId: 'a', permissions } })).status, 403);
+  assert.equal((await call(route, { method: 'POST', data: {}, headers: { Origin: 'https://evil.test' } })).status, 403);
+  const response = await call(route, { method: 'POST', data: {} });
+  assert.equal(response.status, 202); assert.equal(response.payload.accepted, 33); assert.equal(response.payload.skipped, 0);
+  for (const id of ids) { assert.equal(store.get('a', id).status, 'queued'); assert.equal(store.get('a', id).error, ''); }
+  assert.equal(store.get('b', other.id).status, 'failed'); assert.equal(store.get('a', ready.id).status, 'ready');
+  assert.equal((await call(route, { method: 'POST', data: {} })).payload.accepted, 0);
+}));
+
+test('bulk retry reports import failures without changing them when permissions or capacity prevent retry', async () => fixture(async ({ call, store, db }) => {
+  const doc = store.create('a', upload()); store.imports.add('a', doc.id, 'https://www.bilibili.com/video/BV1LTpi69Efh/');
+  db.prepare("UPDATE knowledge_documents SET status='failed' WHERE id=?").run(doc.id);
+  db.prepare("UPDATE knowledge_imports SET state='failed' WHERE document_id=?").run(doc.id);
+  const before = store.imports.get('a', doc.id).settings_json;
+  const permissions = ['knowledge:view', 'knowledge:notes:view', 'knowledge:process:edit', 'knowledge:process:batch:edit'];
+  const denied = await call('/documents/retry-failed', { method: 'POST', data: {}, session: { userId: 'a', permissions } });
+  assert.equal(denied.payload.accepted, 0); assert.equal(denied.payload.skipped, 1); assert.match(denied.payload.results[0].error, /权限/);
+  for (let i = 0; i < 5; i++) store.create('a', upload());
+  const full = await call('/documents/retry-failed', { method: 'POST', data: {} });
+  assert.equal(full.payload.accepted, 0); assert.match(full.payload.results[0].error, /5/);
+  assert.equal(store.get('a', doc.id).status, 'failed'); assert.equal(store.imports.get('a', doc.id).settings_json, before);
+}));
+
 test('document status counts span pages and selected statuses but respect owner, search, topic and deletion', async () => fixture(async ({ call, store, db }) => {
   for (const [status, topic, title] of [['ready', '课程', '甲'], ['ready', '课程', '乙'], ['failed', '课程', '甲'], ['queued', '其他', '甲'], ['deleting', '课程', '甲']]) {
     const item = store.create('a', upload({ topic, title }));

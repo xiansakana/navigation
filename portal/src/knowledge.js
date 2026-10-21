@@ -15,6 +15,8 @@ import { bilibiliAccount, qualitySettings } from './knowledge-bilibili-account.j
 import { handlePublicKnowledge, handleKnowledgeVisibility, handleKnowledgeBatchVisibility } from './knowledge-public.js';
 import { createUploadQueue } from './knowledge-upload-queue.js';
 import { duplicateSourceError } from './knowledge-source-dedupe.js';
+import { retryKnowledgeDocument } from './knowledge-retry.js';
+import { failureMessage } from '../public/knowledge/failure.js';
 
 const root = () => path.resolve(process.env.KNOWLEDGE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/knowledge'));
 export function knowledgeDirectory(id) {
@@ -176,7 +178,7 @@ async function workerApi(req, res, url, json, authorize) {
         const input = await body(req, 4096); store.progress(uid, id, lease, input.stage, input.progress); return json(res, 200, { ok: true });
       }
       if (action === 'fail' && method === 'POST') {
-        const input = await body(req, 4096); store.fail(uid, id, lease, String(input.error || '工作器处理失败')); return json(res, 200, { ok: true });
+        const input = await body(req, 4096); store.fail(uid, id, lease, failureMessage(String(input.error || '工作器处理失败'), String(input.stage || store.getRow(uid, id)?.stage || '').slice(0, 120))); return json(res, 200, { ok: true });
       }
       if (action === 'complete' && method === 'POST') {
         const result = validateKnowledgeResult(await body(req, 18 * 1024 * 1024));
@@ -222,6 +224,7 @@ async function knowledgeApi(req, res, url, session, json) {
   const route = url.pathname.slice('/api/knowledge'.length), method = req.method;
   const document = /^\/documents\/([a-f0-9]{32})(?:\/(parts|complete|local-input|retry|storage-retry|source|export|frames)(?:\/([a-z0-9.-]+))?)?$/.exec(route);
   const action = route === '/settings' ? method === 'GET' ? 'view' : 'settings:edit'
+    : route === '/documents/retry-failed' && method === 'POST' ? 'process:batch:edit'
     : route === '/upload-queue' ? method === 'GET' ? 'queue:view' : method === 'POST' ? 'queue:edit' : null
     : /^\/upload-queue\/[a-f0-9]{32}\/(retry|cancel)$/.test(route) && method === 'POST' ? 'queue:manage'
     : (route === '/bilibili' && method === 'GET' || route === '/bilibili/check' && method === 'POST') ? 'bilibili:view'
@@ -328,6 +331,18 @@ async function knowledgeApi(req, res, url, session, json) {
       return json(res, 200, { ok: true, ...store.saveSettings(uid, input) });
     }
     if (route === '/worker-token' && method === 'POST') return json(res, 200, { ok: true, token: store.rotateToken(uid) });
+    if (route === '/documents/retry-failed' && method === 'POST') {
+      if (!canKnowledge(session, 'process:edit') || !canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '需要查看笔记和生成笔记权限' });
+      await body(req, 4096);
+      const db = getDatabase(), failed = db.prepare("SELECT id FROM knowledge_documents WHERE user_id=? AND status='failed' ORDER BY created_at,id").all(uid);
+      const results = [];
+      for (const { id } of failed) {
+        try { results.push({ id, accepted: retryKnowledgeDocument(db, store, uid, id, action => canKnowledge(session, action)) }); }
+        catch (e) { results.push({ id, accepted: false, error: /^SQLITE_/.test(e.code || '') ? '知识库忙，请稍后重试' : e.message }); }
+      }
+      const accepted = results.filter(r => r.accepted).length;
+      return json(res, 202, { ok: true, accepted, skipped: results.length - accepted, results });
+    }
     if (route === '/documents' && method === 'GET') return json(res, 200, { ok: true, ...store.list(uid, {
       search: url.searchParams.get('search') || '', topic: url.searchParams.get('topic') || '', status: url.searchParams.get('status') || '',
       offset: Math.floor(Math.min(100000, Math.max(0, Number(url.searchParams.get('offset')) || 0))), limit: 30,
@@ -407,14 +422,8 @@ async function knowledgeApi(req, res, url, session, json) {
         return json(res, 202, { ok: true, document: store.get(uid, id) });
       }
       if (operation === 'retry' && method === 'POST') {
-        if (store.imports.get(uid, id)?.state === 'failed' && !canKnowledge(session, 'import:edit')) return json(res, 403, { ok: false, error: '需要链接导入权限' });
         const input = await body(req, 4096);
-        if (store.imports.get(uid, id)?.state === 'failed') {
-          if (!canKnowledge(session, 'upload:edit')) return json(res, 403, { ok: false, error: '需要上传视频权限' });
-          const selected = qualitySettings(input, bilibiliAccount(getDatabase()).public(uid));
-          getDatabase().prepare('UPDATE knowledge_imports SET settings_json=? WHERE user_id=? AND document_id=?').run(JSON.stringify(selected), uid, id);
-        }
-        if (!store.retry(uid, id, input.backend || store.settings(uid).backend)) return json(res, 409, { ok: false, error: '仅失败任务可以重试' });
+        if (!retryKnowledgeDocument(getDatabase(), store, uid, id, action => canKnowledge(session, action), input)) return json(res, 409, { ok: false, error: '仅失败任务可以重试' });
         return json(res, 202, { ok: true, document: store.get(uid, id) });
       }
       if (operation === 'storage-retry' && method === 'POST') {

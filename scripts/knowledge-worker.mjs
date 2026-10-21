@@ -159,7 +159,7 @@ async function processJob(job) {
     console.log(new Date().toISOString(), '笔记已入库', job.id);
   } catch (e) {
     console.error(new Date().toISOString(), '任务失败', job.id, e.message);
-    try { await request('/jobs/' + job.id + '/fail', { data: { error: e.message }, lease: job.lease }); } catch { /* Expired jobs are recovered by the server. */ }
+    try { await request('/jobs/' + job.id + '/fail', { data: { error: e.message, stage: state.stage }, lease: job.lease }); } catch { /* Expired jobs are recovered by the server. */ }
   } finally { clearInterval(heartbeat); releaseMedia(); releaseSummary?.(); activeControllers.delete(controller); }
 }
 let cachedCapabilities = {}, checkedAt = 0;

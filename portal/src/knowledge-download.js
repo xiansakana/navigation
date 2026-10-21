@@ -12,6 +12,17 @@ async function valid(file, job) {
   return hash.digest('hex') === job.sourceSha256;
 }
 export async function downloadVideo(job, target, request, signal) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await downloadAttempt(job, target, request, signal); }
+    catch (error) {
+      const interrupted = /^(terminated|fetch failed)$/i.test(error.message || '') || ['UND_ERR_SOCKET', 'ECONNRESET', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT'].includes(error.cause?.code || error.code);
+      if (signal?.aborted || !interrupted) throw error;
+      if (attempt >= 2) throw new Error('下载视频时网络连接中断，已自动续传重试2次；请检查网络或代理后点击一键重试。');
+      await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+  }
+}
+async function downloadAttempt(job, target, request, signal) {
   if (await valid(target, job)) return target;
   const temp = target + '.tmp';
   if (await valid(temp, job)) { await fsp.rename(temp, target); return target; }
