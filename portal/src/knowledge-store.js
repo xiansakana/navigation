@@ -7,6 +7,7 @@ import { createLocalInputStore } from './knowledge-local-store.js';
 import { createImportStore } from './knowledge-import-store.js';
 import { pipelineSettings } from './knowledge-pipeline.js';
 import { storageConfig } from './knowledge-storage.js';
+import { sourceKey, findSourceDuplicate, duplicateSourceError } from './knowledge-source-dedupe.js';
 
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
@@ -140,27 +141,32 @@ export function createKnowledgeStore(db) {
       const topics = db.prepare("SELECT topic,count(*) AS count FROM knowledge_documents WHERE user_id=? AND topic<>'' GROUP BY topic ORDER BY topic").all(uid);
       return { documents, total, offset, limit, topics };
     },
-    create(uid, raw) {
-      const m = metadata(raw), size = raw.bytes, mime = raw.mimeType;
-      if (!Number.isSafeInteger(size) || size < 12 || size > MAX_VIDEO_BYTES) throw new Error('视频需在1GB以内');
-      if (!['video/mp4', 'video/webm', 'video/quicktime'].includes(mime)) throw new Error('支持 MP4、WebM、MOV 视频');
-      const name = String(raw.originalName || '').slice(0, 240);
-      if (!name) throw new Error('缺少文件名');
-      const backend = backendName(raw.backend || this.settings(uid).backend);
-      const fingerprint = String(raw.fingerprint || '');
-      if (fingerprint && !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('文件指纹无效');
-      const quota = db.prepare("SELECT count(*) AS n,coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE user_id=?").get(uid);
-      const pending = db.prepare("SELECT count(*) AS n FROM knowledge_documents WHERE user_id=? AND status IN ('uploading','importing','queued','processing')").get(uid).n;
-      if (pending >= 5) throw Object.assign(new Error('已有5个待处理任务，请等待空闲位置'), { code: 'KNOWLEDGE_CAPACITY', status: 409 });
-      if (quota.n >= 2000) throw new Error('最多2000篇笔记，请先清理已有内容');
-      // Cloud archives do not consume a lifetime ECS video quota. Upload routes
-      // still check free disk space before accepting temporary video files.
-      if (!storageConfig(uid) && quota.bytes + size > 20 * MAX_VIDEO_BYTES) throw new Error('服务器存储最多20GB视频，请先清理已有内容');
-      const key = id(), time = now();
-      db.prepare('INSERT INTO knowledge_documents(id,user_id,title,topic,tags_json,source_url,original_name,byte_size,mime_type,fingerprint,backend,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
-        .run(key, uid, m.title, m.topic, JSON.stringify(m.tags), m.sourceUrl, name, size, mime, fingerprint, backend, time, time);
-      db.prepare('UPDATE knowledge_documents SET model_settings_json=? WHERE id=?').run(JSON.stringify(modelSettings({}, this.settings(uid))), key);
-      return get(uid, key);
+    duplicateSource(uid, url, options) { return findSourceDuplicate(db, uid, url, options); },
+    create(uid, raw, { queueId = '' } = {}) {
+      return db.transaction(() => {
+        const m = metadata(raw), size = raw.bytes, mime = raw.mimeType;
+        if (!Number.isSafeInteger(size) || size < 12 || size > MAX_VIDEO_BYTES) throw new Error('视频需在1GB以内');
+        if (!['video/mp4', 'video/webm', 'video/quicktime'].includes(mime)) throw new Error('支持 MP4、WebM、MOV 视频');
+        const name = String(raw.originalName || '').slice(0, 240);
+        if (!name) throw new Error('缺少文件名');
+        const backend = backendName(raw.backend || this.settings(uid).backend);
+        const fingerprint = String(raw.fingerprint || '');
+        if (fingerprint && !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('文件指纹无效');
+        const duplicate = findSourceDuplicate(db, uid, m.sourceUrl, { exceptQueue: queueId });
+        if (duplicate) throw duplicateSourceError(duplicate);
+        const quota = db.prepare("SELECT count(*) AS n,coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE user_id=?").get(uid);
+        const pending = db.prepare("SELECT count(*) AS n FROM knowledge_documents WHERE user_id=? AND status IN ('uploading','importing','queued','processing')").get(uid).n;
+        if (pending >= 5) throw Object.assign(new Error('已有5个待处理任务，请等待空闲位置'), { code: 'KNOWLEDGE_CAPACITY', status: 409 });
+        if (quota.n >= 2000) throw new Error('最多2000篇笔记，请先清理已有内容');
+        // Cloud archives do not consume a lifetime ECS video quota. Upload routes
+        // still check free disk space before accepting temporary video files.
+        if (!storageConfig(uid) && quota.bytes + size > 20 * MAX_VIDEO_BYTES) throw new Error('服务器存储最多20GB视频，请先清理已有内容');
+        const key = id(), time = now();
+        db.prepare('INSERT INTO knowledge_documents(id,user_id,title,topic,tags_json,source_url,original_name,byte_size,mime_type,fingerprint,backend,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+          .run(key, uid, m.title, m.topic, JSON.stringify(m.tags), m.sourceUrl, name, size, mime, fingerprint, backend, time, time);
+        db.prepare('UPDATE knowledge_documents SET model_settings_json=? WHERE id=?').run(JSON.stringify(modelSettings({}, this.settings(uid))), key);
+        return get(uid, key);
+      }).immediate();
     },
     parts(uid, key) {
       if (!getRow(uid, key)) return null;
@@ -265,6 +271,10 @@ export function createKnowledgeStore(db) {
       const m = metadata(raw), notes = String(raw.notes ?? previous.notes);
       if (notes.length > 500000) throw new Error('笔记不超过50万字');
       return db.transaction(() => {
+        if (sourceKey(m.sourceUrl) !== sourceKey(previous.sourceUrl)) {
+          const duplicate = findSourceDuplicate(db, uid, m.sourceUrl, { exceptDocument: key });
+          if (duplicate) throw duplicateSourceError(duplicate);
+        }
         const result = db.prepare('UPDATE knowledge_documents SET title=?,topic=?,tags_json=?,source_url=?,notes=?,revision=revision+1,updated_at=? WHERE user_id=? AND id=? AND revision=?')
           .run(m.title, m.topic, JSON.stringify(m.tags), m.sourceUrl, notes, now(), uid, key, Number(raw.revision));
         if (!result.changes) { const e = new Error('笔记已更新，请重新打开后再保存'); e.status = 409; throw e; }

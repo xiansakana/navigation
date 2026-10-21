@@ -44,6 +44,32 @@ async function fixture(fn) {
   }
 }
 
+test('source duplicates are blocked across preview, legacy import and file upload before network or disk checks, without leaking another owner', async () => fixture(async ({ call, store, db }) => {
+  const sourceUrl = 'http://m.bilibili.com/video/BV1LTpi69Efh?p=1&share_source=copy';
+  const saved = store.create('a', upload({ sourceUrl }));
+  db.prepare("UPDATE knowledge_documents SET status='ready' WHERE id=?").run(saved.id);
+  const canonical = 'https://www.bilibili.com/video/BV1LTpi69Efh/?spm_id_from=share#t=30';
+  const original = globalThis.fetch;
+  globalThis.fetch = (url, options) => { if (String(url).startsWith('https://api.bilibili.com/')) assert.fail('existing sources do not need Bilibili API calls'); return original(url, options); };
+  try {
+    for (const route of ['/imports/preview', '/imports', '/documents']) {
+      const response = await call(route, { method: 'POST', data: route === '/documents' ? upload({ sourceUrl: canonical }) : { url: canonical } });
+      assert.equal(response.status, 409); assert.equal(response.payload.code, 'KNOWLEDGE_DUPLICATE_SOURCE');
+      assert.equal(response.payload.duplicate.documentId, saved.id);
+    }
+    const denied = await call('/imports/preview', { method: 'POST', data: { url: canonical }, session: { userId: 'a', permissions: ['knowledge:view', 'knowledge:import:edit', 'knowledge:upload:edit', 'knowledge:process:edit'] } });
+    assert.equal(denied.status, 409); assert.equal(denied.payload.duplicate, undefined);
+    const queued = await call('/upload-queue', { method: 'POST', data: { urls: [canonical] } });
+    assert.equal(queued.payload.accepted, 0); assert.equal(queued.payload.results[0].documentId, saved.id);
+    const other = await call('/documents', { method: 'POST', data: upload({ sourceUrl: canonical }), session: member('b') });
+    assert.equal(other.status, 201); assert.notEqual(other.payload.document.id, saved.id);
+    const second = 'https://www.bilibili.com/video/BV1LTpi69Efh/?p=2';
+    const concurrent = await Promise.all([call('/documents', { method: 'POST', data: upload({ sourceUrl: second }) }), call('/documents', { method: 'POST', data: upload({ sourceUrl: second + '&share_source=copy' }) })]);
+    assert.deepEqual(concurrent.map(r => r.status).sort(), [201, 409]);
+    assert.equal(store.list('a').total, 2);
+  } finally { globalThis.fetch = original; }
+}));
+
 test('persistent upload queue accepts more than five links without resolving them and enforces owner, CSRF and action permissions', async () => fixture(async ({ call, store }) => {
   const urls = Array.from({ length: 7 }, (_, i) => 'https://www.bilibili.com/video/BV1LTpi69Efh/' + (i ? '?p=' + (i + 1) : ''));
   const data = { urls };

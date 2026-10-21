@@ -1,4 +1,4 @@
-export function bindLinkImport({ element, can, canBatch = () => false, send, busy, onError }) {
+export function bindLinkImport({ element, can, canBatch = () => false, send, busy, onError, clearError = () => {} }) {
   const $ = element;
   let sequence = 0, loading = '', dirty = false, queued = false, savedDefaults = null;
   const selection = () => ({ quality: Number($('link-quality').value || 80), strict: $('link-mode').value !== 'auto' });
@@ -14,6 +14,7 @@ export function bindLinkImport({ element, can, canBatch = () => false, send, bus
     $('upload-title').disabled = $('upload-source').disabled = batch; $('upload-title').required = !batch;
     $('upload-title-label').hidden = $('upload-source-label').hidden = batch;
     $('upload-submit').textContent = batch ? '加入批量导入队列' : link ? '导入并生成笔记' : '加入上传队列';
+    if (!busy()) $('upload-submit').disabled = false;
   };
   $('upload-mode').onchange = () => { if (!busy()) mode(); };
   async function preview() {
@@ -35,12 +36,12 @@ export function bindLinkImport({ element, can, canBatch = () => false, send, bus
         $('link-quality-status').textContent = `当前可用：${m.playback.availableQualities.map(label).join('、') || '无'}。` +
           (m.playback.canImport ? '本次将使用' + label(m.playback.selectedQuality) + (m.playback.selectedQuality !== selection().quality ? '（已选择自动降级）' : '') : m.playback.reason);
       }
-    } catch (e) { if (seq === sequence && input === $('video-link').value) { $('video-link-status').textContent = e.message; onError(e); } }
+    } catch (e) { if (seq === sequence && input === $('video-link').value) { $('video-link-status').textContent = e.message; if (e.code === 'KNOWLEDGE_DUPLICATE_SOURCE') $('upload-submit').disabled = true; onError(e); } }
     finally { loading = ''; if (queued) { queued = false; preview(); } }
   }
   $('video-link-preview').onclick = preview;
   $('video-link').onchange = preview;
-  $('video-link').addEventListener('input', () => { sequence++; $('video-link-status').textContent = '链接已改变，请读取视频信息后确认标题等字段。'; });
+  $('video-link').addEventListener('input', () => { sequence++; if (!busy()) $('upload-submit').disabled = false; clearError(); $('video-link-status').textContent = '链接已改变，请读取视频信息后确认标题等字段。'; });
   $('link-quality').onchange = $('link-mode').onchange = () => { dirty = true; sequence++; preview(); };
   const defaults = s => { if (s) savedDefaults = s; if (!dirty && s) { $('link-quality').value = String(s.quality); $('link-mode').value = s.strict ? 'strict' : 'auto'; } };
   return { mode, preview, selection, defaults, reset() { dirty = false; sequence++; defaults(savedDefaults); mode(); } };

@@ -14,6 +14,7 @@ import { inspectBilibili, inspectBilibiliQuality, qualityLabel } from './knowled
 import { bilibiliAccount, qualitySettings } from './knowledge-bilibili-account.js';
 import { handlePublicKnowledge, handleKnowledgeVisibility, handleKnowledgeBatchVisibility } from './knowledge-public.js';
 import { createUploadQueue } from './knowledge-upload-queue.js';
+import { duplicateSourceError } from './knowledge-source-dedupe.js';
 
 const root = () => path.resolve(process.env.KNOWLEDGE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/knowledge'));
 export function knowledgeDirectory(id) {
@@ -104,13 +105,13 @@ export function validateKnowledgeResult(raw) {
   return { duration: raw.duration, language: String(raw.language || '').slice(0, 30), notes: raw.notes.trim(), transcript, frames, provenance };
 }
 
-function knowledgeFailure(res, json, error) {
+function knowledgeFailure(res, json, error, showDuplicate = false) {
   if (error.code === 'KNOWLEDGE_CAPACITY') return json(res, 409, { ok: false, code: error.code, error: error.message });
   if (/^SQLITE_(BUSY|LOCKED)/.test(error.code || '')) {
     res.setHeader('Retry-After', '1');
     return json(res, 503, { ok: false, code: 'KNOWLEDGE_BUSY', retryable: true, error: '知识库正在写入，请稍后重试' });
   }
-  return json(res, error.status || 400, { ok: false, error: error.code?.startsWith('SQLITE_') ? '知识库存储失败' : error.message });
+  return json(res, error.status || 400, { ok: false, ...(error.code === 'KNOWLEDGE_DUPLICATE_SOURCE' ? { code: error.code, ...(showDuplicate ? { duplicate: error.duplicate } : {}) } : {}), error: error.code?.startsWith('SQLITE_') ? '知识库存储失败' : error.message });
 }
 
 export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = () => false) {
@@ -193,7 +194,7 @@ async function workerApi(req, res, url, json, authorize) {
 
 export async function handleKnowledgeApi(req, res, url, session, json) {
   try { return await knowledgeApi(req, res, url, session, json); }
-  catch (e) { return knowledgeFailure(res, json, e); }
+  catch (e) { return knowledgeFailure(res, json, e, canKnowledge(session, 'notes:view')); }
 }
 async function knowledgeApi(req, res, url, session, json) {
   res.setHeader('Cache-Control', 'no-store');
@@ -251,7 +252,9 @@ async function knowledgeApi(req, res, url, session, json) {
       if (!route.endsWith('/cancel') && !['import:edit', 'upload:edit', 'process:edit'].every(a => canKnowledge(session, a))) return json(res, 403, { ok: false, error: '需要链接导入、上传和生成笔记权限' });
       if (route === '/upload-queue' && method === 'POST') {
         const input = await body(req, 180000), defaults = store.settings(uid);
-        return json(res, 202, { ok: true, ...queue.add(uid, input, { ...defaults, quality: bilibiliAccount(getDatabase()).public(uid), modelSettings: Object.fromEntries(MODEL_FIELDS.map(key => [key, defaults[key]])) }) });
+        const result = queue.add(uid, input, { ...defaults, quality: bilibiliAccount(getDatabase()).public(uid), modelSettings: Object.fromEntries(MODEL_FIELDS.map(key => [key, defaults[key]])) });
+        if (!canKnowledge(session, 'notes:view')) result.results = result.results.map(({ documentId, title, ...rest }) => rest);
+        return json(res, 202, { ok: true, ...result });
       }
       const match = /^\/upload-queue\/([a-f0-9]{32})\/(retry|cancel)$/.exec(route);
       if (!queue.get(uid, match[1])) return json(res, 404, { ok: false, error: '队列任务不存在' });
@@ -270,7 +273,11 @@ async function knowledgeApi(req, res, url, session, json) {
     if (['/imports/preview', '/imports'].includes(route)) {
       if (!canKnowledge(session, 'upload:edit') || !canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要上传视频和生成笔记权限' });
       const input = await body(req, 8192);
+      const known = store.duplicateSource(uid, input.url);
+      if (known) throw duplicateSourceError(known);
       const info = await inspectImport(uid, input.url);
+      const resolved = store.duplicateSource(uid, info.sourceUrl);
+      if (resolved) throw duplicateSourceError(resolved);
       const account = bilibiliAccount(getDatabase()), selection = qualitySettings(input, account.public(uid));
       const cookie = await account.credentials(uid);
       const playback = await inspectBilibiliQuality(info, selection, { cookie });
@@ -282,6 +289,8 @@ async function knowledgeApi(req, res, url, session, json) {
       if (MAX_VIDEO_BYTES * 3 + reserved * 2 + 5 * 1024 ** 3 > disk.bavail * disk.bsize) throw new Error('服务器可用空间不足');
       const config = storageConfig(uid);
       const item = getDatabase().transaction(() => {
+        const duplicate = store.duplicateSource(uid, info.sourceUrl);
+        if (duplicate) throw duplicateSourceError(duplicate);
         const created = store.create(uid, { title: input.title === undefined ? info.title : input.title, topic: input.topic === undefined ? info.topic : input.topic,
           tags: input.tags === undefined ? info.tags : input.tags, sourceUrl: input.sourceUrl === undefined ? info.sourceUrl : input.sourceUrl,
           bytes: MAX_VIDEO_BYTES, mimeType: 'video/mp4', originalName: info.title.replace(/[\\/:*?"<>|]/g, '-') + '.mp4', backend: input.backend || store.settings(uid).backend });
@@ -289,7 +298,7 @@ async function knowledgeApi(req, res, url, session, json) {
         if (config) store.sources.add(uid, created.id, sourcePath(config, uid, created));
         getDatabase().prepare("UPDATE knowledge_documents SET status='importing',stage='等待下载B站视频' WHERE user_id=? AND id=?").run(uid, created.id);
         return store.get(uid, created.id);
-      })();
+      }).immediate();
       return json(res, 202, { ok: true, document: item });
     }
     if (route === '/worker-install') {
@@ -327,6 +336,8 @@ async function knowledgeApi(req, res, url, session, json) {
     if (route === '/documents' && method === 'POST') {
       const input = await body(req, 8192);
       if (!canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '上传视频还需生成笔记权限' });
+      const duplicate = store.duplicateSource(uid, input.sourceUrl);
+      if (duplicate) throw duplicateSourceError(duplicate);
       await fsp.mkdir(root(), { recursive: true, mode: 0o700 });
       const disk = await fsp.statfs(root());
       if (Number(input.bytes) * 3 + 5 * 1024 ** 3 + getDatabase().prepare("SELECT coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE status IN ('uploading','importing')").get().bytes * 2 > disk.bavail * disk.bsize) throw new Error('服务器可用空间不足');
@@ -335,7 +346,7 @@ async function knowledgeApi(req, res, url, session, json) {
         const created = store.create(uid, input);
         if (config) { store.sources.add(uid, created.id, sourcePath(config, uid, created)); created.storage = store.sources.public(uid, created.id); }
         return created;
-      })();
+      }).immediate();
       try { await fsp.mkdir(knowledgeDirectory(item.id), { recursive: true, mode: 0o700 }); }
       catch (e) { store.remove(uid, item.id); throw e; }
       return json(res, 201, { ok: true, document: item, chunkBytes: CHUNK_BYTES });
@@ -420,5 +431,5 @@ async function knowledgeApi(req, res, url, session, json) {
       }
       return json(res, 404, { ok: false, error: '接口或资源不存在' });
     });
-  } catch (e) { return knowledgeFailure(res, json, e); }
+  } catch (e) { return knowledgeFailure(res, json, e, canKnowledge(session, 'notes:view')); }
 }

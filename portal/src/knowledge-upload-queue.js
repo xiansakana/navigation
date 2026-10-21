@@ -5,6 +5,7 @@ import { bilibiliUrl, inspectBilibili, inspectBilibiliQuality } from './knowledg
 import { bilibiliAccount, qualitySettings } from './knowledge-bilibili-account.js';
 import { createKnowledgeStore, metadata, backendName, MAX_VIDEO_BYTES } from './knowledge-store.js';
 import { storageConfig, sourcePath } from './knowledge-storage.js';
+import { findSourceDuplicate } from './knowledge-source-dedupe.js';
 
 export function createUploadQueue(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS knowledge_upload_queue (
@@ -14,10 +15,7 @@ export function createUploadQueue(db) {
     created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS knowledge_upload_queue_owner ON knowledge_upload_queue(user_id,state,seq);`);
   const get = (uid, id) => db.prepare('SELECT * FROM knowledge_upload_queue WHERE user_id=? AND id=?').get(uid, id);
-  const duplicate = (uid, url, except = '') => db.prepare(`SELECT q.document_id FROM knowledge_upload_queue q
-    WHERE q.user_id=? AND q.url=? AND q.id<>? AND (q.state IN ('pending','resolving') OR q.state='submitted' AND EXISTS(SELECT 1 FROM knowledge_documents d WHERE d.id=q.document_id AND d.user_id=q.user_id)) LIMIT 1`).get(uid, url, except)
-    || db.prepare("SELECT id AS document_id FROM knowledge_documents WHERE user_id=? AND source_url=? AND status<>'deleting' LIMIT 1").get(uid, url)
-    || db.prepare("SELECT d.id AS document_id FROM knowledge_imports i JOIN knowledge_documents d ON d.id=i.document_id AND d.user_id=i.user_id WHERE i.user_id=? AND i.url=? AND d.status<>'deleting' LIMIT 1").get(uid, url);
+  const duplicate = (uid, url, except = '') => findSourceDuplicate(db, uid, url, { exceptQueue: except });
   return {
     get, duplicate,
     add(uid, raw, defaults) {
@@ -35,7 +33,8 @@ export function createUploadQueue(db) {
           let url;
           try { url = bilibiliUrl(input.trim().replace(/[，。；、）)\]}]+$/, '')); }
           catch (e) { results.push({ index, status: 'invalid', error: e.message }); continue; }
-          if (duplicate(uid, url)) { results.push({ index, status: 'duplicate', url }); continue; }
+          const existing = duplicate(uid, url);
+          if (existing) { results.push({ index, status: 'duplicate', url, documentId: existing.document_id || '', title: existing.title || '' }); continue; }
           if (count + accepted >= 500) throw new Error('等待和失败队列最多500条，请先处理或取消部分任务');
           const id = crypto.randomBytes(16).toString('hex');
           db.prepare('INSERT INTO knowledge_upload_queue(id,user_id,url,settings_json,created_at,updated_at) VALUES (?,?,?,?,?,?)').run(id, uid, url, JSON.stringify(settings), time, time);
@@ -94,7 +93,8 @@ export async function runUploadQueue(db, directoryFor, authorize, { inspect = in
     const info = await inspect(job.url), selection = JSON.parse(job.settings_json);
     if (queue.get(uid, job.id)?.lease !== job.lease) return true;
     // Short URL aliases are deduplicated again after resolving to their video page.
-    if (queue.duplicate(uid, info.sourceUrl, job.id)) { queue.settle(job, 'duplicate', '', '', info.title); return true; }
+    const existing = queue.duplicate(uid, info.sourceUrl, job.id);
+    if (existing) { queue.settle(job, 'duplicate', '', existing.document_id || '', existing.title || info.title); return true; }
     const cookie = await bilibiliAccount(db).credentials(uid);
     const playback = await quality(info, selection, { cookie });
     if (!playback.canImport) throw new Error(playback.reason);
@@ -106,11 +106,12 @@ export async function runUploadQueue(db, directoryFor, authorize, { inspect = in
     db.transaction(() => {
       if (!authorize(uid)) throw new Error('账号或批量导入权限已撤销');
       if (queue.get(uid, job.id)?.lease !== job.lease) return;
-      if (queue.duplicate(uid, info.sourceUrl, job.id)) { queue.settle(job, 'duplicate', '', '', info.title); return; }
+      const existing = queue.duplicate(uid, info.sourceUrl, job.id);
+      if (existing) { queue.settle(job, 'duplicate', '', existing.document_id || '', existing.title || info.title); return; }
       const active = db.prepare("SELECT count(*) n FROM knowledge_documents WHERE user_id=? AND status IN ('uploading','importing','queued','processing')").get(uid).n;
       if (active >= 5) { queue.settle(job, 'pending'); return; }
       const doc = store.create(uid, { title: selection.overrides?.title || info.title, topic: selection.overrides?.topic ?? (selection.topic || info.topic), tags: selection.overrides?.tags ?? [...new Set([...selection.tags, ...info.tags])].slice(0, 20),
-        sourceUrl: selection.overrides?.sourceUrl ?? info.sourceUrl, bytes: MAX_VIDEO_BYTES, mimeType: 'video/mp4', originalName: info.title.replace(/[\\/:*?"<>|]/g, '-') + '.mp4', backend: selection.backend });
+        sourceUrl: selection.overrides?.sourceUrl ?? info.sourceUrl, bytes: MAX_VIDEO_BYTES, mimeType: 'video/mp4', originalName: info.title.replace(/[\\/:*?"<>|]/g, '-') + '.mp4', backend: selection.backend }, { queueId: job.id });
       db.prepare('UPDATE knowledge_documents SET model_settings_json=? WHERE user_id=? AND id=?').run(JSON.stringify(selection.modelSettings), uid, doc.id);
       store.imports.add(uid, doc.id, info.sourceUrl, selection);
       if (config) store.sources.add(uid, doc.id, sourcePath(config, uid, doc));

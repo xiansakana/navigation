@@ -3,7 +3,7 @@ import { createDevicePanel } from './devices.js?v=4';
 import { createSourcePlayer } from './source.js?v=1';
 import { bindVideoDrop } from './drop.js?v=2';
 import { sendLocalInput } from './local-input.js?v=1';
-import { bindLinkImport } from './link-import.js?v=4';
+import { bindLinkImport } from './link-import.js?v=5';
 import { createUploadQueuePanel, parseBatchLinks } from './queue.js?v=1';
 import { createFileQueue } from './file-queue.js?v=1';
 import { createBilibiliPanel } from './bilibili-account.js?v=2';
@@ -18,17 +18,24 @@ const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&a
 const tags = value => value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
 const time = value => { const s = Math.floor(value || 0); return (s >= 3600 ? String(Math.floor(s / 3600)).padStart(2, '0') + ':' : '') + String(Math.floor(s / 60) % 60).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
 const phaseLabel = d => d.status === 'processing' ? ({ media: '正在转写/提取素材', summary_wait: '等待总结', summary: '正在总结' })[d.processingPhase] || '' : '';
-function error(e) { text('error', e.message || String(e)); show('error', true); }
+function error(e) {
+  text('error', e.message || String(e));
+  if (e.duplicate?.documentId && can('notes:view')) {
+    const link = document.createElement('a'); link.href = '/knowledge/?document=' + encodeURIComponent(e.duplicate.documentId);
+    link.textContent = '打开已有笔记'; $('error').append(' ', link);
+  }
+  show('error', true);
+}
 async function api(route, options = {}) {
   const response = await fetch('/api/knowledge' + route, { ...options, headers: { ...(options.body instanceof Blob ? {} : { 'Content-Type': 'application/json' }), ...(state.owner ? { 'X-Knowledge-Owner': state.owner } : {}), ...options.headers } });
   if (response.redirected) throw new Error('登录已过期，请刷新页面重新登录');
   const payload = await response.json();
-  if (!response.ok || !payload.ok) throw Object.assign(new Error(payload.error || '请求失败'), { status: response.status, code: payload.code });
+  if (!response.ok || !payload.ok) throw Object.assign(new Error(payload.error || '请求失败'), { status: response.status, code: payload.code, duplicate: payload.duplicate });
   return payload;
 }
 const send = (route, method, data = {}) => api(route, { method, body: JSON.stringify(data) });
 const notePager = createNotePager(params => api('/documents?' + new URLSearchParams(params)));
-const linkImport = bindLinkImport({ element: $, can: () => can('import:edit'), canBatch: () => can('queue:edit') && can('import:edit'), send, busy: () => state.uploading, onError: error });
+const linkImport = bindLinkImport({ element: $, can: () => can('import:edit'), canBatch: () => can('queue:edit') && can('import:edit'), send, busy: () => state.uploading, onError: error, clearError: () => show('error', false) });
 const uploadQueue = createUploadQueuePanel({ element: $, can, api, send, onError: error, openDocument: open });
 const localQueue = createFileQueue({ capacity: () => state.uploading ? Promise.resolve({ active: 5, capacity: 5, blocked: true }) : api('/upload-queue'), upload: (entry, report) => uploadFile(entry.file, entry.metadata, entry, report), changed: renderLocalQueue });
 function renderLocalQueue() {
@@ -205,12 +212,16 @@ async function upload(event) {
         const duplicates = result.results.filter(r => r.status === 'duplicate').length;
         const invalid = result.results.filter(r => r.status === 'invalid');
         text('queue-submit-result', `已加入 ${result.accepted} 条；重复跳过 ${duplicates} 条；无效 ${invalid.length} 条。` + invalid.map(r => `第${r.index + 1}条：${r.error}`).join(' '));
+        if (can('notes:view')) for (const row of result.results.filter(r => r.status === 'duplicate' && r.documentId)) {
+          const link = document.createElement('a'); link.href = '/knowledge/?document=' + encodeURIComponent(row.documentId);
+          link.textContent = '打开已有笔记：' + (row.title || row.url); $('queue-submit-result').append(document.createElement('br'), link);
+        }
         if (invalid.length) $('batch-links').value = invalid.map(r => rawLinks[r.index]).join('\n');
         await uploadQueue.reset();
       }
       state.resume = null;
       if (!result.results?.some(r => r.status === 'invalid')) { show('upload-panel', false); $('upload-form').reset(); linkImport.mode(); }
-      text('message', '视频已加入链接下载队列。可关闭页面，下载、生成笔记和115归档会在后台继续。'); text('upload-status', '链接已提交');
+      text('message', queued && !result.accepted ? '没有创建新的导入任务，请查看重复或无效链接的校验结果。' : '视频已加入链接下载队列。可关闭页面，下载、生成笔记和115归档会在后台继续。'); text('upload-status', queued && !result.accepted ? '未新增任务' : '链接已提交');
       await load(); if (result.document) await open(result.document.id);
     } catch (e) { error(e); text('upload-status', '链接未提交，请检查后重试。'); }
     finally { state.uploading = false; $('upload-submit').disabled = false; $('upload-mode').disabled = false; }
