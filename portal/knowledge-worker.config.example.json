@@ -5,6 +5,7 @@
   "workDir": "",
   "python": "python3",
   "ffmpeg": "ffmpeg",
+  "downloadOrigin": { "address": "", "caFile": "" },
   "asr": { "model": "turbo", "device": "cuda", "threads": 2, "language": "zh", "modelCache": "" },
   "codex": { "binary": "codex", "model": "", "proxyUrl": "" },
   "openai": {

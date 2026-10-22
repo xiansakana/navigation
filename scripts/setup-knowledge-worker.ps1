@@ -75,6 +75,7 @@ foreach ($file in $packageFiles) {
   if ([IO.Path]::GetFullPath((Join-Path $bundleRoot $file)) -ne [IO.Path]::GetFullPath($destination)) { Copy-Item -LiteralPath (Join-Path $bundleRoot $file) -Destination $destination -Force }
 }
 $config = [ordered]@{ portalUrl=$PortalUrl; token=''; label=$env:COMPUTERNAME; workDir=(Join-Path $appRoot 'cache'); autoUpdate=$true; releaseRoot=$releaseRoot; python=''; ffmpeg=''; asr=@{model='turbo';device='cuda';threads=4;language='zh';modelCache=(Join-Path $appRoot 'models')}; codex=@{binary='';model='';proxyUrl=''} }
+if ($previous -and $previous.downloadOrigin) { $config.downloadOrigin = $previous.downloadOrigin }
 if ($boundDevice -and $boundDevice.deviceId -and $boundDevice.portalUrl -eq $PortalUrl) { $config.token = $boundDevice.token; $config.deviceId = $boundDevice.deviceId }
 elseif ($previous -and $previous.deviceId -and $previous.portalUrl -eq $PortalUrl) { $config.token = $previous.token; $config.deviceId = $previous.deviceId }
 $utf8 = New-Object System.Text.UTF8Encoding($false)

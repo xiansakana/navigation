@@ -4,7 +4,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { downloadVideo } from '../portal/src/knowledge-download.js';
+import { downloadVideo, originDownloadRequest } from '../portal/src/knowledge-download.js';
 import { startLocalInputServer, localDocuments, verifyLocalInput, pruneLocalInputs } from '../portal/src/knowledge-local-input.js';
 import { runProcess, summarizeVideo, modelConfiguration, resolveCodexBinary, createStageGate, workerPortalRequest } from '../portal/src/knowledge-model.js';
 import { restartWithWorkerProxy } from './knowledge-worker-launcher.mjs';
@@ -19,6 +19,7 @@ if (portal.username || portal.password || portal.search || portal.hash || portal
 if (await restartWithWorkerProxy({ portalUrl: portal.href })) process.exit(process.exitCode || 0);
 const token = process.env.KNOWLEDGE_WORKER_TOKEN || config.token;
 if (!/^nkw_[a-f0-9]{64}$/.test(token || '')) throw new Error('工作器凭据无效，请在知识库设置中生成');
+const originDownload = originDownloadRequest(portal.href, config.downloadOrigin);
 const workRoot = path.resolve(config.workDir || path.join(repo, 'portal/data/knowledge-worker'));
 await fsp.mkdir(workRoot, { recursive: true, mode: 0o700 });
 const python = config.python || (process.platform === 'win32' ? 'python.exe' : 'python3');
@@ -37,7 +38,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function request(route, { data, method, lease, signal, raw = false, headers = {} } = {}) {
   const response = await workerPortalRequest(new URL('/api/knowledge/worker' + route, portal), { method: method || (data === undefined ? 'GET' : 'POST'), redirect: 'error',
     headers: { ...headers, Authorization: 'Bearer ' + token, ...(lease ? { 'X-Knowledge-Lease': lease } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) },
-    body: data === undefined ? undefined : JSON.stringify(data), signal: AbortSignal.any([AbortSignal.timeout(raw ? 900000 : 120000), ...(signal ? [signal] : [])]) });
+    body: data === undefined ? undefined : JSON.stringify(data), signal: AbortSignal.any([AbortSignal.timeout(raw ? 900000 : 120000), ...(signal ? [signal] : [])]) }, { fetch: raw && originDownload ? originDownload : globalThis.fetch });
   return raw ? response : response.json();
 }
 async function capabilities() {
@@ -63,8 +64,15 @@ async function capabilities() {
   catch { result.openai = { ready: false, detail: '兼容 API 尚未配置模型' }; }
   return result;
 }
-async function download(job, directory, signal) {
-  return downloadVideo(job, path.join(directory, 'source'), range => request('/jobs/' + job.id + '/source', { lease: job.lease, raw: true, signal, headers: range ? { Range: range } : {} }), signal);
+async function download(job, directory, signal, update) {
+  let last = 0;
+  return downloadVideo(job, path.join(directory, 'source'), (range, transferSignal) => request('/jobs/' + job.id + '/source', { lease: job.lease, raw: true, signal: transferSignal, headers: range ? { Range: range } : {} }), signal, {
+    progress(loaded, total) {
+      if (Date.now() - last < 4000 && loaded < total) return;
+      last = Date.now();
+      update(`下载视频 · ${(loaded / 1024 ** 2).toFixed(1)}/${(total / 1024 ** 2).toFixed(1)} MB · ${Math.floor(loaded / total * 100)}%${originDownload ? ' · 源站通道' : ''}`, 2 + Math.min(2, Math.floor(loaded / total * 2))).catch(() => {});
+    }
+  });
 }
 async function processJob(job) {
   if (!/^[a-f0-9]{32}$/.test(job.id) || !Number.isSafeInteger(job.bytes) || job.bytes > 1024 ** 3) { mediaActive--; throw new Error('服务器任务格式无效'); }
@@ -131,7 +139,7 @@ async function processJob(job) {
         }
         input = path.join(directory, 'source');
         console.log(new Date().toISOString(), '直接使用本机原视频', job.id);
-      } else input = await download(job, directory, signal);
+      } else input = await download(job, directory, signal, update);
       const args = [path.join(repo, 'portal/workers/video_evidence.py'), '--input', input, '--output', directory,
         '--ffmpeg', config.ffmpeg || 'ffmpeg', '--model', speech.asrModel || config.asr?.model || 'turbo', '--device', 'cuda',
         '--profile', profile, '--hotwords', speech.asrHotwords || '',

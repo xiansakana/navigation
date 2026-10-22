@@ -293,3 +293,12 @@ OpenCC在读取私有时间线时转换为简体，旧笔记立即生效，无�
 ### B站信息读取的登录状态
 
 视频预览、单条导入、批量链接队列以及正式下载前的元数据/标签读取，均使用当前用户绑定账号的Cookie，与播放流查询保持一致。匿名接口被HTTP412风控拦截时，已绑定账号不会遗漏登录态而失败；凭据失效仍明确要求扫码，不回退匿名。Cookie仅发往固定api.bilibili.com接口，不发给b23.tv短链接、跳转目标、视频CDN、工作器或第三方。412不进行立即循环重试，提示风控和替代的本地上传方式；登录成功也不能保证消除平台的所有风控。
+
+
+### 下载队列无进展与可选HTTPS源站通道
+
+原片回传现在每约4秒报告已下载MB、总大小和百分比；已有.tmp断点直接续传。每次连接/读取连续30秒无数据即取消并最多续传重试2次，不再让两个素材位置被无数据连接占用数十分钟；外部取消不重试，SHA256与Range校验继续执行。慢但持续有数据的连接不会被当作无进展强行终止。
+
+可在工作器私有配置增加downloadOrigin.address（源站IP）、downloadOrigin.caFile（可选的受信任CA PEM文件路径）以及port（默认443）。只把当前Portal的/jobs/<id>/source GET交给该通道，其他API和模型代理策略保持不变。不跟随重定向，继续校验Portal域名对应的TLS主机名、CA链、工作器token和任务租约；禁止关闭证书校验。默认不设置时仍走原Portal域名。重装脚本保留该私有配置。
+
+当服务器采用Cloudflare Origin CA证书时，可从Cloudflare官方文档或其cloudflare-docs官方GitHub仓库获取公开根证书，保存为独立CA文件；这不是服务器私钥，也不导入系统全局信任库。只对该明确配置的源站下载连接使用。当前电脑配置ECS源站用于避免本机到Cloudflare链路的慢速回传，115到ECS路径保持原样。CA来源：https://developers.cloudflare.com/ssl/origin-configuration/origin-ca/ 。
