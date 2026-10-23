@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import Database from 'better-sqlite3';
-import { ChainMonitor, chainConfig, createChainApiClient, createChainStore } from './torn-chain-monitor.js';
+import { ChainMonitor, chainConfig, createChainApiClient, createChainStore, estimateCooldownStart } from './torn-chain-monitor.js';
 import { canTornChain, createTornChainService } from './torn-chain.js';
 import { resolveRoute } from './router.js';
 import { SYSTEM_PERMISSIONS } from './rbac.js';
@@ -16,6 +16,23 @@ function fixture(t) {
 const candidate = id => ({ id, chain: 200, faction: { id: id + 100, name: 'Faction ' + id } });
 const detail = (id, current = 200, cooldown = 0) => ({ chain: { id, current, cooldown, timeout: cooldown ? 0 : 300 } });
 const page = rows => ({ warfarechains: rows, _metadata: { links: { next: null } } });
+
+test('cooldown start is estimated independently of discovery time and old history is enriched', t => {
+  assert.equal(estimateCooldownStart(4000, 500, 1500), 1000);
+  assert.equal(estimateCooldownStart(4000, 500, 900), null);
+  assert.equal(estimateCooldownStart(4000, 0, 1500), null);
+  assert.equal(estimateCooldownStart(undefined, 500, 1500), null);
+  const db = new Database(':memory:'); t.after(() => db.close()); const store = createChainStore(db);
+  store.get('a');
+  db.prepare('UPDATE torn_chain_monitors SET history_json=? WHERE user_id=?').run(JSON.stringify([{ id: 10, hits: 500, cooldownUntil: 4000, detectedAt: 1500 }]), 'a');
+  assert.equal(store.get('a').history[0].cooldownStartedAt, 1000);
+  store.record('a', { ...candidate(11), chain: 500 }, { id: 11, current: 450, cooldown: 4000 }, false, 1600);
+  assert.equal(store.get('a').history[1].cooldownStartedAt, 1000);
+  assert.equal(store.get('a').history[1].detectedAt, 1600);
+  store.record('a', { ...candidate(12), chain: 1000 }, { id: 12, current: 100, cooldown: 2000 }, false, 1500);
+  assert.equal(store.get('a').history[2].cooldownStartedAt, null);
+  assert.equal(store.get('b').history.length, 0);
+});
 function monitor(store, request, options = {}) {
   return new ChainMonitor({ uid: 'a', store, request, now: () => 1000, schedule: () => 1, cancel: () => {}, ...options });
 }

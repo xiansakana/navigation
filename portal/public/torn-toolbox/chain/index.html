@@ -40,10 +40,10 @@
     </section>
     <p id="message" role="status" aria-live="polite"></p>
     <section class="chain-panel"><h2>监控状态</h2><p id="status">正在加载…</p><p id="coverage"></p></section>
-    <section class="chain-panel"><h2>冷却记录 <span id="count"></span></h2><p>最多保留 200 条；清空记录不会重置去重状态。</p><div id="history"></div></section>
+    <section class="chain-panel"><h2>冷却记录 <span id="count"></span></h2><p>最多保留 200 条；清空记录不会重置去重状态。进入冷却时间按冷却结束时间减去 Chain 长度 × 6 秒推算，无法可靠推算时显示“—”；所有时间使用浏览器本地时区。</p><div id="history"></div></section>
   </main>
   <script src="/theme.js"></script>
   <script src="/layout.js?v=layout-20261018"></script>
-  <script src="/torn-toolbox/chain/app.js?v=2"></script>
+  <script src="/torn-toolbox/chain/app.js?v=3"></script>
 </body>
 </html>

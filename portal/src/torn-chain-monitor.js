@@ -2,6 +2,15 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_CHAIN_NOTIFY, chainNotifySettings } from './torn-chain-notifications.js';
 
 export const DEFAULT_CHAIN_CONFIG = { minHits: 100, maxHits: null, intervalSeconds: 60, apiKey: '' };
+
+// Torn's documented cooldown duration is six seconds per hit. The public API
+// explicitly defines cooldown as its end timestamp; `end` does not document
+// when cooldown began, so keep this value explicitly identified as an estimate.
+export function estimateCooldownStart(until, hits, detectedAt) {
+  if (![until, hits, detectedAt].every(Number.isSafeInteger) || hits <= 0) return null;
+  const start = until - hits * 6;
+  return start > 0 && start <= detectedAt && start < until ? start : null;
+}
 export function chainConfig(input, previous = DEFAULT_CHAIN_CONFIG) {
   const result = { ...previous };
   for (const field of ['minHits', 'maxHits', 'intervalSeconds']) {
@@ -54,7 +63,11 @@ export function createChainStore(db) {
   )`);
   db.exec('CREATE TABLE IF NOT EXISTS torn_chain_notifications (user_id TEXT PRIMARY KEY, settings_json TEXT NOT NULL)');
   const ensure = uid => db.prepare('INSERT OR IGNORE INTO torn_chain_monitors(user_id,config_json) VALUES(?,?)').run(uid, JSON.stringify(DEFAULT_CHAIN_CONFIG));
-  const get = uid => { ensure(uid); const row = db.prepare('SELECT * FROM torn_chain_monitors WHERE user_id=?').get(uid); return { config: JSON.parse(row.config_json), history: JSON.parse(row.history_json), seen: JSON.parse(row.seen_json) }; };
+  const get = uid => {
+    ensure(uid); const row = db.prepare('SELECT * FROM torn_chain_monitors WHERE user_id=?').get(uid);
+    const history = JSON.parse(row.history_json).map(record => ({ ...record, cooldownStartedAt: Object.hasOwn(record, 'cooldownStartedAt') ? record.cooldownStartedAt : estimateCooldownStart(record.cooldownUntil, record.hits, record.detectedAt) }));
+    return { config: JSON.parse(row.config_json), history, seen: JSON.parse(row.seen_json) };
+  };
   return {
     get,
     getNotify(uid) { const row = db.prepare('SELECT settings_json FROM torn_chain_notifications WHERE user_id=?').get(uid); return row ? JSON.parse(row.settings_json) : structuredClone(DEFAULT_CHAIN_NOTIFY); },
@@ -64,7 +77,8 @@ export function createChainStore(db) {
     record(uid, candidate, chain, fresh, now) {
       const { config, history, seen } = get(uid), id = Number(chain.id);
       if (chain.current < config.minHits || config.maxHits !== null && chain.current > config.maxHits || history.some(row => row.id === id)) return;
-      history.push({ id, factionId: Number(candidate.faction.id), name: String(candidate.faction.name || candidate.faction.id).slice(0, 160), hits: chain.current, cooldownUntil: chain.cooldown, detectedAt: now, fresh: fresh && !seen.includes(id) });
+      const finalHits = Number.isSafeInteger(candidate.chain) && candidate.chain > 0 ? candidate.chain : chain.current;
+      history.push({ id, factionId: Number(candidate.faction.id), name: String(candidate.faction.name || candidate.faction.id).slice(0, 160), hits: chain.current, cooldownStartedAt: estimateCooldownStart(chain.cooldown, finalHits, now), cooldownUntil: chain.cooldown, detectedAt: now, fresh: fresh && !seen.includes(id) });
       if (!seen.includes(id)) seen.push(id);
       db.prepare('UPDATE torn_chain_monitors SET history_json=?,seen_json=? WHERE user_id=?').run(JSON.stringify(history.slice(-200)), JSON.stringify(seen.slice(-5000)), uid);
       return history.at(-1);

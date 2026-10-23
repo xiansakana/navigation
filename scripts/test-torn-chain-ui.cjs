@@ -21,7 +21,7 @@ const assert = require('node:assert/strict');
         if (pathname.endsWith('/stop')) running = false;
         return res.end('{"ok":true}');
       }
-      return res.end(JSON.stringify({ ok: true, config, permissions: { configure: writable, control: writable, clear: writable }, state: { running, busy: false, rounds: 2, candidates: 3, confirmed: 3, failed: 0 }, history: [{ id: 1234, name: '<img src=x onerror=alert(1)>', hits: 250, fresh: true, detectedAt: 1792800000, cooldownUntil: 1792801000 }] }));
+      return res.end(JSON.stringify({ ok: true, config, permissions: { configure: writable, control: writable, clear: writable }, state: { running, busy: false, rounds: 2, candidates: 3, confirmed: 3, failed: 0 }, history: [{ id: 1234, name: '<img src=x onerror=alert(1)>', hits: 250, fresh: true, cooldownStartedAt: 1792799500, detectedAt: 1792800000, cooldownUntil: 1792801000 }] }));
     }
     try {
       const file = path.join(__dirname, '../portal/public', pathname.endsWith('/') ? pathname + 'index.html' : pathname);
@@ -53,6 +53,13 @@ const assert = require('node:assert/strict');
     }
     assert.equal(await page.locator('#history img').count(), 0);
     assert.ok((await page.locator('#history').innerText()).includes('<img'));
+    assert.ok((await page.locator('#history').innerText()).includes('进入冷却（推算）'));
+    assert.ok((await page.locator('#history').innerText()).includes('发现于'));
+    assert.ok((await page.locator('#history').innerText()).includes('冷却结束'));
+    assert.ok(await page.evaluate(() => {
+      const text = document.querySelector('#history').textContent;
+      return [1792799500, 1792800000, 1792801000].every(seconds => text.includes(new Date(seconds * 1000).toLocaleString()));
+    }), 'cooldown start, discovery and end timestamps must all be rendered');
     assert.equal(await page.locator('#history a').getAttribute('href'), 'https://www.torn.com/war.php?step=chainreport&chainID=1234');
     await page.locator('#min-hits').fill('150'); await page.locator('#save').click();
     await page.waitForFunction(() => document.querySelector('#message').textContent.includes('配置已保存'));

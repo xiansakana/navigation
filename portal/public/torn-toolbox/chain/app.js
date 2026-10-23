@@ -29,7 +29,7 @@
       const content = document.createElement('div'), title = document.createElement('strong'), badge = document.createElement('span'), info = document.createElement('p');
       badge.className = 'chain-badge' + (row.fresh ? ' fresh' : ''); badge.textContent = row.fresh ? '刚进入冷却' : '首次发现';
       title.textContent = `${row.name} · ${row.hits} hits`;
-      info.textContent = `发现于 ${date(row.detectedAt)} · 冷却结束 ${date(row.cooldownUntil)}`;
+      info.textContent = `进入冷却（推算） ${date(row.cooldownStartedAt)} · 发现于 ${date(row.detectedAt)} · 冷却结束 ${date(row.cooldownUntil)}`;
       content.append(badge, title, info);
       const link = document.createElement('a'); link.textContent = '查看 report ↗'; link.target = '_blank'; link.rel = 'noopener noreferrer';
       link.href = 'https://www.torn.com/war.php?step=chainreport&chainID=' + Number(row.id);
