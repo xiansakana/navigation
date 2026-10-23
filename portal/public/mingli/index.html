@@ -4,7 +4,7 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>命理 · 服务导航</title>
   <script>(function(){try{var t=localStorage.getItem('portal-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
-  <link rel="stylesheet" href="/portal.css?v=layout-20261018"><link rel="stylesheet" href="/experience.css?v=mobile-sheets-1"><link rel="stylesheet" href="/mingli/style.css?v=6">
+  <link rel="stylesheet" href="/portal.css?v=layout-20261018"><link rel="stylesheet" href="/experience.css?v=mobile-sheets-1"><link rel="stylesheet" href="/mingli/style.css?v=7">
   <script defer src="/ui/back-to-top.js?v=1"></script>
 </head>
 <body class="portal-experience has-navbar portal-layout-enabled">
@@ -65,7 +65,12 @@
         <div class="ml-panel-heading"><div><h2>知识库案例</h2><p class="ml-muted">从自己的知识库笔记自动归集，保留课程上下文与来源。</p></div><span id="kc-count" class="ml-badge">0 条案例</span></div>
         <p class="ml-hint">笔记生成、编辑后自动更新；同一来源的相同四柱合并收录。原文的案例陈述和推断均未独立验证，自动提取内容需核对。未提供出生日期时只展示原局，不反推出生信息或大运。</p>
         <form id="kc-search-form" class="ml-search"><label>检索知识库案例<input id="kc-search" type="search" maxlength="100" placeholder="案例标题、原文、课程或标签"></label><label>来源课程<select id="kc-document"><option value="">全部来源</option></select></label><button class="btn ghost" type="submit">搜索</button></form>
-        <div id="kc-list" class="ml-case-list"></div><button id="kc-more" class="btn ghost" hidden>加载更多知识库案例</button>
+        <div id="kc-list" class="ml-case-list"></div>
+        <nav id="kc-pagination" class="ml-pagination" aria-label="知识库案例分页" hidden>
+          <p id="kc-page-info" class="ml-hint" aria-live="polite"></p>
+          <div class="ml-page-controls"><button id="kc-prev" class="btn ghost" type="button">上一页</button><div id="kc-pages" class="ml-page-numbers"></div><button id="kc-next" class="btn ghost" type="button">下一页</button></div>
+          <form id="kc-jump-form" class="ml-page-jump"><label>跳至<input id="kc-page-input" type="number" min="1" step="1" value="1" required aria-label="跳转页码">页</label><button id="kc-jump" class="btn ghost" type="submit">跳转</button></form>
+        </nav>
       </article>
       <article id="kc-detail" class="ml-panel ml-natal-panel" hidden>
         <h2 id="kc-title"></h2><p id="kc-meta" class="ml-hint"></p><a id="kc-source" class="btn ghost" target="_blank" rel="noopener noreferrer">查看知识库原文</a><div id="kc-references" class="ml-actions"></div>
@@ -74,6 +79,6 @@
       </article>
     </section>
   </main>
-  <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script><script src="/dialog.js"></script><script type="module" src="/mingli/app.js?v=public-browsing-20261018"></script>
+  <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script><script src="/dialog.js"></script><script type="module" src="/mingli/app.js?v=knowledge-pagination-20261023"></script>
 </body>
 </html>

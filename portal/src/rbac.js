@@ -227,7 +227,7 @@ var SYSTEM_PERMISSIONS = [
     { id: 'mingli:chart:calculate', name: '八字排盘', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '八字排盘'] },
     { id: 'mingli:cases:view', name: '查看和搜索自己的案例', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '案例库'] },
     { id: 'mingli:cases:filter', name: '高级筛选自己的案例', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '案例库', '高级筛选'] },
-    { id: 'mingli:knowledge:view', name: '查看自动归集的知识库案例和来源', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '知识库案例'] },
+    { id: 'mingli:knowledge:view', name: '查看、分页检索自动归集的知识库案例和来源', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '知识库案例'] },
     { id: 'mingli:knowledge:filter', name: '高级筛选知识库案例', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '知识库案例', '高级筛选'] },
     { id: 'mingli:cases:edit', name: '保存案例和编辑笔记', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '保存案例'] },
     { id: 'mingli:cases:delete', name: '删除自己的案例', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '删除案例'] },
