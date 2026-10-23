@@ -4,6 +4,7 @@ import { hasPermission } from './rbac.js';
 import { resolveSessionUser } from './auth.js';
 import { integrationConfig } from '../../shared/runtime-config.js';
 import { createChainNotifier } from './torn-chain-notifications.js';
+import { BONUS_HITS } from './torn-chain-bonuses.js';
 import { ChainMonitor, createChainApiClient, createChainStore, chainConfig } from './torn-chain-monitor.js';
 
 export function canTornChain(session, action = 'view') {
@@ -41,7 +42,7 @@ export function createTornChainService({ store, request = createChainApiClient()
         }
         if (route === '/state' && req.method === 'GET') {
           const { config: { apiKey, ...config }, history } = store.get(uid);
-          return json(res, 200, { ok: true, config: { ...config, hasKey: !!apiKey }, state: monitor(uid).status(), history: [...history].reverse(), permissions: { configure: canTornChain(session, 'config:edit'), control: canTornChain(session, 'control:edit'), clear: canTornChain(session, 'history:edit') } });
+          return json(res, 200, { ok: true, config: { ...config, hasKey: !!apiKey }, bonusHitOptions: BONUS_HITS, state: monitor(uid).status(), history: [...history].reverse(), permissions: { configure: canTornChain(session, 'config:edit'), control: canTornChain(session, 'control:edit'), clear: canTornChain(session, 'history:edit') } });
         }
         if (route === '/config' && req.method === 'POST') {
           const input = await readJson(req, 4096); chainConfig(input, store.get(uid).config);

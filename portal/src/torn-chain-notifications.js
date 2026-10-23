@@ -1,4 +1,5 @@
 import { normalizeQqMentions } from '../../shared/integrations/qq-mentions.js';
+import { selectedBonusDefenders } from './torn-chain-bonuses.js';
 
 export const DEFAULT_CHAIN_NOTIFY = { qq: { enabled: false }, slack: { enabled: false }, targets: [] };
 
@@ -22,11 +23,15 @@ export function chainNotifySettings(input) {
 // saved per Portal user, never imported from another user's global settings.
 export function createChainNotifier({ endpoint, token, fetchImpl = fetch }) {
   return async (settings, row) => {
+    if (row && row.leaderFilter && row.leaderFilter !== 'all' && !selectedBonusDefenders(row, row.bonusSelection, row.leaderFilter).length) return { skipped: true, reason: 'no-matching-defender' };
     const targets = [...(settings.qq.enabled ? settings.targets.map(target => ({ channel: 'qq', ...target })) : []), ...(settings.slack.enabled ? [{ channel: 'slack' }] : [])];
     if (!targets.length) return { skipped: true };
     const url = new URL('/notify', endpoint);
     if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || !['http:', 'https:'].includes(url.protocol) || !token) throw new Error('通知管理连接或认证尚未配置');
-    const message = row ? `[Torn Chain] ${row.name} · ${row.hits} hits 刚进入冷却\nhttps://www.torn.com/war.php?step=chainreport&chainID=${Number(row.id)}` : '[Torn Chain] 测试通知 · 配置正常';
+    let message = row ? `[Torn Chain] ${row.name} · ${row.hits} hits 刚进入冷却\nhttps://www.torn.com/war.php?step=chainreport&chainID=${Number(row.id)}` : '[Torn Chain] 测试通知 · 配置正常';
+    if (row) for (const bonus of selectedBonusDefenders(row, row.bonusSelection, row.leaderFilter)) {
+      message += `\nBonus #${bonus.hit} 被打玩家${typeof bonus.isLeader === 'boolean' ? bonus.isLeader ? '（Leader）' : '（非 Leader）' : ''}：` + (bonus.defenderId ? `https://www.torn.com/profiles.php?XID=${bonus.defenderId}` : '暂不可用，请查看 report');
+    }
     let failed = 0;
     for (const target of targets) {
       try {

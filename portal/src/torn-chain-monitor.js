@@ -1,7 +1,8 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_CHAIN_NOTIFY, chainNotifySettings } from './torn-chain-notifications.js';
+import { normalizeBonusHits, reportBonusDefenders, lookupDefenderLeader, selectedBonusDefenders } from './torn-chain-bonuses.js';
 
-export const DEFAULT_CHAIN_CONFIG = { minHits: 100, maxHits: null, intervalSeconds: 60, apiKey: '' };
+export const DEFAULT_CHAIN_CONFIG = { minHits: 100, maxHits: null, intervalSeconds: 60, apiKey: '', bonusHits: [], leaderFilter: 'all' };
 
 // Torn's documented cooldown duration is six seconds per hit. The public API
 // explicitly defines cooldown as its end timestamp; `end` does not document
@@ -13,6 +14,12 @@ export function estimateCooldownStart(until, hits, detectedAt) {
 }
 export function chainConfig(input, previous = DEFAULT_CHAIN_CONFIG) {
   const result = { ...previous };
+  if ('bonusHits' in input) result.bonusHits = normalizeBonusHits(input.bonusHits);
+  if ('leaderFilter' in input) {
+    if (!['all', 'leader', 'non-leader'].includes(input.leaderFilter)) throw new Error('Leader 筛选配置无效');
+    result.leaderFilter = input.leaderFilter;
+  }
+  if (result.leaderFilter !== 'all' && !result.bonusHits?.length) throw new Error('使用 Leader 筛选时请至少选择一个 Bonus hit');
   for (const field of ['minHits', 'maxHits', 'intervalSeconds']) {
     if (!(field in input)) continue;
     const value = input[field];
@@ -37,7 +44,7 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 1500 } = {
     const job = queue.catch(() => {}).then(async () => {
       signal?.throwIfAborted();
       const url = new URL(path, 'https://api.torn.com/v2/');
-      if (url.origin !== 'https://api.torn.com' || !/^\/v2\/faction\/(warfarechains|\d+\/chain)$/.test(url.pathname)) throw new Error('API 分页地址无效');
+      if (url.origin !== 'https://api.torn.com' || !/^\/v2\/(faction\/(warfarechains|\d+\/(chain|chainreport|basic))|user\/\d+\/profile)$/.test(url.pathname)) throw new Error('API 分页地址无效');
       url.searchParams.set('key', key); url.searchParams.set('comment', 'NavChain');
       await delay(Math.max(0, nextAt - Date.now()), undefined, { signal });
       signal?.throwIfAborted(); nextAt = Date.now() + spacingMs;
@@ -67,10 +74,17 @@ export function createChainStore(db) {
   const get = uid => {
     ensure(uid); const row = db.prepare('SELECT * FROM torn_chain_monitors WHERE user_id=?').get(uid);
     const history = JSON.parse(row.history_json).map(record => ({ ...record, cooldownStartedAt: Object.hasOwn(record, 'cooldownStartedAt') ? record.cooldownStartedAt : estimateCooldownStart(record.cooldownUntil, record.hits, record.detectedAt) }));
-    return { config: JSON.parse(row.config_json), history, seen: JSON.parse(row.seen_json) };
+    return { config: { ...DEFAULT_CHAIN_CONFIG, ...JSON.parse(row.config_json) }, history, seen: JSON.parse(row.seen_json) };
   };
   return {
     get,
+    updateBonus(uid, id, patch) {
+      const { history } = get(uid), row = history.find(item => item.id === id);
+      if (!row) return null;
+      Object.assign(row, patch);
+      db.prepare('UPDATE torn_chain_monitors SET history_json=? WHERE user_id=?').run(JSON.stringify(history), uid);
+      return row;
+    },
     loadKnown(uid) { const row = db.prepare('SELECT known_json FROM torn_chain_observations WHERE user_id=?').get(uid); return new Map(row ? JSON.parse(row.known_json) : []); },
     saveKnown(uid, known) { db.prepare('INSERT INTO torn_chain_observations(user_id,known_json) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET known_json=excluded.known_json').run(uid, JSON.stringify([...known].slice(-5000))); },
     getNotify(uid) { const row = db.prepare('SELECT settings_json FROM torn_chain_notifications WHERE user_id=?').get(uid); return row ? JSON.parse(row.settings_json) : structuredClone(DEFAULT_CHAIN_NOTIFY); },
@@ -110,12 +124,78 @@ export class ChainMonitor {
     this.promise = this.scan();
   }
   stop() { this.running = false; this.cancel(this.timer); this.controller?.abort(); this.state.nextScanAt = null; }
+  async enrichReport(row, check, signal) {
+    const selected = this.config.bonusHits.filter(hit => hit <= row.hits);
+    if (!selected.length || selected.every(hit => row.bonusDetails?.some(bonus => bonus.hit === hit)) || (row.bonusAttempts || 0) >= 3 || row.bonusAttemptedAt && this.now() - row.bonusAttemptedAt < 60) return row;
+    check();
+    const attempt = { bonusAttempts: (row.bonusAttempts || 0) + 1, bonusAttemptedAt: this.now() };
+    try {
+      const { chainreport } = await this.request('faction/' + row.id + '/chainreport', this.config.apiKey, signal); check();
+      const bonusDetails = reportBonusDefenders(chainreport, row).map(bonus => ({ ...row.bonusDetails?.find(old => old.hit === bonus.hit && old.defenderId === bonus.defenderId), ...bonus }));
+      const complete = selected.every(hit => bonusDetails.some(bonus => bonus.hit === hit));
+      return this.store.updateBonus(this.uid, row.id, { ...attempt, bonusDetails, bonusStatus: complete ? 'ready' : 'partial' }) || row;
+    } catch (error) {
+      if (!signal.aborted) this.store.updateBonus(this.uid, row.id, { ...attempt, bonusStatus: 'unavailable' });
+      if (error.fatal || signal.aborted) throw error;
+      return this.store.get(this.uid).history.find(item => item.id === row.id) || row;
+    }
+  }
+  async enrichBonus(row, check, signal) {
+    row = await this.enrichReport(row, check, signal);
+    if (this.config.leaderFilter === 'all') return row;
+    const bonusDetails = (row.bonusDetails || []).map(bonus => ({ ...bonus }));
+    for (const bonus of bonusDetails) {
+      if (!this.config.bonusHits.includes(bonus.hit) || bonus.hit > row.hits || typeof bonus.isLeader === 'boolean' || (bonus.leaderAttempts || 0) >= 3 || bonus.leaderAttemptedAt && this.now() - bonus.leaderAttemptedAt < 60) continue;
+      check();
+      let cached = this.leaderCache.get(bonus.defenderId);
+      if (cached && this.now() - cached.leaderCheckedAt >= (typeof cached.isLeader === 'boolean' ? 300 : 60)) cached = null;
+      if (!cached && !this.leaderBudget) continue;
+      if (!cached) {
+        this.leaderBudget--;
+        try {
+          const result = await lookupDefenderLeader(bonus.defenderId, async path => { check(); const data = await this.request(path, this.config.apiKey, signal); check(); return data; }, this.factionCache);
+          cached = { ...result, leaderCheckedAt: this.now() };
+        } catch (error) {
+          if (error.fatal || signal.aborted) throw error;
+          check(); cached = { isLeader: null, factionId: null, leaderCheckedAt: this.now() };
+        }
+        this.leaderCache.set(bonus.defenderId, cached);
+      }
+      Object.assign(bonus, cached, { leaderAttempts: (bonus.leaderAttempts || 0) + 1, leaderAttemptedAt: this.now() });
+    }
+    return this.store.updateBonus(this.uid, row.id, { bonusDetails }) || row;
+  }
+  needsBonus(row) {
+    return this.config.bonusHits.some(hit => {
+      if (hit > row.hits) return false;
+      const bonus = row.bonusDetails?.find(item => item.hit === hit);
+      if (!bonus) return (row.bonusAttempts || 0) < 3 && (!row.bonusAttemptedAt || this.now() - row.bonusAttemptedAt >= 60);
+      return this.config.leaderFilter !== 'all' && typeof bonus.isLeader !== 'boolean' && (bonus.leaderAttempts || 0) < 3 && (!bonus.leaderAttemptedAt || this.now() - bonus.leaderAttemptedAt >= 60);
+    });
+  }
+  async notifyRecord(row, check) {
+    if (this.config.leaderFilter !== 'all') {
+      const unresolved = this.config.bonusHits.some(hit => {
+        if (hit > row.hits) return false;
+        const bonus = row.bonusDetails?.find(item => item.hit === hit);
+        return !bonus ? (row.bonusAttempts || 0) < 3 : typeof bonus.isLeader !== 'boolean' && (bonus.leaderAttempts || 0) < 3;
+      });
+      if (unresolved && row.cooldownUntil > this.now()) { this.store.updateBonus(this.uid, row.id, { notificationPending: true }); return; }
+    }
+    check(); this.store.updateBonus(this.uid, row.id, { notificationPending: false });
+    if (row.cooldownUntil <= this.now()) return;
+    if (this.config.leaderFilter !== 'all' && !selectedBonusDefenders(row, this.config.bonusHits, this.config.leaderFilter).length) return;
+    try { await this.notify({ ...row, bonusSelection: this.config.bonusHits, leaderFilter: this.config.leaderFilter }); this.state.notificationError = ''; }
+    catch { this.state.notificationError = '冷却记录已保存，但通知未能全部投递，请检查通知管理（不自动重试）'; }
+  }
   async scan() {
     if (!this.running || this.busy) return;
     this.busy = true; const signal = this.controller.signal;
     const valid = () => this.running && !signal.aborted && this.authorize();
     const check = () => { if (!valid()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true }); };
     const stats = { candidates: 0, confirmed: 0, failed: 0, partial: false, error: '' };
+    this.leaderBudget = 10; this.leaderCache ||= new Map(); this.factionCache = new Map();
+    for (const [id, cached] of this.leaderCache) if (this.now() - cached.leaderCheckedAt >= 300) this.leaderCache.delete(id);
     try {
       check(); const candidates = new Map(), visited = new Set();
       let path = 'faction/warfarechains?cat=active&limit=100', pages = 0;
@@ -141,10 +221,10 @@ export class ChainMonitor {
           if (!chain || chain.id !== candidate.id || !['current', 'cooldown', 'timeout'].every(field => Number.isSafeInteger(chain[field]) && chain[field] >= 0)) { stats.failed++; continue; }
           const old = this.known.get(chain.id), status = chain.cooldown > this.now() ? 'cooldown' : chain.timeout > 0 ? 'active' : 'ended';
           if (status === 'cooldown') {
-            const row = this.store.record(this.uid, candidate, chain, old?.status === 'active', this.now());
+            let row = this.store.record(this.uid, candidate, chain, old?.status === 'active', this.now());
+            if (row) row = await this.enrichBonus(row, check, signal);
             if (row?.notifyEligible) {
-              try { check(); await this.notify(row); this.state.notificationError = ''; }
-              catch { this.state.notificationError = '冷却记录已保存，但通知未能全部投递，请检查通知管理（不自动重试）'; }
+              await this.notifyRecord(row, check);
             }
           }
           this.known.set(chain.id, { status, until: chain.cooldown, candidate, listedAt: this.now() });
@@ -152,6 +232,10 @@ export class ChainMonitor {
         } catch (error) { if (error.fatal || !valid()) throw error; stats.failed++; }
       }
       this.cursor = eligible.length ? (this.cursor + count) % eligible.length : 0;
+      // Backfill recent saved records when bonus selections are enabled later.
+      // At most five reports per round, with three attempts per saved record.
+      const backlog = [...this.store.get(this.uid).history].reverse().filter(row => this.needsBonus(row) || row.notificationPending).slice(0, 5);
+      for (const row of backlog) { check(); const enriched = await this.enrichBonus(row, check, signal); if (enriched.notificationPending) await this.notifyRecord(enriched, check); }
       for (const [id, old] of this.known) if (this.now() - old.listedAt > 86400) this.known.delete(id);
       this.state.rounds++; this.state.lastScanAt = this.now();
     } catch (error) {

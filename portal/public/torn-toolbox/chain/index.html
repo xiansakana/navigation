@@ -7,7 +7,7 @@
   <script defer src="/ui/back-to-top.js?v=1"></script>
   <link rel="stylesheet" href="/portal.css?v=layout-20261018">
   <link rel="stylesheet" href="/experience.css?v=mobile-sheets-1">
-  <link rel="stylesheet" href="/torn-toolbox/chain/style.css?v=1">
+  <link rel="stylesheet" href="/torn-toolbox/chain/style.css?v=2">
 </head>
 <body class="portal-experience has-navbar portal-layout-enabled">
   <header class="navbar"><div class="navbar-inner">
@@ -27,6 +27,10 @@
           <label>轮次间隔（秒）<input id="interval" type="number" min="30" step="1" required disabled></label>
           <label>Public API Key<input id="api-key" type="password" autocomplete="new-password" maxlength="16" placeholder="留空保留已保存 Key" disabled></label>
         </div>
+        <fieldset class="chain-bonus-picker"><legend>Bonus hit 被打玩家（可多选）</legend><div id="bonus-options"></div>
+          <label>被打玩家身份 <select id="leader-filter" disabled><option value="all">全部</option><option value="leader">仅 Leader</option><option value="non-leader">排除 Leader</option></select></label>
+          <p class="chain-note">Leader 指被打玩家当前所属 faction 的 Leader，不含 Co-leader；依据公开资料中的 leader_id 核对，记录查询时的身份快照，未知不匹配身份筛选。筛选同时作用于记录和通知，至少一个所选档位匹配才显示/推送。仅开启筛选时查询身份，每轮最多核验 10 位玩家；查询未完成的通知延后，冷却已过期则不补发。</p>
+          <p class="chain-note">不勾选档位则不读取 report；勾选后每条记录额外读取公开 report，失败最多尝试 3 次。保存后重新启动监控，旧记录每轮最多补查 5 条，不重复推送。</p></fieldset>
         <p id="key-status">正在加载配置…</p>
         <div class="chain-actions">
           <button id="save" type="submit" class="btn" hidden>保存配置</button>
@@ -44,6 +48,6 @@
   </main>
   <script src="/theme.js"></script>
   <script src="/layout.js?v=layout-20261018"></script>
-  <script src="/torn-toolbox/chain/app.js?v=3"></script>
+  <script src="/torn-toolbox/chain/app.js?v=4"></script>
 </body>
 </html>

@@ -163,7 +163,7 @@ function buildNotificationPermissions() {
 var SYSTEM_PERMISSIONS = [
     ...[
         ['view', '查看自己的 Chain 监控', [], 'view'],
-        ['config:edit', '保存自己的 Chain 监控范围和 Key', ['配置'], 'edit'],
+        ['config:edit', '保存自己的 Chain 范围、Bonus hit、Leader 筛选和 Key', ['配置'], 'edit'],
         ['control:edit', '启动或停止自己的 Chain 监控', ['监控控制'], 'edit'],
         ['history:edit', '清空自己的 Chain 报告记录', ['报告记录', '清空'], 'edit']
     ].map(([id, name, parts, action]) => ({ id: 'torn-chain:' + id, name, group: 'Torn 工具箱', serviceId: 'torn-toolbox', action, permissionPath: ['首页', 'Torn 工具箱', 'Chain 监控', ...parts] })),

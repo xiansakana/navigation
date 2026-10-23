@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 
 (async () => {
   let writable = true, running = false, authorized = true;
-  const config = { minHits: 100, maxHits: 500, intervalSeconds: 60, hasKey: true }, writes = [];
+  const config = { minHits: 100, maxHits: 500, intervalSeconds: 60, hasKey: true, bonusHits: [100, 250], leaderFilter: 'all' }, writes = [];
   const server = createServer(async (req, res) => {
     const pathname = new URL(req.url, 'http://localhost').pathname;
     if (pathname.startsWith('/api/')) {
@@ -17,11 +17,12 @@ const assert = require('node:assert/strict');
       if (req.method !== 'GET') {
         let body = ''; for await (const chunk of req) body += chunk;
         writes.push({ path: pathname, body: body && JSON.parse(body) });
+        if (pathname.endsWith('/config')) Object.assign(config, JSON.parse(body));
         if (pathname.endsWith('/start')) running = true;
         if (pathname.endsWith('/stop')) running = false;
         return res.end('{"ok":true}');
       }
-      return res.end(JSON.stringify({ ok: true, config, permissions: { configure: writable, control: writable, clear: writable }, state: { running, busy: false, rounds: 2, candidates: 3, confirmed: 3, failed: 0 }, history: [{ id: 1234, name: '<img src=x onerror=alert(1)>', hits: 250, fresh: true, cooldownStartedAt: 1792799500, detectedAt: 1792800000, cooldownUntil: 1792801000 }] }));
+      return res.end(JSON.stringify({ ok: true, config, bonusHitOptions: [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000], permissions: { configure: writable, control: writable, clear: writable }, state: { running, busy: false, rounds: 2, candidates: 3, confirmed: 3, failed: 0 }, history: [{ id: 1234, name: '<img src=x onerror=alert(1)>', hits: 250, fresh: true, cooldownStartedAt: 1792799500, detectedAt: 1792800000, cooldownUntil: 1792801000, bonusDetails: [{ hit: 100, defenderId: 1100, isLeader: true }, { hit: 250, defenderId: 1250, isLeader: false }] }] }));
     }
     try {
       const file = path.join(__dirname, '../portal/public', pathname.endsWith('/') ? pathname + 'index.html' : pathname);
@@ -60,19 +61,34 @@ const assert = require('node:assert/strict');
       const text = document.querySelector('#history').textContent;
       return [1792799500, 1792800000, 1792801000].every(seconds => text.includes(new Date(seconds * 1000).toLocaleString()));
     }), 'cooldown start, discovery and end timestamps must all be rendered');
-    assert.equal(await page.locator('#history a').getAttribute('href'), 'https://www.torn.com/war.php?step=chainreport&chainID=1234');
+    assert.equal(await page.locator('#history .chain-row > a').getAttribute('href'), 'https://www.torn.com/war.php?step=chainreport&chainID=1234');
+    assert.equal(await page.locator('.chain-bonus-links a').count(), 2);
+    assert.equal(await page.locator('.chain-bonus-links a').first().getAttribute('href'), 'https://www.torn.com/profiles.php?XID=1100');
+    await page.locator('#bonus-options input[value="250"]').uncheck();
+    await page.locator('#bonus-options input[value="500"]').check();
+    await page.locator('#leader-filter').selectOption('leader');
     await page.locator('#min-hits').fill('150'); await page.locator('#save').click();
     await page.waitForFunction(() => document.querySelector('#message').textContent.includes('配置已保存'));
     assert.equal(writes[0].body.minHits, '150'); assert.ok(!('apiKey' in writes[0].body));
+    assert.deepEqual(writes[0].body.bonusHits, [100, 500]);
+    assert.equal(writes[0].body.leaderFilter, 'leader');
+    await page.reload(); await page.waitForSelector('#bonus-options input[value="500"]');
+    assert.equal(await page.locator('#bonus-options input[value="500"]').isChecked(), true);
+    assert.equal(await page.locator('#bonus-options input[value="250"]').isChecked(), false);
+    assert.equal(await page.locator('#leader-filter').inputValue(), 'leader');
+    assert.equal(await page.locator('.chain-bonus-links a').count(), 1);
+    assert.equal(await page.locator('.chain-bonus-links a').getAttribute('href'), 'https://www.torn.com/profiles.php?XID=1100');
     await page.locator('#start').click(); await page.waitForFunction(() => document.querySelector('#status').textContent.includes('运行中'));
     await page.locator('#stop').click(); await page.waitForFunction(() => document.querySelector('#status').textContent.includes('已停止'));
     for (const width of [390, 320]) {
       await page.setViewportSize({ width, height: 850 });
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'mobile overflow ' + width);
     }
-    writable = false; await page.reload(); await page.waitForFunction(() => document.querySelector('#min-hits').value === '100');
+    writable = false; await page.reload(); await page.waitForFunction(() => document.querySelector('#min-hits').value === '150');
     assert.equal(await page.locator('#start').isVisible(), false); assert.equal(await page.locator('#save').isVisible(), false);
     assert.equal(await page.locator('#min-hits').isDisabled(), true);
+    assert.equal(await page.locator('#bonus-options input').first().isDisabled(), true);
+    assert.equal(await page.locator('#leader-filter').isDisabled(), true);
     authorized = false;
     await Promise.all([page.waitForResponse(response => response.url().endsWith('/api/torn-chain/state')), page.goto(origin + '/torn-toolbox/')]);
     assert.equal(await page.locator('#chain-card').isVisible(), false);

@@ -12,13 +12,25 @@
 
 保存配置会停止运行；停止/重启会重新建立观察基线。关闭浏览器不会停止服务器监控；Portal 服务重启后需手动启动。报告由用户手动打开。
 
+## Bonus hit 被打玩家与 Leader 筛选
+
+Chain 监控配置中可多选 13 个标准档位：10、25、50、100、250、500、1000、2500、5000、10000、25000、50000、100000。默认不选，不增加 report 请求。保存后重新启动监控，记录及通知附上所选且已达到档位的**被打玩家**链接 `https://www.torn.com/profiles.php?XID={defender_id}`；不使用出手玩家的 attacker_id。
+
+身份筛选为“全部 / 仅 Leader / 排除 Leader”，默认全部。开启身份筛选需要至少选择一个档位，至少一名所选档位被打玩家符合身份条件，记录才显示、通知才投递，且只展示匹配玩家的链接。身份未知不会被当成非 Leader；无 faction 的玩家确认属于非 Leader。Co-leader 不属于 Leader。身份以 API 查询时的当前 faction 为准，缓存查询时间快照，不能还原攻击发生时的职位。
+
+仅开启身份筛选时读取玩家公开 `profile.faction_id`，再读取该 faction 的 `basic.leader_id`，用数值 ID 对比，避免自定义职位名称误判。不缓存无关玩家资料。每轮最多核验 10 位不同玩家，同 faction 在本轮复用 Leader 查询，玩家核验成功结果最多复用 5 分钟；记录中已确认的身份作为历史快照保存。
+
+每条符合范围的新冷却记录最多额外读取一次 report，缓存其有效 bonus defender ID。report ID/faction ID 必须匹配。暂不可用不伪造链接，最多尝试 3 次，相邻尝试至少 60 秒；未开启身份筛选时仍正常发送 report 链接，并标记被打玩家暂不可用。开启身份筛选后，未完成核验的通知延后；查询失败最多 3 次，未知不匹配，冷却已经结束的延后通知不补发。投递本身依旧不自动重试，避免重复。
+
+旧记录在监控启动后每轮最多补查 5 条，补查本身不重发已发通知；未完成的延后通知在身份核验后投递一次。切换所选档位可立即使用已经缓存的 report 数据；尚未缓存的档位在后续轮次中补查。开启更多档位或身份核验会增加单轮耗时，所有请求仍共用原 1.5 秒串行队列。
+
 ## 通知管理
 
 进入 `/notifications/#chain-notifications` 的业务提醒区域，配置“Torn · Chain 冷却”。QQ 支持当前账号的独立群聊、@、私聊目标，Slack 复用通知管理的公共渠道。两种推送默认关闭，不继承其他用户或业务的目标。保存通知配置不影响扫描运行。
 
 通知查看、保存、测试分别需要 `torn-chain:notify:view`、`torn-chain:notify:edit`、`torn-chain:notify:test:edit`；同时需要 Chain 主模块查看权限，进入通知管理还需原有通知服务权限。后台投递前复查账号及通知保存权限，撤销后不再投递。
 
-仅新记录中“刚进入冷却”的 Chain 推送一次；首次发现、超出范围、重复扫描、重启后的已有冷却记录均不补发。报告先持久化再投递；失败不自动重试，以免部分投递后重复推送。Chain 页状态显示最近投递异常；下一次成功投递或重启监控清除该提示。测试按钮使用已经保存的配置。
+新发现且仍在冷却、符合范围的 Chain 推送一次，包括首次扫描发现的冷却记录；超出范围、重复扫描、重启后的已见 Chain 不重复推送。开启 Leader 筛选时还需满足上述身份条件。报告先持久化再投递；失败不自动重试，以免部分投递后重复推送。Chain 页状态显示最近投递异常；下一次成功投递或重启监控清除该提示。测试按钮使用已经保存的配置。
 
 Portal 通过通知服务的本机 `/notify` 接口、共享集成配置中的 `notifyToken` 投递，不暴露 Token 给浏览器。通知请求与测试均不得在开发验证时真实发送；自动测试使用 mock。
 
@@ -28,6 +40,8 @@ Portal 通过通知服务的本机 `/notify` 接口、共享集成配置中的 `
 
 - `GET https://api.torn.com/v2/faction/warfarechains?cat=active&limit=100`，读取 `_metadata.links.next` 分页，最多 10 页。分页只允许官方域名和预期接口，不跟随 HTTP 跳转。
 - `GET https://api.torn.com/v2/faction/{id}/chain`，必须与列表的 Chain ID 一致，再依据 `cooldown` Unix 秒时间戳和 `timeout` 核验状态。未知/失败结果保留原观察，不推测为已冷却。
+- 选择 Bonus hit 后：`GET /v2/faction/{chainId}/chainreport`，只使用 `bonuses[].chain` 和 `bonuses[].defender_id`；根据[官方公开 API schema](https://www.torn.com/swagger/openapi.json)校验 report 身份。
+- 开启身份筛选后：`GET /v2/user/{id}/profile`、`GET /v2/faction/{id}/basic`，均使用 Public Key；仅比对 `profile.faction_id` 和 `basic.leader_id`，不访问游戏页面。
 - 每轮最多核验 40 条，其余轮换；已确认且未到期的冷却记录不重复核验。近期从列表消失的已知活动 Chain 最多继续核验 10 分钟。
 
 请求在 Portal 本进程共用串行队列，间隔至少 1.5 秒（最多约 40 次/分钟）。轮次间隔从本轮结束计算，含排队时间，因此发现有延迟；多用户或大量候选时可能漏过短冷却。页面显示核验失败、待轮换和分页不完整状态。限流或失效 Key 会停止，修复后手动启动。其他 Torn 工具的请求仍共享 Torn 用户配额，本模块无法协调外部进程的用量。
@@ -36,7 +50,7 @@ Portal 通过通知服务的本机 `/notify` 接口、共享集成配置中的 `
 
 ## 数据与权限
 
-`torn_chain_monitors` 在共享 SQLite 中按已认证 `user_id` 保存配置、最近 200 条报告和最近 5000 个去重 ID；`torn_chain_notifications` 按同一用户保存通知开关与目标。清空报告保留去重 ID。API Key 保存在服务器数据库中，状态 API 只回传 `hasKey`，不返回密钥。数据库备份需要按凭据保护。运行基线仅在内存，不自动恢复运行。
+`torn_chain_monitors` 在共享 SQLite 中按已认证 `user_id` 保存配置、最近 200 条报告（含 Bonus 缓存、身份快照、有限重试状态）和最近 5000 个去重 ID；`torn_chain_notifications` 按同一用户保存通知开关与目标。`torn_chain_observations` 保存近期活动 Chain 观察以便重启后继续核验，进程不会自动恢复运行。清空报告保留去重 ID。API Key 保存在服务器数据库中，状态 API 只回传 `hasKey`，不返回密钥。数据库备份需要按凭据保护。新增 Bonus/Leader 配置使用原有 JSON 字段，旧配置默认空选和全部，不需要表迁移。
 
 页面、各操作 API 均检查 RBAC，写请求检查同源。后台每次请求前后复查运行权限，撤权或禁用账号后停止。报告名称使用文本节点渲染；链接固定为 `https://www.torn.com/war.php?step=chainreport&chainID={id}`，由用户手动打开。
 

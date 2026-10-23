@@ -12,7 +12,7 @@
     host.hidden = false;
     host.innerHTML = '<article class="business-card" data-source="chain"><div class="business-card-head"><div><h3>Torn · Chain 冷却</h3><p>当前账号的 Chain 监控</p></div><a href="/torn-toolbox/chain/">打开监控 →</a></div>'
       + '<div class="biz-global"><label class="biz-check"><input data-channel="qq" type="checkbox"' + (state.settings.qq.enabled ? ' checked' : '') + '> QQ 推送</label><label class="biz-check"><input data-channel="slack" type="checkbox"' + (state.settings.slack.enabled ? ' checked' : '') + '> Slack 推送</label></div>'
-      + '<p class="biz-hint">仅推送持续监控中刚进入冷却、符合长度范围的 Chain，附 report 链接。首次扫描已有记录不补发。QQ 使用下方目标，Slack 使用通知管理上方已配置的渠道。</p>'
+      + '<p class="biz-hint">推送符合长度范围、首次发现仍在冷却的 Chain，附 report 链接；所选 Bonus hit 的被打玩家 profile 在 Chain 监控页多选配置。QQ 使用下方目标，Slack 使用通知管理上方已配置的渠道。</p>'
       + '<h4>QQ 通知目标</h4>' + bizTargets(state.settings.targets, 'chain')
       + '<div class="biz-actions"><button type="button" class="test-btn compact" data-action="chain-save">保存提醒配置</button><button type="button" class="test-btn compact" data-action="chain-test">发送测试</button></div></article>';
     host.querySelectorAll('input,select').forEach(input => { input.disabled = !state.permissions.save; });

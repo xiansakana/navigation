@@ -107,6 +107,8 @@ Deploy Key 需加到 **navigation** 仓库（可与 torn-scripts 共用同一密
 
 Chain 监控是 Portal 内置的 Torn 工具箱子模块，入口 `/torn-toolbox/chain/`；通知管理集成更新 `portal,qq-bot`。首次访问自动建立按用户隔离的 `torn_chain_monitors`、`torn_chain_notifications` 表；备份包含两表并按凭据保护其中的 API Key。新增权限和操作说明见 [Chain 监控](docs/torn-chain-monitor.md)。部署后不自动启动扫描或打开通知开关。
 
+Bonus hit 多选、被打玩家 profile 链接及 Leader 筛选同样更新 `portal,qq-bot`。配置和查询快照存入原有按用户隔离的 JSON，无需新表迁移；默认空选/全部，不增加 API 查询。只有用户保存配置并启动监控后才补查 report 和身份；开发及上线验证不得真实发送测试通知。
+
 视频知识库随 Portal 部署，入口 `/knowledge/`，无新增公网端口。`scripts/sync-blog-upload-nginx.py` 同时维护其分片/工作器结果上传路由。Portal只接收文件和持久化队列；如需在ECS执行转写和总结，另行按 [工作器说明](docs/video-knowledge.md) 安装Python>=3.10、语音依赖和Codex CLI，使用该账号私有凭据启动 `knowledge-worker`。本机工作器也可处理同一站点任务。不要在常规Portal更新中自动安装模型或启动CPU密集任务；备份须额外包含 `portal/data/knowledge/` 的视频和截图。
 
 B站链接导入随Portal进程运行，需现有FFmpeg（可设`KNOWLEDGE_IMPORT_FFMPEG`），不依赖yt-dlp或Python下载器。自动新增`knowledge_imports`表；备份该表和原有知识库数据。一次只下载所选单个分P，1GB/4小时上限，权限为`knowledge:import:edit`并需上传/生成笔记权限。下载完成后GPU处理和115归档并行；无须更新本机工作器。部署仍只更新`portal`。
