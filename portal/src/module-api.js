@@ -1,4 +1,5 @@
 import { findModuleApi } from './modules.js';
+import { handleTornChainApi } from './torn-chain.js';
 import { handleBlogApi } from './blog.js';
 import { handleResourceApi } from './resources.js';
 import { handleBookkeepingApi } from './bookkeeping.js';
@@ -8,6 +9,7 @@ import { handleQqCodexApi } from './qq-codex.js';
 import { handleCodexCliApi } from './codex-cli.js';
 
 const handlers = {
+  'torn-chain': (req, res, url, session, deps) => handleTornChainApi(req, res, url, session, deps.json, deps.config),
   blog: (req, res, url, session, deps) => handleBlogApi(req, res, url, session, deps.json, deps.config),
   resources: (req, res, url, session, deps) => handleResourceApi(req, res, session, deps.resourceMonitor, deps.json),
   bookkeeping: (req, res, url, session, deps) => handleBookkeepingApi(req, res, url, session, deps.json),

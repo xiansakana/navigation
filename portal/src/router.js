@@ -207,6 +207,9 @@ export function resolveProxyContext(services, reqUrl, opts) {
     opts = opts || {};
     var url = new URL(reqUrl, 'http://127.0.0.1');
 
+    // Chain monitoring belongs to Portal, even when the toolbox has a proxy mount.
+    if (url.pathname === '/torn-toolbox/chain' || url.pathname.startsWith('/torn-toolbox/chain/')) return null;
+
     if (url.pathname.startsWith('/api/') && isPortalApiNamespace(url.pathname)) {
         return null;
     }

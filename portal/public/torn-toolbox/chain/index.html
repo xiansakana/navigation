@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chain 监控 · Torn 工具箱</title>
+  <script defer src="/ui/back-to-top.js?v=1"></script>
+  <link rel="stylesheet" href="/portal.css?v=layout-20261018">
+  <link rel="stylesheet" href="/experience.css?v=mobile-sheets-1">
+  <link rel="stylesheet" href="/torn-toolbox/chain/style.css?v=1">
+</head>
+<body class="portal-experience has-navbar portal-layout-enabled">
+  <header class="navbar"><div class="navbar-inner">
+    <a class="navbar-brand" href="/">⚡ 服务导航</a>
+    <nav class="navbar-nav"><a class="navbar-link" href="/torn-toolbox/">Torn 工具箱</a></nav>
+    <div class="navbar-actions"><button type="button" class="btn ghost navbar-layout-btn" aria-pressed="false">全宽</button></div>
+  </div></header>
+  <main class="chain-app" data-layout-container>
+    <h1>Chain 监控</h1>
+    <p>发现进入冷却的 Chain，手动打开 report。首次扫描已有的冷却记录标记为“首次发现”；持续观察到 Active → Cooldown 才标记为“刚进入冷却”。</p>
+    <section class="chain-panel">
+      <form id="config-form">
+        <div class="chain-fields">
+          <label>最小长度<input id="min-hits" type="number" min="0" step="1" required disabled></label>
+          <label>最大长度<input id="max-hits" type="number" min="0" step="1" placeholder="不限" disabled></label>
+          <label>轮次间隔（秒）<input id="interval" type="number" min="30" step="1" required disabled></label>
+          <label>Public API Key<input id="api-key" type="password" autocomplete="new-password" maxlength="16" placeholder="留空保留已保存 Key" disabled></label>
+        </div>
+        <p id="key-status">正在加载配置…</p>
+        <div class="chain-actions">
+          <button id="save" type="submit" class="btn" hidden>保存配置</button>
+          <button id="clear-key" type="button" class="btn ghost" hidden>删除 Key</button>
+          <button id="start" type="button" class="btn" hidden>启动监控</button>
+          <button id="stop" type="button" class="btn ghost" hidden>停止监控</button>
+          <button id="clear-history" type="button" class="btn ghost" hidden>清空记录</button>
+        </div>
+      </form>
+      <p class="chain-note">长度范围包含上下限。保存配置会停止当前监控，请重新启动。监控在服务器运行，关闭页面仍继续；服务重启后需手动启动。每轮结束后等待设定间隔，每轮最多核验 40 条，超出部分轮换扫描，可能漏过短冷却。</p>
+    </section>
+    <p id="message" role="status" aria-live="polite"></p>
+    <section class="chain-panel"><h2>监控状态</h2><p id="status">正在加载…</p><p id="coverage"></p></section>
+    <section class="chain-panel"><h2>冷却记录 <span id="count"></span></h2><p>最多保留 200 条；清空记录不会重置去重状态。</p><div id="history"></div></section>
+  </main>
+  <script src="/theme.js"></script>
+  <script src="/layout.js?v=layout-20261018"></script>
+  <script src="/torn-toolbox/chain/app.js?v=1"></script>
+</body>
+</html>

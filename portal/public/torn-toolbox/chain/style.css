@@ -1,0 +1,16 @@
+.chain-app { max-width: 1100px; margin: 28px auto; padding: 0 20px 40px; box-sizing: border-box; }
+.chain-panel { margin: 18px 0; padding: 20px; border: 1px solid var(--border, #425066); border-radius: 12px; background: var(--bg-card, rgba(128,128,128,.06)); }
+.chain-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.chain-fields label { display: grid; gap: 8px; min-width: 0; }
+.chain-fields input { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid var(--border, #64748b); border-radius: 7px; background: var(--bg-input, transparent); color: inherit; }
+.chain-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.chain-note, #coverage { font-size: .9rem; opacity: .8; line-height: 1.6; }
+.chain-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 20px; padding: 16px 0; border-top: 1px solid var(--border, #425066); }
+.chain-row strong, .chain-row p { overflow-wrap: anywhere; margin: 0 0 6px; }
+.chain-row a { align-self: center; }
+.chain-badge { display: inline-block; margin-right: 8px; padding: 3px 8px; border-radius: 12px; background: rgba(128,128,128,.18); font-size: .85rem; }
+.chain-badge.fresh { background: rgba(34,197,94,.2); }
+#message { min-height: 1.5em; color: var(--text, inherit); }
+@media (max-width: 700px) { .chain-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } .chain-panel { padding: 14px; } .chain-app { padding: 0 12px 24px; margin-top: 16px; } }
+@media (max-width: 380px) { .chain-fields { grid-template-columns: 1fr; } }
+.chain-app [hidden] { display: none !important; }

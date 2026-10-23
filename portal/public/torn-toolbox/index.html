@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Torn 工具箱</title>
+    <style>#chain-card[hidden] { display: none; }</style>
     <script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
     <link rel="stylesheet" href="/portal.css?v=layout-20261018">
     <link rel="stylesheet" href="/experience.css?v=mobile-sheets-1">
@@ -36,10 +37,16 @@
     <section class="toolbox-hero">
         <div class="toolbox-hero-badge">🎮 Torn City 工具集</div>
         <h1>Torn 工具箱</h1>
-        <p>压价助手与公司监听独立运行，互不影响，支持多账号与 QQ 通知</p>
+        <p>压价助手、公司监听与 Chain 监控，按账号独立管理</p>
     </section>
 
-    <main class="toolbox-grid" data-skeleton="cards" data-skeleton-key="page" data-skeleton-static>
+    <main class="toolbox-grid" data-layout-container data-skeleton="cards" data-skeleton-key="page" data-skeleton-static>
+        <a id="chain-card" class="toolbox-card" href="/torn-toolbox/chain/" hidden>
+            <div class="toolbox-card-icon">⛓️</div>
+            <h2>Chain 监控</h2>
+            <p>按长度范围发现刚进入冷却的 Chain，查看 report 链接</p>
+            <span class="toolbox-card-arrow">进入 →</span>
+        </a>
         <a class="toolbox-card" href="/torn-toolbox/undercut/">
             <div class="toolbox-card-icon undercut">📉</div>
             <h2>压价助手</h2>
@@ -58,5 +65,10 @@
     <script src="/layout.js?v=layout-20261018"></script>
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
+    <script>
+      fetch('/api/torn-chain/state', { credentials: 'same-origin' }).then(function (r) {
+        if (r.ok) document.getElementById('chain-card').hidden = false;
+      }).catch(function () {});
+    </script>
 </body>
 </html>
