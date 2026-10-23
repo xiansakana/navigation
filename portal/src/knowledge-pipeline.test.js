@@ -146,3 +146,28 @@ export async function summarizeVideo(config, job) {
     assert.equal(path.dirname(root), os.tmpdir()); await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test('only idempotent Codex receipts retry ambiguous gateway and transport failures', async () => {
+  const url = 'https://test/api/knowledge/worker/jobs/' + 'a'.repeat(32) + '/codex';
+  const options = { method: 'POST', body: JSON.stringify({ id: 'fixed-receipt-id', state: 'succeeded', result: 'saved' }) };
+  let calls = 0; const bodies = [];
+  const response = await workerPortalRequest(url, options, { wait: async () => {}, fetch: async (url, input) => {
+    bodies.push(input.body); calls++;
+    if (calls === 1) throw new TypeError('fetch failed');
+    return calls < 4 ? new Response('<html>gateway</html>', { status: calls === 2 ? 520 : 525 }) : new Response('{"ok":true}');
+  } });
+  assert.equal(response.status, 200); assert.equal(calls, 4); assert.equal(new Set(bodies).size, 1);
+  for (const status of [400, 401, 403, 409]) {
+    calls = 0;
+    await assert.rejects(workerPortalRequest(url, options, { wait: async () => {}, fetch: async () => { calls++; return new Response('{}', { status }); } }), new RegExp(String(status)));
+    assert.equal(calls, 1);
+  }
+  calls = 0;
+  await assert.rejects(workerPortalRequest(url.replace('/codex', '/complete'), options, { fetch: async () => { calls++; return new Response('{}', { status: 520 }); } }), /520/);
+  assert.equal(calls, 1);
+  await assert.rejects(workerPortalRequest(url, options, { retries: 1, wait: async () => {}, fetch: async () => new Response('{}', { status: 520 }) }), /已重试1次.*保留在本机/);
+  const controller = new AbortController();
+  calls = 0;
+  await assert.rejects(workerPortalRequest(url, { ...options, signal: controller.signal }, { wait: async () => controller.abort(new Error('cancelled')), fetch: async () => { calls++; return new Response('{}', { status: 525 }); } }), /cancelled/);
+  assert.equal(calls, 1);
+});

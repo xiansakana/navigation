@@ -138,8 +138,50 @@ test('ephemeral CLI calls report durable start/completion and thread identity wi
     };
     assert.equal(await generate(config,'codex','quoted source',[],directory,undefined,{run}),answer);
     assert.deepEqual(seen.map(x=>x.state),['running','succeeded']);assert.equal(seen[0].id,seen[1].id);assert.equal(seen[1].sessionId,'native-thread');assert.match(seen[0].prompt,/quoted source/);
-    assert.deepEqual(await fs.readdir(directory),[]);
+    assert.deepEqual(await fs.readdir(directory),['.codex-results']);
     seen.length=0;await assert.rejects(generate(config,'codex','source',[],directory,undefined,{run:async()=>{throw new Error('quota');}}),/quota/);
     assert.deepEqual(seen.map(x=>x.state),['running','failed']);
   }finally{await fs.rm(directory,{recursive:true,force:true});}
+});
+
+test('successful CLI work survives lost completion receipts without another model call', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge-receipt-'));
+  const answer = 'A complete cached answer which must never be regenerated.';
+  let runs = 0, failReceipt = true;
+  const seen = [], config = { codex: { model: 'test', reasoningEffort: 'high' }, onCodexCall: async event => {
+    seen.push(event);
+    if (event.state === 'succeeded' && failReceipt) throw Object.assign(new Error('gateway'), { status: 520 });
+  } };
+  const run = async (binary, args) => { runs++; await fs.writeFile(args[args.indexOf('-o') + 1], answer); };
+  try {
+    await assert.rejects(generate(config, 'codex', 'source', [], directory, undefined, { run }), /gateway/);
+    assert.deepEqual(seen.map(x => x.state), ['running', 'succeeded']);
+    const receiptId = seen.at(-1).id;
+    failReceipt = false;
+    assert.equal(await generate(config, 'codex', 'source', [], directory, undefined, { run }), answer);
+    assert.equal(runs, 1); assert.equal(seen.at(-1).id, receiptId);
+    await generate({ ...config, codex: { ...config.codex, reasoningEffort: 'low' } }, 'codex', 'source', [], directory, undefined, { run });
+    await generate({ ...config, cacheRun: 'explicit-new-analysis' }, 'codex', 'source', [], directory, undefined, { run });
+    assert.equal(runs, 3);
+    const image = path.join(directory, 'frame.jpg'); await fs.writeFile(image, 'image-one');
+    await generate(config, 'codex', 'source', [image], directory, undefined, { run });
+    await fs.writeFile(image, 'image-two');
+    await generate(config, 'codex', 'source', [image], directory, undefined, { run });
+    assert.equal(runs, 5);
+    const controller = new AbortController(); controller.abort(new Error('cancelled'));
+    await assert.rejects(generate(config, 'codex', 'source', [], directory, controller.signal, { run }), /cancelled/);
+    assert.equal(runs, 5);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('model errors are not masked by a failed failure receipt or cached as successes', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge-model-failure-'));
+  let runs = 0;
+  const config = { codex: { model: 'test' }, onCodexCall: async event => { if (event.state === 'failed') throw new Error('gateway'); } };
+  const run = async () => { runs++; throw new Error('actual model quota error'); };
+  try {
+    for (let i = 0; i < 2; i++) await assert.rejects(generate(config, 'codex', 'source', [], directory, undefined, { run }), /actual model quota error/);
+    assert.equal(runs, 2);
+    assert.deepEqual(await fs.readdir(directory), []);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });

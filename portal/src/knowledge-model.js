@@ -64,7 +64,7 @@ export function codexArguments({ output, cwd, images = [], model = '', reasoning
 }
 export function jobModelConfig(config, job) {
   const selected = job.modelSettings || {}, prefix = job.backend === 'codex' ? 'codex' : 'api', key = job.backend === 'codex' ? 'codex' : 'openai';
-  return { ...config, [key]: { ...config[key], ...(selected[prefix + 'Model'] ? { model: selected[prefix + 'Model'] } : {}),
+  return { ...config, cacheRun: job.reanalysis?.runId || '', [key]: { ...config[key], ...(selected[prefix + 'Model'] ? { model: selected[prefix + 'Model'] } : {}),
     ...(selected[prefix + 'Effort'] ? { reasoningEffort: selected[prefix + 'Effort'] } : {}) } };
 }
 export function modelConfiguration(config, backend) {
@@ -81,19 +81,42 @@ export function modelConfiguration(config, backend) {
 export async function generate(config, backend, prompt, images, cwd, signal, {run=runProcess}={}) {
   const model = modelConfiguration(config, backend);
   if (backend === 'codex') {
+    signal?.throwIfAborted();
+    // Per-document cache: successful model work survives a failed Portal receipt.
+    // Hash actual image bytes, prompt, settings and explicit reanalysis generation.
+    const digest = crypto.createHash('sha256').update(JSON.stringify([1, SOURCE_POLICY, prompt, model.model, model.reasoningEffort, config.cacheRun || '']));
+    for (const image of images) digest.update(crypto.createHash('sha256').update(await fsp.readFile(image)).digest());
+    const cacheDirectory = path.join(cwd, '.codex-results'), cacheFile = path.join(cacheDirectory, digest.digest('hex') + '.json');
+    let saved;
+    try { saved = JSON.parse(await fsp.readFile(cacheFile, 'utf8')); }
+    catch (error) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error; }
+    if (saved?.version === 1 && /^[a-f0-9-]{36}$/.test(saved.id || '') && typeof saved.answer === 'string') {
+      const answer = cleanAnswer(saved.answer);
+      if (config.onCodexCall) await config.onCodexCall({ id: saved.id, prompt: (SOURCE_POLICY + '\n\n' + prompt).slice(0, 100000), result: answer, state: 'succeeded', model: config.codex?.model || '', sessionId: saved.sessionId || '' });
+      return answer;
+    }
     const output = path.join(cwd, 'answer-' + crypto.randomBytes(6).toString('hex') + '.md');
     const proxy = config.codex?.proxyUrl;
     const env = proxy ? { ...process.env, HTTPS_PROXY: proxy, HTTP_PROXY: proxy, ALL_PROXY: proxy } : process.env;
     const input=SOURCE_POLICY + '\n\n' + prompt,id=crypto.randomUUID();let sessionId='';
     const report=async(state,result='')=>{if(config.onCodexCall)await config.onCodexCall({id,prompt:input.slice(0,100000),result:result.slice(0,500000),state,model:config.codex?.model||'',sessionId});};
     await report('running');
+    let answer;
     try {
       await run(resolveCodexBinary(config.codex?.binary),
         codexArguments({ output, cwd, images, model: config.codex?.model, reasoningEffort: model.reasoningEffort }), { cwd, input, signal, timeout: 1800000, env,
           onLine:line=>{try{const event=JSON.parse(line);if(event.type==='thread.started')sessionId=String(event.thread_id||'').slice(0,100);}catch{}} });
-      const answer=cleanAnswer(await fsp.readFile(output,'utf8'));await report('succeeded',answer);return answer;
-    } catch(error) {await report(signal?.aborted?'cancelled':'failed',error.message);throw error;}
+      answer=cleanAnswer(await fsp.readFile(output,'utf8'));
+      await fsp.mkdir(cacheDirectory, { recursive: true, mode: 0o700 });
+      const temporary = cacheFile + '.' + crypto.randomBytes(6).toString('hex') + '.tmp';
+      try {
+        await fsp.writeFile(temporary, JSON.stringify({ version: 1, id, answer, sessionId }), { mode: 0o600 });
+        await fsp.rename(temporary, cacheFile);
+      } finally { await fsp.rm(temporary, { force: true }); }
+    } catch(error) {try {await report(signal?.aborted?'cancelled':'failed',error.message);} catch { /* Preserve the actual model error. */ } throw error;}
     finally {await fsp.rm(output,{force:true});}
+    // A receipt failure must not overwrite a successful call with "failed".
+    await report('succeeded',answer);return answer;
   }
   const content = [{ type: 'text', text: prompt }];
   if (model.vision) for (const image of images) content.push({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + (await fsp.readFile(image)).toString('base64'), detail: 'high' } });
@@ -193,16 +216,23 @@ export function createStageGate(initialLimit) {
   };
 }
 
-// Retry only an explicit server busy response. Retrying an ambiguous claim after
-// a network failure could leave a committed lease without its worker.
+// Retry explicit storage busy responses, plus transient failures for idempotent
+// call receipts. Ambiguous claims must never leave a lease without its worker.
 export async function workerPortalRequest(url, options, { fetch: fetchRequest = globalThis.fetch, retries = 6, wait = null } = {}) {
+  // These UUID-keyed receipts are idempotent; claims and other mutations are not.
+  const receipt = options.method === 'POST' && /^\/api\/knowledge\/worker\/jobs\/[a-f0-9]{32}\/codex$/.test(new URL(url).pathname);
   for (let attempt = 0; ; attempt++) {
     options.signal?.throwIfAborted();
-    const response = await fetchRequest(url, options);
-    if (response.ok) return response;
+    let response, transportError;
+    try { response = await fetchRequest(url, options); }
+    catch (error) {
+      if (!receipt || options.signal?.aborted || !(error.message === 'fetch failed' || ['ECONNRESET', 'ETIMEDOUT', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT'].includes(error.cause?.code || error.code)) || attempt >= retries) throw error;
+      transportError = error;
+    }
+    if (response?.ok) return response;
     let payload = {};
-    try { payload = await response.json(); } catch { /* Gateways may return HTML. */ }
-    if (response.status === 503 && payload.code === 'KNOWLEDGE_BUSY' && attempt < retries) {
+    try { if (response) payload = await response.json(); } catch { /* Gateways may return HTML. */ }
+    if (attempt < retries && (transportError || response.status === 503 && payload.code === 'KNOWLEDGE_BUSY' || receipt && [502, 503, 504, 520, 521, 522, 523, 524, 525, 526].includes(response.status))) {
       const delay = Math.min(1000 * 2 ** attempt, 5000);
       if (wait) await wait(delay);
       else await new Promise((resolve, reject) => {
@@ -214,6 +244,7 @@ export async function workerPortalRequest(url, options, { fetch: fetchRequest = 
       continue;
     }
     const detail = typeof payload.error === 'string' ? payload.error.replace(/(?:sk-|nkw_)[\w-]+/g, '[已隐藏]').slice(0, 240) : '';
+    if (receipt && [502, 503, 504, 520, 521, 522, 523, 524, 525, 526].includes(response.status)) throw Object.assign(new Error(`模型调用记录回传暂时失败（HTTP ${response.status}），已重试${retries}次；已生成的模型结果保留在本机，重试任务时可复用。请检查网站连接。`), { status: response.status });
     throw Object.assign(new Error(`Portal ${new URL(url).pathname} 返回 HTTP ${response.status}${detail ? '：' + detail : ''}`), { status: response.status, code: payload.code });
   }
 }
