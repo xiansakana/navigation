@@ -19,6 +19,8 @@ test('notification settings are isolated, opt-in and validate recipients', t => 
   assert.throws(() => chainNotifySettings({ ...settings(), targets: [] }), /通知目标/);
   assert.throws(() => chainNotifySettings({ ...settings(), targets: [{ type: 'group', groupId: '<x>' }] }), /QQ/);
   assert.throws(() => chainNotifySettings({ ...settings(), qq: { enabled: 'yes' } }));
+  const mixed = chainNotifySettings({ ...settings(), targets: [{ type: 'group', groupId: '123456', atUserId: '12345678,23456789；34567890 12345678' }] });
+  assert.equal(mixed.targets[0].atUserId, '12345678,23456789,34567890');
 });
 
 test('notifier uses authenticated delivery channels, fixed report link and sanitizes failures', async () => {

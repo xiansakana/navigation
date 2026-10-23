@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateSlackWebhookUrl } from './slack.js';
+import { normalizeQqMentions } from '../../shared/integrations/qq-mentions.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.resolve(__dirname, '../config.json');
@@ -102,7 +103,7 @@ export function applyPublicConfig(current, input) {
     if (typeof body.defaultTarget?.type === 'string') next.defaultTarget.type = body.defaultTarget.type;
     ['userId', 'groupId', 'atUserId'].forEach(function(key) {
         if (body.defaultTarget && Object.hasOwn(body.defaultTarget, key)) {
-            next.defaultTarget[key] = String(body.defaultTarget[key] || '').trim();
+            next.defaultTarget[key] = key === 'atUserId' ? normalizeQqMentions(body.defaultTarget[key]) : String(body.defaultTarget[key] || '').trim();
         }
     });
 
@@ -131,11 +132,10 @@ export function applyPublicConfig(current, input) {
                     type: target.type === 'private' ? 'private' : 'group',
                     userId: String(target.userId || '').trim(),
                     groupId: String(target.groupId || '').trim(),
-                    atUserId: String(target.atUserId || '').trim()
+                    atUserId: normalizeQqMentions(target.atUserId)
                 };
                 if (!next.monitors.tiboReset.qq.useDefaultTarget) {
                     if (!/^\d+$/.test(result.type === 'private' ? result.userId : result.groupId)) throw new Error('请填写有效的 Tibo QQ 号或群号');
-                    if (result.type === 'group' && result.atUserId && !/^(\d+|all)$/.test(result.atUserId)) throw new Error('@ 目标应为 QQ 号或 all');
                 }
                 return result;
             });

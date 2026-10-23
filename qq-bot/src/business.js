@@ -1,4 +1,5 @@
 import notifier from 'node-notifier';
+import { normalizeQqMentions } from '../../shared/integrations/qq-mentions.js';
 
 const SOURCES = {
     stock: { origin: 'http://127.0.0.1:5001', path: '/api/internal/notification-settings' },
@@ -15,7 +16,7 @@ function target(item) {
         id: String(item?.id || '').slice(0, 80),
         type: item?.type === 'private' ? 'private' : 'group',
         groupId: String(item?.groupId || '').trim().slice(0, 32),
-        atUserId: String(item?.atUserId || '').trim().slice(0, 32),
+        atUserId: normalizeQqMentions(item?.atUserId),
         userId: String(item?.userId || '').trim().slice(0, 32)
     };
 }

@@ -2,6 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeConfig, publicConfig, applyPublicConfig } from './config.js';
 
+test('default and Tibo QQ mentions normalize mixed separators and survive reload', () => {
+    const mentions = '12345678，23456789;34567890 12345678';
+    const saved = applyPublicConfig(normalizeConfig({}), {
+        defaultTarget: { type: 'group', groupId: '88888888', atUserId: mentions },
+        monitors: { tiboReset: { qq: { useDefaultTarget: false, targets: [
+            { id: 'a', type: 'group', groupId: '88888888', atUserId: mentions }
+        ] } } }
+    });
+    const reloaded = normalizeConfig(JSON.parse(JSON.stringify(saved)));
+    assert.equal(reloaded.defaultTarget.atUserId, '12345678,23456789,34567890');
+    assert.equal(reloaded.monitors.tiboReset.qq.targets[0].atUserId, reloaded.defaultTarget.atUserId);
+});
+
 test('Tibo custom QQ targets persist independently of the channel default', function() {
     var current = normalizeConfig({ defaultTarget: { type: 'private', userId: '111' } });
     assert.equal(current.monitors.tiboReset.qq.useDefaultTarget, true);

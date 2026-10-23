@@ -1,3 +1,5 @@
+import { normalizeQqMentions } from '../../shared/integrations/qq-mentions.js';
+
 export const DEFAULT_CHAIN_NOTIFY = { qq: { enabled: false }, slack: { enabled: false }, targets: [] };
 
 export function chainNotifySettings(input) {
@@ -8,7 +10,7 @@ export function chainNotifySettings(input) {
     if (!target || !['private', 'group'].includes(target.type)) throw new Error('通知类型无效');
     const row = { id: String(index), type: target.type, userId: String(target.userId || '').trim(), groupId: String(target.groupId || '').trim(), atUserId: String(target.atUserId || '').trim() };
     if (!/^\d{5,20}$/.test(row.type === 'private' ? row.userId : row.groupId)) throw new Error('请填写有效的 QQ 号或群号');
-    if (row.atUserId && !/^(\d{5,20}|all)$/.test(row.atUserId)) throw new Error('@ 目标应为 QQ 号或 all');
+    row.atUserId = normalizeQqMentions(row.atUserId);
     if (row.type === 'private') { row.groupId = ''; row.atUserId = ''; } else row.userId = '';
     return row;
   });

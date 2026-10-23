@@ -1,3 +1,5 @@
+import { parseQqMentions } from './qq-mentions.js';
+
 /**
  * NapCat OneBot 11 HTTP 客户端
  * @see https://napneko.github.io/onebot/api
@@ -68,9 +70,10 @@ function sanitizeOutgoingText(text) {
 
 function buildGroupMessage(text, atUserId) {
     var content = sanitizeOutgoingText(text);
-    if (!atUserId) return content;
+    var mentions = parseQqMentions(atUserId);
+    if (!mentions.length) return content;
     return [
-        { type: 'at', data: { qq: String(atUserId) } },
+        ...mentions.map(function(qq) { return { type: 'at', data: { qq: qq } }; }),
         { type: 'text', data: { text: ' ' + content } }
     ];
 }

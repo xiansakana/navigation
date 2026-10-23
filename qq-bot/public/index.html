@@ -52,7 +52,7 @@
             <div class="monitor-qq-config">
                 <h3>QQ 通知目标</h3>
                 <label class="biz-check"><input id="monitor-qq-default" type="checkbox" checked> 使用 QQ 渠道的默认目标</label>
-                <p class="biz-hint">取消勾选后，可单独添加多个群聊或私聊目标；群内 @ 可填写 QQ 号，填写 all 表示 @所有人。</p>
+                <p class="biz-hint">取消勾选后，可单独添加多个群聊或私聊目标；群内 @ 支持多个 QQ 号，用逗号、分号或空格分隔，填写 all 表示 @所有人。</p>
                 <div id="monitor-qq-targets" hidden></div>
             </div>
         </section>
@@ -87,7 +87,7 @@
                     <label>消息类型<select id="qq-type"><option value="private">私聊</option><option value="group">群聊</option></select></label>
                     <label id="qq-user-wrap">QQ 号<input id="qq-user-id" inputmode="numeric" placeholder="123456789"></label>
                     <label id="qq-group-wrap" class="hidden">群号<input id="qq-group-id" inputmode="numeric" placeholder="123456789"></label>
-                    <label id="qq-at-wrap" class="hidden">@ QQ 号（可选）<input id="qq-at-user-id" inputmode="numeric"></label>
+                    <label id="qq-at-wrap" class="hidden">@ QQ 号（可选，支持多人）<input id="qq-at-user-id" placeholder="逗号、分号或空格分隔；all 为所有人"></label>
                 </div>
                 <button class="test-btn" data-test="qq" type="button">发送 QQ 测试</button>
             </article>
@@ -135,7 +135,7 @@
     </main>
     <div class="toast" id="toast" hidden></div>
     <script src="/skeleton/skeleton.js?v=1"></script>
-    <script src="qq-targets.js?v=qq-codex-group-picker2"></script>
+    <script src="qq-targets.js?v=multi-mentions1"></script>
     <script src="app.js?v=chain-notify-1"></script>
     <script src="integrations.js?v=qq-codex-group-picker2"></script>
     <script src="chain-notifications.js?v=1"></script>

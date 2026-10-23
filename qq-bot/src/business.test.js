@@ -2,6 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBusinessService } from './business.js';
 
+test('business QQ targets preserve more than 32 characters and deliver one message to the group', async () => {
+    const sent = [];
+    const config = { server: { notifyToken: 'service-token' } };
+    const service = createBusinessService(config, { fetcher: sourceFetch, send: async (_, body) => sent.push(body) });
+    const mentions = Array.from({ length: 6 }, (_, i) => String(10000000 + i));
+    await service.save('stock', { targets: [{ type: 'group', groupId: '88888888', atUserId: mentions.join('；') }] });
+    assert.equal(config.business.stock.notify.targets[0].atUserId, mentions.join(','));
+    await service.dispatch('stock', null, 'T1', '触发提醒');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].atUserId, mentions.join(','));
+});
+
 function sourceFetch(url) {
     const data = url.includes(':5001')
         ? { ok: true, notify: { qq: { enabled: true }, slack: { enabled: false }, targets: [{ type: 'private', userId: '123' }], events: { T1: true, openSummary: false } }, monitor: { running: true } }
