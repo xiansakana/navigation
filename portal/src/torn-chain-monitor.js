@@ -62,6 +62,7 @@ export function createChainStore(db) {
     user_id TEXT PRIMARY KEY, config_json TEXT NOT NULL, history_json TEXT NOT NULL DEFAULT '[]', seen_json TEXT NOT NULL DEFAULT '[]'
   )`);
   db.exec('CREATE TABLE IF NOT EXISTS torn_chain_notifications (user_id TEXT PRIMARY KEY, settings_json TEXT NOT NULL)');
+  db.exec("CREATE TABLE IF NOT EXISTS torn_chain_observations (user_id TEXT PRIMARY KEY, known_json TEXT NOT NULL DEFAULT '[]')");
   const ensure = uid => db.prepare('INSERT OR IGNORE INTO torn_chain_monitors(user_id,config_json) VALUES(?,?)').run(uid, JSON.stringify(DEFAULT_CHAIN_CONFIG));
   const get = uid => {
     ensure(uid); const row = db.prepare('SELECT * FROM torn_chain_monitors WHERE user_id=?').get(uid);
@@ -70,6 +71,8 @@ export function createChainStore(db) {
   };
   return {
     get,
+    loadKnown(uid) { const row = db.prepare('SELECT known_json FROM torn_chain_observations WHERE user_id=?').get(uid); return new Map(row ? JSON.parse(row.known_json) : []); },
+    saveKnown(uid, known) { db.prepare('INSERT INTO torn_chain_observations(user_id,known_json) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET known_json=excluded.known_json').run(uid, JSON.stringify([...known].slice(-5000))); },
     getNotify(uid) { const row = db.prepare('SELECT settings_json FROM torn_chain_notifications WHERE user_id=?').get(uid); return row ? JSON.parse(row.settings_json) : structuredClone(DEFAULT_CHAIN_NOTIFY); },
     saveNotify(uid, input) { const settings = chainNotifySettings(input); db.prepare('INSERT INTO torn_chain_notifications(user_id,settings_json) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET settings_json=excluded.settings_json').run(uid, JSON.stringify(settings)); return settings; },
     save(uid, input) { const config = chainConfig(input, get(uid).config); db.prepare('UPDATE torn_chain_monitors SET config_json=? WHERE user_id=?').run(JSON.stringify(config), uid); return config; },
@@ -78,7 +81,7 @@ export function createChainStore(db) {
       const { config, history, seen } = get(uid), id = Number(chain.id);
       if (chain.current < config.minHits || config.maxHits !== null && chain.current > config.maxHits || history.some(row => row.id === id)) return;
       const finalHits = Number.isSafeInteger(candidate.chain) && candidate.chain > 0 ? candidate.chain : chain.current;
-      history.push({ id, factionId: Number(candidate.faction.id), name: String(candidate.faction.name || candidate.faction.id).slice(0, 160), hits: chain.current, cooldownStartedAt: estimateCooldownStart(chain.cooldown, finalHits, now), cooldownUntil: chain.cooldown, detectedAt: now, fresh: fresh && !seen.includes(id) });
+      history.push({ id, factionId: Number(candidate.faction.id), name: String(candidate.faction.name || candidate.faction.id).slice(0, 160), hits: chain.current, cooldownStartedAt: estimateCooldownStart(chain.cooldown, finalHits, now), cooldownUntil: chain.cooldown, detectedAt: now, fresh: fresh && !seen.includes(id), notifyEligible: chain.cooldown > now && !seen.includes(id) });
       if (!seen.includes(id)) seen.push(id);
       db.prepare('UPDATE torn_chain_monitors SET history_json=?,seen_json=? WHERE user_id=?').run(JSON.stringify(history.slice(-200)), JSON.stringify(seen.slice(-5000)), uid);
       return history.at(-1);
@@ -98,7 +101,11 @@ export class ChainMonitor {
     if (!this.authorize()) throw new Error('无权启动 Chain 监控');
     this.config = this.store.get(this.uid).config;
     if (!this.config.apiKey) throw new Error('请先保存 Public API Key');
-    this.known.clear(); this.cursor = 0; this.state.rounds = 0; this.state.error = ''; this.state.notificationError = '';
+    // Restore recent active observations so chains disappearing from the active
+    // listing during a restart still receive a detail check. Cooldown dedup is
+    // handled by the durable seen IDs, not this optimization cache.
+    this.known = new Map([...this.store.loadKnown(this.uid)].filter(([, row]) => row.status === 'active' && this.now() - row.listedAt <= 600));
+    this.cursor = 0; this.state.rounds = 0; this.state.error = ''; this.state.notificationError = '';
     this.running = true; this.controller = new AbortController();
     this.promise = this.scan();
   }
@@ -135,12 +142,13 @@ export class ChainMonitor {
           const old = this.known.get(chain.id), status = chain.cooldown > this.now() ? 'cooldown' : chain.timeout > 0 ? 'active' : 'ended';
           if (status === 'cooldown') {
             const row = this.store.record(this.uid, candidate, chain, old?.status === 'active', this.now());
-            if (row?.fresh) {
+            if (row?.notifyEligible) {
               try { check(); await this.notify(row); this.state.notificationError = ''; }
               catch { this.state.notificationError = '冷却记录已保存，但通知未能全部投递，请检查通知管理（不自动重试）'; }
             }
           }
-          this.known.set(chain.id, { status, until: chain.cooldown, candidate, listedAt: this.now() }); stats.confirmed++;
+          this.known.set(chain.id, { status, until: chain.cooldown, candidate, listedAt: this.now() });
+          this.store.saveKnown(this.uid, this.known); stats.confirmed++;
         } catch (error) { if (error.fatal || !valid()) throw error; stats.failed++; }
       }
       this.cursor = eligible.length ? (this.cursor + count) % eligible.length : 0;
@@ -149,6 +157,7 @@ export class ChainMonitor {
     } catch (error) {
       if (!signal.aborted) { stats.error = String(error.message).replaceAll(this.config.apiKey, '[Key]'); if (error.fatal) this.stop(); }
     } finally {
+      this.store.saveKnown(this.uid, this.known);
       Object.assign(this.state, stats); this.busy = false;
       if (valid()) {
         this.state.nextScanAt = this.now() + this.config.intervalSeconds;

@@ -38,14 +38,17 @@ test('notifier uses authenticated delivery channels, fixed report link and sanit
   await assert.rejects(createChainNotifier({ endpoint: 'http://localhost:8787', token: 'secret', fetchImpl: async () => { throw new Error('secret'); } })(settings(), null), error => !error.message.includes('secret') && error.message.includes('不自动重试'));
 });
 
-test('only fresh cooldown transitions notify once; delivery failure preserves records and dedup', async t => {
+test('first discoveries and observed transitions notify once; delivery failure preserves records and dedup', async t => {
   const store = fixture(t); store.save('a', { apiKey: '1234567890abcdef' });
   let phase = 0, sent = 0;
-  const monitor = new ChainMonitor({ uid: 'a', store, now: () => 1000, schedule: () => 1, cancel: () => {}, notify: async row => { sent++; assert.equal(row.id, 1); throw new Error('delivery failed'); }, request: async path => path.includes('warfarechains') ? { warfarechains: [1, 2].map(id => ({ id, faction: { id } })) } : { chain: { id: Number(path.split('/')[1]), current: 200, timeout: 300, cooldown: Number(path.split('/')[1]) === 2 || phase ? 2000 : 0 } } });
-  monitor.start(); await monitor.promise; assert.equal(sent, 0);
-  phase = 1; await monitor.scan(); assert.equal(sent, 1); assert.equal(store.get('a').history.length, 2);
+  const monitor = new ChainMonitor({ uid: 'a', store, now: () => 1000, schedule: () => 1, cancel: () => {}, notify: async row => { sent++; assert.ok([1, 2].includes(row.id)); throw new Error('delivery failed'); }, request: async path => path.includes('warfarechains') ? { warfarechains: [1, 2].map(id => ({ id, faction: { id } })) } : { chain: { id: Number(path.split('/')[1]), current: 200, timeout: 300, cooldown: Number(path.split('/')[1]) === 2 || phase ? 2000 : 0 } } });
+  monitor.start(); await monitor.promise; assert.equal(sent, 1);
+  assert.equal(store.get('a').history[0].fresh, false);
+  phase = 1; await monitor.scan(); assert.equal(sent, 2); assert.equal(store.get('a').history.length, 2);
   assert.match(monitor.status().notificationError, /通知/);
-  await monitor.scan(); assert.equal(sent, 1); monitor.stop();
+  await monitor.scan(); assert.equal(sent, 2); monitor.stop();
+  store.clear('a'); monitor.start(); await monitor.promise;
+  assert.equal(sent, 2); assert.ok(store.get('a').history.every(row => !row.notifyEligible)); monitor.stop();
 });
 
 test('notification API uses separate view/save/test permissions and saved settings', async t => {

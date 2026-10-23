@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import Database from 'better-sqlite3';
 import { ChainMonitor, chainConfig, createChainApiClient, createChainStore, estimateCooldownStart } from './torn-chain-monitor.js';
 import { canTornChain, createTornChainService } from './torn-chain.js';
@@ -79,6 +82,41 @@ test('unknown, mismatched and transient failures do not invent cooldown transiti
   assert.equal(m.status().failed, 2); assert.equal(store.get('a').history.length, 0);
   phase = 2; await m.scan();
   assert.deepEqual(store.get('a').history.map(row => [row.id, row.fresh]), [[1, true]]); m.stop();
+});
+
+test('active observations survive SQLite reopen and recover cooldowns absent from the listing', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'chain-persistence-'));
+  const filename = path.join(directory, 'chain.db');
+  let db = new Database(filename);
+  t.after(() => { db.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  let store = createChainStore(db);
+  store.save('a', { apiKey: key });
+  let phase = 0, sent = 0;
+  const request = async url => url.includes('warfarechains') ? page(phase ? [] : [candidate(1)]) : detail(1, 200, phase ? 2000 : 0);
+  const first = monitor(store, request);
+  first.start(); await first.promise; first.stop();
+  assert.equal(store.loadKnown('a').get(1).status, 'active');
+  assert.equal(store.loadKnown('b').size, 0);
+  db.close(); db = new Database(filename); store = createChainStore(db); phase = 1;
+  const restarted = monitor(store, request, { notify: async () => { sent++; } });
+  restarted.start(); await restarted.promise; restarted.stop();
+  assert.equal(sent, 1); assert.equal(store.get('a').history[0].fresh, true);
+  store.clear('a');
+  const again = monitor(store, async url => url.includes('warfarechains') ? page([candidate(1)]) : detail(1, 200, 2000), { notify: async () => { sent++; } });
+  again.start(); await again.promise; again.stop(); assert.equal(sent, 1);
+});
+
+test('expired observations are not restored and only live unseen cooldowns are eligible', async t => {
+  const store = fixture(t);
+  store.saveKnown('a', new Map([[1, { status: 'active', listedAt: 399, candidate: candidate(1) }]]));
+  const m = monitor(store, async () => page([])); m.start(); await m.promise; m.stop();
+  assert.equal(m.known.size, 0);
+  const expired = store.record('a', candidate(2), detail(2, 200, 999).chain, false, 1000);
+  assert.equal(expired.notifyEligible, false);
+  const discovered = store.record('a', candidate(3), detail(3, 200, 2000).chain, false, 1000);
+  assert.equal(discovered.notifyEligible, true); assert.equal(discovered.fresh, false);
+  assert.equal(store.record('a', candidate(4), detail(4, 99, 2000).chain, false, 1000), undefined);
+  assert.equal(store.record('a', candidate(5), detail(5, 501, 2000).chain, false, 1000), undefined);
 });
 
 test('pagination and rotating detail budget cover candidates without truncating silently', async t => {
