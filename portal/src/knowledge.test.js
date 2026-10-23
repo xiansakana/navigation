@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -36,8 +36,10 @@ async function fixture(fn) {
     const payload = response.headers.get('content-type')?.includes('json') ? await response.json() : Buffer.from(await response.arrayBuffer());
     return { status: response.status, payload, headers: response.headers };
   };
-  try { await fn({ call, store: createKnowledgeStore(getDatabase()), db: getDatabase(), root, origin, server }); }
+  const disk = mock.method(fs.promises, 'statfs', async () => ({ bavail: 64 * 1024 ** 3, bsize: 1 }));
+  try { await fn({ call, store: createKnowledgeStore(getDatabase()), db: getDatabase(), root, origin, server, disk }); }
   finally {
+    disk.mock.restore();
     await new Promise(resolve => server.close(resolve)); closeDatabase();
     for (const [key, value] of [['NAVIGATION_DB_PATH', previous.db], ['KNOWLEDGE_DATA_DIR', previous.dir]]) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     assert.ok(path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)); fs.rmSync(root, { recursive: true, force: true });

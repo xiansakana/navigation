@@ -7,7 +7,8 @@ import path from 'node:path';
 import { createKnowledgeStore, MAX_VIDEO_BYTES } from './knowledge-store.js';
 import { createUploadQueue, runUploadQueue } from './knowledge-upload-queue.js';
 
-test('115 archives have no cumulative byte quota; local storage and temporary upload limits remain enforced', async () => {
+test('115 archives have no cumulative byte quota; local storage and temporary upload limits remain enforced', async t => {
+  t.mock.method(fs, 'statfs', async () => ({ bavail: 64 * 1024 ** 3, bsize: 1 }));
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge-quota-'));
   const previous = process.env.KNOWLEDGE_STORAGE_CONFIG;
   process.env.KNOWLEDGE_STORAGE_CONFIG = path.join(directory, 'storage.json');

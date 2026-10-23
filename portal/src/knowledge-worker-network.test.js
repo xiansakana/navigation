@@ -6,6 +6,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { workerProxyEnvironment } from '../../scripts/knowledge-worker-launcher.mjs';
 
+// Linux treats empty lowercase proxy variables as overrides of uppercase ones.
+// Use only the fixture's proxy, regardless of the runner or developer environment.
+function proxyTestEnvironment() {
+  return Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+    !/^(?:https?_proxy|all_proxy|no_proxy|NODE_USE_ENV_PROXY|NAVIGATION_WORKER_PROXY_READY)$/i.test(key)));
+}
+
 test('Windows worker inherits enabled proxies, preserves explicit overrides, bypasses loopback and reboots only once', () => {
   const readProxy = () => ({ enabled: 1, server: 'http=127.0.0.1:7890;https=127.0.0.1:7891;socks=127.0.0.1:7892' });
   const env = workerProxyEnvironment({ platform: 'win32', env: { no_proxy: 'internal.test' }, readProxy });
@@ -33,7 +40,7 @@ test('worker Node fetch reaches a proxy-only hostname while local GPU endpoints 
   proxy.listen(0, '127.0.0.1'); local.listen(0, '127.0.0.1');
   await Promise.all([once(proxy, 'listening'), once(local, 'listening')]);
   try {
-    const env = workerProxyEnvironment({ platform: 'win32', env: { ...process.env, HTTP_PROXY: '', HTTPS_PROXY: '', http_proxy: '', https_proxy: '', NAVIGATION_WORKER_PROXY_READY: '' }, readProxy: () => ({ enabled: 1, server: '127.0.0.1:' + proxy.address().port }) });
+    const env = workerProxyEnvironment({ platform: 'win32', env: proxyTestEnvironment(), readProxy: () => ({ enabled: 1, server: '127.0.0.1:' + proxy.address().port }) });
     const code = `const results=await Promise.all(['http://navigation-proxy.invalid/video','http://127.0.0.1:${local.address().port}/health'].map(async url=>(await fetch(url,{signal:AbortSignal.timeout(5000)})).text())); console.log(JSON.stringify(results));`;
     const { stdout } = await promisify(execFile)(process.execPath, ['--use-env-proxy', '--input-type=module', '-e', code], { env, timeout: 10000, windowsHide: true });
     assert.deepEqual(JSON.parse(stdout), ['proxied', 'local-gpu']); assert.equal(tunnels, 1); assert.equal(direct, 1);
@@ -66,7 +73,7 @@ test('a broken proxy cannot intercept Portal traffic but still handles external 
   await Promise.all([once(portal, 'listening'), once(proxy, 'listening')]);
   try {
     const env = workerProxyEnvironment({ platform: 'win32', portalUrl: 'http://127.0.0.2:' + portal.address().port,
-      env: { ...process.env, HTTP_PROXY: '', HTTPS_PROXY: '', http_proxy: '', https_proxy: '', NAVIGATION_WORKER_PROXY_READY: '', NO_PROXY: '', no_proxy: '' },
+      env: proxyTestEnvironment(),
       readProxy: () => ({ enabled: 1, server: '127.0.0.1:' + proxy.address().port }) });
     const code = `const r=await fetch('http://127.0.0.2:${portal.address().port}',{signal:AbortSignal.timeout(2000)});const value=await r.text();let external=false;try{await fetch('https://model-proxy.invalid',{signal:AbortSignal.timeout(2000)})}catch{external=true}console.log(JSON.stringify({value,external}));process.exit(0);`;
     const { stdout } = await promisify(execFile)(process.execPath, ['--use-env-proxy', '--input-type=module', '-e', code], { env, timeout: 10000, windowsHide: true });

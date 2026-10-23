@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import fs from 'node:fs/promises';
@@ -16,9 +16,20 @@ async function fixture(fn) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge-submission-'));
   const db = new Database(path.join(directory, 'test.sqlite')), store = createKnowledgeStore(db), queue = createUploadQueue(db);
   const run = (options = {}, authorize = () => true) => runUploadQueue(db, id => path.join(directory, 'media', id), authorize, { inspect: metadata, quality: async () => ({ canImport: true }), ...options });
-  try { await fn({ db, store, queue, directory, run }); }
-  finally { db.close(); await fs.rm(directory, { recursive: true, force: true }); }
+  const disk = mock.method(fs, 'statfs', async () => ({ bavail: 64 * 1024 ** 3, bsize: 1 }));
+  try { await fn({ db, store, queue, directory, run, disk }); }
+  finally { disk.mock.restore(); db.close(); await fs.rm(directory, { recursive: true, force: true }); }
 }
+
+test('link submissions reject low disk space without creating a document', async () => fixture(async ({ db, queue, run, disk }) => {
+  disk.mock.mockImplementation(async () => ({ bavail: 1, bsize: 4096 }));
+  queue.add('a', { urls: [url(1)] }, defaults);
+  await run();
+  const entry = queue.list('a').entries[0];
+  assert.equal(entry.state, 'failed');
+  assert.match(entry.error, /服务器可用空间不足/);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM knowledge_documents').get().n, 0);
+}));
 
 test('idle and capacity-blocked polling never waits for an unrelated database writer', async () => fixture(async ({ db, store, queue }) => {
   const writer = new Database(db.name); db.pragma('busy_timeout = 1');

@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import fs from 'node:fs/promises';
@@ -16,9 +16,18 @@ async function fixture(fn) {
     store.imports.add(uid, d.id, d.sourceUrl);
     db.prepare("UPDATE knowledge_documents SET status='importing' WHERE id=?").run(d.id); return d;
   })();
-  try { await fn({ db, store, directory, add }); }
-  finally { db.close(); await fs.rm(directory, { recursive: true, force: true }); }
+  const disk = mock.method(fs, 'statfs', async () => ({ bavail: 64 * 1024 ** 3, bsize: 1 }));
+  try { await fn({ db, store, directory, add, disk }); }
+  finally { disk.mock.restore(); db.close(); await fs.rm(directory, { recursive: true, force: true }); }
 }
+
+test('link imports reject low disk space before starting a download', async () => fixture(async ({ db, store, directory, add, disk }) => {
+  disk.mock.mockImplementation(async () => ({ bavail: 1, bsize: 4096 }));
+  const doc = add();
+  await runKnowledgeImport(db, () => directory, () => true, { download() { assert.fail('must not download on a full disk'); } });
+  assert.equal(store.get('a', doc.id).status, 'failed');
+  assert.match(store.get('a', doc.id).error, /服务器可用空间不足/);
+}));
 test('durable link import becomes a hashed queued source; worker can read before 115 archive completes', async () => fixture(async ({ db, store, directory, add }) => {
   const d = add(); store.sources.add('a', d.id, '/115/test/source.mp4');
   store.saveSettings('a', { codexModel: 'gpt-6-luna', codexEffort: 'high' });
