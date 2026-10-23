@@ -22,6 +22,10 @@ Chain 监控配置中可多选 13 个标准档位：10、25、50、100、250、5
 
 每条符合范围的新冷却记录最多额外读取一次 report，缓存其有效 bonus defender ID。report ID/faction ID 必须匹配。暂不可用不伪造链接，最多尝试 3 次，相邻尝试至少 60 秒；未开启身份筛选时仍正常发送 report 链接，并标记被打玩家暂不可用。开启身份筛选后，未完成核验的通知延后；查询失败最多 3 次，未知不匹配，冷却已经结束的延后通知不补发。投递本身依旧不自动重试，避免重复。
 
+兼容部分新结束 Chain 在 v2 report 返回错误 6（Incorrect ID）、官方 v1 却正常的情况：仅此错误时，在同一限速队列中额外请求 `https://api.torn.com/torn/{chainId}?selections=chainreport`，校验 v1 的 `factionID`、最终 `chain` 长度和 bonus 数据，再把 `bonuses[].defender` 转换为被打玩家 ID。凭据错误、限流和私有数据错误不触发兼容读取。记录保存 `bonusSource`（api-v1/api-v2）；旧版本已耗尽的 report 尝试次数在兼容读取版本中有一次新的有限重试周期，不重发历史通知。
+
+QQ 和 Slack 的 Report、被打玩家标签与完整 HTTPS 网址分别独立成行，并显示被打玩家数字 ID，避免中文标点紧贴网址干扰客户端识别。QQ 是否转成蓝色可点击链接或预览卡片由客户端决定；已发送的旧消息不会自动改变。
+
 旧记录在监控启动后每轮最多补查 5 条，补查本身不重发已发通知；未完成的延后通知在身份核验后投递一次。切换所选档位可立即使用已经缓存的 report 数据；尚未缓存的档位在后续轮次中补查。开启更多档位或身份核验会增加单轮耗时，所有请求仍共用原 1.5 秒串行队列。
 
 ## 通知管理
@@ -41,6 +45,7 @@ Portal 通过通知服务的本机 `/notify` 接口、共享集成配置中的 `
 - `GET https://api.torn.com/v2/faction/warfarechains?cat=active&limit=100`，读取 `_metadata.links.next` 分页，最多 10 页。分页只允许官方域名和预期接口，不跟随 HTTP 跳转。
 - `GET https://api.torn.com/v2/faction/{id}/chain`，必须与列表的 Chain ID 一致，再依据 `cooldown` Unix 秒时间戳和 `timeout` 核验状态。未知/失败结果保留原观察，不推测为已冷却。
 - 选择 Bonus hit 后：`GET /v2/faction/{chainId}/chainreport`，只使用 `bonuses[].chain` 和 `bonuses[].defender_id`；根据[官方公开 API schema](https://www.torn.com/swagger/openapi.json)校验 report 身份。
+- v2 错误 6 时的兼容读取：官方 v1 `GET /torn/{chainId}?selections=chainreport`；仅允许该选择，不允许任意 v1 API。参见[官方 API 说明](https://www.torn.com/api.html)。兼容请求与其他请求共用原有 1.5 秒间隔。
 - 开启身份筛选后：`GET /v2/user/{id}/profile`、`GET /v2/faction/{id}/basic`，均使用 Public Key；仅比对 `profile.faction_id` 和 `basic.leader_id`，不访问游戏页面。
 - 每轮最多核验 40 条，其余轮换；已确认且未到期的冷却记录不重复核验。近期从列表消失的已知活动 Chain 最多继续核验 10 分钟。
 

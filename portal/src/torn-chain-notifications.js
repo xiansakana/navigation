@@ -28,9 +28,9 @@ export function createChainNotifier({ endpoint, token, fetchImpl = fetch }) {
     if (!targets.length) return { skipped: true };
     const url = new URL('/notify', endpoint);
     if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || !['http:', 'https:'].includes(url.protocol) || !token) throw new Error('通知管理连接或认证尚未配置');
-    let message = row ? `[Torn Chain] ${row.name} · ${row.hits} hits 刚进入冷却\nhttps://www.torn.com/war.php?step=chainreport&chainID=${Number(row.id)}` : '[Torn Chain] 测试通知 · 配置正常';
+    let message = row ? `[Torn Chain] ${row.name} · ${row.hits} hits 刚进入冷却\nReport：\nhttps://www.torn.com/war.php?step=chainreport&chainID=${Number(row.id)}` : '[Torn Chain] 测试通知 · 配置正常';
     if (row) for (const bonus of selectedBonusDefenders(row, row.bonusSelection, row.leaderFilter)) {
-      message += `\nBonus #${bonus.hit} 被打玩家${typeof bonus.isLeader === 'boolean' ? bonus.isLeader ? '（Leader）' : '（非 Leader）' : ''}：` + (bonus.defenderId ? `https://www.torn.com/profiles.php?XID=${bonus.defenderId}` : '暂不可用，请查看 report');
+      message += `\nBonus #${bonus.hit} 被打玩家${bonus.defenderId ? ' [' + bonus.defenderId + ']' : ''}${typeof bonus.isLeader === 'boolean' ? bonus.isLeader ? '（Leader）' : '（非 Leader）' : ''}：` + (bonus.defenderId ? `\nhttps://www.torn.com/profiles.php?XID=${bonus.defenderId}` : '暂不可用，请查看 report');
     }
     let failed = 0;
     for (const target of targets) {

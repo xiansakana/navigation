@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_CHAIN_NOTIFY, chainNotifySettings } from './torn-chain-notifications.js';
-import { normalizeBonusHits, reportBonusDefenders, lookupDefenderLeader, selectedBonusDefenders } from './torn-chain-bonuses.js';
+import { normalizeBonusHits, reportBonusDefenders, legacyReportBonusDefenders, lookupDefenderLeader, selectedBonusDefenders } from './torn-chain-bonuses.js';
 
 export const DEFAULT_CHAIN_CONFIG = { minHits: 100, maxHits: null, intervalSeconds: 60, apiKey: '', bonusHits: [], leaderFilter: 'all' };
 
@@ -44,7 +44,9 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 1500 } = {
     const job = queue.catch(() => {}).then(async () => {
       signal?.throwIfAborted();
       const url = new URL(path, 'https://api.torn.com/v2/');
-      if (url.origin !== 'https://api.torn.com' || !/^\/v2\/(faction\/(warfarechains|\d+\/(chain|chainreport|basic))|user\/\d+\/profile)$/.test(url.pathname)) throw new Error('API 分页地址无效');
+      const v2 = /^\/v2\/(faction\/(warfarechains|\d+\/(chain|chainreport|basic))|user\/\d+\/profile)$/.test(url.pathname);
+      const legacyReport = /^\/torn\/[1-9]\d*$/.test(url.pathname) && url.searchParams.get('selections') === 'chainreport';
+      if (url.origin !== 'https://api.torn.com' || !v2 && !legacyReport) throw new Error('API 分页地址无效');
       url.searchParams.set('key', key); url.searchParams.set('comment', 'NavChain');
       await delay(Math.max(0, nextAt - Date.now()), undefined, { signal });
       signal?.throwIfAborted(); nextAt = Date.now() + spacingMs;
@@ -56,7 +58,7 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 1500 } = {
       const data = await response.json().catch(() => { throw new Error('Torn API 返回无效数据'); });
       if (data.error) {
         const code = Number(data.error.code);
-        throw Object.assign(new Error('Torn API 错误 ' + code + ([1, 2, 10, 13, 16, 18].includes(code) ? '，请检查 Key 和权限' : '')), { fatal: [1, 2, 5, 8, 9, 10, 13, 16, 18].includes(code) });
+        throw Object.assign(new Error('Torn API 错误 ' + code + ([1, 2, 10, 13, 16, 18].includes(code) ? '，请检查 Key 和权限' : '')), { apiCode: code, fatal: [1, 2, 5, 8, 9, 10, 13, 16, 18].includes(code) });
       }
       return data;
     });
@@ -124,16 +126,29 @@ export class ChainMonitor {
     this.promise = this.scan();
   }
   stop() { this.running = false; this.cancel(this.timer); this.controller?.abort(); this.state.nextScanAt = null; }
+  reportAttempts(row) { return row.bonusReaderVersion === 2 ? row.bonusAttempts || 0 : 0; }
   async enrichReport(row, check, signal) {
     const selected = this.config.bonusHits.filter(hit => hit <= row.hits);
-    if (!selected.length || selected.every(hit => row.bonusDetails?.some(bonus => bonus.hit === hit)) || (row.bonusAttempts || 0) >= 3 || row.bonusAttemptedAt && this.now() - row.bonusAttemptedAt < 60) return row;
+    if (!selected.length || selected.every(hit => row.bonusDetails?.some(bonus => bonus.hit === hit)) || this.reportAttempts(row) >= 3 || row.bonusAttemptedAt && this.now() - row.bonusAttemptedAt < 60) return row;
     check();
-    const attempt = { bonusAttempts: (row.bonusAttempts || 0) + 1, bonusAttemptedAt: this.now() };
+    const attempt = { bonusReaderVersion: 2, bonusAttempts: this.reportAttempts(row) + 1, bonusAttemptedAt: this.now() };
     try {
-      const { chainreport } = await this.request('faction/' + row.id + '/chainreport', this.config.apiKey, signal); check();
-      const bonusDetails = reportBonusDefenders(chainreport, row).map(bonus => ({ ...row.bonusDetails?.find(old => old.hit === bonus.hit && old.defenderId === bonus.defenderId), ...bonus }));
+      let parsed, bonusSource = 'api-v2';
+      try {
+        const { chainreport } = await this.request('faction/' + row.id + '/chainreport', this.config.apiKey, signal); check();
+        parsed = reportBonusDefenders(chainreport, row);
+      } catch (error) {
+        // Some newly completed public reports return v2 error 6 even though
+        // the same chain is listed and its official v1 report is available.
+        // Never fall back on authentication, rate limits or private-data errors.
+        if (error.apiCode !== 6 || error.fatal) throw error;
+        check();
+        const { chainreport } = await this.request('https://api.torn.com/torn/' + row.id + '?selections=chainreport', this.config.apiKey, signal); check();
+        parsed = legacyReportBonusDefenders(chainreport, row); bonusSource = 'api-v1';
+      }
+      const bonusDetails = parsed.map(bonus => ({ ...row.bonusDetails?.find(old => old.hit === bonus.hit && old.defenderId === bonus.defenderId), ...bonus }));
       const complete = selected.every(hit => bonusDetails.some(bonus => bonus.hit === hit));
-      return this.store.updateBonus(this.uid, row.id, { ...attempt, bonusDetails, bonusStatus: complete ? 'ready' : 'partial' }) || row;
+      return this.store.updateBonus(this.uid, row.id, { ...attempt, bonusDetails, bonusSource, bonusStatus: complete ? 'ready' : 'partial' }) || row;
     } catch (error) {
       if (!signal.aborted) this.store.updateBonus(this.uid, row.id, { ...attempt, bonusStatus: 'unavailable' });
       if (error.fatal || signal.aborted) throw error;
@@ -169,7 +184,7 @@ export class ChainMonitor {
     return this.config.bonusHits.some(hit => {
       if (hit > row.hits) return false;
       const bonus = row.bonusDetails?.find(item => item.hit === hit);
-      if (!bonus) return (row.bonusAttempts || 0) < 3 && (!row.bonusAttemptedAt || this.now() - row.bonusAttemptedAt >= 60);
+      if (!bonus) return this.reportAttempts(row) < 3 && (!row.bonusAttemptedAt || this.now() - row.bonusAttemptedAt >= 60);
       return this.config.leaderFilter !== 'all' && typeof bonus.isLeader !== 'boolean' && (bonus.leaderAttempts || 0) < 3 && (!bonus.leaderAttemptedAt || this.now() - bonus.leaderAttemptedAt >= 60);
     });
   }
@@ -178,7 +193,7 @@ export class ChainMonitor {
       const unresolved = this.config.bonusHits.some(hit => {
         if (hit > row.hits) return false;
         const bonus = row.bonusDetails?.find(item => item.hit === hit);
-        return !bonus ? (row.bonusAttempts || 0) < 3 : typeof bonus.isLeader !== 'boolean' && (bonus.leaderAttempts || 0) < 3;
+        return !bonus ? this.reportAttempts(row) < 3 : typeof bonus.isLeader !== 'boolean' && (bonus.leaderAttempts || 0) < 3;
       });
       if (unresolved && row.cooldownUntil > this.now()) { this.store.updateBonus(this.uid, row.id, { notificationPending: true }); return; }
     }

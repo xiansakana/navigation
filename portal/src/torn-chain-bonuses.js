@@ -16,6 +16,13 @@ export function reportBonusDefenders(report, row) {
   return [...bonuses.values()].sort((a, b) => a.hit - b.hit);
 }
 
+export function legacyReportBonusDefenders(report, row) {
+  // The official v1 report has no report ID in its body. Its requested URL is
+  // pinned to row.id; verify faction and final hit count before translating.
+  if (!report || report.factionID !== row.factionId || report.chain !== row.hits || !Array.isArray(report.bonuses)) throw new Error('v1 Chain report 与记录不匹配');
+  return reportBonusDefenders({ id: row.id, faction_id: report.factionID, bonuses: report.bonuses.map(bonus => ({ chain: bonus.chain, defender_id: bonus.defender })) }, row);
+}
+
 export function selectedBonusDefenders(row, selection, leaderFilter = 'all') {
   return (selection || []).filter(hit => BONUS_HITS.includes(hit) && hit <= row.hits).map(hit => {
     const bonus = row.bonusDetails?.find(item => item.hit === hit);

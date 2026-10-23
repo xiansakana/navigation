@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
-import { BONUS_HITS, normalizeBonusHits, reportBonusDefenders, selectedBonusDefenders, lookupDefenderLeader } from './torn-chain-bonuses.js';
+import { BONUS_HITS, normalizeBonusHits, reportBonusDefenders, legacyReportBonusDefenders, selectedBonusDefenders, lookupDefenderLeader } from './torn-chain-bonuses.js';
 import { ChainMonitor, chainConfig, createChainStore, createChainApiClient } from './torn-chain-monitor.js';
 import { createChainNotifier } from './torn-chain-notifications.js';
 
@@ -77,7 +77,8 @@ test('notification includes only selected reached bonus defender profile URLs', 
   const messages = [];
   const notify = createChainNotifier({ endpoint: 'http://localhost:8787', token: 'secret', fetchImpl: async (_, options) => { messages.push(JSON.parse(options.body).message); return { ok: true, json: async () => ({ ok: true }) }; } });
   await notify({ qq: { enabled: false }, slack: { enabled: true } }, { id: 1, name: 'Example', hits: 250, bonusSelection: [100, 250, 500], bonusDetails: [{ hit: 100, defenderId: 1100 }] });
-  assert.match(messages[0], /Bonus #100 被打玩家：https:\/\/www.torn.com\/profiles.php\?XID=1100/);
+  assert.match(messages[0], /Bonus #100 被打玩家 \[1100\]：\nhttps:\/\/www.torn.com\/profiles.php\?XID=1100/);
+  assert.match(messages[0], /\nReport：\nhttps:\/\/www.torn.com\/war.php\?step=chainreport&chainID=1/);
   assert.match(messages[0], /Bonus #250 被打玩家：暂不可用/); assert.ok(!messages[0].includes('#500')); assert.ok(!messages[0].includes('attacker'));
 });
 
@@ -175,4 +176,72 @@ test('expired deferred notifications are discarded even if identity verification
   } });
   m.start(); await m.promise; assert.equal(store.get('a').history[0].notificationPending, true);
   now = 2100; available = true; await m.scan(); assert.equal(sent, 0); assert.equal(store.get('a').history[0].notificationPending, false); m.stop();
+});
+
+test('official v1 report translates defender IDs and validates faction and hit count', () => {
+  const row = { id: 72002271, factionId: 53564, hits: 11 };
+  const legacy = { factionID: 53564, chain: 11, bonuses: [{ chain: 10, attacker: 3616003, defender: 667169, respect: 10 }] };
+  assert.deepEqual(legacyReportBonusDefenders(legacy, row), [{ hit: 10, defenderId: 667169 }]);
+  assert.throws(() => legacyReportBonusDefenders({ ...legacy, factionID: 999 }, row));
+  assert.throws(() => legacyReportBonusDefenders({ ...legacy, chain: 10 }, row));
+  assert.throws(() => legacyReportBonusDefenders({ ...legacy, bonuses: [{ chain: 10, defender: '667169' }] }, row));
+});
+
+test('v2 incorrect-ID error falls back once to official v1 before sending the defender link', async t => {
+  const store = fixture(t), requests = [], notices = [];
+  store.save('a', { bonusHits: [100] });
+  const m = new ChainMonitor({ uid: 'a', store, now: () => 1000, schedule: () => 1, cancel: () => {}, notify: async row => notices.push(row), request: async path => {
+    requests.push(path);
+    if (path.includes('warfarechains')) return { warfarechains: [candidate(1)] };
+    if (path.endsWith('/chainreport')) throw Object.assign(new Error('Torn API 错误 6'), { apiCode: 6 });
+    if (path.startsWith('https://api.torn.com/torn/')) return { chainreport: { factionID: 101, chain: 250, bonuses: [{ chain: 100, defender: 1100 }] } };
+    return { chain: chain(1) };
+  } });
+  m.start(); await m.promise;
+  assert.equal(notices.length, 1); assert.equal(notices[0].bonusDetails[0].defenderId, 1100);
+  assert.equal(store.get('a').history[0].bonusSource, 'api-v1');
+  await m.scan(); assert.equal(requests.filter(path => path.startsWith('https://')).length, 1); m.stop();
+});
+
+test('authentication, private-data errors and rate limits never trigger a legacy fallback', async t => {
+  const store = fixture(t); store.save('a', { bonusHits: [100] });
+  for (const apiCode of [2, 5, 7]) {
+    let legacyCalls = 0;
+    const m = new ChainMonitor({ uid: 'a', store, now: () => 1000, schedule: () => 1, cancel: () => {}, request: async path => {
+      if (path.startsWith('https://')) legacyCalls++;
+      throw Object.assign(new Error('API unavailable'), { apiCode, fatal: apiCode !== 7 });
+    } });
+    m.config = store.get('a').config;
+    const row = { id: 10, factionId: 110, hits: 250 };
+    if (apiCode !== 7) await assert.rejects(m.enrichReport(row, () => {}, new AbortController().signal));
+    else await m.enrichReport(row, () => {}, new AbortController().signal);
+    assert.equal(legacyCalls, 0);
+  }
+});
+
+test('old exhausted report retries recover once with the new reader without repeating an old notification', async t => {
+  const store = fixture(t); store.save('a', { bonusHits: [100] });
+  store.record('a', candidate(1), chain(1), false, 1000);
+  store.updateBonus('a', 1, { bonusStatus: 'unavailable', bonusAttempts: 3, bonusAttemptedAt: 900 });
+  let sent = 0, legacyCalls = 0;
+  const m = new ChainMonitor({ uid: 'a', store, now: () => 1000, schedule: () => 1, cancel: () => {}, notify: async () => { sent++; }, request: async path => {
+    if (path.includes('warfarechains')) return { warfarechains: [] };
+    if (path.startsWith('https://api.torn.com/torn/')) { legacyCalls++; return { chainreport: { factionID: 101, chain: 250, bonuses: [{ chain: 100, defender: 1100 }] } }; }
+    throw Object.assign(new Error('incorrect id'), { apiCode: 6 });
+  } });
+  m.start(); await m.promise; assert.equal(store.get('a').history[0].bonusStatus, 'ready'); assert.equal(legacyCalls, 1); assert.equal(sent, 0); m.stop();
+});
+
+test('API client exposes error code and restricts legacy calls to the official chainreport selection', async () => {
+  let calls = 0;
+  const request = createChainApiClient({ spacingMs: 0, fetchImpl: async url => {
+    calls++; const path = new URL(url).pathname;
+    return { ok: true, json: async () => path.startsWith('/v2/') ? { error: { code: 6 } } : { chainreport: {} } };
+  } });
+  await assert.rejects(request('faction/1/chainreport', '1234567890abcdef'), error => error.apiCode === 6 && !error.fatal);
+  await request('https://api.torn.com/torn/1?selections=chainreport', '1234567890abcdef');
+  assert.equal(calls, 2);
+  await assert.rejects(request('https://api.torn.com/torn/1?selections=log', '1234567890abcdef'));
+  await assert.rejects(request('https://evil.test/torn/1?selections=chainreport', '1234567890abcdef'));
+  assert.equal(calls, 2);
 });
