@@ -105,7 +105,7 @@ Deploy Key 需加到 **navigation** 仓库（可与 torn-scripts 共用同一密
 
 ## 六、添加非 Torn 服务
 
-Chain 监控是 Portal 内置的 Torn 工具箱子模块，入口 `/torn-toolbox/chain/`，只更新 `portal`。首次访问自动建立按用户隔离的 `torn_chain_monitors` 表；备份包含该表并按凭据保护其中的 API Key。新增权限和操作说明见 [Chain 监控](docs/torn-chain-monitor.md)。部署后不自动启动扫描。
+Chain 监控是 Portal 内置的 Torn 工具箱子模块，入口 `/torn-toolbox/chain/`；通知管理集成更新 `portal,qq-bot`。首次访问自动建立按用户隔离的 `torn_chain_monitors`、`torn_chain_notifications` 表；备份包含两表并按凭据保护其中的 API Key。新增权限和操作说明见 [Chain 监控](docs/torn-chain-monitor.md)。部署后不自动启动扫描或打开通知开关。
 
 视频知识库随 Portal 部署，入口 `/knowledge/`，无新增公网端口。`scripts/sync-blog-upload-nginx.py` 同时维护其分片/工作器结果上传路由。Portal只接收文件和持久化队列；如需在ECS执行转写和总结，另行按 [工作器说明](docs/video-knowledge.md) 安装Python>=3.10、语音依赖和Codex CLI，使用该账号私有凭据启动 `knowledge-worker`。本机工作器也可处理同一站点任务。不要在常规Portal更新中自动安装模型或启动CPU密集任务；备份须额外包含 `portal/data/knowledge/` 的视频和截图。
 

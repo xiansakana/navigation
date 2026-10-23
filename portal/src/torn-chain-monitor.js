@@ -1,4 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import { DEFAULT_CHAIN_NOTIFY, chainNotifySettings } from './torn-chain-notifications.js';
 
 export const DEFAULT_CHAIN_CONFIG = { minHits: 100, maxHits: null, intervalSeconds: 60, apiKey: '' };
 export function chainConfig(input, previous = DEFAULT_CHAIN_CONFIG) {
@@ -51,10 +52,13 @@ export function createChainStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS torn_chain_monitors (
     user_id TEXT PRIMARY KEY, config_json TEXT NOT NULL, history_json TEXT NOT NULL DEFAULT '[]', seen_json TEXT NOT NULL DEFAULT '[]'
   )`);
+  db.exec('CREATE TABLE IF NOT EXISTS torn_chain_notifications (user_id TEXT PRIMARY KEY, settings_json TEXT NOT NULL)');
   const ensure = uid => db.prepare('INSERT OR IGNORE INTO torn_chain_monitors(user_id,config_json) VALUES(?,?)').run(uid, JSON.stringify(DEFAULT_CHAIN_CONFIG));
   const get = uid => { ensure(uid); const row = db.prepare('SELECT * FROM torn_chain_monitors WHERE user_id=?').get(uid); return { config: JSON.parse(row.config_json), history: JSON.parse(row.history_json), seen: JSON.parse(row.seen_json) }; };
   return {
     get,
+    getNotify(uid) { const row = db.prepare('SELECT settings_json FROM torn_chain_notifications WHERE user_id=?').get(uid); return row ? JSON.parse(row.settings_json) : structuredClone(DEFAULT_CHAIN_NOTIFY); },
+    saveNotify(uid, input) { const settings = chainNotifySettings(input); db.prepare('INSERT INTO torn_chain_notifications(user_id,settings_json) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET settings_json=excluded.settings_json').run(uid, JSON.stringify(settings)); return settings; },
     save(uid, input) { const config = chainConfig(input, get(uid).config); db.prepare('UPDATE torn_chain_monitors SET config_json=? WHERE user_id=?').run(JSON.stringify(config), uid); return config; },
     clear(uid) { ensure(uid); db.prepare("UPDATE torn_chain_monitors SET history_json='[]' WHERE user_id=?").run(uid); },
     record(uid, candidate, chain, fresh, now) {
@@ -63,13 +67,14 @@ export function createChainStore(db) {
       history.push({ id, factionId: Number(candidate.faction.id), name: String(candidate.faction.name || candidate.faction.id).slice(0, 160), hits: chain.current, cooldownUntil: chain.cooldown, detectedAt: now, fresh: fresh && !seen.includes(id) });
       if (!seen.includes(id)) seen.push(id);
       db.prepare('UPDATE torn_chain_monitors SET history_json=?,seen_json=? WHERE user_id=?').run(JSON.stringify(history.slice(-200)), JSON.stringify(seen.slice(-5000)), uid);
+      return history.at(-1);
     }
   };
 }
 
 export class ChainMonitor {
-  constructor({ uid, store, request, authorize = () => true, now = () => Math.floor(Date.now() / 1000), schedule = setTimeout, cancel = clearTimeout }) {
-    Object.assign(this, { uid, store, request, authorize, now, schedule, cancel });
+  constructor({ uid, store, request, notify = async () => {}, authorize = () => true, now = () => Math.floor(Date.now() / 1000), schedule = setTimeout, cancel = clearTimeout }) {
+    Object.assign(this, { uid, store, request, notify, authorize, now, schedule, cancel });
     this.running = false; this.busy = false; this.known = new Map(); this.cursor = 0;
     this.state = { running: false, rounds: 0, candidates: 0, confirmed: 0, failed: 0, partial: false, error: '', lastScanAt: null, nextScanAt: null };
   }
@@ -79,7 +84,7 @@ export class ChainMonitor {
     if (!this.authorize()) throw new Error('无权启动 Chain 监控');
     this.config = this.store.get(this.uid).config;
     if (!this.config.apiKey) throw new Error('请先保存 Public API Key');
-    this.known.clear(); this.cursor = 0; this.state.rounds = 0; this.state.error = '';
+    this.known.clear(); this.cursor = 0; this.state.rounds = 0; this.state.error = ''; this.state.notificationError = '';
     this.running = true; this.controller = new AbortController();
     this.promise = this.scan();
   }
@@ -114,7 +119,13 @@ export class ChainMonitor {
           const { chain } = await this.request('faction/' + candidate.faction.id + '/chain', this.config.apiKey, signal); check();
           if (!chain || chain.id !== candidate.id || !['current', 'cooldown', 'timeout'].every(field => Number.isSafeInteger(chain[field]) && chain[field] >= 0)) { stats.failed++; continue; }
           const old = this.known.get(chain.id), status = chain.cooldown > this.now() ? 'cooldown' : chain.timeout > 0 ? 'active' : 'ended';
-          if (status === 'cooldown') this.store.record(this.uid, candidate, chain, old?.status === 'active', this.now());
+          if (status === 'cooldown') {
+            const row = this.store.record(this.uid, candidate, chain, old?.status === 'active', this.now());
+            if (row?.fresh) {
+              try { check(); await this.notify(row); this.state.notificationError = ''; }
+              catch { this.state.notificationError = '冷却记录已保存，但通知未能全部投递，请检查通知管理（不自动重试）'; }
+            }
+          }
           this.known.set(chain.id, { status, until: chain.cooldown, candidate, listedAt: this.now() }); stats.confirmed++;
         } catch (error) { if (error.fatal || !valid()) throw error; stats.failed++; }
       }

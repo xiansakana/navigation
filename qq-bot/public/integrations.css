@@ -52,3 +52,6 @@
 @keyframes biz-spin { to { transform:rotate(360deg); } }
 @media(max-width:800px) { .business-grid{grid-template-columns:1fr}.business-card[data-source="stock"]{grid-column:auto}.biz-target{grid-template-columns:90px 1fr 32px}.biz-target input[data-field="atUserId"],.biz-target input[data-field="userId"]{grid-column:2}.biz-target button{grid-column:3;grid-row:1} }
 @media(max-width:540px) { .business-heading{align-items:flex-start;flex-direction:column}.biz-endpoint{grid-template-columns:1fr} }
+#chain-notifications { margin-top: 18px; }
+#chain-notifications[hidden] { display: none; }
+#chain-notifications .business-card { grid-column: 1 / -1; }

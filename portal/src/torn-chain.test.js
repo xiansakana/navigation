@@ -126,5 +126,5 @@ test('native Chain page and API bypass toolbox proxies and declare action permis
   assert.equal(resolveRoute(services, '/api/torn-chain/state', 'GET').kind, 'portal-api');
   assert.equal(resolveRoute(services, '/torn-toolbox/company/', 'GET').kind, 'proxy');
   assert.ok(!canTornChain({ userId: 'a', permissions: ['torn-chain:control:edit'] }, 'control:edit'));
-  for (const permission of SYSTEM_PERMISSIONS.filter(p => p.id.startsWith('torn-chain:'))) assert.deepEqual(permission.permissionPath.slice(0, 3), ['首页', 'Torn 工具箱', 'Chain 监控']);
+  for (const permission of SYSTEM_PERMISSIONS.filter(p => p.id.startsWith('torn-chain:'))) assert.deepEqual(permission.permissionPath.slice(0, 3), permission.id.startsWith('torn-chain:notify:') ? ['首页', '通知管理', '业务提醒'] : ['首页', 'Torn 工具箱', 'Chain 监控']);
 });

@@ -168,6 +168,11 @@ var SYSTEM_PERMISSIONS = [
         ['history:edit', '清空自己的 Chain 报告记录', ['报告记录', '清空'], 'edit']
     ].map(([id, name, parts, action]) => ({ id: 'torn-chain:' + id, name, group: 'Torn 工具箱', serviceId: 'torn-toolbox', action, permissionPath: ['首页', 'Torn 工具箱', 'Chain 监控', ...parts] })),
     ...[
+        ['notify:view', '查看自己的 Chain 通知配置', 'view', []],
+        ['notify:edit', '保存自己的 Chain 通知配置', 'edit', ['保存配置']],
+        ['notify:test:edit', '测试自己的 Chain 通知', 'edit', ['发送测试']]
+    ].map(([id, name, action, parts]) => ({ id: 'torn-chain:' + id, name, action, group: '通知管理', serviceId: 'notifications', permissionPath: ['首页', '通知管理', '业务提醒', 'Chain 冷却', ...parts] })),
+    ...[
         ['view','进入Codex CLI模块',[],'view'],
         ['usage:view','查看服务器账户额度',['账户与额度'],'view'],
         ['settings:edit','保存服务器Codex默认设置',['服务器默认设置','保存'],'edit'],

@@ -8,7 +8,17 @@
 2. 保存 Torn Public API Key、长度上下限及轮次间隔。默认最小 100、最大不限、间隔 60 秒，范围包含边界，间隔最短 30 秒。留空 Key 保留已有值；删除 Key 使用独立按钮。
 3. 点击启动。首次看见已冷却的 Chain 记录为“首次发现”；同次持续运行中核验到 Active → Cooldown 才记录为“刚进入冷却”。点击 report 链接手动打开报告。
 
-保存配置会停止运行；停止/重启会重新建立观察基线。关闭浏览器不会停止服务器监控；Portal 服务重启后需手动启动。没有 QQ 推送或自动打开报告。
+保存配置会停止运行；停止/重启会重新建立观察基线。关闭浏览器不会停止服务器监控；Portal 服务重启后需手动启动。报告由用户手动打开。
+
+## 通知管理
+
+进入 `/notifications/#chain-notifications` 的业务提醒区域，配置“Torn · Chain 冷却”。QQ 支持当前账号的独立群聊、@、私聊目标，Slack 复用通知管理的公共渠道。两种推送默认关闭，不继承其他用户或业务的目标。保存通知配置不影响扫描运行。
+
+通知查看、保存、测试分别需要 `torn-chain:notify:view`、`torn-chain:notify:edit`、`torn-chain:notify:test:edit`；同时需要 Chain 主模块查看权限，进入通知管理还需原有通知服务权限。后台投递前复查账号及通知保存权限，撤销后不再投递。
+
+仅新记录中“刚进入冷却”的 Chain 推送一次；首次发现、超出范围、重复扫描、重启后的已有冷却记录均不补发。报告先持久化再投递；失败不自动重试，以免部分投递后重复推送。Chain 页状态显示最近投递异常；下一次成功投递或重启监控清除该提示。测试按钮使用已经保存的配置。
+
+Portal 通过通知服务的本机 `/notify` 接口、共享集成配置中的 `notifyToken` 投递，不暴露 Token 给浏览器。通知请求与测试均不得在开发验证时真实发送；自动测试使用 mock。
 
 ## API 与覆盖范围
 
@@ -24,7 +34,7 @@
 
 ## 数据与权限
 
-`torn_chain_monitors` 在共享 SQLite 中按已认证 `user_id` 保存配置、最近 200 条报告和最近 5000 个去重 ID；清空报告保留去重 ID。API Key 保存在服务器数据库中，状态 API 只回传 `hasKey`，不返回密钥。数据库备份需要按凭据保护。运行基线仅在内存，不自动恢复运行。
+`torn_chain_monitors` 在共享 SQLite 中按已认证 `user_id` 保存配置、最近 200 条报告和最近 5000 个去重 ID；`torn_chain_notifications` 按同一用户保存通知开关与目标。清空报告保留去重 ID。API Key 保存在服务器数据库中，状态 API 只回传 `hasKey`，不返回密钥。数据库备份需要按凭据保护。运行基线仅在内存，不自动恢复运行。
 
 页面、各操作 API 均检查 RBAC，写请求检查同源。后台每次请求前后复查运行权限，撤权或禁用账号后停止。报告名称使用文本节点渲染；链接固定为 `https://www.torn.com/war.php?step=chainreport&chainID={id}`，由用户手动打开。
 
@@ -32,6 +42,8 @@
 
 - `node scripts/test.mjs portal`：Portal 全量测试，包含范围、基线/转换、去重、分页轮换、停止、用户隔离、Key 隐藏、权限和路由优先级。
 - `node scripts/test-torn-chain-ui.cjs`：需 Playwright 和 Edge；本地模拟 API，阻断所有外部请求。检查工具箱及 Chain 页全宽切换/刷新持久化，390/320px 无溢出，权限和手动按钮。
+- `node scripts/test-chain-notify-ui.cjs`：本机通过真实 Portal 代理外壳渲染通知管理卡片，验证目标保存/刷新、模拟测试、权限和 320/390px 布局。通知管理 1600px 下主体 1120→1600、导航栏 1440→1600；切回恢复，刷新保存状态。
+- 通知集成全量服务测试：`node scripts/test.mjs portal qq-bot`。线上 `scripts/verify-platform.mjs` 只读取 Chain 通知配置及通知管理 HTML，不投递消息、不启动扫描。
 - 桌面 1600px 实测：工具箱主体 720→1600、Chain 主体 1100→1600、两页导航栏均 1440→1600；切回恢复原尺寸。
 
-只部署 `portal`，无新增进程或公网端口。首次授权访问自动创建表；备份共享数据库时包含 `torn_chain_monitors`。按仓库 Git/SHA 部署流程运行 `scripts/ecs-update.sh --expected-sha <sha> --only portal`，部署本身不会启动扫描。
+通知集成版本部署 `portal,qq-bot`，无新增进程或公网端口。首次授权访问自动创建表；备份共享数据库时包含 `torn_chain_monitors` 和 `torn_chain_notifications`。按仓库 Git/SHA 部署流程运行 `scripts/ecs-update.sh --expected-sha <sha> --only portal,qq-bot`，部署本身不会启动扫描或打开通知开关。
