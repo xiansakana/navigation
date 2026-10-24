@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { ensureAccessPolicy, modulePolicy, validateAccessPolicy, resolveDataAccess, listDataAccess, dataRequestAction, accessModules } from './access-policy.js';
 import { resolveLoggedInPermissions } from './auth.js';
 import { ensureGuestAccess } from './rbac.js';
+import { permissionsForDataAccess } from './data-access.js';
 
 const fixture = () => {
   const rbac = { users: [{ id: 'a', username: 'A', roleIds: ['members'] }, { id: 'b', username: 'B', roleIds: ['members'] }, { id: 'admin', username: 'admin', roleIds: ['admins'] }], roles: [{ id: 'members' }, { id: 'admins' }], permissions: [{ id: 'bookkeeping:view' }] };
@@ -87,5 +88,12 @@ test('module kill switch, read-only personal access and credential-producing GET
   assert.equal(dataRequestAction({ method: 'GET' }, '/api/knowledge/worker-package'), 'write');
   assert.equal(dataRequestAction({ method: 'GET' }, '/api/knowledge/documents'), 'read');
   assert.equal(dataRequestAction({ method: 'POST' }, '/api/knowledge/imports/preview'), 'write');
+  assert.equal(dataRequestAction({ method: 'POST' }, '/api/mingli/chart'), 'read');
   for (const id of ['bookkeeping', 'knowledge', 'mingli', 'stock-manage', 'torn-chain', 'codex-cli', 'qq-codex', 'blog', 'resources']) assert.ok(accessModules().some(m => m.id === id));
+});
+test('read-only data scopes retain view prerequisites and stateless calculation but remove mutations', () => {
+  const permissions = ['service:resources:edit'];
+  assert.deepEqual(permissionsForDataAccess({}, permissions, { moduleId: 'resources', writable: false }), permissions);
+  const rbac = { permissions: [{ id: 'mingli:chart:calculate', serviceId: 'mingli', action: 'execute' }, { id: 'mingli:cases:edit', serviceId: 'mingli', action: 'edit' }] };
+  assert.deepEqual(permissionsForDataAccess(rbac, ['mingli:chart:calculate', 'mingli:cases:edit'], { moduleId: 'mingli', writable: false }), ['mingli:chart:calculate']);
 });

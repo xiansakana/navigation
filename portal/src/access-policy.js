@@ -100,6 +100,7 @@ export function listDataAccess(rbac, session, moduleId, services = []) {
 }
 
 export function dataRequestAction(req, pathname) {
+  if (req.method === 'POST' && pathname === '/api/mingli/chart') return 'read';
   // These GET endpoints provision credentials or expose an interactive control
   // channel. A read-only share must never acquire a worker or writable session.
   if (/\/worker-package$|\/worker-install$/.test(pathname)) return 'write';

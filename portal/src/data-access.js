@@ -37,9 +37,11 @@ export function requestDataAccess(req, session, moduleId, config, action) {
   return access;
 }
 export function permissionsForDataAccess(rbac, permissions, access) {
-  if (access.writable) return permissions;
+  // Resource metrics are read-only even though their legacy entry permission is
+  // named edit. Keep that prerequisite; the API itself rejects all mutations.
+  if (access.writable || access.moduleId === 'resources') return permissions;
   const isModule = p => p.serviceId === access.moduleId || p.id.startsWith(access.moduleId + ':') || p.id.startsWith('service:' + access.moduleId + ':');
-  const writable = p => p.action && p.action !== 'view' || /:(edit|create|execute|run|stop|manage|order|restore|send|calculate)$/.test(p.id);
+  const writable = p => p.id !== 'mingli:chart:calculate' && p.id !== 'qq-codex:execute' && (p.action && p.action !== 'view' || /:(edit|create|execute|run|stop|manage|order|restore|send|calculate)$/.test(p.id));
   const allowed = (rbac.permissions || []).filter(p => hasPermission(permissions, p.id)
     || isModule(p) && permissions.includes('service:' + access.moduleId + ':edit'));
   const result = allowed.filter(p => !isModule(p) || !writable(p)).map(p => p.id);
