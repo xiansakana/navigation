@@ -52,6 +52,7 @@ Tests use Node's built-in `node:test` and `node:assert/strict`. Name files `*.te
 - Keep test fixtures independent of the host's free disk space and proxy environment. Provide explicit capacity/network fixtures while retaining rejection tests for low disk space and unauthorized access.
 - Control animation frames and timers explicitly in UI tests. For asynchronous I/O, wait for an observable condition with a bounded elapsed-time deadline; a fixed number of `setImmediate` or microtask turns is not a timeout and does not prove a rendering timer ran.
 - For intermittent CI failures, first reproduce the scheduling or environment dependency, then verify repeated targeted runs and the actual GitHub workflow on the fix commit. Do not hide failures with skipped tests, disabled checks, or automatic retries until green.
+- Queue fixtures must follow the production ordering including timestamp tie breakers. Release held I/O before awaiting child-process shutdown, bound graceful shutdown with forced termination, and honor test cancellation so failed assertions cannot leave CI hanging.
 
 ## Shared Page Layout and Full-Width Verification
 

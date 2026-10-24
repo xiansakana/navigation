@@ -11,6 +11,23 @@ import { getDatabase, closeDatabase } from '../../shared/db/index.js';
 import { createKnowledgeStore } from './knowledge-store.js';
 import { handleKnowledgeWorkerApi } from './knowledge.js';
 
+async function stopWorker(child) {
+  if (!child || child.exitCode != null || child.signalCode != null) return;
+  const exit = once(child, 'exit');
+  const force = setTimeout(() => child.kill('SIGKILL'), 1000);
+  try { child.kill(); await exit; } finally { clearTimeout(force); }
+}
+
+test('worker fixture cleanup terminates a process that ignores graceful shutdown', { timeout: 5000 }, async () => {
+  const child = spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)"], { windowsHide: true });
+  try {
+    await once(child.stdout, 'data');
+    await stopWorker(child);
+    assert.ok(child.exitCode != null || child.signalCode != null);
+    if (process.platform !== 'win32') assert.equal(child.signalCode, 'SIGKILL');
+  } finally { await stopWorker(child); }
+});
+
 test('worker retries explicit storage busy responses using identical payload, but never blindly repeats claims', async () => {
   const options = { method: 'POST', body: '{"backends":["codex"]}' }, delays = [], requests = [];
   const r = await workerPortalRequest('https://test/api/knowledge/worker/claim', options, { wait: async ms => delays.push(ms), fetch: async (url, input) => {
@@ -47,7 +64,7 @@ test('summary slots are FIFO, cancelled waiters do not block others and lower li
   releaseFourth(); releaseFifth();
 });
 
-test('real worker loop overlaps next video media with two summaries and isolates a failed summary', { timeout: 30000 }, async () => {
+test('real worker loop overlaps next video media with two summaries and isolates a failed summary', { timeout: 30000 }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'knowledge-pipeline-'));
   const previous = { db: process.env.NAVIGATION_DB_PATH, media: process.env.KNOWLEDGE_DATA_DIR };
   process.env.NAVIGATION_DB_PATH = path.join(root, 'db.sqlite'); process.env.KNOWLEDGE_DATA_DIR = path.join(root, 'media');
@@ -56,6 +73,9 @@ test('real worker loop overlaps next video media with two summaries and isolates
   const store = createKnowledgeStore(getDatabase()), token = store.rotateToken('a');
   const ids = [];
   for (let i = 0; i < 3; i++) { const d = store.create('a', { title: 'lesson ' + i, bytes: 24, mimeType: 'video/mp4', originalName: 'lesson.mp4' }); store.enqueue('a', d.id); ids.push(d.id); }
+  // Exercise timestamp ties deliberately. Claims break ties by ID, not insertion order.
+  getDatabase().prepare('UPDATE knowledge_documents SET created_at=? WHERE user_id=?').run('2026-01-01T00:00:00.000Z', 'a');
+  ids.sort();
   const server = http.createServer(async (req, res) => {
     if (req.url.startsWith('/test/media')) { media.push(res); return; }
     if (req.url.startsWith('/test/summary')) { summaries.push(res); return; }
@@ -74,7 +94,8 @@ test('real worker loop overlaps next video media with two summaries and isolates
   const waitFor = async predicate => {
     const until = Date.now() + 18000;
     while (!predicate()) {
-      if (Date.now() > until || child?.exitCode != null) throw new Error('Pipeline did not reach expected state: ' + output.slice(-2000));
+      t.signal.throwIfAborted();
+      if (Date.now() > until || child?.exitCode != null || child?.signalCode != null) throw new Error('Pipeline did not reach expected state: ' + JSON.stringify({ media: media.length, summaries: summaries.length, jobs: ids.map(id => { const d = store.get('a', id); return { id, status: d.status, phase: d.processingPhase }; }) }) + '\n' + output.slice(-2000));
       await new Promise(resolve => setTimeout(resolve, 20));
     }
   };
@@ -138,9 +159,11 @@ export async function summarizeVideo(config, job) {
     assert.ok(store.get('a', before.id).revision > before.revision);
     assert.deepEqual(errors, []);
   } finally {
-    if (child && child.exitCode == null) { const exit = once(child, 'exit'); child.kill(); await exit; }
+    // Release held model requests before waiting for graceful worker shutdown.
     for (const res of [...media, ...summaries]) if (!res.writableEnded) res.end();
-    server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); closeDatabase();
+    server.closeAllConnections();
+    await stopWorker(child);
+    await new Promise(resolve => server.close(resolve)); closeDatabase();
     if (previous.db === undefined) delete process.env.NAVIGATION_DB_PATH; else process.env.NAVIGATION_DB_PATH = previous.db;
     if (previous.media === undefined) delete process.env.KNOWLEDGE_DATA_DIR; else process.env.KNOWLEDGE_DATA_DIR = previous.media;
     assert.equal(path.dirname(root), os.tmpdir()); await fs.rm(root, { recursive: true, force: true });
