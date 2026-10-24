@@ -1,6 +1,7 @@
 import { hasPermission, resolveUserPermissions } from '../../shared/auth/permissions.js';
 export { hasPermission, resolveUserPermissions } from '../../shared/auth/permissions.js';
 import { PORTAL_MODULES, moduleMenu } from './modules.js';
+import { ensureAccessPolicy } from './access-policy.js';
 import crypto from 'node:crypto';
 import { getDatabase } from '../../shared/db/index.js';
 import { loadRbacBlob, saveRbacBlob, rbacRevision, copyRbac } from '../../shared/db/rbac-store.js';
@@ -161,6 +162,8 @@ function buildNotificationPermissions() {
 }
 
 var SYSTEM_PERMISSIONS = [
+    { id: 'admin:data-policy:view', name: '查看模块授权和数据范围', group: '系统', action: 'view', resource: 'admin:data-policy', permissionPath: ['权限管理', '模块与数据范围'] },
+    { id: 'admin:data-policy:edit', name: '配置模块授权和数据范围', group: '系统', action: 'edit', resource: 'admin:data-policy', permissionPath: ['权限管理', '模块与数据范围', '保存'] },
     ...[
         ['view', '查看自己的 Chain 监控', [], 'view'],
         ['config:edit', '保存自己的 Chain 范围、Bonus hit、Leader 筛选和 Key', ['配置'], 'edit'],
@@ -399,12 +402,14 @@ function ensureGuestAccess(data, config) {
         )));
         data.guestModuleBrowsingVersion = 1;
     }
-    guestRole.permissions = (guestRole.permissions || []).filter(function(permission) {
+    if (!data.guestCashPermissionsMigrated) guestRole.permissions = (guestRole.permissions || []).filter(function(permission) {
         return permission !== stockManageFeaturePermissionId('cash', 'view')
             && permission !== stockManageFeaturePermissionId('cash', 'edit');
     });
+    data.guestCashPermissionsMigrated = true;
 
     var guestUser = data.users.find(function(u) { return u.username === guestUsername; });
+    data.guestUserId = guestUser?.id || 'usr_guest';
     if (!guestUser) {
         data.users.push({
             id: 'usr_guest',
@@ -413,12 +418,7 @@ function ensureGuestAccess(data, config) {
             enabled: true,
             createdAt: new Date().toISOString()
         });
-    } else {
-        guestUser.enabled = true;
-        if (!(guestUser.roleIds || []).includes('role_guest')) {
-            guestUser.roleIds = ['role_guest'];
-        }
-    }
+    } else if (!Array.isArray(guestUser.roleIds)) guestUser.roleIds = ['role_guest'];
 }
 
 function normalizeMenuPermission(menu) {
@@ -529,6 +529,7 @@ function createDefaultRbac(config) {
         userPrefs: {}
     };
     ensureGuestAccess(created, config);
+    ensureAccessPolicy(created);
     return created;
 }
 
@@ -581,6 +582,7 @@ function migrateRolePermissions(permissions) {
 
 export function syncRbacPermissions(data, config) {
     var before = JSON.stringify(data);
+    ensureAccessPolicy(data);
     var servicePerms = buildServicePermissions(config.services);
     var stockManagePerms = buildStockManagePermissions();
     var qqqDipPerms = buildQqqDipPermissions();

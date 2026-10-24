@@ -17,10 +17,12 @@ const MAX_REQUEST_BYTES = 128 * 1024;
 
 export function blogAccess(session) {
     const permissions = session.permissions || [];
-    const canPost = !session.isGuest && hasPermission(permissions, 'blog:post:edit');
-    const canManage = !session.isGuest && hasPermission(permissions, 'blog:manage:edit');
+    const postPermission = !session.isGuest && hasPermission(permissions, 'blog:post:edit');
+    const managePermission = !session.isGuest && hasPermission(permissions, 'blog:manage:edit');
+    const canPost = postPermission && session.dataAccess?.writable !== false;
+    const canManage = managePermission && session.dataAccess?.writable !== false;
     // Guests can read public posts; write operations still require an authenticated author.
-    return { canView: session.isGuest || hasPermission(permissions, 'blog:feed:view') || canPost || canManage, canPost, canManage };
+    return { canView: session.isGuest || hasPermission(permissions, 'blog:feed:view') || postPermission || managePermission, canPost, canManage };
 }
 
 export function validateContent(value, allowEmpty = false) {
@@ -114,6 +116,7 @@ export function createPost(db, session, content, hasMedia = false, options = {})
 export function canChangePost(db, id, session) {
     const row = db.prepare('SELECT author_id FROM blog_posts WHERE id = ?').get(id);
     if (!row) return { status: 404, error: '文章不存在' };
+    if (session.dataAccess && session.dataAccess.scope !== 'public' && row.author_id !== session.dataAccess.ownerId) return { status: 404, error: '文章不属于当前数据范围' };
     const access = blogAccess(session);
     if (!access.canManage && !(access.canPost && row.author_id === session.userId)) {
         return { status: 403, error: '无权修改这篇文章' };

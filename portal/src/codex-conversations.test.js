@@ -26,6 +26,7 @@ test('conversation API isolates owners/projects/groups, enforces actions and CSR
     assert.equal((await request('','POST',{project:'navigation'},viewer)).status,403);
     assert.equal((await request('','POST',{project:'navigation'},undefined,'https://evil.test')).status,403);
     assert.equal((await request('','POST',{project:'other'})).status,400);
+    assert.equal((await request('','POST',{project:'navigation'},{userId:'owner',actorUserId:'other',permissions:['*']})).status,400);
     const created=await request('','POST',{project:'navigation'});assert.equal(created.status,201);const id=created.body.conversation.id;
     assert.equal((await request('/'+id,'GET',undefined,{userId:'other',permissions:['*']})).status,404);
     for(const [suffix,method,body] of [['','PATCH',{title:'new'}],['/messages','POST',{prompt:'hi'}],['/stop','POST',{}]])assert.equal((await request('/'+id+suffix,method,body,viewer)).status,403);

@@ -7,69 +7,8 @@ import {
     resolveUserPermissions
 } from './rbac.js';
 
-const DEFAULT_PERSONAL_PERMISSIONS = Object.freeze([
-    'knowledge:view',
-    'knowledge:notes:view',
-    'knowledge:storage:edit',
-    'knowledge:source:view',
-    'knowledge:transcript:view',
-    'knowledge:transcript:script:view',
-    'knowledge:asr:edit',
-    'knowledge:frames:view',
-    'knowledge:upload:edit',
-    'knowledge:import:edit',
-    'knowledge:bilibili:view',
-    'knowledge:bilibili:edit',
-    'knowledge:quality:edit',
-    'knowledge:local-input:edit',
-    'knowledge:process:edit',
-    'knowledge:process:batch:edit',
-    'knowledge:reanalysis:edit',
-    'knowledge:reanalysis:batch:edit',
-    'knowledge:history:view',
-    'knowledge:history:restore',
-    'knowledge:notes:edit',
-    'knowledge:publish:edit',
-    'knowledge:publish:batch:edit',
-    'knowledge:concurrency:edit',
-    'knowledge:queue:view',
-    'knowledge:queue:edit',
-    'knowledge:queue:manage',
-    'knowledge:delete:edit',
-    'knowledge:export:view',
-    'knowledge:settings:edit',
-    'knowledge:model:edit',
-    'knowledge:worker:edit',
-    'knowledge:devices:view',
-    'knowledge:devices:install',
-    'knowledge:devices:install-zip',
-    'knowledge:devices:edit',
-    'mingli:categories:view',
-    'mingli:categories:edit',
-    'mingli:cases:classify',
-    'mingli:cases:import',
-    'mingli:view',
-    'mingli:chart:calculate',
-    'mingli:cases:view',
-    'mingli:cases:filter',
-    'mingli:knowledge:view',
-    'mingli:knowledge:filter',
-    'mingli:cases:edit',
-    'mingli:cases:delete',
-    'bookkeeping:location:edit',
-    'bookkeeping:qq:edit',
-    'bookkeeping:view',
-    'bookkeeping:entries:edit',
-    'bookkeeping:accounts:view',
-    'bookkeeping:accounts:edit',
-    'bookkeeping:import:edit',
-    'bookkeeping:export:view',
-    'bookkeeping:settings:edit',
-    'bookkeeping:fx:edit',
-    'bookkeeping:analysis:view',
-    'bookkeeping:categories:view',
-    'bookkeeping:categories:edit',
-]);
+import { DEFAULT_PERSONAL_PERMISSIONS } from './access-defaults.js';
+
 
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -124,8 +63,7 @@ export function resolveLoggedInPermissions(rbac, user, config = {}) {
     // Signed-in members own personal ledgers/cases and may publish their own blog posts.
     // These grants do not confer access to other users' data, stock, or admin features.
     return Array.from(new Set(permissions.concat(
-        DEFAULT_PERSONAL_PERMISSIONS,
-        'blog:post:edit'
+        ...(rbac.accessPolicy?.memberPermissions ?? [...DEFAULT_PERSONAL_PERMISSIONS, 'blog:post:edit'])
     )));
 }
 

@@ -302,6 +302,7 @@ function injectNapcatTokenShim(html, token, mountPath) {
 function injectPortalShell(html, service) {
     if (!html.includes('<body')) return html;
     html = ensureViewportMeta(html);
+    if (!html.includes('/data-scope.js')) html = html.replace(/<\/head>/i, '<script defer src="/data-scope.js?v=1"></script></head>');
     if (!html.includes('/ui/back-to-top.js')) {
         html = html.replace(/<\/head>/i, '<script defer src="/ui/back-to-top.js?v=1"></script></head>');
     }

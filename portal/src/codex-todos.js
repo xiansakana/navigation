@@ -26,6 +26,12 @@ export async function handleCodexTodosApi(req,res,url,session,json,dependencies)
   }
   try{
     const setup=dependencies.setup(uid);if(!setup.configured)return json(res,403,{ok:false,error:'当前账号尚未配置Codex项目'});
+    if (session.actorUserId && session.actorUserId !== uid) {
+      const actor = dependencies.setup(session.actorUserId);
+      setup.projects = setup.projects.filter(project => actor.projects.includes(project));
+      if (!actor.configured) return json(res, 403, { ok: false, error: '操作人尚未配置Codex项目' });
+      setup.enabled = setup.enabled && actor.enabled;
+    }
     const store=dependencies.store || createCodexStore(getDatabase()),todos=store.todos;
     const allowed=c=>c&&setup.projects.includes(c.project)&&(!c.group_id||store.settings(uid).groups.includes(c.group_id));
     const allowedTodo=row=>row&&setup.projects.includes(row.project)&&(!row.conversation_id||allowed(store.conversations.get(uid,row.conversation_id)));
@@ -56,6 +62,10 @@ export async function handleCodexTodosApi(req,res,url,session,json,dependencies)
     const runtime=validateRuntime({model:body.model ?? '',effort:body.effort ?? ''},catalog,{partial:true,defaultModel:setup.config.model || catalog.defaults.model});
     resolveRuntime(setup.config,runtime,catalog);
     const fresh=dependencies.setup(uid);
+    if (session.actorUserId && session.actorUserId !== uid) {
+      const actor = dependencies.setup(session.actorUserId);
+      if (!actor.configured || !actor.projects.includes(body.project)) return json(res, 403, { ok: false, error: '操作人的项目授权已撤销' });
+    }
     if(!fresh.configured||!fresh.projects.includes(body.project)||conversationId&&(!store.conversations.get(uid,conversationId)||store.conversations.get(uid,conversationId).archived||conversation.group_id&&!store.settings(uid).groups.includes(conversation.group_id)))return json(res,403,{ok:false,error:'项目或会话授权已撤销'});
     const values={project:body.project,title:body.title.trim(),prompt:body.prompt.trim(),runtime,conversationId,autoRun:body.autoRun,requestId:body.requestId,scheduledAt:body.scheduledAt || 0};
     const saved=id?todos.edit(uid,id,values):todos.create(uid,setup.qqId || '',values);

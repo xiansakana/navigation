@@ -28,11 +28,17 @@ export async function handleCodexConversationsApi(req,res,url,session,json,depen
   }
   try {
     const setup=dependencies.setup(uid);
+    if (session.actorUserId && session.actorUserId !== uid) {
+      const actor = dependencies.setup(session.actorUserId);
+      setup.projects = setup.projects.filter(project => actor.projects.includes(project));
+      setup.configured = setup.configured && actor.configured;
+      setup.enabled = setup.enabled && actor.enabled;
+    }
     if(method!=='GET'&&!setup.configured)return json(res,403,{ok:false,error:'当前账号尚未配置Codex执行项目'});
     const store=dependencies.store || createCodexStore(getDatabase()),conversations=store.conversations;
     const external=dependencies.external || (!dependencies.store?createServerSessions(getDatabase()):null);
     const cursor=url.searchParams.get('cursor')||'';if(cursor.length>8192)throw new Error('分页标识无效');
-    const externalOptions={config:setup.config,all:can('sessions:server:view'),canKnowledge:['knowledge:view','knowledge:notes:view'].every(p=>hasPermission(session.permissions||[],p)),canKnowledgePrompts:['knowledge:transcript:view','knowledge:frames:view'].every(p=>hasPermission(session.permissions||[],p)),archived:url.searchParams.get('archived')==='true',cursor};
+    const externalOptions={config:setup.config,all:can('sessions:server:view')&&(!session.dataAccess||session.dataAccess.scope==='self'),canKnowledge:['knowledge:view','knowledge:notes:view'].every(p=>hasPermission(session.permissions||[],p)),canKnowledgePrompts:['knowledge:transcript:view','knowledge:frames:view'].every(p=>hasPermission(session.permissions||[],p)),archived:url.searchParams.get('archived')==='true',cursor};
     const allowed=c=>c&&hasPermission(session.permissions||[],'qq-codex:execute')&&setup.projects.includes(c.project)&&(!c.group_id||store.settings(uid).groups.includes(c.group_id));
     if(method==='GET'&&!id) {
       const local=conversations.list(uid).filter(allowed),extra=await external?.list(uid,{...externalOptions,excludeSessionIds:local.map(c=>c.session_id).filter(Boolean)})||{conversations:[]};
@@ -68,6 +74,10 @@ export async function handleCodexConversationsApi(req,res,url,session,json,depen
     const values=validateRuntime({model:body.model ?? '',effort:body.effort ?? ''},catalog,{partial:true,defaultModel:setup.config.model || catalog.defaults.model});
     const runtime=resolveRuntime(setup.config,values,catalog);
     const fresh=dependencies.setup(uid);
+    if (session.actorUserId && session.actorUserId !== uid) {
+      const actor = dependencies.setup(session.actorUserId);
+      if (!actor.enabled || !actor.configured || !actor.projects.includes(conversation.project)) return json(res, 403, { ok: false, error: '操作人的项目授权已撤销' });
+    }
     if(!fresh.enabled||!fresh.configured||!fresh.projects.includes(conversation.project)||conversation.group_id&&!store.settings(uid).groups.includes(conversation.group_id))return json(res,403,{ok:false,error:'项目或会话授权已撤销'});
     const jobId=conversations.enqueue(uid,setup.qqId || '',id,{prompt:body.prompt.trim(),runtime,requestId:body.requestId});
     return json(res,202,{ok:true,jobId});

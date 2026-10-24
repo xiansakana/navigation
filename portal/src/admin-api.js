@@ -13,6 +13,7 @@ import {
     canViewAdminResource,
     canEditAdminResource
 } from './rbac.js';
+import { accessModules, validateAccessPolicy } from './access-policy.js';
 
 function forbidden(res, message) {
     res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -59,6 +60,23 @@ export async function handleAdminApi(req, res, url, session, config, json, readJ
                 }
             }
         });
+    }
+
+    if (url.pathname === '/api/admin/data-policy') {
+        if (!requireView(res, userPerms, 'admin:data-policy')) return;
+        if (req.method === 'GET') return json(res, 200, { ok: true, policy: rbac.accessPolicy,
+            modules: accessModules(config.services), users: sanitizeRbac(rbac).users, roles: sanitizeRbac(rbac).roles,
+            permissions: rbac.permissions, services: (config.services || []).filter(s => s.type === 'proxy').map(s => ({ id: s.id, title: s.title || s.id })),
+            canEdit: canEditAdminResource(userPerms, 'admin:data-policy') });
+        if (req.method !== 'PUT') return json(res, 405, { ok: false, error: '不支持此方法' });
+        if (!requireEdit(res, userPerms, 'admin:data-policy')) return;
+        try {
+            const input = await readJson(req);
+            if (input.revision !== rbac.accessPolicy.revision) return json(res, 409, { ok: false, error: '访问策略已更新，请刷新后重试' });
+            const policy = validateAccessPolicy(input, rbac, config.services);
+            rbac.accessPolicy = policy; saveRbac(rbac);
+            return json(res, 200, { ok: true, policy });
+        } catch (err) { return json(res, err.status || 400, { ok: false, error: err.message }); }
     }
 
     if (url.pathname === '/api/admin/users') {

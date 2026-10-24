@@ -63,6 +63,7 @@ export async function handleTornChainApi(req, res, url, session, json, config) {
   if (!canTornChain(session)) return json(res, 403, { ok: false, error: '请登录并获取 Chain 监控权限' });
   const authorized = (uid, action) => {
     const current = resolveSessionUser({ userId: uid }, config);
+    if (current?.rbac?.accessPolicy?.modules?.['torn-chain']?.enabled === false) return false;
     const ctx = current && { userId: uid, permissions: current.permissions, isGuest: current.user.username === (config.auth?.guestUsername || 'guest') };
     return !!ctx && canTornChain(ctx, action) && (action !== 'notify:edit' || canTornChain(ctx, 'notify:view'));
   };

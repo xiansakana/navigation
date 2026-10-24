@@ -28,6 +28,7 @@ export function authorizedCodexUser(config, qq, db) {
   const user = config.allowedUsers?.find(u => String(u.qqId) === String(qq));
   if (!user?.userId) return null;
   const rbac = loadRbacBlob(db), account = rbac?.users?.find(u => u.id === user.userId);
+  if (rbac?.accessPolicy?.modules?.['qq-codex']?.enabled === false) return null;
   if (!account || account.enabled === false || account.username === 'guest' || !hasPermission(resolveUserPermissions(rbac, account), 'qq-codex:execute')) return null;
   return user;
 }
@@ -46,6 +47,7 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
     if(todo.conversation_id){const c=storage().conversations.get(todo.user_id,todo.conversation_id);if(!c||c.archived||c.project!==todo.project||c.group_id&&!storage().settings(todo.user_id).groups.includes(c.group_id))return false;}
     if(authorizeTodo)return authorizeTodo(todo);
     const rbac=loadRbacBlob(getDatabase()),account=rbac?.users?.find(u=>u.id===todo.user_id);
+    if (rbac?.accessPolicy?.modules?.['codex-cli']?.enabled === false) return false;
     return account&&account.enabled!==false&&['codex-cli:view','codex-cli:todos:view','codex-cli:todos:run','codex-cli:sessions:view','codex-cli:sessions:create','codex-cli:messages:send'].every(p=>hasPermission(resolveUserPermissions(rbac,account),p));
   }
   function jobUser(job) {
@@ -54,6 +56,7 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
     if(job.todo_id){const todo=storage().todos.get(job.user_id,job.todo_id);if(!todo||todo.state==='paused'||!todoAllowed(todo))return null;}
     const conversation=storage().conversations.get(job.user_id,job.conversation_id);
     const rbac=authorizeWeb ? null : loadRbacBlob(getDatabase()),account=rbac?.users?.find(u=>u.id===job.user_id);
+    if (rbac?.accessPolicy?.modules?.['codex-cli']?.enabled === false) return null;
     const permissions=account ? resolveUserPermissions(rbac,account) : [];
     const webAllowed=authorizeWeb ? authorizeWeb(job) : account&&account.enabled!==false&&['codex-cli:view','codex-cli:sessions:view','codex-cli:messages:send'].every(p=>hasPermission(permissions,p));
     if(!conversation || conversation.archived || conversation.group_id&&!storage().settings(job.user_id).groups.includes(conversation.group_id)

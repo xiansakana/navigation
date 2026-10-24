@@ -12,6 +12,9 @@ export function resolveUserPermissions(data, user) {
     if (perms.has('*')) {
         (data.permissions || []).forEach(function(p) { perms.add(p.id); });
     }
+    if (data.guestUserId ? user.id !== data.guestUserId : user.id !== 'usr_guest' && user.username !== 'guest') {
+        (data.accessPolicy?.memberPermissions || []).forEach(function(p) { perms.add(p); });
+    }
     return Array.from(perms);
 }
 

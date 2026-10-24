@@ -1,6 +1,8 @@
 import { instrumentRequest } from '../../shared/request-log.js';
 import { moduleApiHandler } from './module-api.js';
-import { moduleInventory } from './modules.js';
+import { moduleInventory, findModuleApi } from './modules.js';
+import { requestDataAccess, scopedSession, availableDataAccess, scopeCookie, auditDataAccess, stripPortalIdentity } from './data-access.js';
+import { accessModules, modulePolicy, moduleForPath } from './access-policy.js';
 import { readJson, sameOriginWrite } from '../../shared/http.js';
 import { sessionSecret, cookieOptions, createLoginLimiter } from './login-security.js';
 import { createQqBookkeeping, internalQqAuthorized } from './bookkeeping-qq.js';
@@ -86,7 +88,7 @@ function sendError(req, res, url, status, message, pageOptions) {
         message: message,
         hint: ''
     }, pageOptions || {}));
-    return sendHtml(res, status, html);
+    return sendHtml(res, status, html.replace(/<\/head>/i, '<script defer src="/data-scope.js?v=1"></script></head>'));
 }
 
 function redirect(res, location, setCookie) {
@@ -106,6 +108,10 @@ function serveStatic(filePath, res) {
         '.css': 'text/css; charset=utf-8',
         '.js': 'application/javascript; charset=utf-8'
     };
+    if (ext === '.html') {
+        const html = fs.readFileSync(filePath, 'utf8').replace(/<\/head>/i, '<script defer src="/data-scope.js?v=1"></script></head>');
+        res.writeHead(200, { 'Content-Type': types[ext], 'Cache-Control': 'no-store' }); return res.end(html);
+    }
     res.writeHead(200, { 'Content-Type': types[ext] || 'application/octet-stream' });
     fs.createReadStream(filePath).pipe(res);
     return true;
@@ -168,15 +174,56 @@ function publicServices(userCtx, userAgent) {
 
 async function handleApi(req, res, url, session) {
     const moduleHandler = moduleApiHandler(url.pathname);
-    if (moduleHandler) return moduleHandler(req, res, url, session, { json, config, resourceMonitor });
+    if (moduleHandler) {
+        try {
+            const module = findModuleApi(url.pathname);
+            // Author-published text remains a separate deliberately public projection.
+            const publicRead = module.id === 'knowledge' && url.pathname.startsWith('/api/knowledge/public');
+            const access = requestDataAccess(req, session, module.id, config, publicRead ? 'read' : undefined);
+            auditDataAccess(req, res, access);
+            if (access.binding) { stripPortalIdentity(req); req.url = url.pathname + url.search; return proxyHttpRequest(access.binding, req, res); }
+            return await moduleHandler(req, res, url, scopedSession(session, access), { json, config, resourceMonitor });
+        } catch (error) { return json(res, error.status || 403, { ok: false, error: error.message }); }
+    }
+    if (url.pathname === '/api/me/data-scopes') {
+        const moduleId = url.searchParams.get('module') || moduleForPath(url.searchParams.get('path') || '', config.services);
+        if (!accessModules(config.services).some(m => m.id === moduleId)) return json(res, 400, { ok: false, error: '模块不存在' });
+        if (req.method === 'GET') {
+            let selected = null; try { selected = requestDataAccess(req, session, moduleId, config, 'read').scope; } catch { /* Revoked selection must be replaced explicitly. */ }
+            return json(res, 200, { ok: true, module: moduleId, selected, scopes: availableDataAccess(session, moduleId, config) });
+        }
+        if (req.method !== 'PUT') return json(res, 405, { ok: false, error: '不支持此方法' });
+        try {
+            const input = await readJson(req, 2048);
+            req.headers['x-navigation-data-scope'] = input.scope;
+            const access = requestDataAccess(req, session, moduleId, config, 'read');
+            res.setHeader('Set-Cookie', scopeCookie(moduleId) + '=' + encodeURIComponent(access.scope) + '; Path=/; HttpOnly; SameSite=Lax' + (cookieOptions(config).secure ? '; Secure' : ''));
+            return json(res, 200, { ok: true, scope: access.scope });
+        } catch (error) { return json(res, error.status || 400, { ok: false, error: error.message }); }
+    }
+    if (url.pathname === '/api/me/data-modules' && req.method === 'GET') {
+        return json(res, 200, { ok: true, modules: accessModules(config.services).map(m => ({ id: m.id,
+            path: m.id === 'blog' ? '/' : m.id === 'torn-chain' ? '/torn-toolbox/chain/' : (config.services || []).find(s => s.id === m.id)?.path || '/' + m.id + '/' })) });
+    }
     if (req.method === 'GET' && url.pathname === '/api/me') {
         var rbac = loadRbac(config);
         var stockManagePrefs = getStockManagePrefs(rbac, session.userId);
+        let dataContext = null, visiblePermissions = session.permissions;
+        try {
+            const source = new URL(req.headers.referer || '', 'http://' + req.headers.host);
+            const moduleId = moduleForPath(source.pathname, config.services);
+            if (moduleId) {
+                const access = requestDataAccess(req, session, moduleId, config, 'read');
+                visiblePermissions = access.permissions;
+                dataContext = { module: moduleId, scope: access.scope, label: access.label, writable: access.writable };
+            }
+        } catch { /* Individual APIs still reject a revoked or unavailable scope. */ }
         return json(res, 200, {
             ok: true,
             username: session.username,
             userId: session.userId,
-            permissions: session.permissions,
+            permissions: visiblePermissions,
+            dataContext,
             isGuest: !!session.isGuest,
             canAdmin: !session.isGuest && canViewAdmin(session.permissions),
             prefs: { stockManage: stockManagePrefs }
@@ -227,6 +274,12 @@ async function handleApi(req, res, url, session) {
     }
 
     if (url.pathname.startsWith('/api/piclist/')) {
+        try {
+            const access = requestDataAccess(req, session, 'piclist', config);
+            auditDataAccess(req, res, access);
+            if (access.binding) { stripPortalIdentity(req); return proxyHttpRequest(access.binding, req, res); }
+        }
+        catch (error) { return json(res, error.status || 403, { ok: false, error: error.message }); }
         var piclistService = (config.services || []).find(function(service) { return service.id === 'piclist'; });
         if (!piclistService || !canViewService(session.permissions, 'piclist')) {
             return json(res, 403, { ok: false, error: '无权访问 PicList 管理' });
@@ -358,12 +411,18 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
     var browserUrl = new URL(req.url, 'http://127.0.0.1');
 
     var proxySession = null;
+    var dataAccess = null;
     var alistSharePublic = ctx.service.id === 'alist'
         && isAlistPublicSharePath(browserUrl.pathname, req.method);
     if (isPublicProxyService(ctx.service) || alistSharePublic) {
         // 无需 Portal 登录；读写限制由上游发布内核（:6808 只读模式）负责。
         // 思源 API 即使用 POST 拉取文档，不可在 Portal 层拦截 POST。
         // AList /s/ /sd/ /sp/ 短链分享对访客开放。
+        try {
+            const publicSession = resolveRequestUser(req, config);
+            dataAccess = requestDataAccess(req, publicSession || {}, ctx.service.id, config, 'read');
+            if (dataAccess.binding) ctx = { ...ctx, service: { ...dataAccess.binding, id: ctx.service.id, path: ctx.service.path } };
+        } catch (error) { sendError(req, res, browserUrl, error.status || 403, error.message); return true; }
     } else {
         proxySession = requireAuth(req, res);
         if (!proxySession) return true;
@@ -410,6 +469,12 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
             sendError(req, res, new URL(req.url, 'http://127.0.0.1'), 403, '该服务为只读权限，无法修改');
             return true;
         }
+        try {
+            dataAccess = requestDataAccess(req, proxySession, ctx.service.id, config,
+                ['notes', 'napcat', 'piclist'].includes(ctx.service.id) ? 'write' : undefined);
+            auditDataAccess(req, res, dataAccess);
+            if (dataAccess.binding) ctx = { ...ctx, service: { ...dataAccess.binding, id: ctx.service.id, path: ctx.service.path } };
+        } catch (error) { sendError(req, res, browserUrl, error.status || 403, error.message); return true; }
     }
 
     var proxyUrl = new URL(ctx.proxyUrl, 'http://127.0.0.1');
@@ -494,8 +559,9 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
     delete req.headers['x-portal-user-id'];
     delete req.headers['x-portal-username'];
     delete req.headers['x-portal-permissions'];
+    delete req.headers['x-navigation-data-scope'];
     if (['stock-manage', 'qqq-dip'].includes(ctx.service.id) && proxySession) {
-        req.headers['x-portal-user-id'] = String(proxySession.userId);
+        req.headers['x-portal-user-id'] = String(dataAccess?.ownerId || proxySession.userId);
         req.headers['x-portal-username'] = String(proxySession.username || '');
         req.headers['x-portal-permissions'] = Buffer
             .from(JSON.stringify(proxySession.permissions || []), 'utf8')
@@ -522,7 +588,7 @@ async function handleRequest(req, res) {
         return handleKnowledgeWorkerApi(req, res, url, json, uid => {
             const ctx = resolveSessionUser({ userId: uid }, config);
             const s = ctx && { userId: uid, permissions: ctx.permissions, isGuest: ctx.user.username === (config.auth?.guestUsername || 'guest') };
-            return canKnowledge(s) && canKnowledge(s, 'process:edit') && canKnowledge(s, 'worker:edit');
+            return ctx?.rbac?.accessPolicy?.modules?.knowledge?.enabled !== false && canKnowledge(s) && canKnowledge(s, 'process:edit') && canKnowledge(s, 'worker:edit');
         });
     }
     if (url.pathname === '/api/internal/bookkeeping/qq') {
@@ -530,7 +596,7 @@ async function handleRequest(req, res) {
         try {
             const input = await readJson(req, 65536), service = createQqBookkeeping(getDatabase(), {resolveUser: uid => {
                 const ctx = resolveSessionUser({userId:uid}, config);
-                return ctx ? {permissions:ctx.permissions,isGuest:ctx.user.username === (config.auth?.guestUsername || 'guest')} : null;
+                return ctx && ctx.rbac?.accessPolicy?.modules?.bookkeeping?.enabled !== false ? {permissions:ctx.permissions,isGuest:ctx.user.username === (config.auth?.guestUsername || 'guest')} : null;
             }});
             if (input.ack) { service.ack(String(input.ack)); return json(res,200,{ok:true}); }
             return json(res,200,{ok:true,...service.process(input.event || {})});
@@ -566,6 +632,12 @@ async function handleRequest(req, res) {
 
     if (route.kind === 'not-found') {
         return json(res, 404, { ok: false, error: 'Not Found' });
+    }
+    if (req.method === 'GET' && (url.pathname.endsWith('/') || url.pathname.endsWith('.html'))) {
+        const pageModule = url.pathname === '/' || url.pathname === '/index.html' ? null
+            : url.pathname.startsWith('/torn-toolbox/chain/') ? 'torn-chain'
+            : accessModules(config.services).find(m => url.pathname.startsWith('/' + m.id + '/'))?.id;
+        if (pageModule && !modulePolicy(loadRbac(config), pageModule, config.services).enabled) return sendError(req, res, url, 403, '模块已由管理员停用');
     }
 
     if (req.method === 'GET' && (url.pathname === '/piclist/manage'
@@ -716,6 +788,11 @@ server.on('upgrade', async function(req, socket, head) {
         return;
     }
     if (isPublicProxyService(proxyCtx.service)) {
+        try {
+            const access = requestDataAccess(req, resolveRequestUser(req, config) || {}, proxyCtx.service.id, config, 'read');
+            if (access.binding) proxyCtx = { ...proxyCtx, service: { ...access.binding, id: proxyCtx.service.id, path: proxyCtx.service.path } };
+        } catch { socket.destroy(); return; }
+        stripPortalIdentity(req);
         req.url = proxyCtx.proxyUrl;
         proxyWebSocket(proxyCtx.service, req, socket, head);
         return;
@@ -729,6 +806,10 @@ server.on('upgrade', async function(req, socket, head) {
         socket.destroy();
         return;
     }
+    try {
+        const access = requestDataAccess(req, ctx, proxyCtx.service.id, config, 'write');
+        if (access.binding) proxyCtx = { ...proxyCtx, service: { ...access.binding, id: proxyCtx.service.id, path: proxyCtx.service.path } };
+    } catch { socket.destroy(); return; }
     if (proxyCtx.service.id === 'notes'
         && canEditService(ctx.permissions, 'notes')
         && proxyCtx.service.accessAuthCode
@@ -736,6 +817,7 @@ server.on('upgrade', async function(req, socket, head) {
         var setCookies = await loginSiyuanSession(proxyCtx.service);
         if (setCookies) appendCookieHeader(req, setCookies);
     }
+    stripPortalIdentity(req);
     req.url = proxyCtx.proxyUrl;
     proxyWebSocket(proxyCtx.service, req, socket, head);
 });
@@ -753,7 +835,7 @@ server.listen(port, host, function() {
     startKnowledgeImports(getDatabase(), knowledgeDirectory, (uid, batch = false) => {
         const ctx = resolveSessionUser({ userId: uid }, config);
         const s = ctx && { userId: uid, permissions: ctx.permissions, isGuest: ctx.user.username === (config.auth?.guestUsername || 'guest') };
-        return ['view', 'import:edit', 'upload:edit', 'process:edit', ...(batch ? ['queue:edit'] : [])].every(action => canKnowledge(s, action));
+        return ctx?.rbac?.accessPolicy?.modules?.knowledge?.enabled !== false && ['view', 'import:edit', 'upload:edit', 'process:edit', ...(batch ? ['queue:edit'] : [])].every(action => canKnowledge(s, action));
     });
     console.log('服务导航门户已启动: http://' + (host === '0.0.0.0' ? '127.0.0.1' : host) + ':' + port);
     if (host === '0.0.0.0' && port === 80) {

@@ -7,6 +7,7 @@
     <script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
     <link rel="stylesheet" href="/portal.css?v=layout-20261018">
     <link rel="stylesheet" href="/experience.css?v=mobile-sheets-1">
+    <link rel="stylesheet" href="/admin-data-policy.css?v=1">
     <link rel="stylesheet" href="/skeleton/skeleton.css?v=2">
     <script src="/ui/input-guard.js?v=20261011-2"></script>
   <script defer src="/ui/back-to-top.js?v=1"></script>
@@ -40,9 +41,23 @@
             <button type="button" class="admin-tab" data-tab="roles">角色</button>
             <button type="button" class="admin-tab" data-tab="menus">菜单</button>
             <button type="button" class="admin-tab" data-tab="permissions">权限</button>
+            <button type="button" class="admin-tab" data-tab="data-policy">模块与数据范围</button>
         </aside>
 
-        <main class="admin-main" data-skeleton="dashboard" data-skeleton-key="page">
+        <main class="admin-main" data-layout-container data-skeleton="dashboard" data-skeleton-key="page">
+            <section class="admin-panel" id="panel-data-policy">
+                <div class="admin-panel-head"><div><h1>模块授权与数据范围</h1><p>功能权限在角色中配置；数据范围在此配置。两项授权必须同时满足。</p></div><button class="btn primary" type="button" id="policy-save">保存访问策略</button></div>
+                <p id="policy-status" role="status">打开此页后加载配置。</p>
+                <div id="policy-editor" hidden>
+                    <details><summary>登录成员的默认功能权限</summary><p>这些权限会附加到所有普通登录账号。取消勾选后不再默认授予，角色中已有的授权仍然有效。</p><fieldset class="admin-checks" id="policy-default-permissions"></fieldset></details>
+                    <details><summary>团队共享空间</summary><p>每个空间绑定一个数据所属账号。授权会开放该账号在所选模块中的全部数据；需要独立团队数据时，请先创建专用团队账号。多个空间绑定同一账号时使用同一份数据。绑定不会复制、移动或合并原有数据。</p><div id="policy-teams"></div><button class="btn ghost" type="button" id="policy-add-team">新增共享空间</button></details>
+                    <label>模块<select id="policy-module"></select></label>
+                    <p id="policy-kind"></p>
+                    <div id="policy-module-editor"></div>
+                    <h2>共享授权</h2><p>共享授权只扩大数据范围，不额外授予功能权限。修改授权需同时允许查看。</p>
+                    <div id="policy-grants"></div><button class="btn ghost" type="button" id="policy-add-grant">新增授权</button>
+                </div>
+            </section>
             <section class="admin-panel active" id="panel-users">
                 <div class="admin-panel-head">
                     <div>
@@ -148,5 +163,6 @@
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
     <script src="/admin.js?v=routes-20261016"></script>
+    <script src="/admin-data-policy.js?v=1"></script>
 </body>
 </html>

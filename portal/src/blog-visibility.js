@@ -23,6 +23,7 @@ export function normalizeVisibility(value, createdAt = new Date().toISOString())
 
 // Authors and authenticated blog managers can inspect every audience and time window.
 export function visibilityFilter(session = {}, alias = 'blog_posts', now = new Date().toISOString()) {
+  if (session.dataAccess && session.dataAccess.scope !== 'public') return { sql: `${alias}.author_id = ?`, params: [session.dataAccess.ownerId] };
   if (session.userId && !session.isGuest && hasPermission(session.permissions || [], 'blog:manage:edit')) return { sql: '1 = 1', params: [] };
   const owner = !session.isGuest && session.userId ? session.userId : '';
   const member = !session.isGuest && Boolean(session.userId) ? 1 : 0;

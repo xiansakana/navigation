@@ -1,0 +1,10 @@
+#policy-editor { display: grid; gap: 20px; min-width: 0; }
+#policy-editor details { border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+#policy-editor summary { cursor: pointer; font-weight: 600; }
+#policy-module-editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+#policy-grants, #policy-teams { display: grid; gap: 12px; }
+#policy-grants > div, #policy-teams > div { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+#policy-grants label, #policy-teams label { margin: 0; }
+#policy-default-permissions { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
+#policy-editor select { max-width: 100%; }
+@media (max-width: 600px) { #policy-grants > div, #policy-teams > div { flex-direction: column; align-items: stretch; } }

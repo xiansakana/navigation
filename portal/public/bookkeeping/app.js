@@ -252,7 +252,7 @@
   $('export').onclick=()=>{location.href='/api/bookkeeping/export?'+query();};
   $('refresh-fx').onclick = () => refreshFx(true); $('refresh-asset-fx').onclick = () => refreshFx(true);
   async function boot(){
-    try { const r=await fetch('/api/me'); me=await r.json();if(me.isGuest||!me.ok)throw new Error('请登录后访问记账模块');$('owner').textContent=me.username;
+    try { const r=await fetch('/api/me'); me=await r.json();if(me.isGuest||!me.ok)throw new Error('请登录后访问记账模块');$('owner').textContent=me.dataContext&&me.dataContext.scope!=='self'?me.dataContext.label:me.username;
       populate('currency',currencies,'全部货币');$('currency').value='';populate('type',[...types,'余额调整'],'所有类型');$('month').value=now().slice(0,7);
       $('extra-filters').open = window.innerWidth > 760;
       for(const [id,p] of [['add-entry','entries:edit'],['add-account','accounts:edit'],['settings','settings:edit'],['import-label','import:edit'],['snapshot-label','accounts:edit'],['export','export:view'],['import-shortcut','import:edit']])$(id).classList.toggle('hidden',!can(p));

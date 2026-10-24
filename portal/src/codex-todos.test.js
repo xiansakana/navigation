@@ -11,7 +11,7 @@ const Database=createRequire(import.meta.url)('better-sqlite3');
 test('Todo API enforces owner/project/group boundaries, action permissions, CSRF and durable create deduplication',async()=>{
   const db=new Database(':memory:'),store=createCodexStore(db);let projects=['navigation'],hook=()=>{};
   const catalog={models:[{id:'test',efforts:['low','high'],defaultEffort:'low'}],defaults:{model:'test',effort:'low'}};
-  const dependencies={store,setup:()=>({config:{},configured:true,qqId:'12345678',enabled:false,projects}),catalog:async()=>{hook();return catalog;}};
+  const dependencies={store,setup:uid=>({config:{},configured:true,qqId:'12345678',enabled:false,projects:uid==='owner'?projects:['other']}),catalog:async()=>{hook();return catalog;}};
   const server=http.createServer((req,res)=>void handleCodexCliApi(req,res,new URL(req.url,'http://localhost'),JSON.parse(req.headers['x-session'] || '{"userId":"owner","permissions":["*"]}'),(r,s,b)=>{r.writeHead(s,{'Content-Type':'application/json'});r.end(JSON.stringify(b));},dependencies));server.listen(0,'127.0.0.1');await once(server,'listening');
   const request=async(path='',method='GET',body,session,origin)=>{const r=await fetch('http://127.0.0.1:'+server.address().port+'/api/codex-cli/todos'+path,{method,headers:{...(session?{'X-Session':JSON.stringify(session)}:{}),...(origin?{Origin:origin}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});return {status:r.status,body:await r.json()};};
   const body=()=>({title:'做一件事',project:'navigation',prompt:'do it',model:'test',effort:'low',autoRun:true,requestId:crypto.randomUUID()});
@@ -21,6 +21,7 @@ test('Todo API enforces owner/project/group boundaries, action permissions, CSRF
     assert.equal((await request('','POST',body(),viewer)).status,403);
     assert.equal((await request('','POST',body(),undefined,'https://evil.test')).status,403);
     assert.equal((await request('','POST',{...body(),project:'other'})).status,400);
+    assert.equal((await request('','POST',body(),{userId:'owner',actorUserId:'other',permissions:['*']})).status,400);
     const editor={...viewer,permissions:[...viewer.permissions,'codex-cli:todos:edit']};
     assert.equal((await request('','POST',body(),editor)).status,403);
     for(const scheduledAt of [-1,1.5,'2026-10-20',null,9e15])assert.equal((await request('','POST',{...body(),scheduledAt})).status,400);

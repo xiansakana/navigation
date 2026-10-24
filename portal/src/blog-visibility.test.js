@@ -12,6 +12,19 @@ const member = { userId: 'reader', permissions: ['blog:feed:view'] };
 const guest = { userId: 'author', isGuest: true, permissions: ['blog:feed:view'] };
 const manager = { userId: 'admin', permissions: ['blog:manage:edit'] };
 
+test('explicit owner sharing reads that owner only and cannot use blog management to write outside the selected scope', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    initSchema(db);
+    const own = createPost(db, writer, '共享私密正文', false, { visibility: { audience: 'self' } });
+    const other = createPost(db, { ...writer, userId: 'different' }, '别人的公开正文');
+    const scoped = { ...manager, actorUserId: 'admin', userId: writer.userId, dataAccess: { scope: 'user:author', ownerId: 'author', writable: false } };
+    assert.deepEqual(listPosts(db, null, 20, '', '', scoped).map(p => p.id), [own]);
+    assert.equal(changePost(db, own, scoped, '禁止修改').status, 403);
+    assert.equal(changePost(db, other, { ...scoped, dataAccess: { ...scoped.dataAccess, writable: true } }, '禁止跨范围修改').status, 404);
+  } finally { db.close(); }
+});
+
 test('blog managers see every audience while ordinary members and guests remain restricted', () => {
   const db = new DatabaseSync(':memory:');
   try {
