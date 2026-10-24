@@ -19,10 +19,17 @@ test('workbench labels module histories, disables mutation and keeps paginated n
   };
   try{
     w.eval(read('chat.js'));await until(()=>$('chat-title').textContent==='Lesson');
+    const counts=()=>[...$('session-source').options].map(o=>o.textContent);
+    assert.deepEqual(counts(),['全部来源（2+）','网页（0）','QQ（0）','知识库（1）','服务器 CLI（1+）']);
+    $('session-search').value='Lesson';$('session-search').dispatchEvent(new w.Event('input'));
+    assert.deepEqual(counts(),['全部来源（1+）','网页（0）','QQ（0）','知识库（1）','服务器 CLI（0+）']);
+    $('session-search').value='';$('session-search').dispatchEvent(new w.Event('input'));
     d.dispatchEvent(new w.CustomEvent('codex-status',{detail:{models:[],qqDefaults:{model:'test'}}}));
     assert.equal($('send-chat').disabled,true);assert.equal($('rename-chat').hidden,true);assert.equal($('stop-chat').hidden,true);assert.match($('chat-meta').textContent,/知识库/);
     $('session-source').value='cli';$('session-source').dispatchEvent(new w.Event('change'));assert.equal($('sessions').children.length,1);
     $('sessions-more').click();await until(()=>$('sessions').children.length===2);
+    assert.equal($('session-source').value,'cli');
+    assert.deepEqual(counts(),['全部来源（3）','网页（0）','QQ（0）','知识库（1）','服务器 CLI（2）']);
     [...$('sessions').querySelectorAll('button')].find(b=>b.textContent.includes('Terminal')).click();await until(()=>$('chat-title').textContent==='Terminal');
     $('history-more').click();await until(()=>$('messages').textContent.includes('Answer older'));
     d.dispatchEvent(new w.Event('visibilitychange'));await new Promise(r=>setImmediate(r));await until(()=>$('messages').textContent.includes('Answer newer'));

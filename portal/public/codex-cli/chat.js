@@ -3,6 +3,7 @@
   let list=[],projects=[],permissions={},selected='',current=null,jobs=[],catalog=null,enabled=false,sending=false,reading=false,lastSnapshot='',retry=null;
   const drafts=new Map();let sessionsCursor='',historyCursor='',listExpanded=false,historyExpanded=false;
   const sourceLabel=c=>c.source==='qq'?'QQ'+(c.groupId?' 群聊':' 私聊'):({web:'网页',knowledge:'知识库',cli:'服务器 CLI'}[c.source]||c.source);
+  const sourceNames=new Map([...$('session-source').options].map(option=>[option.value,option.textContent]));
   function notice(text,error=false){$('chat-notice').textContent=text;$('chat-notice').classList.toggle('error',error);}
   async function api(path='',method='GET',body) {
     const response=await fetch('/api/codex-cli/conversations'+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
@@ -28,7 +29,15 @@
   function renderList() {
     const query=$('session-search').value.trim().toLowerCase(),archived=$('show-archived').checked;
     const source=$('session-source').value;
-    const visible=list.filter(c=>c.archived===archived&&(!source||c.source===source)&&(!query||(c.title+' '+c.project+' '+sourceLabel(c)).toLowerCase().includes(query)));
+    const matching=list.filter(c=>c.archived===archived&&(!query||(c.title+' '+c.project+' '+sourceLabel(c)).toLowerCase().includes(query)));
+    for(const option of $('session-source').options){
+      const count=option.value?matching.filter(c=>c.source===option.value).length:matching.length;
+      const partial=!!sessionsCursor&&(!option.value||option.value==='cli');
+      const text=`${sourceNames.get(option.value)}（${count}${partial?'+':''}）`;
+      if(option.textContent!==text)option.textContent=text;
+      option.title=partial?'按当前已加载的会话统计，加载更多后数量会更新':'';
+    }
+    const visible=matching.filter(c=>!source||c.source===source);
     $('sessions').replaceChildren(...visible.map(c=>{
       const button=node('button',undefined,'session-entry'+(c.id===selected?' selected':''));button.type='button';button.setAttribute('aria-pressed',String(c.id===selected));
       button.append(node('strong',c.title),node('span',`${c.project} · ${sourceLabel(c)}${c.state?' · '+(labels[c.state] || c.state):''}`));
