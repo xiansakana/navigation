@@ -22,7 +22,13 @@ const assert = require('node:assert/strict');
         if (pathname.endsWith('/stop')) running = false;
         return res.end('{"ok":true}');
       }
-      return res.end(JSON.stringify({ ok: true, config, bonusHitOptions: [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000], permissions: { configure: writable, control: writable, clear: writable }, state: { running, busy: false, rounds: 2, candidates: 3, confirmed: 3, failed: 0 }, history: [{ id: 1234, name: '<img src=x onerror=alert(1)>', hits: 250, fresh: true, cooldownStartedAt: 1792799500, detectedAt: 1792800000, cooldownUntil: 1792801000, bonusDetails: [{ hit: 100, defenderId: 1100, isLeader: true }, { hit: 250, defenderId: 1250, isLeader: false }] }] }));
+      const chains = [
+        { id: 101, factionId: 53564, name: 'Example Faction', hits: 250, hitsSource: 'verified', status: 'active', timeoutSeconds: 278, verifiedAt: 1792800000, reason: '详情核验成功', inRange: true },
+        { id: 102, factionId: 53565, name: 'Failed Faction', hits: 200, hitsSource: 'list', status: 'failed', reason: 'Torn API 网络异常或超时', attemptedAt: 1792800000, verifiedAt: null },
+        { id: 103, factionId: 53566, name: '<script>alert(1)</script>', hits: 200, hitsSource: 'list', status: 'unknown', reason: '返回 Chain ID 不一致', verifiedAt: null },
+        { id: 104, factionId: 53567, name: 'Cooling Faction', hits: 500, hitsSource: 'verified', status: 'cooldown', cached: true, cooldownUntil: Math.floor(Date.now() / 1000) + 1000, verifiedAt: 1792800000, reason: '复用冷却缓存' }
+      ];
+      return res.end(JSON.stringify({ ok: true, config, bonusHitOptions: [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000], permissions: { configure: writable, control: writable, clear: writable }, state: { running, busy: false, rounds: 2, candidates: 4, confirmed: 1, failed: 2, detailsAt: 1792800000, detailsStale: false, chains }, history: [{ id: 1234, name: '<img src=x onerror=alert(1)>', hits: 250, fresh: true, cooldownStartedAt: 1792799500, detectedAt: 1792800000, cooldownUntil: 1792801000, bonusDetails: [{ hit: 100, defenderId: 1100, isLeader: true }, { hit: 250, defenderId: 1250, isLeader: false }] }] }));
     }
     try {
       const file = path.join(__dirname, '../portal/public', pathname.endsWith('/') ? pathname + 'index.html' : pathname);
@@ -53,6 +59,14 @@ const assert = require('node:assert/strict');
       console.log(JSON.stringify({ endpoint, before, full, restored }));
     }
     assert.equal(await page.locator('#history img').count(), 0);
+    assert.equal(await page.locator('#monitor-chains tr').count(), 4);
+    assert.equal(await page.locator('#monitor-chains script').count(), 0);
+    assert.ok((await page.locator('#monitor-chains').innerText()).includes('Torn API 网络异常或超时'));
+    assert.ok((await page.locator('#monitor-chains').innerText()).includes('278 秒'));
+    assert.equal(await page.locator('#monitor-chains [data-chain-id="101"] a').first().getAttribute('href'), 'https://www.torn.com/factions.php?step=profile&ID=53564');
+    await page.locator('#monitor-filter').selectOption('problem'); assert.equal(await page.locator('#monitor-chains tr').count(), 2);
+    await page.locator('#monitor-filter').selectOption('pending'); assert.equal(await page.locator('#monitor-table').isVisible(), false);
+    await page.locator('#monitor-filter').selectOption('all'); assert.equal(await page.locator('#monitor-chains tr').count(), 4);
     assert.ok((await page.locator('#history').innerText()).includes('<img'));
     assert.ok((await page.locator('#history').innerText()).includes('进入冷却（推算）'));
     assert.ok((await page.locator('#history').innerText()).includes('发现于'));

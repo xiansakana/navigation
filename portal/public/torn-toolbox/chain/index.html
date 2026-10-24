@@ -7,7 +7,7 @@
   <script defer src="/ui/back-to-top.js?v=1"></script>
   <link rel="stylesheet" href="/portal.css?v=layout-20261018">
   <link rel="stylesheet" href="/experience.css?v=mobile-sheets-1">
-  <link rel="stylesheet" href="/torn-toolbox/chain/style.css?v=2">
+  <link rel="stylesheet" href="/torn-toolbox/chain/style.css?v=3">
 </head>
 <body class="portal-experience has-navbar portal-layout-enabled">
   <header class="navbar"><div class="navbar-inner">
@@ -43,11 +43,19 @@
       <p class="chain-note">长度范围包含上下限。保存配置会停止当前监控，请重新启动。监控在服务器运行，关闭页面仍继续；服务重启后需手动启动。每轮结束后等待设定间隔，每轮最多核验 40 条，超出部分轮换扫描，可能漏过短冷却。</p>
     </section>
     <p id="message" role="status" aria-live="polite"></p>
-    <section class="chain-panel"><h2>监控状态</h2><p id="status">正在加载…</p><p id="coverage"></p></section>
+    <section class="chain-panel"><h2>监控状态</h2><p id="status">正在加载…</p><p id="coverage"></p>
+      <div class="chain-monitor-heading"><h3>帮派 / Chain 明细 <span id="monitor-count"></span></h3>
+        <label>状态筛选 <select id="monitor-filter"><option value="all">全部</option><option value="problem">失败 / 状态不明</option><option value="pending">待核验 / 核验中</option><option value="active">活动中</option><option value="cooldown">冷却中</option><option value="ended">已结束</option></select></label>
+      </div>
+      <p id="monitor-hint" class="chain-note"></p>
+      <p class="chain-note">显示最近一次 API 核验结果，每 5 秒刷新页面数据。列表值、冷却缓存和未核验项会明确标注；超出长度范围的 Chain 仍会继续观察。</p>
+      <table id="monitor-table" class="chain-monitor-table" hidden><caption class="chain-monitor-caption">当前候选帮派和 Chain 的核验明细</caption><colgroup><col style="width:18%"><col style="width:15%"><col style="width:9%"><col style="width:16%"><col style="width:17%"><col style="width:25%"></colgroup><thead><tr><th scope="col">帮派</th><th scope="col">Chain</th><th scope="col">长度</th><th scope="col">状态 / 计时</th><th scope="col">核验时间</th><th scope="col">核验说明</th></tr></thead><tbody id="monitor-chains"></tbody></table>
+      <p id="monitor-empty">启动监控后显示帮派和 Chain 明细。</p>
+    </section>
     <section class="chain-panel"><h2>冷却记录 <span id="count"></span></h2><p>最多保留 200 条；清空记录不会重置去重状态。进入冷却时间按冷却结束时间减去 Chain 长度 × 6 秒推算，无法可靠推算时显示“—”；所有时间使用浏览器本地时区。</p><div id="history"></div></section>
   </main>
   <script src="/theme.js"></script>
   <script src="/layout.js?v=layout-20261018"></script>
-  <script src="/torn-toolbox/chain/app.js?v=4"></script>
+  <script src="/torn-toolbox/chain/app.js?v=5"></script>
 </body>
 </html>

@@ -109,9 +109,10 @@ export class ChainMonitor {
   constructor({ uid, store, request, notify = async () => {}, authorize = () => true, now = () => Math.floor(Date.now() / 1000), schedule = setTimeout, cancel = clearTimeout }) {
     Object.assign(this, { uid, store, request, notify, authorize, now, schedule, cancel });
     this.running = false; this.busy = false; this.known = new Map(); this.cursor = 0;
-    this.state = { running: false, rounds: 0, candidates: 0, confirmed: 0, failed: 0, partial: false, error: '', lastScanAt: null, nextScanAt: null };
+    this.state = { running: false, rounds: 0, candidates: 0, confirmed: 0, failed: 0, partial: false, error: '', lastScanAt: null, nextScanAt: null, chains: [], detailsAt: null, detailsStale: false };
   }
-  status() { return { ...this.state, running: this.running, busy: this.busy }; }
+  status() { return { ...this.state, chains: this.state.chains.map(row => ({ ...row })), running: this.running, busy: this.busy }; }
+  safeError(error) { const message = String(error?.message || '请求失败'); return (this.config?.apiKey ? message.replaceAll(this.config.apiKey, '[Key]') : message).slice(0, 240); }
   start() {
     if (this.running || this.busy) throw new Error('监控正在运行或上次请求尚未结束');
     if (!this.authorize()) throw new Error('无权启动 Chain 监控');
@@ -206,6 +207,7 @@ export class ChainMonitor {
   async scan() {
     if (!this.running || this.busy) return;
     this.busy = true; const signal = this.controller.signal;
+    this.state.detailsStale = true;
     const valid = () => this.running && !signal.aborted && this.authorize();
     const check = () => { if (!valid()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true }); };
     const stats = { candidates: 0, confirmed: 0, failed: 0, partial: false, error: '' };
@@ -225,26 +227,48 @@ export class ChainMonitor {
         if (data.warfarechains.length === 100 && !data._metadata?.links) stats.partial = true;
         if (path && pages >= 10) { stats.partial = true; break; }
       }
+      const listedIds = new Set(candidates.keys());
       for (const [id, old] of this.known) if (old.status === 'active' && this.now() - old.listedAt <= 600 && !candidates.has(id)) candidates.set(id, old.candidate);
       stats.candidates = candidates.size;
       const eligible = [...candidates.values()].filter(row => { const old = this.known.get(row.id); return !(old?.status === 'cooldown' && old.until > this.now()); });
       const count = Math.min(40, eligible.length); stats.remainingCandidates = eligible.length - count;
+      const chosen = new Set(Array.from({ length: count }, (_, i) => eligible[(this.cursor + i) % eligible.length].id));
+      this.state.chains = [...candidates.values()].map(candidate => {
+        const old = this.known.get(candidate.id), cached = old?.status === 'cooldown' && old.until > this.now();
+        const hits = cached && Number.isSafeInteger(old.hits) ? old.hits : Number.isSafeInteger(candidate.chain) ? candidate.chain : null;
+        return { id: candidate.id, factionId: candidate.faction.id, name: String(candidate.faction.name || candidate.faction.id).slice(0, 160), hits, hitsSource: cached && Number.isSafeInteger(old.hits) ? 'verified' : 'list', status: cached ? 'cooldown' : 'waiting', cached: !!cached, listed: listedIds.has(candidate.id), verifiedAt: old?.checkedAt || null, previousStatus: old?.status || null, attemptedAt: null, cooldownUntil: cached ? old.until : null, timeoutSeconds: null, inRange: hits === null ? null : hits >= this.config.minHits && (this.config.maxHits === null || hits <= this.config.maxHits), reason: cached ? '已确认冷却且尚未到期，复用缓存' : chosen.has(candidate.id) ? '等待本轮核验' : '本轮核验名额已满，等待后续轮换' };
+      });
+      this.state.detailsAt = this.now(); this.state.detailsStale = false;
+      Object.assign(this.state, stats);
+      const detailRows = new Map(this.state.chains.map(row => [row.id, row]));
       for (let i = 0; i < count; i++) {
         check(); const candidate = eligible[(this.cursor + i) % eligible.length];
+        const row = detailRows.get(candidate.id); row.status = 'checking'; row.reason = '正在核验'; row.attemptedAt = this.now();
+        let detailConfirmed = false;
         try {
           const { chain } = await this.request('faction/' + candidate.faction.id + '/chain', this.config.apiKey, signal); check();
-          if (!chain || chain.id !== candidate.id || !['current', 'cooldown', 'timeout'].every(field => Number.isSafeInteger(chain[field]) && chain[field] >= 0)) { stats.failed++; continue; }
+          if (!chain || chain.id !== candidate.id || !['current', 'cooldown', 'timeout'].every(field => Number.isSafeInteger(chain[field]) && chain[field] >= 0)) {
+            row.status = 'unknown'; row.reason = chain && Number.isSafeInteger(chain.id) && chain.id !== candidate.id ? `返回的 Chain ID ${chain.id} 与候选 ${candidate.id} 不一致，未判定状态` : 'API 缺少有效的 Chain 长度或计时数据，未判定状态';
+            stats.failed++; this.state.failed = stats.failed; continue;
+          }
           const old = this.known.get(chain.id), status = chain.cooldown > this.now() ? 'cooldown' : chain.timeout > 0 ? 'active' : 'ended';
+          detailConfirmed = true;
+          Object.assign(row, { status, hits: chain.current, hitsSource: 'verified', verifiedAt: this.now(), previousStatus: status, cooldownUntil: chain.cooldown || null, timeoutSeconds: chain.timeout, inRange: chain.current >= this.config.minHits && (this.config.maxHits === null || chain.current <= this.config.maxHits), reason: listedIds.has(chain.id) ? '详情核验成功' : '已从列表消失，保留跟踪后核验成功' });
+          this.known.set(chain.id, { status, until: chain.cooldown, hits: chain.current, checkedAt: row.verifiedAt, candidate, listedAt: this.now() });
+          this.store.saveKnown(this.uid, this.known); stats.confirmed++; this.state.confirmed = stats.confirmed;
           if (status === 'cooldown') {
-            let row = this.store.record(this.uid, candidate, chain, old?.status === 'active', this.now());
-            if (row) row = await this.enrichBonus(row, check, signal);
-            if (row?.notifyEligible) {
-              await this.notifyRecord(row, check);
+            let record = this.store.record(this.uid, candidate, chain, old?.status === 'active', this.now());
+            if (record) record = await this.enrichBonus(record, check, signal);
+            if (record?.notifyEligible) {
+              await this.notifyRecord(record, check);
             }
           }
-          this.known.set(chain.id, { status, until: chain.cooldown, candidate, listedAt: this.now() });
-          this.store.saveKnown(this.uid, this.known); stats.confirmed++;
-        } catch (error) { if (error.fatal || !valid()) throw error; stats.failed++; }
+        } catch (error) {
+          if (detailConfirmed) row.reason = 'Chain 已核验，后续处理未完成：' + this.safeError(error);
+          else if (!valid()) { row.status = 'waiting'; row.reason = '监控已停止，本条核验未完成'; }
+          else { row.status = 'failed'; row.reason = this.safeError(error); stats.failed++; this.state.failed = stats.failed; }
+          if (error.fatal || !valid()) throw error;
+        }
       }
       this.cursor = eligible.length ? (this.cursor + count) % eligible.length : 0;
       // Backfill recent saved records when bonus selections are enabled later.
@@ -256,6 +280,7 @@ export class ChainMonitor {
     } catch (error) {
       if (!signal.aborted) { stats.error = String(error.message).replaceAll(this.config.apiKey, '[Key]'); if (error.fatal) this.stop(); }
     } finally {
+      for (const row of this.state.chains) if (row.status === 'checking') { row.status = 'waiting'; row.reason = '核验未完成，等待下一轮'; }
       this.store.saveKnown(this.uid, this.known);
       Object.assign(this.state, stats); this.busy = false;
       if (valid()) {
