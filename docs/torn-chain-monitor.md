@@ -64,6 +64,7 @@ Portal 通过通知服务的本机 `/notify` 接口、共享集成配置中的 `
 - `node scripts/test.mjs portal`：Portal 全量测试，包含范围、基线/转换、去重、分页轮换、停止、用户隔离、Key 隐藏、权限和路由优先级。
 - `node scripts/test-torn-chain-ui.cjs`：需 Playwright 和 Edge；本地模拟 API，阻断所有外部请求。检查工具箱及 Chain 页全宽切换/刷新持久化，390/320px 无溢出，权限和手动按钮。
 - `node scripts/test-chain-notify-ui.cjs`：本机通过真实 Portal 代理外壳渲染通知管理卡片，验证目标保存/刷新、模拟测试、权限和 320/390px 布局。通知管理 1600px 下主体 1120→1600、导航栏 1440→1600；切回恢复，刷新保存状态。
+- 通知管理渠道状态只在 `.channel-grid .channel-card` 中更新，Chain 推送开关使用独立 `data-chain-channel` 标记。回归测试和浏览器验证均覆盖 Chain 先于渠道配置返回的加载顺序，避免把复选框误当状态卡片而触发 `textContent` 空节点错误。
 - 通知集成全量服务测试：`node scripts/test.mjs portal qq-bot`。线上 `scripts/verify-platform.mjs` 只读取 Chain 通知配置及通知管理 HTML，不投递消息、不启动扫描。
 - 桌面 1600px 实测：工具箱主体 720→1600、Chain 主体 1100→1600、两页导航栏均 1440→1600；切回恢复原尺寸。
 

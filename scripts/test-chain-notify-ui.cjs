@@ -12,15 +12,26 @@ const assert = require('node:assert/strict');
   const upstream = http.createServer(async (req, res) => {
     try {
       const name = new URL(req.url, 'http://localhost').pathname.replace(/^\//, '') || 'index.html';
+      if (name === 'api/config') {
+        // Reproduce Chain controls arriving before the channel configuration.
+        await new Promise(resolve => setTimeout(resolve, 200));
+        res.setHeader('Content-Type', 'application/json');
+        return res.end(JSON.stringify({ ok: true, config: { channels: { qq: { enabled: true }, email: { enabled: false, smtp: {} }, slack: { enabled: false } }, napcat: {}, defaultTarget: {}, monitors: { tiboReset: { enabled: false, channels: ['qq'], qq: { useDefaultTarget: true, targets: [] } } } }, channels: [{ id: 'qq', enabled: true, ready: true }, { id: 'email', enabled: false, ready: false }, { id: 'slack', enabled: false, ready: false }] }));
+      }
+      if (name === 'api/monitors/tibo-reset') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({ ok: true, status: null })); }
+      if (name === 'api/integrations') {
+        res.setHeader('Content-Type', 'application/json');
+        return res.end(JSON.stringify({ ok: true, integrations: ['stock', 'undercut', 'company'].map(id => ({ id, ok: true, notify: { qq: { enabled: false }, slack: { enabled: false }, desktop: false, targets: [], events: {} }, watchers: [], monitor: { running: false, checks: 0 } })) }));
+      }
       let body = await fs.readFile(path.join(__dirname, '../qq-bot/public', name), 'utf8');
-      // Isolate the new card; other modules have their own fixtures.
-      if (name === 'index.html') body = body.replace(/<script src="(?:app|integrations|codex)\.js[^>]*><\/script>/g, '').replace('</head>', '<script>function toast(message) { document.body.dataset.toast = message; }</script></head>');
       res.setHeader('Content-Type', mime(name)); res.end(body);
     } catch { res.writeHead(404); res.end(); }
   });
   await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
   const server = http.createServer(async (req, res) => {
     const pathname = new URL(req.url, 'http://localhost').pathname;
+    if (pathname === '/api/me') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({ permissions: writable ? ['*'] : ['service:notifications:view'] })); }
+    if (pathname === '/api/qq-codex/settings') { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({ ok: true, configured: false, enabled: false, groups: [], groupReply: 'mention', projects: [] })); }
     if (pathname.startsWith('/notifications')) return proxyHttpRequest({ id: 'notifications', title: '通知管理', path: '/notifications', internalUrl: 'http://127.0.0.1:' + upstream.address().port }, req, res);
     if (pathname.startsWith('/api/torn-chain/notifications')) {
       if (req.method !== 'GET') { let body = ''; for await (const chunk of req) body += chunk; writes.push({ method: req.method, body }); if (req.method === 'PUT') settings = JSON.parse(body); }
@@ -35,8 +46,12 @@ const assert = require('node:assert/strict');
   try {
     const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
     await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
-    const page = await context.newPage(); await page.goto(origin + '/notifications/');
+    const page = await context.newPage(), errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(origin + '/notifications/');
     await page.waitForSelector('#chain-notifications [data-action="chain-save"]');
+    await page.waitForFunction(() => document.querySelector('.channel-card[data-channel="qq"] .status-text').textContent === '配置已就绪');
+    assert.ok(!(await page.locator('#toast').innerText()).includes('加载失败'));
     const dimensions = () => page.evaluate(() => ({ main: document.querySelector('[data-layout-container]').getBoundingClientRect().width, navbar: document.querySelector('.navbar-inner').getBoundingClientRect().width }));
     const before = await dimensions(); await page.locator('.navbar-layout-btn').click(); const full = await dimensions();
     assert.ok(full.main > before.main && full.navbar > before.navbar && full.main >= 1580);
@@ -45,19 +60,20 @@ const assert = require('node:assert/strict');
     await page.reload(); assert.equal(await page.locator('.navbar-layout-btn').getAttribute('aria-pressed'), 'false');
     await page.locator('#chain-notifications [data-action="add-target"]').click();
     await page.locator('#chain-notifications [data-field="groupId"]').fill('123456');
-    await page.locator('#chain-notifications [data-channel="qq"]').check();
+    await page.locator('#chain-notifications [data-chain-channel="qq"]').check();
     await page.locator('#chain-notifications [data-action="chain-save"]').click();
-    await page.waitForFunction(() => document.body.dataset.toast === 'Chain 提醒配置已保存');
+    await page.waitForFunction(() => document.querySelector('#toast').textContent === 'Chain 提醒配置已保存');
     assert.equal(settings.targets[0].groupId, '123456'); assert.equal(settings.qq.enabled, true);
     await page.reload(); await page.waitForSelector('#chain-notifications [data-field="groupId"]');
     assert.equal(await page.locator('#chain-notifications [data-field="groupId"]').inputValue(), '123456');
     await page.locator('#chain-notifications [data-action="chain-test"]').click();
-    await page.waitForFunction(() => document.body.dataset.toast?.includes('测试通知'));
+    await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('测试通知'));
     assert.ok(writes.some(row => row.method === 'POST' && !row.body));
     for (const width of [390, 320]) { await page.setViewportSize({ width, height: 850 }); assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'overflow ' + width); }
     writable = false; await page.reload(); await page.waitForSelector('#chain-notifications [data-action="chain-save"]');
     assert.equal(await page.locator('#chain-notifications [data-action="chain-save"]').isDisabled(), true);
     assert.equal(await page.locator('#chain-notifications [data-action="chain-test"]').isDisabled(), true);
+    assert.deepEqual(errors, []);
     console.log(JSON.stringify({ page: '/notifications/', before, full, mobile: [390, 320], result: 'save/reload, mocked test, permissions and layout passed' }));
     await context.close();
   } finally { await browser.close(); server.closeAllConnections(); upstream.closeAllConnections(); server.close(); upstream.close(); }

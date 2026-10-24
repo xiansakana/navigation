@@ -113,7 +113,8 @@ function renderStatus(channels) {
     var ready = channels.filter(function(item) { return item.enabled && item.ready; }).length;
     byId('summary').textContent = enabled ? ready + ' / ' + enabled + ' 个已启用渠道就绪' : '尚未启用通知渠道';
     channels.forEach(function(status) {
-        var card = document.querySelector('[data-channel="' + status.id + '"]');
+        var card = document.querySelector('.channel-grid .channel-card[data-channel="' + status.id + '"]');
+        if (!card) return;
         card.classList.toggle('ready', status.enabled && status.ready);
         card.classList.toggle('not-ready', status.enabled && !status.ready);
         card.querySelector('.status-text').textContent = !status.enabled ? '已停用' : status.ready ? '配置已就绪' : '配置不完整';
