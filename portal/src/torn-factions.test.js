@@ -131,11 +131,12 @@ test('multiple search pages are sorted together and off-origin continuation is r
     calls.push(path);
     if (path.includes('/search')) {
       if (path.includes('offset=100')) return { search: [faction(10, 100)], _metadata: { links: { next: null } } };
-      return { search: [faction(20, 500)], _metadata: { links: { next: 'https://api.torn.com/v2/faction/search?limit=100&offset=100&filters=' + encodeURIComponent('notDestroyed,respect:>=:0') } } };
+      return { search: [faction(20, 500)], _metadata: { links: { next: 'https://api.torn.com/v2/faction/search?limit=100&filters=notDestroyed,respect:&gt;=:0&offset=100' } } };
     }
     return base(path);
   } });
   scanner.start(); await scanner.promise; assert.equal(scanner.run.rows[0].id, 10); assert.equal(calls.filter(path => path.includes('/search')).length, 2);
+  assert.equal(new URL(calls[1], 'https://api.torn.com/v2/').searchParams.get('filters'), 'notDestroyed,respect:>=:0');
   store.save('a', {});
   let external = false;
   const bad = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, request: async path => { if (path.includes('evil.test')) external = true; return { search: [], _metadata: { links: { next: 'https://evil.test/v2/faction/search' } } }; } });

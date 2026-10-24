@@ -69,7 +69,13 @@ export class FactionScanner {
           const links = data._metadata?.links;
           if (!links || !Object.hasOwn(links, 'next')) throw new Error('分页信息缺失，不能确认列表完整');
           path = links.next;
-          if (path) { const next = new URL(path, 'https://api.torn.com/v2/'); if (next.origin !== 'https://api.torn.com' || next.pathname !== '/v2/faction/search' || next.searchParams.get('filters') !== filters.join(',') || Number(next.searchParams.get('limit')) !== 100) throw new Error('帮派分页地址无效'); path = next.href; }
+          if (path) {
+            const next = new URL(path, 'https://api.torn.com/v2/'), offset = Number(next.searchParams.get('offset'));
+            if (next.origin !== 'https://api.torn.com' || next.pathname !== '/v2/faction/search' || Number(next.searchParams.get('limit')) !== 100 || !Number.isSafeInteger(offset) || offset !== pages * 100) throw new Error('帮派分页地址无效');
+            // Torn may HTML-escape comparison operators in pagination filters.
+            // Retain only the validated offset and rebuild the original query.
+            path = 'faction/search?limit=100&offset=' + offset + '&filters=' + encodeURIComponent(filters.join(','));
+          }
         }
         this.run.rows = [...factions.values()].sort((a, b) => a.respect - b.respect || a.id - b.id); this.run.listComplete = true; this.run.cursor = 0; persist();
       }
