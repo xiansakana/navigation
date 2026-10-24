@@ -11,8 +11,8 @@ import { SYSTEM_PERMISSIONS } from './rbac.js';
 const today = 20000, key = '1234567890abcdef';
 const series = values => values.map((value, i) => ({ day: today - values.length + 1 + i, value, timestamp: (today - values.length + 1 + i) * DAY, exactDay: true }));
 const meta = { today, lastAction: (today - 1) * DAY, daysInFaction: 10 };
-const config = patch => factionConfig(patch);
-function fixture(t) { const db = new Database(':memory:'); t.after(() => db.close()); const store = createFactionStore(db); store.save('a', { apiKey: key, batchSize: 1 }); return store; }
+const config = patch => factionConfig({ dailyDropAmount: 200, peakDropAmount: 200, ...patch });
+function fixture(t) { const db = new Database(':memory:'); t.after(() => db.close()); const store = createFactionStore(db); store.save('a', { apiKey: key, batchSize: 1, dailyDropAmount: 200, peakDropAmount: 200 }); return store; }
 const faction = (id, respect) => ({ id, respect, name: 'Faction ' + id, leader: { id: id + 1000, name: 'Leader ' + id }, is_destroyed: false });
 function mockRequest(calls = []) {
   return async path => {
@@ -41,26 +41,29 @@ test('any subsequent recovery to the old peak invalidates that event, even if cu
   assert.equal(newDrop.status, 'match'); assert.equal(newDrop.dropDay, today);
 });
 
-test('daily, peak and combined percentage conditions have separate semantics', () => {
+test('daily, peak and combined absolute amounts have separate semantics and inclusive thresholds', () => {
   const points = series([1000, 800, 600, 590]);
-  assert.equal(analyzeFactionHistory(points, meta, config({ dropMode: 'daily', dailyDropPct: 40 })).status, 'excluded');
-  assert.equal(analyzeFactionHistory(points, meta, config({ dropMode: 'peak', peakDropPct: 40 })).dropDay, today);
-  assert.equal(analyzeFactionHistory(points, meta, config({ dropMode: 'both', dailyDropPct: 20, peakDropPct: 40 })).dropDay, today - 1);
+  assert.equal(analyzeFactionHistory(points, meta, config({ dropMode: 'daily', dailyDropAmount: 400 })).status, 'excluded');
+  assert.equal(analyzeFactionHistory(points, meta, config({ dropMode: 'peak', peakDropAmount: 400, minDifference: -1 })).dropDay, today);
+  assert.equal(analyzeFactionHistory(points, meta, config({ dropMode: 'both', dailyDropAmount: 200, peakDropAmount: 400 })).dropDay, today - 1);
+  assert.equal(analyzeFactionHistory(series([-100, -300]), meta, config({ dailyDropAmount: 200, minDifference: -1 })).dailyAmount, 200);
 });
 
 test('missing or merged history and invalid identity times never become matches', () => {
   const points = series([1000, 400, 500]);
   assert.equal(analyzeFactionHistory([points[0], points[2]], meta, FACTION_DEFAULTS).status, 'unknown');
-  assert.equal(analyzeFactionHistory(points.map(row => ({ ...row, exactDay: false })), meta, FACTION_DEFAULTS).status, 'unknown');
+  assert.equal(analyzeFactionHistory(points.map(row => ({ ...row, timestamp: (today + 1) * DAY })), meta, FACTION_DEFAULTS).status, 'unknown');
   assert.equal(analyzeFactionHistory(points, { ...meta, lastAction: 0 }, FACTION_DEFAULTS).status, 'unknown');
-  assert.equal(historicNetworth({ personalstats: [{ name: 'networth', value: 10, timestamp: (today - 1) * DAY }] }, today).exactDay, false);
+  assert.equal(historicNetworth({ personalstats: [{ name: 'networth', value: 10, timestamp: (today - 1) * DAY }] }, today).timestamp, (today - 1) * DAY);
+  assert.throws(() => historicNetworth({ personalstats: [{ name: 'networth', value: 10, timestamp: (today + 1) * DAY }] }, today), /晚于/);
   assert.throws(() => historicNetworth({ personalstats: [{ name: 'networth', value: '10', timestamp: today * DAY }] }, today));
 });
 
-test('configuration validates modes, percentages and signed difference bounds', () => {
+test('configuration validates integer money amounts and signed difference bounds', () => {
   assert.equal(config({ minDifference: '-30', maxDifference: '0' }).minDifference, -30);
   assert.equal(config({ maxRespect: '', minDifference: '', maxDifference: '' }).maxRespect, null);
-  for (const patch of [{ minRespect: 200, maxRespect: 100 }, { dailyDropPct: 0 }, { peakDropPct: 101 }, { historyMode: 'bad' }, { batchSize: 500 }, { minDifference: 1, maxDifference: -1 }, { apiKey: 'bad' }]) assert.throws(() => config(patch));
+  assert.equal(config({ dailyDropAmount: '1234567890' }).dailyDropAmount, 1234567890);
+  for (const patch of [{ minRespect: 200, maxRespect: 100 }, { dailyDropAmount: 0 }, { peakDropAmount: 1.5 }, { peakDropAmount: Number.MAX_SAFE_INTEGER + 1 }, { dailyDropAmount: ' ' }, { dailyDropPct: 50 }, { historyMode: 'bad' }, { batchSize: 500 }, { minDifference: 1, maxDifference: -1 }, { apiKey: 'bad' }]) assert.throws(() => config(patch));
 });
 
 test('search pagination is fully assembled and sorted ascending before bounded batches run', async t => {
@@ -87,13 +90,40 @@ test('stop, process replacement and resume preserve completed daily cache withou
   assert.equal(calls.filter(path => path.includes('/search')).length, 1);
 });
 
-test('changed Leaders and inexact historical points are unknown rather than invented results', async t => {
+test('changed Leaders and future historical updates are unknown rather than invented results', async t => {
   const store = fixture(t), base = mockRequest();
   const scanner = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, request: async path => path.endsWith('/basic') ? { basic: { id: 10, leader_id: 999 } } : base(path) });
   scanner.start(); await scanner.promise; assert.equal(scanner.run.rows[0].status, 'unknown'); assert.match(scanner.run.rows[0].reason, /Leader 已变更/);
   store.save('a', { historyMode: 'window' });
-  const bad = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, request: async path => path.includes('/personalstats') ? { personalstats: [{ name: 'networth', value: 100, timestamp: (today - 1000) * DAY }] } : base(path) });
+  const bad = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, request: async path => path.includes('/personalstats') ? { personalstats: [{ name: 'networth', value: 100, timestamp: (today + 1) * DAY }] } : base(path) });
   bad.start(); await bad.promise; assert.equal(bad.run.rows[0].status, 'unknown'); assert.equal(store.point('a', 1010, today - 3), null);
+});
+
+test('unchanged historic stats can retain old update timestamps without inventing new declines', async t => {
+  const store = fixture(t), base = mockRequest();
+  const scanner = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, request: async path => {
+    if (!path.includes('/personalstats')) return base(path);
+    const day = Number(new URL(path, 'https://api.torn.com/v2/').searchParams.get('timestamp')) / DAY;
+    return { personalstats: [{ name: 'networth', value: day < today - 2 ? 1000 : 400, timestamp: (day < today - 2 ? today - 1000 : today - 2) * DAY }] };
+  } });
+  scanner.start(); await scanner.promise;
+  assert.equal(scanner.run.rows[0].status, 'match'); assert.equal(scanner.run.rows[0].dropDay, today - 2);
+  assert.equal(store.point('a', 1010, today - 1).timestamp, (today - 2) * DAY);
+  const points = series([1000, 400, 400]); points[2].timestamp = points[1].timestamp;
+  assert.equal(analyzeFactionHistory(points, meta, config({})).dropDay, today - 1);
+  points[2].value = 200; assert.equal(analyzeFactionHistory(points, meta, config({})).status, 'unknown');
+});
+
+test('legacy percentage configuration resets derived results while retaining keys, other settings and historic cache', t => {
+  const db = new Database(':memory:'); t.after(() => db.close()); const store = createFactionStore(db);
+  store.save('legacy', { apiKey: key, maxRespect: 10000, minDifference: null });
+  store.savePoint('legacy', 42, { day: today - 1, timestamp: (today - 5) * DAY, value: 100 });
+  store.saveRun('legacy', { rows: [{ id: 42, respect: 100, status: 'match', dailyPct: 50 }] });
+  const old = { ...FACTION_DEFAULTS, dailyDropPct: 50, peakDropPct: 60 }; delete old.dailyDropAmount; delete old.peakDropAmount;
+  db.prepare('UPDATE torn_faction_scans SET config_json=? WHERE user_id=?').run(JSON.stringify({ ...old, apiKey: key, maxRespect: 10000, minDifference: null }), 'legacy');
+  const migrated = store.get('legacy'); assert.equal(migrated.config.dailyDropAmount, 1000000000); assert.equal(migrated.config.apiKey, key); assert.equal(migrated.config.maxRespect, 10000); assert.equal(migrated.config.minDifference, null);
+  assert.equal('dailyDropPct' in migrated.config, false); assert.deepEqual(migrated.run.rows, []); assert.ok(store.point('legacy', 42, today - 1));
+  assert.equal(JSON.parse(db.prepare('SELECT config_json FROM torn_faction_scans WHERE user_id=?').get('legacy').config_json).dailyDropPct, undefined);
 });
 
 test('missing pagination cannot pretend that the first unsorted page is a globally sorted complete list', async t => {

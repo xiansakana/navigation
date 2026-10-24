@@ -67,14 +67,14 @@
         <label>历史范围<select id="faction-historyMode" disabled><option value="full">注册后全部可用日快照</option><option value="window">仅最近 N 天（窗口内高点）</option></select></label>
         <label>N 天<input id="faction-historyDays" type="number" min="2" max="3650" required disabled></label>
         <label>降幅条件<select id="faction-dropMode" disabled><option value="daily">仅单日跌幅</option><option value="peak">仅距此前高点回撤</option><option value="both">两者同时满足</option></select></label>
-        <label>单日跌幅 ≥ %<input id="faction-dailyDropPct" type="number" min="0.01" max="100" step="any" required disabled></label>
-        <label>距高点回撤 ≥ %<input id="faction-peakDropPct" type="number" min="0.01" max="100" step="any" required disabled></label>
+        <label>单日减少金额 ≥（Torn $）<input id="faction-dailyDropAmount" type="number" min="1" max="9007199254740991" step="1" required disabled></label>
+        <label>距高点减少金额 ≥（Torn $）<input id="faction-peakDropAmount" type="number" min="1" max="9007199254740991" step="1" required disabled></label>
         <label>A−B 最小值（天）<input id="faction-minDifference" type="number" placeholder="不限，可为负" disabled></label>
         <label>A−B 最大值（天）<input id="faction-maxDifference" type="number" placeholder="不限，可为负" disabled></label>
       </div><p id="faction-key-status"></p><p id="faction-estimate" class="chain-note"></p>
       <div class="chain-actions"><button type="submit" id="faction-save" class="btn" hidden>保存筛选配置</button><button type="button" id="faction-start" class="btn" hidden>启动 / 继续下一批</button><button type="button" id="faction-stop" class="btn ghost" hidden>暂停</button><button type="button" id="faction-reset" class="btn ghost" hidden>重取列表（保留历史缓存）</button></div></form>
-      <p class="chain-note">A=下跌日至今天数，B=Leader 最后活动日至今天数，C=当前帮派中的天数。A、B 按 Torn UTC 日期计算。单日跌幅相对前一日，高点回撤相对下跌前已扫描日快照的最高值；再次回到或超过该高点的旧下跌会被排除。选择有限窗口时只确认窗口内高点，不能证明全历史最高点。</p>
-      <p class="chain-note">历史接口每次只查一个日期，首次全历史扫描可能耗时很长；与 Chain 共用限速队列。按天保存缓存，暂停或服务重启后手动继续。缺失、日期合并、今日快照未就绪或 Leader 变更均标为“待确认”，不会误判为命中。保存配置会重置当前列表和结果，历史缓存保留。此功能不发送通知。</p></section>
+      <p class="chain-note">A=下跌日至今天数，B=Leader 最后活动日至今天数，C=当前帮派中的天数。A、B 按 Torn UTC 日期计算。金额直接输入整数，例如 1000000000 表示减少 10 亿 Torn $。单日金额=前一日净资产−当日净资产；距高点金额=此前最高净资产−当日净资产。再次回到或超过该高点的旧下跌会被排除。选择有限窗口时只确认窗口内高点。</p>
+      <p class="chain-note">历史接口每次只查一个日期，首次全历史扫描可能耗时很长；与 Chain 共用限速队列。返回时间戳为该数值最后更新时间，早于查询日属正常，按截至查询日的数值使用；重复时间戳不算新的下跌。缺失、未来更新、时间和值矛盾或 Leader 变更标为“待确认”。保存配置会重置当前列表和结果，历史缓存保留。此功能不发送通知。</p></section>
       <p id="faction-message" role="status" aria-live="polite"></p>
       <section class="chain-panel"><h3>扫描进度</h3><p id="faction-status"></p><p id="faction-progress"></p></section>
       <section class="chain-panel"><div class="chain-monitor-heading"><h3>respect 升序结果</h3><label>显示 <select id="faction-filter"><option value="all">全部</option><option value="match">命中</option><option value="excluded">已排除</option><option value="unknown">待确认</option><option value="waiting">待扫描</option></select></label></div><p id="faction-counts"></p><div id="faction-results"></div><div class="chain-actions"><button type="button" id="faction-prev" class="btn ghost" disabled>上一页</button><span id="faction-page"></span><button type="button" id="faction-next" class="btn ghost" disabled>下一页</button></div></section>
@@ -83,6 +83,6 @@
   <script src="/theme.js"></script>
   <script src="/layout.js?v=layout-20261018"></script>
   <script src="/torn-toolbox/chain/app.js?v=5"></script>
-  <script src="/torn-toolbox/chain/factions.js?v=1"></script>
+  <script src="/torn-toolbox/chain/factions.js?v=2"></script>
 </body>
 </html>

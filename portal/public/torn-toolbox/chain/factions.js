@@ -1,5 +1,5 @@
 (() => {
-  const $ = id => document.getElementById(id), fields = ['minRespect', 'maxRespect', 'batchSize', 'historyMode', 'historyDays', 'dropMode', 'dailyDropPct', 'peakDropPct', 'minDifference', 'maxDifference'];
+  const $ = id => document.getElementById(id), fields = ['minRespect', 'maxRespect', 'batchSize', 'historyMode', 'historyDays', 'dropMode', 'dailyDropAmount', 'peakDropAmount', 'minDifference', 'maxDifference'];
   let loaded = false, dirty = false, busy = false, offset = 0;
   const day = value => Number.isInteger(value) ? new Date(value * 86400000).toISOString().slice(0, 10) : '—';
   const value = number => Number.isFinite(number) ? number.toLocaleString() : '—';
@@ -38,7 +38,7 @@
       title.append(faction, document.createTextNode(` · respect ${value(row.respect)} · ${labels[row.status] || row.status}`)); article.append(title);
       const leader = document.createElement('a'); leader.textContent = `Leader ${row.leaderName} [${row.leaderId}]`; leader.href = 'https://www.torn.com/profiles.php?XID=' + row.leaderId; leader.target = '_blank'; leader.rel = 'noopener noreferrer'; article.append(leader);
       const dl = document.createElement('dl');
-      for (const [name, text] of [['下跌日（TCT）', day(row.dropDay)], ['A（天）', value(row.A)], ['B（天）', value(row.B)], ['C（天）', value(row.C)], ['A−B（天）', value(row.difference)], ['单日跌幅', row.dailyPct == null ? '—' : row.dailyPct.toFixed(2) + '%'], ['距高点回撤', row.peakPct == null ? '—' : row.peakPct.toFixed(2) + '%'], ['历史进度', `${row.loadedDays || 0}/${row.totalDays || '—'}`], ['下跌前高点', value(row.peakBefore)], ['下跌前一日', value(row.beforeValue)], ['下跌日净资产', value(row.dropValue)], ['扫描范围', `${day(row.firstDay ?? row.historyStart)} 至 ${day(row.lastDay ?? state.today)}`]]) {
+      for (const [name, text] of [['下跌日（TCT）', day(row.dropDay)], ['A（天）', value(row.A)], ['B（天）', value(row.B)], ['C（天）', value(row.C)], ['A−B（天）', value(row.difference)], ['单日减少（Torn $）', value(row.dailyAmount)], ['距高点减少（Torn $）', value(row.peakAmount)], ['历史进度', `${row.loadedDays || 0}/${row.totalDays || '—'}`], ['下跌前高点', value(row.peakBefore)], ['下跌前一日', value(row.beforeValue)], ['下跌日净资产', value(row.dropValue)], ['扫描范围', `${day(row.firstDay ?? row.historyStart)} 至 ${day(row.lastDay ?? state.today)}`]]) {
         const wrap = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = name; dd.textContent = text; wrap.append(dt, dd); dl.append(wrap);
       }
       const reason = document.createElement('p'); reason.textContent = row.reason || '—'; article.append(dl, reason); return article;

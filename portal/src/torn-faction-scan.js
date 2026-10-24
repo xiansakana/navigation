@@ -1,4 +1,4 @@
-import { DAY, FACTION_DEFAULTS, factionConfig, historicNetworth, analyzeFactionHistory } from './torn-faction-analysis.js';
+import { DAY, FACTION_DEFAULTS, factionConfig, historicNetworth, validHistoricPoint, analyzeFactionHistory } from './torn-faction-analysis.js';
 
 export function createFactionStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS torn_faction_scans(user_id TEXT PRIMARY KEY, config_json TEXT NOT NULL, run_json TEXT NOT NULL DEFAULT '{}');
@@ -8,7 +8,15 @@ export function createFactionStore(db) {
   const lists = new Map();
   const saveRow = db.prepare('INSERT INTO torn_faction_rows(user_id,faction_id,respect,row_json) VALUES(?,?,?,?) ON CONFLICT(user_id,faction_id) DO UPDATE SET respect=excluded.respect,row_json=excluded.row_json');
   return {
-    get(uid) { ensure(uid); const row = db.prepare('SELECT * FROM torn_faction_scans WHERE user_id=?').get(uid), run = JSON.parse(row.run_json); run.rows = db.prepare('SELECT row_json FROM torn_faction_rows WHERE user_id=? ORDER BY respect,faction_id').all(uid).map(item => JSON.parse(item.row_json)); return { config: factionConfig({}, JSON.parse(row.config_json)), run }; },
+    get(uid) {
+      ensure(uid); const row = db.prepare('SELECT * FROM torn_faction_scans WHERE user_id=?').get(uid), saved = JSON.parse(row.config_json), config = factionConfig({}, saved);
+      const legacy = 'dailyDropPct' in saved || 'peakDropPct' in saved;
+      const run = legacy ? { stage: '已切换为金额条件，请确认金额阈值后启动；历史缓存保留' } : JSON.parse(row.run_json);
+      if (legacy) {
+        db.transaction(() => { db.prepare('UPDATE torn_faction_scans SET config_json=?,run_json=? WHERE user_id=?').run(JSON.stringify(config), JSON.stringify(run), uid); db.prepare('DELETE FROM torn_faction_rows WHERE user_id=?').run(uid); })(); lists.delete(uid);
+      }
+      run.rows = db.prepare('SELECT row_json FROM torn_faction_rows WHERE user_id=? ORDER BY respect,faction_id').all(uid).map(item => JSON.parse(item.row_json)); return { config, run };
+    },
     save(uid, input) { const config = factionConfig(input, this.get(uid).config); db.transaction(() => { db.prepare('UPDATE torn_faction_scans SET config_json=?,run_json=? WHERE user_id=?').run(JSON.stringify(config), '{}', uid); db.prepare('DELETE FROM torn_faction_rows WHERE user_id=?').run(uid); })(); lists.delete(uid); return config; },
     saveRun(uid, run) {
       ensure(uid); const { rows, ...state } = run;
@@ -100,10 +108,10 @@ export class FactionScanner {
             for (let day = first; day <= today; day++) {
               check(); this.run.stage = '读取历史 networth'; this.run.currentDay = day;
               let point = day < today ? this.store.point(this.uid, row.leaderId, day) : null;
+              if (point && (!validHistoricPoint(point) || point.day !== day)) point = null;
               if (point) this.run.cached = (this.run.cached || 0) + 1;
               else {
                 point = historicNetworth(await request('user/' + row.leaderId + '/personalstats?stat=networth&timestamp=' + day * DAY), day);
-                if (!point.exactDay) throw new Error('API 历史日期不对应请求日，无法确认单日变化；请缩短历史范围或稍后重扫');
                 this.store.savePoint(this.uid, row.leaderId, point);
               }
               points.push(point); row.loadedDays++; persist();
