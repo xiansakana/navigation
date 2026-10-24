@@ -2,6 +2,8 @@
 
 入口：`/torn-toolbox/` → Chain 监控，页面 `/torn-toolbox/chain/`。这是 navigation 的 Portal 内置模块，独立于浏览器用户脚本和原有压价/公司监听服务。
 
+同页新增“帮派筛选”Tab：通过 faction/search 按 respect 升序扫描 Leader 的历史 networth、最后活动和入帮天数，配置两种跌幅及 A−B，按 C≥A 判断。配置和状态独立，详见[帮派筛选说明](torn-faction-screener.md)。两个功能共享 Portal Torn API 限速队列。
+
 ## 使用
 
 1. 管理员分配 `torn-chain:view`，按需分配 `torn-chain:config:edit`、`torn-chain:control:edit`、`torn-chain:history:edit`。工具箱首页还需要原有工具箱访问权限；游客不可使用。

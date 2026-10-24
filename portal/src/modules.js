@@ -15,6 +15,7 @@ function blogApi(pathname, method) {
 
 // Single catalog for built-in module entry points, API ownership, menus and observability.
 export const PORTAL_MODULES = Object.freeze([
+  { id: 'torn-factions', title: '帮派筛选', namespace: 'torn-factions', runtime: 'portal', tables: ['torn_faction_scans', 'torn_faction_rows', 'torn_faction_networth'], apiPrefix: '/api/torn-factions/' },
   { id: 'torn-chain', title: 'Chain 监控', namespace: 'torn-chain', runtime: 'portal', tables: ['torn_chain_monitors', 'torn_chain_notifications'], apiPrefix: '/api/torn-chain/' },
   { id: 'blog', title: '博客', namespace: 'blog', runtime: 'portal', tables: ['blog_posts'], apiPrefix: '/api/blog/', matches: blogApi },
   { id: 'codex-cli', title: 'Codex CLI', namespace: 'codex-cli', runtime: 'qq-bot', tables: ['qq_codex_jobs'],

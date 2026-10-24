@@ -162,6 +162,11 @@ function buildNotificationPermissions() {
 }
 
 var SYSTEM_PERMISSIONS = [
+    ...[
+        ['view', '查看自己的帮派筛选列表与结果', [], 'view'],
+        ['config:edit', '配置自己的 Leader networth 筛选', ['保存配置'], 'edit'],
+        ['control:edit', '启动、暂停和重置自己的帮派筛选批次', ['扫描控制'], 'edit']
+    ].map(([id, name, parts, action]) => ({ id: 'torn-factions:' + id, name, group: 'Torn 工具箱', serviceId: 'torn-toolbox', action, permissionPath: ['首页', 'Torn 工具箱', 'Chain 监控', '帮派筛选', ...parts] })),
     { id: 'admin:data-policy:view', name: '查看模块授权和数据范围', group: '系统', action: 'view', resource: 'admin:data-policy', permissionPath: ['权限管理', '模块与数据范围'] },
     { id: 'admin:data-policy:edit', name: '配置模块授权和数据范围', group: '系统', action: 'edit', resource: 'admin:data-policy', permissionPath: ['权限管理', '模块与数据范围', '保存'] },
     ...[

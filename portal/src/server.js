@@ -203,7 +203,7 @@ async function handleApi(req, res, url, session) {
     }
     if (url.pathname === '/api/me/data-modules' && req.method === 'GET') {
         return json(res, 200, { ok: true, modules: accessModules(config.services).map(m => ({ id: m.id,
-            path: m.id === 'blog' ? '/' : m.id === 'torn-chain' ? '/torn-toolbox/chain/' : (config.services || []).find(s => s.id === m.id)?.path || '/' + m.id + '/' })) });
+            path: m.id === 'blog' ? '/' : m.id === 'torn-chain' ? '/torn-toolbox/chain/' : m.id === 'torn-factions' ? '/torn-toolbox/chain/#factions' : (config.services || []).find(s => s.id === m.id)?.path || '/' + m.id + '/' })) });
     }
     if (req.method === 'GET' && url.pathname === '/api/me') {
         var rbac = loadRbac(config);
@@ -712,7 +712,7 @@ async function handleRequest(req, res) {
         if (!chainSession) return;
         if (!canTornChain(chainSession)) return sendError(req, res, url, 403, '无权访问 Chain 监控');
         const file = url.pathname.replace(/^\/torn-toolbox\/chain\/?/, '') || 'index.html';
-        if (!['index.html', 'app.js', 'style.css'].includes(file)) return json(res, 404, { ok: false, error: 'Not Found' });
+        if (!['index.html', 'app.js', 'factions.js', 'style.css'].includes(file)) return json(res, 404, { ok: false, error: 'Not Found' });
         res.setHeader('Cache-Control', 'no-store');
         return serveStatic(path.join(PUBLIC_DIR, 'torn-toolbox', 'chain', file), res);
     }

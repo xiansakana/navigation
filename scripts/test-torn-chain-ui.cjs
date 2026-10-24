@@ -13,6 +13,7 @@ const assert = require('node:assert/strict');
     const pathname = new URL(req.url, 'http://localhost').pathname;
     if (pathname.startsWith('/api/')) {
       res.setHeader('Content-Type', 'application/json');
+      if (pathname.startsWith('/api/torn-factions/')) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: '未授权帮派筛选' })); }
       if (!authorized) { res.writeHead(403); return res.end(JSON.stringify({ ok: false, error: '无权访问' })); }
       if (req.method !== 'GET') {
         let body = ''; for await (const chunk of req) body += chunk;
