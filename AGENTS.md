@@ -49,6 +49,10 @@ Use two-space indentation, semicolons, single quotes, and ES modules for JavaScr
 
 Tests use Node's built-in `node:test` and `node:assert/strict`. Name files `*.test.js` and place them beside the implementation. Add regression coverage for API fallbacks, persistence, calculations, and permission-sensitive behavior. Run the complete service test command before submitting changes; UI changes should also receive browser verification.
 
+- Keep test fixtures independent of the host's free disk space and proxy environment. Provide explicit capacity/network fixtures while retaining rejection tests for low disk space and unauthorized access.
+- Control animation frames and timers explicitly in UI tests. For asynchronous I/O, wait for an observable condition with a bounded elapsed-time deadline; a fixed number of `setImmediate` or microtask turns is not a timeout and does not prove a rendering timer ran.
+- For intermittent CI failures, first reproduce the scheduling or environment dependency, then verify repeated targeted runs and the actual GitHub workflow on the fix commit. Do not hide failures with skipped tests, disabled checks, or automatic retries until green.
+
 ## Shared Page Layout and Full-Width Verification
 
 - Every new or changed Portal module page with a full-width control must use the shared layout contract: `body.portal-layout-enabled`, a main `[data-layout-container]`, `.navbar-layout-btn`, and the shared `portal.css` and `layout.js`. Proxied pages must use the Portal shell's shared layout behavior.

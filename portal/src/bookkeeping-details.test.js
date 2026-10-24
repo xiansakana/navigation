@@ -19,7 +19,11 @@ async function fixture(extra={},permissions=['*']) {
   let scrollY=1800;
   Object.defineProperty(w,'scrollY',{get:()=>scrollY});
   w.scrollTo=options=>{scrollY=options.top;};
-  w.requestAnimationFrame=callback=>w.setTimeout(callback,0);
+  // Advance rendering explicitly: event-loop turns do not guarantee a timer/frame ran.
+  const frames=new Map();let frameId=0;
+  w.requestAnimationFrame=callback=>{const id=++frameId;frames.set(id,callback);return id;};
+  w.cancelAnimationFrame=id=>frames.delete(id);
+  const advanceFrame=()=>{const callbacks=[...frames.values()];frames.clear();for(const callback of callbacks)callback(w.performance.now());};
   w.HTMLElement.prototype.scrollIntoView=function(){scrollY=0;};
   w.HTMLElement.prototype.getBoundingClientRect=function(){return {top:this.matches('[data-entry]')?1960-scrollY:0};};
   w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
@@ -44,12 +48,18 @@ async function fixture(extra={},permissions=['*']) {
     return {ok:true,json:async()=>JSON.parse(JSON.stringify(data))};
   };
   for(const name of ['periods','analysis','management','details','app'])w.eval(fs.readFileSync(new URL('../public/bookkeeping/'+name+'.js',import.meta.url),'utf8'));
-  const wait=async condition=>{for(let i=0;i<50;i++){if(condition())return;await new Promise(resolve=>setImmediate(resolve));}throw new Error('UI did not settle');};
+  const wait=async condition=>{
+    const deadline=performance.now()+2000;
+    while(!condition()){
+      if(performance.now()>=deadline)throw new Error('UI did not settle within 2000ms');
+      await new Promise(resolve=>setTimeout(resolve,5));
+    }
+  };
   await wait(()=>$('entry-list').querySelector('[data-entry]'));
   $('entry-list').querySelector('[data-entry]').click();
   const edit=key=>$('entry-detail-view').querySelector('[data-detail-field="'+key+'"]:not(.btn)').click();
   const submit=async()=>{$('editor-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await wait(()=>!$('editor').open);};
-  return {dom,w,$,writes,edit,submit,wait};
+  return {dom,w,$,writes,edit,submit,wait,advanceFrame,pendingFrames:()=>frames.size};
 }
 
 test('entry click opens details; amount popup is compact and preserves every other financial field',async()=>{
@@ -87,7 +97,10 @@ test('return from details restores the same bill position after editing refreshe
     assert.equal(f.w.scrollY,0);
     f.edit('amount');f.$('editor-form').elements.amount.value='12.34';await f.submit();
     f.$('entry-detail-view').querySelector('[data-detail-action="back"]').click();
-    await f.wait(()=>f.w.scrollY===1800);
+    assert.equal(f.pendingFrames(),1);
+    assert.equal(f.w.scrollY,0,'restoration waits for the browser frame');
+    f.advanceFrame();
+    assert.equal(f.w.scrollY,1800);
     assert.equal(f.w.document.activeElement.dataset.entry,'a'.repeat(32));
     assert.equal(f.$('entry-list').querySelector('[data-entry]').getBoundingClientRect().top,160);
   } finally {f.dom.window.close();}
@@ -97,9 +110,23 @@ test('deleting the selected bill restores the saved list position without the ro
   const f=await fixture();
   try {
     f.$('entry-detail-view').querySelector('[data-detail-action="delete"]').click();
-    await f.wait(()=>f.w.scrollY===1800);
+    await f.wait(()=>f.pendingFrames()===1);
+    f.advanceFrame();
+    assert.equal(f.w.scrollY,1800);
     assert.equal(f.$('entry-list').querySelector('[data-entry]'),null);
     assert.equal(f.$('entry-detail-view').classList.contains('hidden'),true);
+  } finally {f.dom.window.close();}
+});
+
+test('a delayed restoration frame does not scroll a different tab',async()=>{
+  const f=await fixture();
+  try {
+    f.$('entry-detail-view').querySelector('[data-detail-action="back"]').click();
+    assert.equal(f.pendingFrames(),1);
+    f.w.document.querySelector('[data-tab="accounts"]').click();
+    f.advanceFrame();
+    assert.equal(f.w.scrollY,0);
+    assert.equal(f.$('entry-list').querySelector('[data-entry]').matches(':focus'),false);
   } finally {f.dom.window.close();}
 });
 
