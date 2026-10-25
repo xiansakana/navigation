@@ -45,13 +45,13 @@
       label.append(input, document.createTextNode('#' + hit)); $('bonus-options').append(label);
     }
     if (!editing) {
-      $('min-hits').value = config.minHits; $('max-hits').value = config.maxHits ?? ''; $('interval').value = config.intervalSeconds;
+      $('min-hits').value = config.minHits; $('max-hits').value = config.maxHits ?? ''; $('interval').value = config.intervalSeconds; $('api-interval').value = config.apiIntervalSeconds ?? 2;
       $('bonus-options').querySelectorAll('input').forEach(input => { input.checked = (config.bonusHits || []).includes(Number(input.value)); });
       $('leader-filter').value = config.leaderFilter || 'all';
     }
     $('leader-filter').disabled = !permissions.configure;
     $('bonus-options').querySelectorAll('input').forEach(input => { input.disabled = !permissions.configure; });
-    for (const id of ['min-hits', 'max-hits', 'interval', 'api-key']) $(id).disabled = !permissions.configure;
+    for (const id of ['min-hits', 'max-hits', 'interval', 'api-interval', 'api-key']) $(id).disabled = !permissions.configure;
     $('save').hidden = $('clear-key').hidden = !permissions.configure;
     $('start').hidden = $('stop').hidden = !permissions.control;
     $('clear-history').hidden = !permissions.clear;
@@ -107,7 +107,7 @@
   $('monitor-filter').addEventListener('change', () => { if (lastMonitorState) renderMonitor(lastMonitorState); });
   $('config-form').addEventListener('submit', async event => {
     event.preventDefault();
-    const body = { minHits: $('min-hits').value, maxHits: $('max-hits').value, intervalSeconds: $('interval').value, bonusHits: Array.from($('bonus-options').querySelectorAll('input:checked'), input => Number(input.value)), leaderFilter: $('leader-filter').value };
+    const body = { minHits: $('min-hits').value, maxHits: $('max-hits').value, intervalSeconds: $('interval').value, apiIntervalSeconds: $('api-interval').value, bonusHits: Array.from($('bonus-options').querySelectorAll('input:checked'), input => Number(input.value)), leaderFilter: $('leader-filter').value };
     if ($('api-key').value.trim()) body.apiKey = $('api-key').value.trim();
     try { await api('config', 'POST', body); editing = false; $('api-key').value = ''; $('message').textContent = '配置已保存，请启动监控'; await refresh(); } catch (error) { $('message').textContent = error.message; }
   });

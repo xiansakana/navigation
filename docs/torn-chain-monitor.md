@@ -79,3 +79,7 @@ Portal 通过通知服务的本机 `/notify` 接口、共享集成配置中的 `
 - 桌面 1600px 实测：工具箱主体 720→1600、Chain 主体 1100→1600、两页导航栏均 1440→1600；切回恢复原尺寸。
 
 通知集成版本部署 `portal,qq-bot`，无新增进程或公网端口。首次授权访问自动创建表；备份共享数据库时包含 `torn_chain_monitors` 和 `torn_chain_notifications`。按仓库 Git/SHA 部署流程运行 `scripts/ecs-update.sh --expected-sha <sha> --only portal,qq-bot`，部署本身不会启动扫描或打开通知开关。
+
+## API 请求间隔配置
+
+本 Tab 表单的 API 请求间隔（apiIntervalSeconds）默认 2 秒，可设 1–60 秒（支持小数），按 Portal 账号保存在各自配置中。与 Chain 轮次间隔分开；每个 Torn 账号共享请求队列，同时运行的任务以较慢间隔为准，停止/完成后释放该任务的间隔设置。不同 Torn 账号独立限速，同账号多个 Key 不叠加额度；初次 Key 归属核验仍经默认队列。仅修改帮派筛选 API 间隔保留已扫列表/结果和历史缓存，保存后手动继续；更改其他筛选条件仍重置本轮结果。无新增权限，沿用各 Tab 配置权限。

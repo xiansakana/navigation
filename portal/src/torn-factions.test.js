@@ -66,6 +66,16 @@ test('configuration validates integer money amounts and signed difference bounds
   for (const patch of [{ minRespect: 200, maxRespect: 100 }, { dailyDropAmount: 0 }, { peakDropAmount: 1.5 }, { peakDropAmount: Number.MAX_SAFE_INTEGER + 1 }, { dailyDropAmount: ' ' }, { dailyDropPct: 50 }, { historyMode: 'bad' }, { batchSize: 500 }, { minDifference: 1, maxDifference: -1 }, { apiKey: 'bad' }]) assert.throws(() => config(patch));
 });
 
+test('API intervals validate and changing only the interval retains progress/results/cache', t => {
+  const store = fixture(t);
+  assert.equal(config({ apiIntervalSeconds: '1.5' }).apiIntervalSeconds, 1.5);
+  for (const value of [0, 0.9, 61, '', ' ', null, false]) assert.throws(() => config({ apiIntervalSeconds: value }));
+  store.saveRun('a', { cursor: 1, rows: [{ id: 10, respect: 100, status: 'match' }], listComplete: true });
+  store.savePoint('a', 1010, { day: today - 1, value: 1000, timestamp: (today - 1) * DAY });
+  store.save('a', { apiIntervalSeconds: 5 });
+  assert.equal(store.get('a').config.apiIntervalSeconds, 5); assert.equal(store.get('a').run.cursor, 1); assert.equal(store.get('a').run.rows[0].status, 'match'); assert.ok(store.point('a', 1010, today - 1));
+});
+
 test('one start automatically crosses faction batches after sorting all search pages', async t => {
   const store = fixture(t), calls = [], scanner = new FactionScanner({ uid: 'a', store, request: mockRequest(calls), now: () => today * DAY + 3600 });
   scanner.start(); await scanner.promise;

@@ -96,3 +96,18 @@ test('default account request spacing is two seconds for shared Chain and factio
   await client('user/10/profile', keys[0]);
   assert.ok(starts[1] - starts[0] >= 1950, 'default shared spacing must remain approximately 2000ms');
 });
+
+test('configured shared-owner intervals use the slower active scope and release stopped scopes', async () => {
+  const times = [];
+  const client = createTornAccountClient({ spacingMs: 0, globalSpacingMs: 0, fetchImpl: async url => {
+    if (new URL(url).pathname.endsWith('/info')) return response({ info: { user: { id: 1 } } });
+    times.push(performance.now()); return response({});
+  } });
+  await client('user/10/profile', keys[0], undefined, { scope: 'chain:a', spacingMs: 0 });
+  await client('user/10/profile', keys[0], undefined, { scope: 'factions:a', spacingMs: 80 });
+  await client('user/10/profile', keys[0], undefined, { scope: 'chain:a', spacingMs: 0 });
+  assert.ok(times[1] - times[0] >= 70); assert.ok(times[2] - times[1] >= 70);
+  client.release('factions:a');
+  await client('user/10/profile', keys[0], undefined, { scope: 'chain:a', spacingMs: 0 });
+  assert.equal(times.length, 4);
+});

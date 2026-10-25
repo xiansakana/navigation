@@ -1,5 +1,5 @@
 (() => {
-  const $ = id => document.getElementById(id), fields = ['minRespect', 'maxRespect', 'batchSize', 'historyDays', 'dropMode', 'dailyDropAmount', 'peakDropAmount', 'minDifference', 'maxDifference'];
+  const $ = id => document.getElementById(id), fields = ['minRespect', 'maxRespect', 'batchSize', 'apiIntervalSeconds', 'historyDays', 'dropMode', 'dailyDropAmount', 'peakDropAmount', 'minDifference', 'maxDifference'];
   let loaded = false, dirty = false, busy = false, offset = 0;
   const day = value => Number.isInteger(value) ? new Date(value * 86400000).toISOString().slice(0, 10) : '—';
   const value = number => Number.isFinite(number) ? number.toLocaleString() : '—';

@@ -48,6 +48,8 @@ test('configuration validates inclusive ranges and preserves a saved key', t => 
   assert.equal(store.save('a', { minHits: 120 }).apiKey, key);
   assert.equal(store.get('b').config.apiKey, '');
   assert.equal(chainConfig({ maxHits: '' }).maxHits, null);
+  assert.equal(chainConfig({ apiIntervalSeconds: '3.5' }).apiIntervalSeconds, 3.5);
+  for (const value of [0, 61, '', null, false]) assert.throws(() => chainConfig({ apiIntervalSeconds: value }));
 });
 
 test('only a confirmed active to cooldown transition is fresh; bounds, dedup and isolation persist', async t => {

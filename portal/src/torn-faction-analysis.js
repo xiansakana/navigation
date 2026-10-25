@@ -1,8 +1,10 @@
+import { apiIntervalSeconds } from './torn-api-config.js';
 export const DAY = 86400;
-export const FACTION_DEFAULTS = { apiKey: '', apiKeys: [], minRespect: 0, maxRespect: null, batchSize: 10, historyMode: 'full', historyDays: null, dropMode: 'daily', dailyDropAmount: 1000000000, peakDropAmount: 1000000000, minDifference: 0, maxDifference: null };
+export const FACTION_DEFAULTS = { apiKey: '', apiKeys: [], apiIntervalSeconds: 2, minRespect: 0, maxRespect: null, batchSize: 10, historyMode: 'full', historyDays: null, dropMode: 'daily', dailyDropAmount: 1000000000, peakDropAmount: 1000000000, minDifference: 0, maxDifference: null };
 
 export function factionConfig(input, previous = FACTION_DEFAULTS) {
   const result = Object.fromEntries(Object.entries(FACTION_DEFAULTS).map(([key, value]) => [key, previous[key] ?? value]));
+  result.apiIntervalSeconds = apiIntervalSeconds('apiIntervalSeconds' in input ? input.apiIntervalSeconds : previous.apiIntervalSeconds);
   for (const key of ['minDifference', 'maxDifference', 'maxRespect']) if (previous[key] === null) result[key] = null;
   if ('dailyDropPct' in input || 'peakDropPct' in input) throw new Error('跌幅已改为金额，请刷新页面后输入减少金额');
   for (const [key, min, max] of [['minRespect', 0, 2147483647], ['maxRespect', 0, 2147483647], ['batchSize', 1, 50], ['minDifference', -10000, 10000], ['maxDifference', -10000, 10000]]) {

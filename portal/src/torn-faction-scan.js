@@ -20,7 +20,12 @@ export function createFactionStore(db) {
       }
       run.rows = db.prepare('SELECT row_json FROM torn_faction_rows WHERE user_id=? ORDER BY respect,faction_id').all(uid).map(item => JSON.parse(item.row_json)); return { config, run };
     },
-    save(uid, input) { const config = factionConfig(input, this.get(uid).config); db.transaction(() => { db.prepare('UPDATE torn_faction_scans SET config_json=?,run_json=? WHERE user_id=?').run(JSON.stringify(config), '{}', uid); db.prepare('DELETE FROM torn_faction_rows WHERE user_id=?').run(uid); })(); lists.delete(uid); return config; },
+    save(uid, input) {
+      const previous = this.get(uid).config, config = factionConfig(input, previous);
+      const intervalOnly = config.apiIntervalSeconds !== previous.apiIntervalSeconds && Object.keys(config).every(key => key === 'apiIntervalSeconds' || JSON.stringify(config[key]) === JSON.stringify(previous[key]));
+      if (intervalOnly) { db.prepare('UPDATE torn_faction_scans SET config_json=? WHERE user_id=?').run(JSON.stringify(config), uid); return config; }
+      db.transaction(() => { db.prepare('UPDATE torn_faction_scans SET config_json=?,run_json=? WHERE user_id=?').run(JSON.stringify(config), '{}', uid); db.prepare('DELETE FROM torn_faction_rows WHERE user_id=?').run(uid); })(); lists.delete(uid); return config;
+    },
     saveRun(uid, run) {
       ensure(uid); const { rows, ...state } = run;
       db.transaction(() => {
@@ -42,7 +47,7 @@ export class FactionScanner {
     Object.assign(this, { uid, store, request, authorize, now, wait }); this.running = false; this.busy = false; this.run = store.get(uid).run;
   }
   status() { return { ...this.run, running: this.running, busy: this.busy }; }
-  stop() { this.running = false; this.controller?.abort(); }
+  stop() { this.running = false; this.controller?.abort(); this.request.release?.('factions:' + this.uid); }
   start() {
     if (this.running || this.busy) throw new Error('扫描仍在运行或停止中');
     if (!this.authorize()) throw new Error('无权启动扫描');
@@ -82,7 +87,7 @@ export class FactionScanner {
       for (let attempt = 0; ; attempt++) {
         check();
         try {
-          const data = await this.request(path, key, signal); check();
+          const data = await this.request(path, key, signal, { scope: 'factions:' + this.uid, spacingMs: config.apiIntervalSeconds * 1000 }); check();
           this.run.requests = (this.run.requests || 0) + 1; return data;
         } catch (error) {
           if (signal.aborted || !this.running || !this.authorize()) throw error;
@@ -225,6 +230,6 @@ export class FactionScanner {
       if (!signal.aborted) this.run.error = redactFactionKeys(error.message, config);
       this.run.stage = signal.aborted ? '已暂停，下次启动从断点继续' : '扫描停止，请查看错误';
       const row = this.run.rows?.[this.run.cursor]; if (row?.status === 'scanning') { this.run.currentFaction = row.id; row.status = 'waiting'; row.reason = '已中断，历史缓存保留，等待继续'; }
-    } finally { persist(); this.running = false; this.busy = false; }
+    } finally { this.request.release?.('factions:' + this.uid); persist(); this.running = false; this.busy = false; }
   }
 }

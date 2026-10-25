@@ -36,7 +36,7 @@ export function createFactionService({ store, request = portalTornRequest, autho
       }
       if (route === '/config' && req.method === 'POST') {
         const input = await readJson(req, 4096); factionConfig(input, store.get(uid).config);
-        monitor.stop(); await monitor.promise; store.save(uid, input); monitor.run = {}; return json(res, 200, { ok: true });
+        monitor.stop(); await monitor.promise; store.save(uid, input); monitor.run = store.get(uid).run; return json(res, 200, { ok: true });
       }
       if (route === '/start' && req.method === 'POST') { monitor.start(); return json(res, 200, { ok: true }); }
       if (route === '/stop' && req.method === 'POST') { monitor.stop(); return json(res, 200, { ok: true }); }

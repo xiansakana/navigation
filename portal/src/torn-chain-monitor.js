@@ -1,8 +1,9 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { DEFAULT_CHAIN_NOTIFY, chainNotifySettings } from './torn-chain-notifications.js';
 import { normalizeBonusHits, reportBonusDefenders, legacyReportBonusDefenders, lookupDefenderLeader, selectedBonusDefenders } from './torn-chain-bonuses.js';
+import { apiIntervalSeconds } from './torn-api-config.js';
 
-export const DEFAULT_CHAIN_CONFIG = { minHits: 100, maxHits: null, intervalSeconds: 60, apiKey: '', bonusHits: [], leaderFilter: 'all' };
+export const DEFAULT_CHAIN_CONFIG = { minHits: 100, maxHits: null, intervalSeconds: 60, apiIntervalSeconds: 2, apiKey: '', bonusHits: [], leaderFilter: 'all' };
 
 // Torn's documented cooldown duration is six seconds per hit. The public API
 // explicitly defines cooldown as its end timestamp; `end` does not document
@@ -14,6 +15,7 @@ export function estimateCooldownStart(until, hits, detectedAt) {
 }
 export function chainConfig(input, previous = DEFAULT_CHAIN_CONFIG) {
   const result = { ...previous };
+  result.apiIntervalSeconds = apiIntervalSeconds('apiIntervalSeconds' in input ? input.apiIntervalSeconds : previous.apiIntervalSeconds);
   if ('bonusHits' in input) result.bonusHits = normalizeBonusHits(input.bonusHits);
   if ('leaderFilter' in input) {
     if (!['all', 'leader', 'non-leader'].includes(input.leaderFilter)) throw new Error('Leader 筛选配置无效');
@@ -39,7 +41,7 @@ export function chainConfig(input, previous = DEFAULT_CHAIN_CONFIG) {
 // One serial lane: approximately 30 requests/minute, leaving headroom for
 // other tools. The Portal client below groups these lanes by Torn account.
 export function createChainApiClient({ fetchImpl = fetch, spacingMs = 2000, beforeFetch = async () => {} } = {}) {
-  let queue = Promise.resolve(), nextAt = 0;
+  let queue = Promise.resolve(), lastAt = null;
   return (path, key, signal) => {
     const job = queue.catch(() => {}).then(async () => {
       signal?.throwIfAborted();
@@ -48,9 +50,10 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 2000, befo
       const legacyReport = /^\/torn\/[1-9]\d*$/.test(url.pathname) && url.searchParams.get('selections') === 'chainreport';
       if (url.origin !== 'https://api.torn.com' || !v2 && !legacyReport) throw new Error('API 分页地址无效');
       url.searchParams.set('key', key); url.searchParams.set('comment', 'NavChain');
-      await delay(Math.max(0, nextAt - Date.now()), undefined, { signal });
+      const interval = typeof spacingMs === 'function' ? spacingMs() : spacingMs;
+      await delay(Math.max(0, lastAt === null ? 0 : lastAt + interval - Date.now()), undefined, { signal });
       await beforeFetch(signal);
-      signal?.throwIfAborted(); nextAt = Date.now() + spacingMs;
+      signal?.throwIfAborted(); lastAt = Date.now();
       let response;
       try { response = await fetchImpl(url.href, { signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(15000)]), headers: { Accept: 'application/json' }, redirect: 'error' }); }
       catch { if (signal?.aborted) signal.throwIfAborted(); throw Object.assign(new Error('Torn API 网络异常或超时'), { transient: true }); }
@@ -75,7 +78,7 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 2000, befo
 // player, including Chain keys, must share one quota. Unknown keys are checked
 // serially. The process also caps aggregate starts to 10/s across owners.
 export function createTornAccountClient({ fetchImpl = fetch, spacingMs = 2000, globalSpacingMs = 100 } = {}) {
-  const identities = new Map(), lanes = new Map();
+  const identities = new Map(), lanes = new Map(), scopes = new Map();
   let globalQueue = Promise.resolve(), globalNext = 0, blockedUntil = 0, blockedCode;
   const cooldownError = () => Object.assign(new Error('Torn API 限流冷却中'), { fatal: true, localCooldown: true, apiCode: blockedCode, rateLimited: ![8, 9].includes(blockedCode), retryAfterMs: Math.max(0, blockedUntil - Date.now()) });
   const beforeFetch = signal => {
@@ -98,12 +101,16 @@ export function createTornAccountClient({ fetchImpl = fetch, spacingMs = 2000, g
     }
     return identities.get(key);
   };
-  return async (path, key, signal) => {
+  const client = async (path, key, signal, policy = {}) => {
     try {
       const data = await identity(key, signal); signal?.throwIfAborted();
       if (path === 'key/info') return data;
       const owner = data.info.user.id;
-      if (!lanes.has(owner)) lanes.set(owner, createChainApiClient(options));
+      if (policy.scope) scopes.set(policy.scope + ':' + owner, { scope: policy.scope, owner, spacingMs: policy.spacingMs ?? spacingMs });
+      if (!lanes.has(owner)) lanes.set(owner, createChainApiClient({ ...options, spacingMs: () => {
+        const active = [...scopes.values()].filter(scope => scope.owner === owner).map(scope => scope.spacingMs);
+        return active.length ? Math.max(...active) : spacingMs;
+      } }));
       return await lanes.get(owner)(path, key, signal);
     } catch (error) {
       if (!error.localCooldown && ([5, 8, 9].includes(error.apiCode) || error.rateLimited)) {
@@ -112,6 +119,8 @@ export function createTornAccountClient({ fetchImpl = fetch, spacingMs = 2000, g
       throw error;
     }
   };
+  client.release = scope => { for (const [id, entry] of scopes) if (entry.scope === scope) scopes.delete(id); };
+  return client;
 }
 
 export const portalTornRequest = createTornAccountClient();
@@ -167,7 +176,7 @@ export class ChainMonitor {
     const check = () => { if (!this.running || signal?.aborted || !this.authorize()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true }); };
     for (let attempt = 0; ; attempt++) {
       check();
-      try { const data = await this.request(path, key, signal); check(); return data; }
+      try { const data = await this.request(path, key, signal, { scope: 'chain:' + this.uid, spacingMs: (this.config.apiIntervalSeconds ?? 2) * 1000 }); check(); return data; }
       catch (error) {
         check();
         const limited = ![8, 9].includes(error.apiCode) && (error.apiCode === 5 || error.rateLimited);
@@ -193,7 +202,7 @@ export class ChainMonitor {
     this.running = true; this.controller = new AbortController();
     this.promise = this.scan();
   }
-  stop() { this.running = false; this.cancel(this.timer); this.controller?.abort(); this.state.nextScanAt = null; }
+  stop() { this.running = false; this.cancel(this.timer); this.controller?.abort(); this.state.nextScanAt = null; this.request.release?.('chain:' + this.uid); }
   reportAttempts(row) { return row.bonusReaderVersion === 2 ? row.bonusAttempts || 0 : 0; }
   async enrichReport(row, check, signal) {
     const selected = this.config.bonusHits.filter(hit => hit <= row.hits);
