@@ -260,25 +260,29 @@ export class ChainMonitor {
     this.state.detailsStale = true;
     const valid = () => this.running && !signal.aborted && this.authorize();
     const check = () => { if (!valid()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true }); };
-    const stats = { candidates: 0, confirmed: 0, failed: 0, partial: false, error: '' };
+    const stats = { candidates: 0, belowMinimum: 0, confirmed: 0, failed: 0, partial: false, error: '' };
     this.leaderBudget = 10; this.leaderCache ||= new Map(); this.factionCache = new Map();
     for (const [id, cached] of this.leaderCache) if (this.now() - cached.leaderCheckedAt >= 300) this.leaderCache.delete(id);
     try {
-      check(); const candidates = new Map(), visited = new Set();
+      check(); const candidates = new Map(), visited = new Set(), skipped = new Set();
+      const belowMinimum = hits => Number.isSafeInteger(hits) && hits >= 0 && hits < this.config.minHits;
       let path = 'faction/warfarechains?cat=active&limit=100', pages = 0;
       while (path) {
         check(); if (visited.has(path)) { stats.partial = true; break; } visited.add(path);
         const data = await this.request(path, this.config.apiKey, signal); check();
         if (!Array.isArray(data.warfarechains)) throw new Error('API 未返回 Chain 列表');
         for (const row of data.warfarechains) if (Number.isSafeInteger(row?.id) && row.id > 0 && Number.isSafeInteger(row.faction?.id) && row.faction.id > 0) {
-          candidates.set(row.id, row); const old = this.known.get(row.id); if (old) old.listedAt = this.now();
+          const old = this.known.get(row.id);
+          if (belowMinimum(row.chain) && !(old?.status === 'active' && Number.isSafeInteger(old.hits) && old.hits >= this.config.minHits)) { skipped.add(row.id); continue; }
+          candidates.set(row.id, row); skipped.delete(row.id); if (old) old.listedAt = this.now();
         }
         path = data._metadata?.links?.next || null; pages++;
         if (data.warfarechains.length === 100 && !data._metadata?.links) stats.partial = true;
         if (path && pages >= 10) { stats.partial = true; break; }
       }
       const listedIds = new Set(candidates.keys());
-      for (const [id, old] of this.known) if (old.status === 'active' && this.now() - old.listedAt <= 600 && !candidates.has(id)) candidates.set(id, old.candidate);
+      for (const [id, old] of this.known) if (old.status === 'active' && this.now() - old.listedAt <= 600 && !candidates.has(id) && !belowMinimum(old.hits ?? old.candidate?.chain)) { candidates.set(id, old.candidate); skipped.delete(id); }
+      stats.belowMinimum = skipped.size;
       stats.candidates = candidates.size;
       const eligible = [...candidates.values()].filter(row => { const old = this.known.get(row.id); return !(old?.status === 'cooldown' && old.until > this.now()); });
       const count = Math.min(40, eligible.length); stats.remainingCandidates = eligible.length - count;

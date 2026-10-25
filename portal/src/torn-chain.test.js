@@ -132,6 +132,31 @@ test('pagination and rotating detail budget cover candidates without truncating 
   await m.scan(); assert.equal(new Set(calls).size, 45); m.stop();
 });
 
+test('minimum hits filters before details without truncating pages and admits chains when they reach the boundary', async t => {
+  const store = fixture(t), calls = []; let grown = false;
+  const m = monitor(store, async path => {
+    if (path.includes('warfarechains')) {
+      if (path.includes('page=2')) return page([{ ...candidate(2), chain: 100 }, { ...candidate(3), chain: null }]);
+      return { warfarechains: [{ ...candidate(1), chain: grown ? 100 : 99 }], _metadata: { links: { next: 'https://api.torn.com/v2/faction/warfarechains?page=2' } } };
+    }
+    const id = Number(path.split('/')[1]) - 100; calls.push(id); return detail(id, 100);
+  });
+  m.start(); await m.promise;
+  assert.deepEqual(calls, [2, 3]); assert.equal(m.status().belowMinimum, 1); assert.equal(m.status().candidates, 2);
+  grown = true; calls.length = 0; await m.scan(); m.stop();
+  assert.deepEqual(calls, [1, 2, 3]); assert.equal(m.status().belowMinimum, 0);
+});
+
+test('previously qualifying active chains survive short/absent listings to detect cooldown', async t => {
+  const store = fixture(t); let phase = 0;
+  const m = monitor(store, async path => {
+    if (path.includes('warfarechains')) return page([{ ...candidate(1), chain: phase ? 0 : 100 }]);
+    return detail(1, 100, phase ? 2000 : 0);
+  });
+  m.start(); await m.promise; phase = 1; await m.scan(); m.stop();
+  assert.equal(store.get('a').history[0].fresh, true); assert.equal(m.status().confirmed, 1); assert.equal(m.status().belowMinimum, 0);
+});
+
 test('stop cancels in-flight results and revoked authorization prevents further requests', async t => {
   const store = fixture(t); let release, allowed = true, calls = 0;
   const m = monitor(store, async () => { calls++; return new Promise(resolve => { release = resolve; }); }, { authorize: () => allowed });
