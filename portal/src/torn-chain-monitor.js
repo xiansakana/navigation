@@ -53,13 +53,13 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 2000, befo
       signal?.throwIfAborted(); nextAt = Date.now() + spacingMs;
       let response;
       try { response = await fetchImpl(url.href, { signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(15000)]), headers: { Accept: 'application/json' }, redirect: 'error' }); }
-      catch { if (signal?.aborted) signal.throwIfAborted(); throw new Error('Torn API 网络异常或超时'); }
+      catch { if (signal?.aborted) signal.throwIfAborted(); throw Object.assign(new Error('Torn API 网络异常或超时'), { transient: true }); }
       if (response.status === 429) {
         const header = response.headers?.get?.('retry-after'), seconds = Number(header);
         const retryAfterMs = header && Number.isFinite(seconds) ? seconds * 1000 : header ? Date.parse(header) - Date.now() : 65000;
         throw Object.assign(new Error('Torn API 已限流'), { fatal: true, rateLimited: true, retryAfterMs: Math.max(65000, Number.isFinite(retryAfterMs) ? retryAfterMs : 65000) });
       }
-      if (!response.ok) throw new Error('Torn API HTTP ' + response.status);
+      if (!response.ok) throw Object.assign(new Error('Torn API HTTP ' + response.status), { transient: response.status === 408 || response.status >= 500 });
       const data = await response.json().catch(() => { throw new Error('Torn API 返回无效数据'); });
       if (data.error) {
         const code = Number(data.error.code);
@@ -156,13 +156,30 @@ export function createChainStore(db) {
 }
 
 export class ChainMonitor {
-  constructor({ uid, store, request, notify = async () => {}, authorize = () => true, now = () => Math.floor(Date.now() / 1000), schedule = setTimeout, cancel = clearTimeout }) {
-    Object.assign(this, { uid, store, request, notify, authorize, now, schedule, cancel });
+  constructor({ uid, store, request, notify = async () => {}, authorize = () => true, now = () => Math.floor(Date.now() / 1000), schedule = setTimeout, cancel = clearTimeout, wait = delay }) {
+    Object.assign(this, { uid, store, request, notify, authorize, now, schedule, cancel, wait });
     this.running = false; this.busy = false; this.known = new Map(); this.cursor = 0;
-    this.state = { running: false, rounds: 0, candidates: 0, confirmed: 0, failed: 0, partial: false, error: '', lastScanAt: null, nextScanAt: null, chains: [], detailsAt: null, detailsStale: false };
+    this.state = { running: false, rounds: 0, candidates: 0, confirmed: 0, failed: 0, partial: false, error: '', lastScanAt: null, nextScanAt: null, retryAt: null, retryAttempt: 0, retryMessage: '', chains: [], detailsAt: null, detailsStale: false };
   }
   status() { return { ...this.state, chains: this.state.chains.map(row => ({ ...row })), running: this.running, busy: this.busy }; }
   safeError(error) { const message = String(error?.message || '请求失败'); return (this.config?.apiKey ? message.replaceAll(this.config.apiKey, '[Key]') : message).slice(0, 240); }
+  async api(path, key, signal) {
+    const check = () => { if (!this.running || signal?.aborted || !this.authorize()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true }); };
+    for (let attempt = 0; ; attempt++) {
+      check();
+      try { const data = await this.request(path, key, signal); check(); return data; }
+      catch (error) {
+        check();
+        const limited = ![8, 9].includes(error.apiCode) && (error.apiCode === 5 || error.rateLimited);
+        if (!limited && (!error.transient || error.fatal)) throw error;
+        if (attempt >= 3) throw Object.assign(new Error((limited ? 'Torn API 持续限流' : 'Torn API 网络或服务持续异常') + '，自动重试 3 次后停止；已保存记录保留，请稍后继续'), { fatal: true });
+        const ms = limited ? Math.max(65000 * 2 ** attempt, Number(error.retryAfterMs) || 0) : 10000 * 2 ** attempt;
+        Object.assign(this.state, { retryAt: this.now() + Math.ceil(ms / 1000), retryAttempt: attempt + 1, retryMessage: (limited ? '限流冷却' : '网络或服务异常') + '，等待自动重试（' + (attempt + 1) + '/3）', nextScanAt: null });
+        try { await this.wait(ms, undefined, { signal }); check(); }
+        finally { Object.assign(this.state, { retryAt: null, retryAttempt: 0, retryMessage: '' }); }
+      }
+    }
+  }
   start() {
     if (this.running || this.busy) throw new Error('监控正在运行或上次请求尚未结束');
     if (!this.authorize()) throw new Error('无权启动 Chain 监控');
@@ -186,7 +203,7 @@ export class ChainMonitor {
     try {
       let parsed, bonusSource = 'api-v2';
       try {
-        const { chainreport } = await this.request('faction/' + row.id + '/chainreport', this.config.apiKey, signal); check();
+        const { chainreport } = await this.api('faction/' + row.id + '/chainreport', this.config.apiKey, signal); check();
         parsed = reportBonusDefenders(chainreport, row);
       } catch (error) {
         // Some newly completed public reports return v2 error 6 even though
@@ -194,7 +211,7 @@ export class ChainMonitor {
         // Never fall back on authentication, rate limits or private-data errors.
         if (error.apiCode !== 6 || error.fatal) throw error;
         check();
-        const { chainreport } = await this.request('https://api.torn.com/torn/' + row.id + '?selections=chainreport', this.config.apiKey, signal); check();
+        const { chainreport } = await this.api('https://api.torn.com/torn/' + row.id + '?selections=chainreport', this.config.apiKey, signal); check();
         parsed = legacyReportBonusDefenders(chainreport, row); bonusSource = 'api-v1';
       }
       const bonusDetails = parsed.map(bonus => ({ ...row.bonusDetails?.find(old => old.hit === bonus.hit && old.defenderId === bonus.defenderId), ...bonus }));
@@ -219,7 +236,7 @@ export class ChainMonitor {
       if (!cached) {
         this.leaderBudget--;
         try {
-          const result = await lookupDefenderLeader(bonus.defenderId, async path => { check(); const data = await this.request(path, this.config.apiKey, signal); check(); return data; }, this.factionCache);
+          const result = await lookupDefenderLeader(bonus.defenderId, async path => { check(); const data = await this.api(path, this.config.apiKey, signal); check(); return data; }, this.factionCache);
           cached = { ...result, leaderCheckedAt: this.now() };
         } catch (error) {
           if (error.fatal || signal.aborted) throw error;
@@ -271,7 +288,7 @@ export class ChainMonitor {
       let path = 'faction/warfarechains?cat=active&limit=100&sort=asc', pages = 0;
       while (path) {
         check(); if (visited.has(path)) { stats.partial = true; break; } visited.add(path);
-        const data = await this.request(path, this.config.apiKey, signal); check();
+        const data = await this.api(path, this.config.apiKey, signal); check();
         if (!Array.isArray(data.warfarechains)) throw new Error('API 未返回 Chain 列表');
         for (const row of data.warfarechains) if (Number.isSafeInteger(row?.id) && row.id > 0 && Number.isSafeInteger(row.faction?.id) && row.faction.id > 0) {
           const old = this.known.get(row.id);
@@ -308,7 +325,7 @@ export class ChainMonitor {
         const row = detailRows.get(candidate.id); row.status = 'checking'; row.reason = '正在核验'; row.attemptedAt = this.now();
         let detailConfirmed = false;
         try {
-          const { chain } = await this.request('faction/' + candidate.faction.id + '/chain', this.config.apiKey, signal); check();
+          const { chain } = await this.api('faction/' + candidate.faction.id + '/chain', this.config.apiKey, signal); check();
           if (!chain || chain.id !== candidate.id || !['current', 'cooldown', 'timeout'].every(field => Number.isSafeInteger(chain[field]) && chain[field] >= 0)) {
             row.status = 'unknown'; row.reason = chain && Number.isSafeInteger(chain.id) && chain.id !== candidate.id ? `返回的 Chain ID ${chain.id} 与候选 ${candidate.id} 不一致，未判定状态` : 'API 缺少有效的 Chain 长度或计时数据，未判定状态';
             stats.failed++; this.state.failed = stats.failed; continue;

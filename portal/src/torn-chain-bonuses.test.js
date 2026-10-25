@@ -207,11 +207,11 @@ test('authentication, private-data errors and rate limits never trigger a legacy
   const store = fixture(t); store.save('a', { bonusHits: [100] });
   for (const apiCode of [2, 5, 7]) {
     let legacyCalls = 0;
-    const m = new ChainMonitor({ uid: 'a', store, now: () => 1000, schedule: () => 1, cancel: () => {}, request: async path => {
+    const m = new ChainMonitor({ uid: 'a', store, now: () => 1000, schedule: () => 1, cancel: () => {}, wait: async () => {}, request: async path => {
       if (path.startsWith('https://')) legacyCalls++;
       throw Object.assign(new Error('API unavailable'), { apiCode, fatal: apiCode !== 7 });
     } });
-    m.config = store.get('a').config;
+    m.config = store.get('a').config; m.running = true;
     const row = { id: 10, factionId: 110, hits: 250 };
     if (apiCode !== 7) await assert.rejects(m.enrichReport(row, () => {}, new AbortController().signal));
     else await m.enrichReport(row, () => {}, new AbortController().signal);

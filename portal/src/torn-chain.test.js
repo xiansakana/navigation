@@ -177,6 +177,39 @@ test('previously qualifying active chains survive short/absent listings to detec
   assert.equal(store.get('a').history[0].fresh, true); assert.equal(m.status().confirmed, 1); assert.equal(m.status().belowMinimum, 0);
 });
 
+test('Chain rate limiting retries the current detail and resumes the same round without repeating completed work', async t => {
+  const store = fixture(t), details = [], waits = []; let failed = false, m;
+  m = monitor(store, async path => {
+    if (path.includes('warfarechains')) return page([candidate(1), candidate(2)]);
+    const id = Number(path.split('/')[1]) - 100; details.push(id);
+    if (id === 2 && !failed) { failed = true; throw Object.assign(new Error('Torn API 错误 5'), { apiCode: 5, fatal: true }); }
+    return detail(id);
+  }, { wait: async ms => { waits.push(ms); assert.equal(m.running, true); assert.equal(m.status().confirmed, 1); assert.ok(m.status().retryAt); assert.match(m.status().retryMessage, /限流冷却/); } });
+  m.start(); await m.promise; m.stop();
+  assert.deepEqual(waits, [65000]); assert.deepEqual(details, [1, 2, 2]); assert.equal(m.status().rounds, 1); assert.equal(m.status().confirmed, 2); assert.equal(m.status().retryAt, null);
+});
+
+test('Chain transient failures recover and sustained limits stop only after bounded increasing backoff', async t => {
+  const store = fixture(t), waits = []; let attempts = 0;
+  const m = monitor(store, async () => { if (!attempts++) throw Object.assign(new Error('timeout'), { transient: true }); return page([]); }, { wait: async ms => { waits.push(ms); } });
+  m.start(); await m.promise; assert.deepEqual(waits, [10000]); assert.equal(m.status().rounds, 1); m.stop();
+  attempts = 0; waits.length = 0; m.request = async () => { attempts++; throw Object.assign(new Error('HTTP429'), { rateLimited: true, fatal: true, retryAfterMs: 90000 }); };
+  m.start(); await m.promise;
+  assert.deepEqual(waits, [90000, 130000, 260000]); assert.equal(attempts, 4); assert.equal(m.running, false); assert.match(m.status().error, /自动重试 3 次/); assert.equal(m.status().retryAt, null);
+});
+
+test('Chain retry waits cancel on stop and invalid keys or bans never trigger automatic retry', async t => {
+  const store = fixture(t); let entered, calls = 0;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const m = monitor(store, async () => { calls++; throw Object.assign(new Error('limit'), { apiCode: 5, fatal: true }); }, { wait: async (ms, _, { signal }) => { entered(); await new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })); } });
+  m.start(); await waiting; m.stop(); await m.promise;
+  assert.equal(calls, 1); assert.equal(m.status().retryAt, null); assert.equal(m.status().nextScanAt, null);
+  for (const apiCode of [2, 8, 9, 14]) {
+    let retries = 0; m.wait = async () => { retries++; }; m.request = async () => { throw Object.assign(new Error('error ' + apiCode), { apiCode, fatal: true }); };
+    m.start(); await m.promise; assert.equal(retries, 0); assert.equal(m.running, false);
+  }
+});
+
 test('stop cancels in-flight results and revoked authorization prevents further requests', async t => {
   const store = fixture(t); let release, allowed = true, calls = 0;
   const m = monitor(store, async () => { calls++; return new Promise(resolve => { release = resolve; }); }, { authorize: () => allowed });

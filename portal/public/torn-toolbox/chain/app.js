@@ -59,7 +59,8 @@
     $('start').disabled = state.running || state.busy || !config.hasKey;
     $('stop').disabled = !state.running;
     $('key-status').textContent = config.hasKey ? '已保存 Key（不回传浏览器）' : '请保存具有公开信息权限的 Torn API Key';
-    $('status').textContent = `${state.running ? state.busy ? '扫描中' : '运行中' : state.busy ? '正在停止' : '已停止'} · 已完成 ${state.rounds} 轮 · 最近扫描 ${date(state.lastScanAt)} · 下轮 ${date(state.nextScanAt)}`;
+    const retry = state.running && state.retryAt ? ` · ${state.retryMessage} · 约 ${Math.max(0, Math.ceil(state.retryAt - Date.now() / 1000))} 秒后重试` : '';
+    $('status').textContent = `${state.running ? state.busy ? '扫描中' : '运行中' : state.busy ? '正在停止' : '已停止'} · 已完成 ${state.rounds} 轮 · 最近扫描 ${date(state.lastScanAt)} · 下轮 ${date(state.nextScanAt)}${retry}`;
     $('coverage').textContent = `候选 ${state.candidates} · 本轮核验 ${state.confirmed} · 已跳过短 Chain ${state.belowMinimum || 0} · 失败/状态不明 ${state.failed}${state.remainingCandidates ? ' · 待轮换 ' + state.remainingCandidates : ''}${state.partial ? ' · 列表不完整，覆盖受限' : ''}${state.error ? ' · ' + state.error : ''}${state.notificationError ? ' · ' + state.notificationError : ''}`;
     renderMonitor(state);
     const leaderFilter = config.leaderFilter || 'all';
