@@ -108,6 +108,43 @@ test('multiple keys rotate by distinct verified owners, never by duplicate accou
   assert.equal(f.scanner.run.rows[0].status, 'match');
 });
 
+test('invalid keys are skipped during ownership verification while valid keys finish the scan', async t => {
+  const f = setup(t, { apiKeys: [key, key3], minDifference: null }), base = f.request;
+  f.scanner.request = async (path, apiKey) => {
+    if (apiKey === key) throw Object.assign(new Error('invalid ' + key), { apiCode: 2, fatal: true });
+    return base(path, apiKey);
+  };
+  f.scanner.start(); await f.scanner.promise;
+  assert.equal(f.scanner.run.rows[0].status, 'match'); assert.equal(f.scanner.run.availableKeyCount, 1); assert.equal(f.scanner.run.ownerCount, 1);
+  assert.deepEqual(f.scanner.run.skippedKeys, [{ index: 1, code: 2, reason: 'API 错误 2' }]);
+  assert.ok(!JSON.stringify(f.scanner.run).includes(key)); assert.equal(f.store.get('a').config.apiKeys.length, 2);
+});
+
+test('a disabled representative key falls back to a verified same-owner standby without resetting progress', async t => {
+  const f = setup(t, { apiKeys: [key, key2], minDifference: null }), base = f.request, attempts = [];
+  f.scanner.request = async (path, apiKey) => {
+    attempts.push({ path, apiKey });
+    if (apiKey === key && path.endsWith('/basic')) throw Object.assign(new Error('disabled'), { apiCode: 13, fatal: true });
+    return base(path, apiKey);
+  };
+  f.scanner.start(); await f.scanner.promise;
+  const basics = attempts.filter(row => row.path.endsWith('/basic'));
+  assert.deepEqual(basics.slice(0, 2).map(row => row.apiKey), [key, key2]); assert.equal(f.scanner.run.rows[0].status, 'match');
+  assert.equal(f.scanner.run.skippedKeys[0].code, 13); assert.equal(f.scanner.run.ownerCount, 1);
+  assert.equal(attempts.filter(row => row.apiKey === key && row.path !== 'key/info').length, 2); // search, then failed basic only
+});
+
+test('all rejected keys stop with per-key diagnostics while bans never trigger fallback', async t => {
+  const f = setup(t, { apiKeys: [key, key3] });
+  f.scanner.request = async () => { throw Object.assign(new Error('paused'), { apiCode: 18, fatal: true }); };
+  f.scanner.start(); await f.scanner.promise;
+  assert.equal(f.scanner.run.skippedKeys.length, 2); assert.equal(f.scanner.run.availableKeyCount, 0); assert.match(f.scanner.run.error, /所有 API Key 均不可用/);
+  const calls = [];
+  f.scanner.request = async (path, apiKey) => { calls.push(apiKey); throw Object.assign(new Error('IP blocked'), { apiCode: 8, fatal: true }); };
+  f.scanner.start(); await f.scanner.promise;
+  assert.deepEqual(calls, [key]); assert.match(f.scanner.run.error, /IP blocked/); assert.equal(f.scanner.run.skippedKeys.length, 0);
+});
+
 test('unknown key owners and fatal quota errors stop, redact ALL keys, and never rotate past failure', async t => {
   const f = setup(t, { apiKeys: [key, key2], minDifference: null });
   f.scanner.request = async () => ({ info: { user: {} } });

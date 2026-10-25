@@ -36,7 +36,7 @@ Chain 监控配置中可多选 13 个标准档位：10、25、50、100、250、5
 
 QQ 和 Slack 的 Report、被打玩家标签与完整 HTTPS 网址分别独立成行，并显示被打玩家数字 ID，避免中文标点紧贴网址干扰客户端识别。QQ 是否转成蓝色可点击链接或预览卡片由客户端决定；已发送的旧消息不会自动改变。
 
-旧记录在监控启动后每轮最多补查 5 条，补查本身不重发已发通知；未完成的延后通知在身份核验后投递一次。切换所选档位可立即使用已经缓存的 report 数据；尚未缓存的档位在后续轮次中补查。开启更多档位或身份核验会增加单轮耗时，所有请求仍按 Torn 账号共用 1.5 秒串行队列。
+旧记录在监控启动后每轮最多补查 5 条，补查本身不重发已发通知；未完成的延后通知在身份核验后投递一次。切换所选档位可立即使用已经缓存的 report 数据；尚未缓存的档位在后续轮次中补查。开启更多档位或身份核验会增加单轮耗时，所有请求仍按 Torn 账号共用 2 秒串行队列。
 
 ## 通知管理
 
@@ -55,11 +55,11 @@ Portal 通过通知服务的本机 `/notify` 接口、共享集成配置中的 `
 - `GET https://api.torn.com/v2/faction/warfarechains?cat=active&limit=100`，读取 `_metadata.links.next` 分页，最多 10 页。分页只允许官方域名和预期接口，不跟随 HTTP 跳转。
 - `GET https://api.torn.com/v2/faction/{id}/chain`，必须与列表的 Chain ID 一致，再依据 `cooldown` Unix 秒时间戳和 `timeout` 核验状态。未知/失败结果保留原观察，不推测为已冷却。
 - 选择 Bonus hit 后：`GET /v2/faction/{chainId}/chainreport`，只使用 `bonuses[].chain` 和 `bonuses[].defender_id`；根据[官方公开 API schema](https://www.torn.com/swagger/openapi.json)校验 report 身份。
-- v2 错误 6 时的兼容读取：官方 v1 `GET /torn/{chainId}?selections=chainreport`；仅允许该选择，不允许任意 v1 API。参见[官方 API 说明](https://www.torn.com/api.html)。兼容请求与其他请求共用原有 1.5 秒间隔。
+- v2 错误 6 时的兼容读取：官方 v1 `GET /torn/{chainId}?selections=chainreport`；仅允许该选择，不允许任意 v1 API。参见[官方 API 说明](https://www.torn.com/api.html)。兼容请求与其他请求共用原有 2 秒间隔。
 - 开启身份筛选后：`GET /v2/user/{id}/profile`、`GET /v2/faction/{id}/basic`，均使用 Public Key；仅比对 `profile.faction_id` 和 `basic.leader_id`，不访问游戏页面。
 - 每轮最多核验 40 条，其余轮换；已确认且未到期的冷却记录不重复核验。近期从列表消失的已知活动 Chain 最多继续核验 10 分钟。
 
-请求先通过 key/info 确认 Key 所属游戏账号，在 Portal 本进程按 Torn 账号共用串行队列，间隔至少 1.5 秒（每账号约 40 次/分钟，另有初次归属核验），不同账号可独立运行；全进程还限制请求启动间隔至少 100ms。轮次间隔从本轮结束计算，含排队时间，因此发现有延迟；多用户或大量候选时可能漏过短冷却。页面显示核验失败、待轮换和分页不完整状态。限流或失效 Key 会停止，修复后手动启动。其他 Torn 工具的请求仍共享 Torn 用户配额，本模块无法协调外部进程的用量。
+请求先通过 key/info 确认 Key 所属游戏账号，在 Portal 本进程按 Torn 账号共用串行队列，间隔至少 2 秒（每账号约 30 次/分钟，另有初次归属核验），不同账号可独立运行；全进程还限制请求启动间隔至少 100ms。轮次间隔从本轮结束计算，含排队时间，因此发现有延迟；多用户或大量候选时可能漏过短冷却。页面显示核验失败、待轮换和分页不完整状态。限流或失效 Key 会停止，修复后手动启动。其他 Torn 工具的请求仍共享 Torn 用户配额，本模块无法协调外部进程的用量。
 
 官方参考：[API Playground](https://api-playground.torn.com/)、[API v2 更新讨论](https://www.torn.com/forums.php?a=0&b=0&f=63&p=threads&start=360&t=16401584)、[Chain 说明](https://wiki.torn.com/wiki/Chain)。`cat=active` 包含活动与冷却项；状态判断仍依赖详情核验。
 

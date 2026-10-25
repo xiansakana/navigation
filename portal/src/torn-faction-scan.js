@@ -58,9 +58,26 @@ export class FactionScanner {
       if (Math.floor(this.now() / DAY) !== today) throw Object.assign(new Error('扫描已跨过 Torn 日期，请再次启动刷新当天数据；历史缓存保留'), { fatal: true });
     };
     const persist = () => this.store.saveRun(this.uid, this.run);
-    let keys = config.apiKeys, keyCursor = 0;
+    let keys = [...config.apiKeys], keyCursor = 0;
+    const rejected = new Set(), verified = new Map(), skippedKeys = [];
+    const updateKeys = () => {
+      const owners = new Map();
+      for (const key of config.apiKeys) if (!rejected.has(key) && (config.apiKeys.length === 1 || verified.has(key))) {
+        const owner = verified.get(key) || 'single'; if (!owners.has(owner)) owners.set(owner, key);
+      }
+      keys = [...owners.values()];
+      Object.assign(this.run, { keyCount: config.apiKeys.length, availableKeyCount: config.apiKeys.length - rejected.size, ownerCount: owners.size, skippedKeys: [...skippedKeys] });
+    };
+    const rejectKey = (key, error) => {
+      if (!rejected.has(key)) {
+        rejected.add(key); skippedKeys.push({ index: config.apiKeys.indexOf(key) + 1, code: error.apiCode || null, reason: error.apiCode ? 'API 错误 ' + error.apiCode : '无法确认所属账号' });
+      }
+      updateKeys(); persist();
+    };
+    const noKeys = () => Object.assign(new Error('所有 API Key 均不可用或无法确认所属账号，扫描已停止；进度与缓存保留' + (skippedKeys.at(-1)?.code ? '；最后失败：错误 ' + skippedKeys.at(-1).code : '')), { fatal: true });
     const request = async (path, selectedKey) => {
-      const key = selectedKey || keys[keyCursor++ % keys.length];
+      let key = selectedKey || keys[keyCursor++ % keys.length];
+      if (!key) throw noKeys();
       const stage = this.run.stage;
       for (let attempt = 0; ; attempt++) {
         check();
@@ -69,6 +86,12 @@ export class FactionScanner {
           this.run.requests = (this.run.requests || 0) + 1; return data;
         } catch (error) {
           if (signal.aborted || !this.running || !this.authorize()) throw error;
+          if ([1, 2, 10, 13, 16, 18].includes(error.apiCode)) {
+            rejectKey(key, error);
+            if (selectedKey) throw Object.assign(error, { keyRejected: true });
+            if (!keys.length) throw noKeys();
+            key = keys[keyCursor++ % keys.length]; attempt = -1; continue;
+          }
           if (error.apiCode !== 5 && !error.rateLimited || [8, 9].includes(error.apiCode)) throw error;
           if (attempt >= 3) throw Object.assign(new Error('Torn API 持续限流，自动重试 3 次后停止；进度与缓存保留，请减少同账号其他工具的请求后继续'), { fatal: true });
           const ms = Math.max(65000 * 2 ** attempt, Number(error.retryAfterMs) || 0);
@@ -82,20 +105,22 @@ export class FactionScanner {
     try {
       check(); this.run.error = ''; this.run.retryAt = null; this.run.rateLimitRetries = 0; this.run.startedAt = this.now();
       const requestsBeforeKeys = this.run.requests || 0;
-      let owners = null;
+      this.run.skippedKeys = []; this.run.availableKeyCount = config.apiKeys.length;
       if (keys.length > 1) {
         this.run.stage = '核验 API Key 所属账号'; persist();
-        owners = new Map();
-        for (const key of keys) {
-          const data = await request('key/info', key), id = data.info?.user?.id;
-          if (!Number.isSafeInteger(id) || id <= 0) throw Object.assign(new Error('无法确认 API Key 所属账号'), { fatal: true });
-          if (!owners.has(id)) owners.set(id, key);
+        for (const key of config.apiKeys) {
+          try {
+            const data = await request('key/info', key), id = data.info?.user?.id;
+            if (!Number.isSafeInteger(id) || id <= 0) { rejectKey(key, {}); continue; }
+            verified.set(key, id);
+          } catch (error) { if (!error.keyRejected) throw error; }
         }
-        keys = [...owners.values()];
       }
+      updateKeys(); if (!keys.length) throw noKeys();
       const keyRequests = (this.run.requests || 0) - requestsBeforeKeys;
       if (this.run.today !== today || !this.run.listComplete) {
         this.run = { today, rows: [], cursor: 0, requests: keyRequests, cached: 0, skippedDays: 0, listComplete: false, stage: '读取帮派列表', startedAt: this.now() }; persist();
+        updateKeys();
         const filters = ['notDestroyed', 'respect:>=:' + config.minRespect, ...(config.maxRespect === null ? [] : ['respect:<=:' + config.maxRespect])];
         let path = 'faction/search?limit=100&offset=0&filters=' + encodeURIComponent(filters.join(','));
         const visited = new Set(), factions = new Map(); let pages = 0;
@@ -123,7 +148,7 @@ export class FactionScanner {
         }
         this.run.rows = [...factions.values()].sort((a, b) => a.respect - b.respect || a.id - b.id); this.run.listComplete = true; this.run.cursor = 0; persist();
       }
-      this.run.keyCount = config.apiKeys.length; this.run.ownerCount = owners?.size || 1;
+      updateKeys();
       this.run.batchEnd = this.run.cursor;
       while (this.run.cursor < this.run.rows.length) {
         check();

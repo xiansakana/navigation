@@ -85,3 +85,14 @@ test('cooldown metadata honors Retry-After and distinguishes account limits from
     assert.equal(calls, 2);
   }
 });
+
+test('default account request spacing is two seconds for shared Chain and faction work', async () => {
+  const starts = [];
+  const client = createTornAccountClient({ fetchImpl: async url => {
+    if (new URL(url).pathname.endsWith('/info')) return response({ info: { user: { id: 1 } } });
+    starts.push(performance.now()); return response({});
+  } });
+  await client('faction/10/chain', keys[0]);
+  await client('user/10/profile', keys[0]);
+  assert.ok(starts[1] - starts[0] >= 1950, 'default shared spacing must remain approximately 2000ms');
+});

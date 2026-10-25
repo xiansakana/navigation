@@ -36,9 +36,9 @@ export function chainConfig(input, previous = DEFAULT_CHAIN_CONFIG) {
   return result;
 }
 
-// One serial lane: approximately 40 requests/minute, leaving headroom for
+// One serial lane: approximately 30 requests/minute, leaving headroom for
 // other tools. The Portal client below groups these lanes by Torn account.
-export function createChainApiClient({ fetchImpl = fetch, spacingMs = 1500, beforeFetch = async () => {} } = {}) {
+export function createChainApiClient({ fetchImpl = fetch, spacingMs = 2000, beforeFetch = async () => {} } = {}) {
   let queue = Promise.resolve(), nextAt = 0;
   return (path, key, signal) => {
     const job = queue.catch(() => {}).then(async () => {
@@ -74,7 +74,7 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 1500, befo
 // Resolve key ownership before allocating lanes: all keys of the same Torn
 // player, including Chain keys, must share one quota. Unknown keys are checked
 // serially. The process also caps aggregate starts to 10/s across owners.
-export function createTornAccountClient({ fetchImpl = fetch, spacingMs = 1500, globalSpacingMs = 100 } = {}) {
+export function createTornAccountClient({ fetchImpl = fetch, spacingMs = 2000, globalSpacingMs = 100 } = {}) {
   const identities = new Map(), lanes = new Map();
   let globalQueue = Promise.resolve(), globalNext = 0, blockedUntil = 0, blockedCode;
   const cooldownError = () => Object.assign(new Error('Torn API 限流冷却中'), { fatal: true, localCooldown: true, apiCode: blockedCode, rateLimited: ![8, 9].includes(blockedCode), retryAfterMs: Math.max(0, blockedUntil - Date.now()) });
