@@ -3,7 +3,70 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import { gzipSync, deflateSync, brotliCompressSync } from 'node:zlib';
-import { classifyResetOpportunity, parseRss, deliverToChannels, fetchText, fetchSourceText } from './tibo-reset-monitor.js';
+import { classifyResetOpportunity, parseRss, deliverToChannels, fetchText, fetchSourceText, startTiboResetMonitor } from './tibo-reset-monitor.js';
+
+const contextParent = { id: '100', text: 'Day 20/ Rest and reset', at: '2026-10-25T03:39:31Z', kind: 'other' };
+const contextReply = { id: '101', text: 'By midnight PST', at: '2026-10-25T03:40:04Z', in_reply_to_tweet_id: '100', kind: 'signal', tibo_lane: 'reset_related' };
+
+test('reset day announcements and explicit timed replies use parent context, not unrelated conversations', () => {
+    assert.equal(classifyResetOpportunity(contextParent).relevant, true);
+    assert.equal(classifyResetOpportunity(contextReply, [contextParent]).level, 'announced');
+    assert.equal(classifyResetOpportunity(contextReply).level, 'possible');
+    assert.equal(classifyResetOpportunity({ text: 'By midnight PST', conversation_id: '100' }, [contextParent]).relevant, false);
+    assert.equal(classifyResetOpportunity({ text: 'Thanks!', in_reply_to_tweet_id: '100' }, [contextParent]).relevant, false);
+    assert.equal(classifyResetOpportunity({ ...contextReply, text: 'No reset tonight' }, [contextParent]).relevant, false);
+    assert.equal(classifyResetOpportunity({ ...contextReply, text: 'We will not reset usage today' }, [contextParent]).relevant, false);
+});
+
+function monitorFixture(initial, tweets, send) {
+    var stored = structuredClone(initial);
+    const config = { monitors: { tiboReset: { enabled: true, channels: ['qq', 'slack'] } } };
+    const create = () => startTiboResetMonitor(() => config, {
+        schedule: false, now: () => Date.parse('2026-10-25T04:00:00Z'),
+        readState: () => structuredClone(stored), writeState: value => { stored = structuredClone(value); },
+        fetchTweets: async () => tweets, send
+    });
+    return { create, state: () => stored };
+}
+
+test('legacy negative is reclassified and delivered once; unknown historical seen IDs are not replayed', async () => {
+    const sent = [];
+    const fixture = monitorFixture({ initialized: true, seenIds: ['100', '101'], lastTweet: { ...contextReply, decision: { relevant: false } } }, [contextParent, contextReply], async (_, channel, message) => { sent.push(channel); assert.match(message, /回复上下文：Day 20/); });
+    const m = fixture.create(); await m.checkNow(); await m.checkNow();
+    assert.deepEqual(sent, ['qq', 'slack']);
+    assert.equal(fixture.state().lastSignal.id, '101');
+    assert.equal(fixture.state().decisions['101'].level, 'announced');
+    await fixture.create().checkNow(); assert.equal(sent.length, 2);
+});
+
+test('recent negative replies recover when the parent appears later; expired negatives stay suppressed', async () => {
+    const tweets = [{ ...contextReply, kind: 'other' }], sent = [];
+    const fixture = monitorFixture({ initialized: true, seenIds: [] }, tweets, async (_, channel) => { sent.push(channel); });
+    const m = fixture.create(); await m.checkNow(); assert.equal(sent.length, 0);
+    tweets.push(contextParent); await m.checkNow(); assert.equal(sent.length, 4);
+    const expired = { ...contextReply, at: '2026-10-24T00:00:00Z' };
+    const old = monitorFixture({ initialized: true, seenIds: ['100', '101'], lastTweet: { ...expired, decision: { relevant: false } } }, [contextParent, expired], async () => { throw new Error('must not replay'); });
+    assert.equal((await old.create().checkNow()).lastError, null);
+    assert.equal(old.state().lastSignal, null);
+});
+
+test('reclassified delivery resumes after restart without repeating successful QQ or completed signals', async () => {
+    const sent = []; let fail = true;
+    const fixture = monitorFixture({ initialized: true, seenIds: ['100', '101'], lastTweet: { ...contextReply, decision: { relevant: false } } }, [contextParent, contextReply], async (_, channel) => {
+        if (channel === 'slack' && fail) throw new Error('slack unavailable');
+        sent.push(channel);
+    });
+    assert.match((await fixture.create().checkNow()).lastError, /slack/);
+    assert.deepEqual(fixture.state().sentChannels['101'], ['qq']);
+    fail = false; await fixture.create().checkNow(); await fixture.create().checkNow();
+    assert.deepEqual(sent, ['qq', 'slack']);
+});
+
+test('first initialization still baselines history without sending old reset messages', async () => {
+    const fixture = monitorFixture({ initialized: false, seenIds: [] }, [contextParent, contextReply], async () => { throw new Error('must not send'); });
+    const m = fixture.create(); assert.equal((await m.checkNow()).lastError, null);
+    await m.checkNow(); assert.deepEqual(fixture.state().seenIds, ['100', '101']);
+});
 
 test('feed source tries resolved addresses while keeping the original HTTPS hostname', async function() {
     var signals = [];

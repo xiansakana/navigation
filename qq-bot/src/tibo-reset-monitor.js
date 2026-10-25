@@ -9,6 +9,7 @@ import { sendMessage } from './napcat.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STATE_PATH = path.resolve(__dirname, '../data/tibo-reset-state.json');
 const MAX_SEEN = 300;
+const RECHECK_WINDOW_MS = 6 * 60 * 60 * 1000;
 
 function decodeXml(text) {
     return String(text || '')
@@ -32,12 +33,25 @@ export function parseRss(xml) {
     }).filter(function(tweet) { return /^\d+$/.test(tweet.id) && tweet.text; });
 }
 
-export function classifyResetOpportunity(tweet) {
+export function classifyResetOpportunity(tweet, tweets = []) {
+    // Only follow explicit parent links from this author's validated feed. A
+    // shared conversation ID alone does not establish what a reply refers to.
+    var ancestors = [], current = tweet, visited = new Set([String(tweet?.id)]);
+    for (var depth = 0; depth < 5 && current?.in_reply_to_tweet_id; depth++) {
+        var parent = tweets.find(function(item) { return String(item.id) === String(current.in_reply_to_tweet_id); });
+        if (!parent || visited.has(String(parent.id))) break;
+        ancestors.push(parent); visited.add(String(parent.id)); current = parent;
+    }
     var text = String(tweet?.text || '').replace(/\s+/g, ' ').trim();
+    var ownLower = text.toLowerCase();
+    if (/\b(?:no|without) (?:a |another )?reset\b|\b(?:won't|will not|not going to) reset\b/.test(ownLower)) return { level: 'unrelated', label: '未宣布额度重置', confidence: 'high', relevant: false };
+    var futurePattern = /\b(will|going to|land(?:s|ing)?|tomorrow|today|tonight|next hour|end of day|eod|midnight|soon|coming|by \d|before \d|later)\b/;
+    if (!futurePattern.test(ownLower) && !/\b(reset(?:ting|s)?|refill(?:ed|ing|s)?)\b/.test(ownLower) && tweet?.kind !== 'signal') ancestors = [];
+    text = [text, ...ancestors.map(function(parent) { return parent.text || ''; })].join(' ');
     var lower = text.toLowerCase();
     var reset = /\b(reset(?:ting|s)?|refill(?:ed|ing|s)?|replenish(?:ed|ment|ing)?)\b/.test(lower);
     var limits = /\b(codex|chatgpt work|usage|rate[ -]?limits?|paid (?:users|subscriptions?|plans?))\b/.test(lower);
-    var future = /\b(will|going to|lands?|tomorrow|today|tonight|next hour|end of day|midnight|soon|coming|by \d|later)\b/.test(lower);
+    var future = futurePattern.test(lower);
     var uncertain = /\b(may|might|maybe|possible|possibly|likely|chance|occasional|who says|if)\b|[?？]|👀/.test(lower);
     var complete = /\b(reset all propagated|have reset|has been reset|we(?:'ve| have)? reset|i(?:'ve| have)? reset|just reset|reset(?:ting)? (?:is )?(?:done|complete|completed|live|propagated))\b/.test(lower);
     var remediation = /\b(fix(?:ed|es|ing)?|investigat(?:e|ed|ing|ion)|issue|bug|outage|drain(?:ed|ing)?|inefficien)/.test(lower);
@@ -47,6 +61,8 @@ export function classifyResetOpportunity(tweet) {
     if (reset && future && limits) return { level: 'announced', label: '即将重置', confidence: 'high', relevant: true };
     if (reset && future) return { level: 'announced', label: '疑似即将重置', confidence: 'medium', relevant: true };
     if (reset && (uncertain || limits || upstreamCandidate)) return { level: 'possible', label: '可能有重置机会', confidence: limits ? 'medium' : 'low', relevant: true };
+    if (reset && /\bday\s*\d+\s*\//i.test(text)) return { level: 'possible', label: '可能有重置机会', confidence: 'medium', relevant: true };
+    if (tweet?.kind === 'signal' && tweet?.tibo_lane === 'reset_related') return { level: 'possible', label: '上游提示重置信号（待确认）', confidence: 'low', relevant: true };
     if (limits && remediation && future) return { level: 'possible', label: '可能触发补偿重置', confidence: 'low', relevant: true };
     return { level: 'unrelated', label: '与额度重置无关', confidence: 'high', relevant: false };
 }
@@ -205,6 +221,7 @@ function formatMessage(tweet, decision) {
         '时间：' + time,
         '',
         excerpt,
+        ...(decision.contextText ? ['', '回复上下文：' + decision.contextText] : []),
         '',
         tweet.url || ('https://x.com/thsottiaux/status/' + tweet.id),
         '',
@@ -236,7 +253,13 @@ export async function deliverToChannels(config, message, alreadySent, send, onDe
 }
 
 export function startTiboResetMonitor(getConfig, hooks) {
-    var state = readState();
+    var state = (hooks?.readState || readState)();
+    var persist = hooks?.writeState || writeState;
+    var now = hooks?.now || Date.now;
+    state.decisions = state.decisions || {};
+    // Old versions only retained the latest decision. Re-evaluate that known
+    // negative, never blanket-replay historical IDs whose delivery is unknown.
+    if (state.lastTweet?.decision && !state.decisions[state.lastTweet.id]) state.decisions[state.lastTweet.id] = state.lastTweet.decision;
     state.sentChannels = state.sentChannels || {};
     var timer = null;
     var running = false;
@@ -249,7 +272,7 @@ export function startTiboResetMonitor(getConfig, hooks) {
         if (!options.enabled) return runtime;
         running = true;
         try {
-            var tweets = await fetchTweets(options);
+            var tweets = await (hooks?.fetchTweets || fetchTweets)(options);
             var seen = new Set(state.seenIds || []);
             if (!state.initialized) {
                 tweets.forEach(function(tweet) { seen.add(tweet.id); });
@@ -257,8 +280,16 @@ export function startTiboResetMonitor(getConfig, hooks) {
                 state.initializedAt = new Date().toISOString();
             } else {
                 for (var tweet of tweets) {
-                    if (seen.has(tweet.id)) continue;
-                    var decision = classifyResetOpportunity(tweet);
+                    var previous = state.decisions[tweet.id];
+                    var age = now() - new Date(tweet.at).getTime();
+                    var recheck = seen.has(tweet.id) && previous?.relevant === false && age >= 0 && age <= RECHECK_WINDOW_MS;
+                    if (seen.has(tweet.id) && !recheck) continue;
+                    var decision = classifyResetOpportunity(tweet, tweets);
+                    if (decision.relevant && tweet.in_reply_to_tweet_id) {
+                        var parent = tweets.find(function(item) { return String(item.id) === String(tweet.in_reply_to_tweet_id); });
+                        if (parent) decision.contextText = String(parent.text || '').slice(0, 500);
+                    }
+                    if (recheck && !decision.relevant) continue;
                     runtime.lastTweet = { id: tweet.id, text: tweet.text, at: tweet.at, url: tweet.url, decision: decision };
                     if (decision.relevant) {
                         await deliverToChannels(config, formatMessage(tweet, decision), state.sentChannels[tweet.id],
@@ -273,16 +304,22 @@ export function startTiboResetMonitor(getConfig, hooks) {
                                 }, message);
                             }, function(sent) {
                                 state.sentChannels[tweet.id] = sent;
-                                writeState(state);
+                                persist(state);
                             });
                         delete state.sentChannels[tweet.id];
                         runtime.lastSignal = runtime.lastTweet;
                         hooks?.onSignal?.(runtime.lastSignal);
                     }
                     seen.add(tweet.id);
+                    state.decisions[tweet.id] = decision;
+                    state.seenIds = Array.from(seen).slice(-MAX_SEEN);
+                    state.lastTweet = runtime.lastTweet;
+                    state.lastSignal = runtime.lastSignal;
+                    persist(state);
                 }
             }
             state.seenIds = Array.from(seen).slice(-MAX_SEEN);
+            Object.keys(state.decisions).forEach(function(id) { if (!state.seenIds.includes(id)) delete state.decisions[id]; });
             Object.keys(state.sentChannels).forEach(function(id) {
                 if (seen.has(id)) delete state.sentChannels[id];
             });
@@ -291,7 +328,7 @@ export function startTiboResetMonitor(getConfig, hooks) {
             state.lastSignal = runtime.lastSignal;
             runtime.lastCheckedAt = state.lastCheckedAt;
             runtime.lastError = null;
-            writeState(state);
+            persist(state);
         } catch (err) {
             runtime.lastCheckedAt = new Date().toISOString();
             runtime.lastError = err.message || String(err);
@@ -307,7 +344,9 @@ export function startTiboResetMonitor(getConfig, hooks) {
         timer.unref?.();
     }
 
-    schedule();
-    setTimeout(checkNow, 5_000).unref?.();
+    if (hooks?.schedule !== false) {
+        schedule();
+        setTimeout(checkNow, 5_000).unref?.();
+    }
     return { checkNow: checkNow, status: function() { return { ...runtime, running: running, initialized: !!state.initialized }; }, reschedule: schedule, stop: function() { clearInterval(timer); } };
 }
