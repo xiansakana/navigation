@@ -66,11 +66,12 @@ test('configuration validates integer money amounts and signed difference bounds
   for (const patch of [{ minRespect: 200, maxRespect: 100 }, { dailyDropAmount: 0 }, { peakDropAmount: 1.5 }, { peakDropAmount: Number.MAX_SAFE_INTEGER + 1 }, { dailyDropAmount: ' ' }, { dailyDropPct: 50 }, { historyMode: 'bad' }, { batchSize: 500 }, { minDifference: 1, maxDifference: -1 }, { apiKey: 'bad' }]) assert.throws(() => config(patch));
 });
 
-test('search pagination is fully assembled and sorted ascending before bounded batches run', async t => {
+test('one start automatically crosses faction batches after sorting all search pages', async t => {
   const store = fixture(t), calls = [], scanner = new FactionScanner({ uid: 'a', store, request: mockRequest(calls), now: () => today * DAY + 3600 });
   scanner.start(); await scanner.promise;
-  assert.deepEqual(scanner.run.rows.map(row => row.id), [10, 20]); assert.equal(scanner.run.rows[0].status, 'match'); assert.equal(scanner.run.rows[1].status, 'waiting'); assert.equal(scanner.run.cursor, 1);
-  scanner.start(); await scanner.promise; assert.equal(scanner.run.cursor, 2); assert.ok(scanner.run.rows.every(row => row.status === 'match'));
+  assert.deepEqual(scanner.run.rows.map(row => row.id), [10, 20]); assert.equal(scanner.run.cursor, 2); assert.ok(scanner.run.rows.every(row => row.status === 'match'));
+  assert.equal(scanner.run.factionBatch, 2); assert.equal(scanner.run.stage, '本次列表扫描完成'); assert.equal(scanner.running, false);
+  const count = calls.length; scanner.start(); await scanner.promise; assert.equal(calls.length, count);
   assert.equal(calls.filter(path => path.includes('/search')).length, 1);
   assert.equal(store.get('a').run.rows[0].id, 10); assert.deepEqual(store.get('b').run.rows, []);
 });
@@ -87,7 +88,7 @@ test('stop, process replacement and resume preserve completed daily cache withou
   assert.ok(store.point('a', 1010, today - 1)); assert.equal(scanner.run.cursor, 0);
   const resumed = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, request: base }); resumed.start(); await resumed.promise;
   assert.equal(resumed.run.rows[0].status, 'match'); assert.ok(resumed.run.cached >= 1);
-  assert.equal(calls.filter(path => path.includes('timestamp=' + (today - 1) * DAY)).length, 1);
+  assert.equal(calls.filter(path => path.includes('user/1010/personalstats') && path.includes('timestamp=' + (today - 1) * DAY)).length, 1);
   assert.equal(calls.filter(path => path.includes('/search')).length, 1);
 });
 
@@ -144,9 +145,33 @@ test('API masks keys, checks view/config/control/CSRF and isolates results', asy
   assert.equal((await call('start', 'POST')).status, 403);
   assert.equal((await call('config', 'POST', ['*'], { minDifference: -10 }, 'a', { origin: 'https://evil.test' })).status, 403);
   assert.equal((await call('start', 'POST', ['*'])).status, 200); await service.scanners.get('a').promise;
-  assert.equal((await call('state?filter=match')).data.total, 1);
+  assert.equal((await call('state?filter=match')).data.total, 2);
   assert.equal((await call('state', 'GET', ['*'], {}, 'b')).data.total, 0);
   assert.equal((await call('reset', 'POST', ['*'])).status, 200); assert.equal((await call('state')).data.total, 0); assert.ok(store.point('a', 1010, today - 3));
+});
+
+test('networth automatically crosses sample batches and can pause while filling a long unchanged interval', async t => {
+  const store = fixture(t), base = mockRequest(), calls = [];
+  let pause = false, scanner;
+  const saveRun = store.saveRun.bind(store);
+  store.saveRun = (uid, run) => {
+    saveRun(uid, run);
+    const row = run.rows?.[0];
+    if (pause && row?.loadedDays === 100) { pause = false; setImmediate(() => scanner.stop()); }
+  };
+  scanner = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, request: async path => {
+    calls.push(path);
+    if (path.endsWith('/profile')) { const data = await base(path); data.profile.signed_up = (today - 250) * DAY; return data; }
+    if (path.includes('/personalstats')) return { personalstats: [{ name: 'networth', value: 1000, timestamp: (today - 300) * DAY }] };
+    return base(path);
+  } });
+  pause = true; scanner.start(); await scanner.promise;
+  assert.equal(scanner.run.cursor, 0); assert.equal(scanner.run.rows[0].loadedDays, 100); assert.equal(scanner.run.rows[0].status, 'waiting'); assert.match(scanner.run.stage, /已暂停/);
+  assert.ok(store.point('a', 1010, today - 99));
+  scanner.start(); await scanner.promise;
+  assert.equal(scanner.run.cursor, 2); assert.equal(scanner.run.rows[0].loadedDays, 250); assert.equal(scanner.run.rows[0].historyBatch, 3);
+  assert.equal(scanner.run.rows[1].historyBatch, 3); assert.ok(scanner.run.rows.every(row => row.status === 'excluded'));
+  assert.equal(scanner.running, false); assert.equal(calls.filter(path => path.includes('/personalstats')).length, 3);
 });
 
 test('new tab permissions declare full hierarchy and personal data policy registration', () => {

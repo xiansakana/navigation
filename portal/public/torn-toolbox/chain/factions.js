@@ -30,7 +30,7 @@
     $('faction-key-status').textContent = config.hasKey ? `已保存 ${config.keyCount} 个 Key（不回传浏览器）；有效账号数在扫描核验后显示` : '请保存用于公开帮派与个人统计查询的 API Keys';
     $('faction-estimate').textContent = config.historyMode === 'full' ? 'N 未填写，扫描全历史。倒序按更新时间跳过不变区间；每天变化的账号仍需逐日查询。' : `最近 ${config.historyDays} 天，仅确认窗口内高点；逐日查询上界约 ${config.batchSize * (config.historyDays + 7)} 次详情请求，另加 Key 核验和列表分页。跳过不变区间可减少请求，暂停后可继续。`;
     $('faction-status').textContent = `${state.running ? '运行中' : state.busy ? '停止中' : '已停止'} · ${state.stage || '尚未启动'}${state.error ? ' · ' + state.error : ''}`;
-    $('faction-progress').textContent = `列表 ${state.listed || 0} 个 · 已处理 ${state.cursor || 0} 个 · 成功请求 ${state.requests || 0} · 缓存复用 ${state.cached || 0} · 跳过不变日期 ${state.skippedDays || 0} · 有效账号 ${state.ownerCount || '—'} · 当前帮派 ${state.currentFaction || '—'} · 当前历史日 ${day(state.currentDay)}`;
+    $('faction-progress').textContent = `列表 ${state.listed || 0} 个 · 已处理 ${state.cursor || 0} 个 · 帮派第 ${state.factionBatch || 0} 批（自动续批） · 成功请求 ${state.requests || 0} · 缓存复用 ${state.cached || 0} · 跳过不变日期 ${state.skippedDays || 0} · 有效账号 ${state.ownerCount || '—'} · 当前帮派 ${state.currentFaction || '—'} · 当前历史日 ${day(state.currentDay)}`;
     $('faction-counts').textContent = `命中 ${counts.match} · 已排除 ${counts.excluded} · 待确认 ${counts.unknown} · 扫描中 ${counts.scanning} · 待扫描 ${counts.waiting}（列表完整后按 respect 升序）`;
     const rows = data.rows.map(row => {
       const article = document.createElement('article'); article.className = 'faction-result';
@@ -38,7 +38,7 @@
       title.append(faction, document.createTextNode(` · respect ${value(row.respect)} · ${labels[row.status] || row.status}`)); article.append(title);
       const leader = document.createElement('a'); leader.textContent = `Leader ${row.leaderName} [${row.leaderId}]`; leader.href = 'https://www.torn.com/profiles.php?XID=' + row.leaderId; leader.target = '_blank'; leader.rel = 'noopener noreferrer'; article.append(leader);
       const dl = document.createElement('dl');
-      for (const [name, text] of [['下跌日（TCT）', day(row.dropDay)], ['A（天）', value(row.A)], ['B（天）', value(row.B)], ['C（天）', value(row.C)], ['A−B（天）', value(row.difference)], ['单日减少（Torn $）', value(row.dailyAmount)], ['距高点减少（Torn $）', value(row.peakAmount)], ['历史进度', `${row.loadedDays || 0}/${row.totalDays || '—'}`], ['下跌前高点', value(row.peakBefore)], ['下跌前一日', value(row.beforeValue)], ['下跌日净资产', value(row.dropValue)], ['扫描范围', `${day(row.firstDay ?? row.historyStart)} 至 ${day(row.lastDay ?? state.today)}`]]) {
+      for (const [name, text] of [['下跌日（TCT）', day(row.dropDay)], ['A（天）', value(row.A)], ['B（天）', value(row.B)], ['C（天）', value(row.C)], ['A−B（天）', value(row.difference)], ['单日减少（Torn $）', value(row.dailyAmount)], ['距高点减少（Torn $）', value(row.peakAmount)], ['历史进度', `${row.loadedDays || 0}/${row.totalDays || '—'} · 第 ${row.historyBatch || 0} 批（自动续批）`], ['下跌前高点', value(row.peakBefore)], ['下跌前一日', value(row.beforeValue)], ['下跌日净资产', value(row.dropValue)], ['扫描范围', `${day(row.firstDay ?? row.historyStart)} 至 ${day(row.lastDay ?? state.today)}`]]) {
         const wrap = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = name; dd.textContent = text; wrap.append(dt, dd); dl.append(wrap);
       }
       const reason = document.createElement('p'); reason.textContent = row.reason || '—'; article.append(dl, reason); return article;

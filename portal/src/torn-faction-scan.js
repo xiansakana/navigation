@@ -1,4 +1,7 @@
 import { DAY, FACTION_DEFAULTS, factionConfig, historicNetworth, validHistoricPoint, analyzeFactionHistory, possibleFactionEvent, redactFactionKeys } from './torn-faction-analysis.js';
+import { setImmediate as yieldScan } from 'node:timers/promises';
+
+export const HISTORY_BATCH_DAYS = 100;
 
 export function createFactionStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS torn_faction_scans(user_id TEXT PRIMARY KEY, config_json TEXT NOT NULL, run_json TEXT NOT NULL DEFAULT '{}');
@@ -102,9 +105,15 @@ export class FactionScanner {
         this.run.rows = [...factions.values()].sort((a, b) => a.respect - b.respect || a.id - b.id); this.run.listComplete = true; this.run.cursor = 0; persist();
       }
       this.run.keyCount = config.apiKeys.length; this.run.ownerCount = owners?.size || 1;
-      const end = Math.min(this.run.rows.length, this.run.cursor + config.batchSize);
-      this.run.batchEnd = end;
-      while (this.run.cursor < end) {
+      this.run.batchEnd = this.run.cursor;
+      while (this.run.cursor < this.run.rows.length) {
+        check();
+        if (this.run.cursor >= this.run.batchEnd) {
+          this.run.factionBatch = Math.floor(this.run.cursor / config.batchSize) + 1;
+          this.run.batchEnd = Math.min(this.run.rows.length, this.run.cursor + config.batchSize);
+          this.run.stage = '自动扫描帮派第 ' + this.run.factionBatch + ' 批'; persist();
+          await yieldScan(undefined, { signal }); check();
+        }
         check(); const row = this.run.rows[this.run.cursor]; row.status = 'scanning'; row.reason = '核验当前 Leader 和身份时间'; this.run.currentFaction = row.id; persist();
         try {
           const { basic } = await request('faction/' + row.id + '/basic');
@@ -118,7 +127,7 @@ export class FactionScanner {
             const first = config.historyMode === 'full' ? birth : Math.max(birth, today - config.historyDays);
             if (first >= today || today - first > 10000) throw new Error('可用历史范围不足或超过安全上限');
             if (!Number.isSafeInteger(profile.last_action?.timestamp) || profile.last_action.timestamp <= 0 || profile.last_action.timestamp > this.now()) throw new Error('Leader 最后活动时间无效');
-            row.totalDays = today - first + 1; row.loadedDays = 0; row.historyStart = first; row.lastAction = profile.last_action.timestamp; row.B = today - Math.floor(row.lastAction / DAY); row.C = faction.days_in_faction; persist();
+            row.totalDays = today - first + 1; row.loadedDays = 0; row.historyBatch = 1; row.historyStart = first; row.lastAction = profile.last_action.timestamp; row.B = today - Math.floor(row.lastAction / DAY); row.C = faction.days_in_faction; persist();
             const eligibility = possibleFactionEvent({ today, first, lastAction: row.lastAction, daysInFaction: row.C }, config);
             if (!eligibility.possible) {
               Object.assign(row, { status: 'excluded', reason: '身份条件提前排除：历史范围内不存在同时满足 C≥A 和 A−B 的日期', checkedAt: this.now(), earlyExcluded: true });
@@ -140,11 +149,15 @@ export class FactionScanner {
               const from = Math.max(first, Math.floor(point.timestamp / DAY));
               for (let fill = day; fill >= from; fill--) {
                 check();
+                row.historyBatch = Math.floor(row.loadedDays / HISTORY_BATCH_DAYS) + 1;
                 const cached = this.store.point(this.uid, row.leaderId, fill);
                 if (cached && (!validHistoricPoint(cached) || cached.value !== point.value || cached.timestamp !== point.timestamp)) throw new Error('历史缓存与更新时间矛盾，不能跳过该区间');
                 const sample = { ...point, day: fill };
                 if (fill !== day && !cached) this.store.savePoint(this.uid, row.leaderId, sample);
                 points.push(sample); row.loadedDays++;
+                if (row.loadedDays % HISTORY_BATCH_DAYS === 0) {
+                  persist(); await yieldScan(undefined, { signal }); check();
+                }
               }
               this.run.skippedDays = (this.run.skippedDays || 0) + day - from;
               day = from - 1; persist();
@@ -163,7 +176,7 @@ export class FactionScanner {
           row.status = 'unknown'; row.reason = redactFactionKeys(error.message, config); row.checkedAt = this.now(); this.run.cursor++; persist();
         }
       }
-      this.run.stage = this.run.cursor >= this.run.rows.length ? '本次列表扫描完成' : '本批完成，点击继续扫描下一批';
+      this.run.stage = '本次列表扫描完成';
     } catch (error) {
       if (!signal.aborted) this.run.error = redactFactionKeys(error.message, config);
       this.run.stage = signal.aborted ? '已暂停，下次启动从断点继续' : '扫描停止，请查看错误';
