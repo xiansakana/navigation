@@ -1,5 +1,5 @@
 (() => {
-  const $ = id => document.getElementById(id), fields = ['minRespect', 'maxRespect', 'batchSize', 'historyMode', 'historyDays', 'dropMode', 'dailyDropAmount', 'peakDropAmount', 'minDifference', 'maxDifference'];
+  const $ = id => document.getElementById(id), fields = ['minRespect', 'maxRespect', 'batchSize', 'historyDays', 'dropMode', 'dailyDropAmount', 'peakDropAmount', 'minDifference', 'maxDifference'];
   let loaded = false, dirty = false, busy = false, offset = 0;
   const day = value => Number.isInteger(value) ? new Date(value * 86400000).toISOString().slice(0, 10) : '—';
   const value = number => Number.isFinite(number) ? number.toLocaleString() : '—';
@@ -23,14 +23,14 @@
     loaded = true; $('tab-factions').hidden = false;
     const { config, state, permissions, counts } = data;
     if (!dirty) for (const field of fields) $('faction-' + field).value = config[field] ?? '';
-    for (const field of [...fields, 'apiKey']) $('faction-' + field).disabled = !permissions.configure;
+    for (const field of [...fields, 'apiKeys']) $('faction-' + field).disabled = !permissions.configure;
     $('faction-save').hidden = !permissions.configure;
     for (const name of ['start', 'stop', 'reset']) $('faction-' + name).hidden = !permissions.control;
     $('faction-start').disabled = state.running || state.busy || !config.hasKey; $('faction-stop').disabled = !state.running; $('faction-reset').disabled = state.busy;
-    $('faction-key-status').textContent = config.hasKey ? '本账号已保存 Key（不回传浏览器）' : '请保存用于公开帮派与个人统计查询的 API Key';
-    $('faction-estimate').textContent = config.historyMode === 'full' ? '全历史从各 Leader 注册后的第一个完整日快照开始，耗时取决于账号年龄。可先用较小 respect 范围和较小批次试扫。' : `无缓存时每批约 ${config.batchSize * (config.historyDays + 7)} 次详情请求，另加列表分页；队列最多约 40 次/分钟，暂停后可继续。`;
+    $('faction-key-status').textContent = config.hasKey ? `已保存 ${config.keyCount} 个 Key（不回传浏览器）；有效账号数在扫描核验后显示` : '请保存用于公开帮派与个人统计查询的 API Keys';
+    $('faction-estimate').textContent = config.historyMode === 'full' ? 'N 未填写，扫描全历史。倒序按更新时间跳过不变区间；每天变化的账号仍需逐日查询。' : `最近 ${config.historyDays} 天，仅确认窗口内高点；逐日查询上界约 ${config.batchSize * (config.historyDays + 7)} 次详情请求，另加 Key 核验和列表分页。跳过不变区间可减少请求，暂停后可继续。`;
     $('faction-status').textContent = `${state.running ? '运行中' : state.busy ? '停止中' : '已停止'} · ${state.stage || '尚未启动'}${state.error ? ' · ' + state.error : ''}`;
-    $('faction-progress').textContent = `列表 ${state.listed || 0} 个 · 已处理 ${state.cursor || 0} 个 · 成功请求 ${state.requests || 0} · 缓存复用 ${state.cached || 0} · 当前帮派 ${state.currentFaction || '—'} · 当前历史日 ${day(state.currentDay)}`;
+    $('faction-progress').textContent = `列表 ${state.listed || 0} 个 · 已处理 ${state.cursor || 0} 个 · 成功请求 ${state.requests || 0} · 缓存复用 ${state.cached || 0} · 跳过不变日期 ${state.skippedDays || 0} · 有效账号 ${state.ownerCount || '—'} · 当前帮派 ${state.currentFaction || '—'} · 当前历史日 ${day(state.currentDay)}`;
     $('faction-counts').textContent = `命中 ${counts.match} · 已排除 ${counts.excluded} · 待确认 ${counts.unknown} · 扫描中 ${counts.scanning} · 待扫描 ${counts.waiting}（列表完整后按 respect 升序）`;
     const rows = data.rows.map(row => {
       const article = document.createElement('article'); article.className = 'faction-result';
@@ -56,8 +56,8 @@
   $('faction-form').addEventListener('input', () => { dirty = true; });
   $('faction-form').onsubmit = async event => {
     event.preventDefault(); const body = Object.fromEntries(fields.map(field => [field, $('faction-' + field).value]));
-    if ($('faction-apiKey').value.trim()) body.apiKey = $('faction-apiKey').value.trim();
-    try { await api('config', 'POST', body); dirty = false; offset = 0; $('faction-apiKey').value = ''; $('faction-message').textContent = '配置已保存，历史缓存保留；点击启动进行扫描。'; await refresh(); }
+    if ($('faction-apiKeys').value.trim()) body.apiKeys = $('faction-apiKeys').value.trim();
+    try { await api('config', 'POST', body); dirty = false; offset = 0; $('faction-apiKeys').value = ''; $('faction-message').textContent = '配置已保存，历史缓存保留；点击启动进行扫描。'; await refresh(); }
     catch (error) { $('faction-message').textContent = error.message; }
   };
   for (const name of ['start', 'stop', 'reset']) $('faction-' + name).onclick = async () => {

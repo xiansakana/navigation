@@ -1,11 +1,11 @@
 export const DAY = 86400;
-export const FACTION_DEFAULTS = { apiKey: '', minRespect: 0, maxRespect: null, batchSize: 10, historyMode: 'full', historyDays: 365, dropMode: 'daily', dailyDropAmount: 1000000000, peakDropAmount: 1000000000, minDifference: 0, maxDifference: null };
+export const FACTION_DEFAULTS = { apiKey: '', apiKeys: [], minRespect: 0, maxRespect: null, batchSize: 10, historyMode: 'full', historyDays: null, dropMode: 'daily', dailyDropAmount: 1000000000, peakDropAmount: 1000000000, minDifference: 0, maxDifference: null };
 
 export function factionConfig(input, previous = FACTION_DEFAULTS) {
   const result = Object.fromEntries(Object.entries(FACTION_DEFAULTS).map(([key, value]) => [key, previous[key] ?? value]));
   for (const key of ['minDifference', 'maxDifference', 'maxRespect']) if (previous[key] === null) result[key] = null;
   if ('dailyDropPct' in input || 'peakDropPct' in input) throw new Error('跌幅已改为金额，请刷新页面后输入减少金额');
-  for (const [key, min, max] of [['minRespect', 0, 2147483647], ['maxRespect', 0, 2147483647], ['batchSize', 1, 50], ['historyDays', 2, 3650], ['minDifference', -10000, 10000], ['maxDifference', -10000, 10000]]) {
+  for (const [key, min, max] of [['minRespect', 0, 2147483647], ['maxRespect', 0, 2147483647], ['batchSize', 1, 50], ['minDifference', -10000, 10000], ['maxDifference', -10000, 10000]]) {
     if (!(key in input)) continue;
     if (['maxRespect', 'minDifference', 'maxDifference'].includes(key) && (input[key] === '' || input[key] === null)) { result[key] = null; continue; }
     if (!['string', 'number'].includes(typeof input[key]) || input[key] === '' || !Number.isSafeInteger(Number(input[key])) || Number(input[key]) < min || Number(input[key]) > max) throw new Error('筛选范围或批次数值无效');
@@ -19,11 +19,39 @@ export function factionConfig(input, previous = FACTION_DEFAULTS) {
     if (!values.includes(input[key])) throw new Error('筛选方式无效'); result[key] = input[key];
   }
   if (result.maxRespect !== null && result.maxRespect < result.minRespect || result.minDifference !== null && result.maxDifference !== null && result.maxDifference < result.minDifference) throw new Error('上限不能小于下限');
-  if ('apiKey' in input) {
-    result.apiKey = String(input.apiKey || '').trim();
-    if (result.apiKey && !/^[A-Za-z0-9]{16}$/.test(result.apiKey)) throw new Error('API Key 应为 16 位字母或数字');
+  if ('historyDays' in input) {
+    const days = input.historyDays;
+    if (days === null || typeof days === 'string' && !days.trim()) { result.historyDays = null; result.historyMode = 'full'; }
+    else {
+      if (!['number', 'string'].includes(typeof days) || !Number.isSafeInteger(Number(days)) || Number(days) < 2 || Number(days) > 3650) throw new Error('N 须为 2–3650 的整数，留空表示全历史');
+      result.historyDays = Number(days); result.historyMode = input.historyMode === 'full' ? 'full' : 'window';
+    }
   }
+  if (result.historyMode === 'full') result.historyDays = null;
+  else result.historyDays ??= 365; // Accept older clients which only send historyMode.
+  const savedKeys = previous.apiKeys?.length ? previous.apiKeys : previous.apiKey ? [previous.apiKey] : [];
+  const supplied = 'apiKeys' in input ? input.apiKeys : 'apiKey' in input ? input.apiKey : savedKeys;
+  if (!Array.isArray(supplied) && typeof supplied !== 'string') throw new Error('API Keys 格式无效');
+  const keys = typeof supplied === 'string' ? supplied.split(/[\s,，;；]+/).filter(Boolean) : supplied;
+  if (keys.length > 10 || keys.some(key => typeof key !== 'string' || !/^[A-Za-z0-9]{16}$/.test(key))) throw new Error('最多保存 10 个 API Key，每个应为 16 位字母或数字');
+  result.apiKeys = [...new Set(keys)]; result.apiKey = result.apiKeys[0] || '';
   return result;
+}
+
+// Only reject when NO event date in the entire requested scope could satisfy
+// the identity constraints. Do not trim old peaks or select an older event.
+export function possibleFactionEvent({ today, first, lastAction, daysInFaction }, config) {
+  const B = today - Math.floor(lastAction / DAY), C = daysInFaction;
+  if (!Number.isSafeInteger(C) || C < 0 || !Number.isSafeInteger(lastAction) || lastAction <= 0 || B < 0) throw new Error('Leader 身份时间数据无效');
+  const minA = Math.max(0, config.minDifference === null ? 0 : B + config.minDifference);
+  const maxA = Math.min(today - first - 1, C, config.maxDifference === null ? Infinity : B + config.maxDifference);
+  return { possible: minA <= maxA, B, C, minA, maxA };
+}
+
+export function redactFactionKeys(message, config) {
+  let text = String(message);
+  for (const key of config.apiKeys || [config.apiKey]) if (key) text = text.replaceAll(key, '[Key]');
+  return text.slice(0, 240);
 }
 
 export function historicNetworth(data, requestedDay) {

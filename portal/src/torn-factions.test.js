@@ -82,11 +82,12 @@ test('stop, process replacement and resume preserve completed daily cache withou
     if (path.includes('timestamp=' + (today - 2) * DAY)) { entered(); await new Promise(resolve => { release = resolve; }); }
     return base(path);
   } });
+  t.after(async () => { scanner.stop(); release?.(); await scanner.promise; });
   scanner.start(); await waiting; scanner.stop(); release(); await scanner.promise;
-  assert.ok(store.point('a', 1010, today - 3)); assert.equal(scanner.run.cursor, 0);
+  assert.ok(store.point('a', 1010, today - 1)); assert.equal(scanner.run.cursor, 0);
   const resumed = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, request: base }); resumed.start(); await resumed.promise;
   assert.equal(resumed.run.rows[0].status, 'match'); assert.ok(resumed.run.cached >= 1);
-  assert.equal(calls.filter(path => path.includes('timestamp=' + (today - 3) * DAY)).length, 1);
+  assert.equal(calls.filter(path => path.includes('timestamp=' + (today - 1) * DAY)).length, 1);
   assert.equal(calls.filter(path => path.includes('/search')).length, 1);
 });
 

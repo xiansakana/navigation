@@ -1,4 +1,4 @@
-import { DAY, FACTION_DEFAULTS, factionConfig, historicNetworth, validHistoricPoint, analyzeFactionHistory } from './torn-faction-analysis.js';
+import { DAY, FACTION_DEFAULTS, factionConfig, historicNetworth, validHistoricPoint, analyzeFactionHistory, possibleFactionEvent, redactFactionKeys } from './torn-faction-analysis.js';
 
 export function createFactionStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS torn_faction_scans(user_id TEXT PRIMARY KEY, config_json TEXT NOT NULL, run_json TEXT NOT NULL DEFAULT '{}');
@@ -45,7 +45,7 @@ export class FactionScanner {
     if (!this.authorize()) throw new Error('无权启动扫描');
     this.config = this.store.get(this.uid).config;
     if (!this.config.apiKey) throw new Error('请先保存 Public API Key');
-    this.running = true; this.controller = new AbortController(); this.promise = this.scan().catch(error => { this.run.error = String(error.message).replaceAll(this.config.apiKey, '[Key]').slice(0, 240); this.run.stage = '扫描或持久化失败'; this.running = false; this.busy = false; });
+    this.running = true; this.controller = new AbortController(); this.promise = this.scan().catch(error => { this.run.error = redactFactionKeys(error.message, this.config); this.run.stage = '扫描或持久化失败'; this.running = false; this.busy = false; });
   }
   async scan() {
     this.busy = true;
@@ -55,11 +55,25 @@ export class FactionScanner {
       if (Math.floor(this.now() / DAY) !== today) throw Object.assign(new Error('扫描已跨过 Torn 日期，请再次启动刷新当天数据；历史缓存保留'), { fatal: true });
     };
     const persist = () => this.store.saveRun(this.uid, this.run);
-    const request = async path => { check(); const data = await this.request(path, config.apiKey, signal); check(); this.run.requests = (this.run.requests || 0) + 1; return data; };
+    let keys = config.apiKeys, keyCursor = 0;
+    const request = async (path, selectedKey) => { check(); const data = await this.request(path, selectedKey || keys[keyCursor++ % keys.length], signal); check(); this.run.requests = (this.run.requests || 0) + 1; return data; };
     try {
       check(); this.run.error = ''; this.run.startedAt = this.now();
+      const requestsBeforeKeys = this.run.requests || 0;
+      let owners = null;
+      if (keys.length > 1) {
+        this.run.stage = '核验 API Key 所属账号'; persist();
+        owners = new Map();
+        for (const key of keys) {
+          const data = await request('key/info', key), id = data.info?.user?.id;
+          if (!Number.isSafeInteger(id) || id <= 0) throw Object.assign(new Error('无法确认 API Key 所属账号'), { fatal: true });
+          if (!owners.has(id)) owners.set(id, key);
+        }
+        keys = [...owners.values()];
+      }
+      const keyRequests = (this.run.requests || 0) - requestsBeforeKeys;
       if (this.run.today !== today || !this.run.listComplete) {
-        this.run = { today, rows: [], cursor: 0, requests: 0, cached: 0, listComplete: false, stage: '读取帮派列表', startedAt: this.now() }; persist();
+        this.run = { today, rows: [], cursor: 0, requests: keyRequests, cached: 0, skippedDays: 0, listComplete: false, stage: '读取帮派列表', startedAt: this.now() }; persist();
         const filters = ['notDestroyed', 'respect:>=:' + config.minRespect, ...(config.maxRespect === null ? [] : ['respect:<=:' + config.maxRespect])];
         let path = 'faction/search?limit=100&offset=0&filters=' + encodeURIComponent(filters.join(','));
         const visited = new Set(), factions = new Map(); let pages = 0;
@@ -87,6 +101,7 @@ export class FactionScanner {
         }
         this.run.rows = [...factions.values()].sort((a, b) => a.respect - b.respect || a.id - b.id); this.run.listComplete = true; this.run.cursor = 0; persist();
       }
+      this.run.keyCount = config.apiKeys.length; this.run.ownerCount = owners?.size || 1;
       const end = Math.min(this.run.rows.length, this.run.cursor + config.batchSize);
       this.run.batchEnd = end;
       while (this.run.cursor < end) {
@@ -104,9 +119,14 @@ export class FactionScanner {
             if (first >= today || today - first > 10000) throw new Error('可用历史范围不足或超过安全上限');
             if (!Number.isSafeInteger(profile.last_action?.timestamp) || profile.last_action.timestamp <= 0 || profile.last_action.timestamp > this.now()) throw new Error('Leader 最后活动时间无效');
             row.totalDays = today - first + 1; row.loadedDays = 0; row.historyStart = first; row.lastAction = profile.last_action.timestamp; row.B = today - Math.floor(row.lastAction / DAY); row.C = faction.days_in_faction; persist();
+            const eligibility = possibleFactionEvent({ today, first, lastAction: row.lastAction, daysInFaction: row.C }, config);
+            if (!eligibility.possible) {
+              Object.assign(row, { status: 'excluded', reason: '身份条件提前排除：历史范围内不存在同时满足 C≥A 和 A−B 的日期', checkedAt: this.now(), earlyExcluded: true });
+              this.run.cursor++; persist(); continue;
+            }
             const points = [];
-            for (let day = first; day <= today; day++) {
-              check(); this.run.stage = '读取历史 networth'; this.run.currentDay = day;
+            for (let day = today; day >= first;) {
+              check(); this.run.stage = '倒序追溯 networth 更新时间'; this.run.currentDay = day;
               let point = day < today ? this.store.point(this.uid, row.leaderId, day) : null;
               if (point && (!validHistoricPoint(point) || point.day !== day)) point = null;
               if (point) this.run.cached = (this.run.cached || 0) + 1;
@@ -114,7 +134,20 @@ export class FactionScanner {
                 point = historicNetworth(await request('user/' + row.leaderId + '/personalstats?stat=networth&timestamp=' + day * DAY), day);
                 this.store.savePoint(this.uid, row.leaderId, point);
               }
-              points.push(point); row.loadedDays++; persist();
+              // The API's last-update timestamp proves that the as-of value
+              // was unchanged until this query day. Retain a continuous daily
+              // series for peak/recovery checks, but avoid those API requests.
+              const from = Math.max(first, Math.floor(point.timestamp / DAY));
+              for (let fill = day; fill >= from; fill--) {
+                check();
+                const cached = this.store.point(this.uid, row.leaderId, fill);
+                if (cached && (!validHistoricPoint(cached) || cached.value !== point.value || cached.timestamp !== point.timestamp)) throw new Error('历史缓存与更新时间矛盾，不能跳过该区间');
+                const sample = { ...point, day: fill };
+                if (fill !== day && !cached) this.store.savePoint(this.uid, row.leaderId, sample);
+                points.push(sample); row.loadedDays++;
+              }
+              this.run.skippedDays = (this.run.skippedDays || 0) + day - from;
+              day = from - 1; persist();
             }
             // Leadership/membership may change during a long history scan.
             const { basic: current } = await request('faction/' + row.id + '/basic');
@@ -127,12 +160,12 @@ export class FactionScanner {
           this.run.cursor++; persist();
         } catch (error) {
           if (signal.aborted || error.fatal) throw error;
-          row.status = 'unknown'; row.reason = String(error.message).replaceAll(config.apiKey, '[Key]').slice(0, 240); row.checkedAt = this.now(); this.run.cursor++; persist();
+          row.status = 'unknown'; row.reason = redactFactionKeys(error.message, config); row.checkedAt = this.now(); this.run.cursor++; persist();
         }
       }
       this.run.stage = this.run.cursor >= this.run.rows.length ? '本次列表扫描完成' : '本批完成，点击继续扫描下一批';
     } catch (error) {
-      if (!signal.aborted) this.run.error = String(error.message).replaceAll(config.apiKey, '[Key]').slice(0, 240);
+      if (!signal.aborted) this.run.error = redactFactionKeys(error.message, config);
       this.run.stage = signal.aborted ? '已暂停，下次启动从断点继续' : '扫描停止，请查看错误';
       const row = this.run.rows?.[this.run.cursor]; if (row?.status === 'scanning') { this.run.currentFaction = row.id; row.status = 'waiting'; row.reason = '已中断，历史缓存保留，等待继续'; }
     } finally { persist(); this.running = false; this.busy = false; }

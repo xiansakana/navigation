@@ -36,19 +36,20 @@ export function chainConfig(input, previous = DEFAULT_CHAIN_CONFIG) {
   return result;
 }
 
-// One queue for this Portal process: <= 40 requests/minute, leaving headroom
-// for other tools. Torn's per-user quota also includes external services.
-export function createChainApiClient({ fetchImpl = fetch, spacingMs = 1500 } = {}) {
+// One serial lane: approximately 40 requests/minute, leaving headroom for
+// other tools. The Portal client below groups these lanes by Torn account.
+export function createChainApiClient({ fetchImpl = fetch, spacingMs = 1500, beforeFetch = async () => {} } = {}) {
   let queue = Promise.resolve(), nextAt = 0;
   return (path, key, signal) => {
     const job = queue.catch(() => {}).then(async () => {
       signal?.throwIfAborted();
       const url = new URL(path, 'https://api.torn.com/v2/');
-      const v2 = /^\/v2\/(faction\/(warfarechains|search|\d+\/(chain|chainreport|basic))|user\/\d+\/(profile|faction|personalstats))$/.test(url.pathname);
+      const v2 = /^\/v2\/(key\/info|faction\/(warfarechains|search|\d+\/(chain|chainreport|basic))|user\/\d+\/(profile|faction|personalstats))$/.test(url.pathname);
       const legacyReport = /^\/torn\/[1-9]\d*$/.test(url.pathname) && url.searchParams.get('selections') === 'chainreport';
       if (url.origin !== 'https://api.torn.com' || !v2 && !legacyReport) throw new Error('API 分页地址无效');
       url.searchParams.set('key', key); url.searchParams.set('comment', 'NavChain');
       await delay(Math.max(0, nextAt - Date.now()), undefined, { signal });
+      await beforeFetch(signal);
       signal?.throwIfAborted(); nextAt = Date.now() + spacingMs;
       let response;
       try { response = await fetchImpl(url.href, { signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(15000)]), headers: { Accept: 'application/json' }, redirect: 'error' }); }
@@ -58,7 +59,7 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 1500 } = {
       const data = await response.json().catch(() => { throw new Error('Torn API 返回无效数据'); });
       if (data.error) {
         const code = Number(data.error.code);
-        throw Object.assign(new Error('Torn API 错误 ' + code + ([1, 2, 10, 13, 16, 18].includes(code) ? '，请检查 Key 和权限' : '')), { apiCode: code, fatal: [1, 2, 5, 8, 9, 10, 13, 16, 18].includes(code) });
+        throw Object.assign(new Error('Torn API 错误 ' + code + ([1, 2, 10, 13, 16, 18].includes(code) ? '，请检查 Key 和权限' : '')), { apiCode: code, fatal: [1, 2, 5, 8, 9, 10, 13, 14, 16, 18].includes(code) });
       }
       return data;
     });
@@ -66,9 +67,47 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 1500 } = {
   };
 }
 
-// Portal-owned Torn modules share this queue so simultaneous scans do not
-// independently consume the same account's request allowance.
-export const portalTornRequest = createChainApiClient();
+// Resolve key ownership before allocating lanes: all keys of the same Torn
+// player, including Chain keys, must share one quota. Unknown keys are checked
+// serially. The process also caps aggregate starts to 10/s across owners.
+export function createTornAccountClient({ fetchImpl = fetch, spacingMs = 1500, globalSpacingMs = 100 } = {}) {
+  const identities = new Map(), lanes = new Map();
+  let globalQueue = Promise.resolve(), globalNext = 0, blockedUntil = 0;
+  const beforeFetch = signal => {
+    const job = globalQueue.catch(() => {}).then(async () => {
+      if (Date.now() < blockedUntil) throw Object.assign(new Error('Torn API 限流冷却中，请稍后手动启动'), { fatal: true });
+      await delay(Math.max(0, globalNext - Date.now()), undefined, { signal });
+      if (Date.now() < blockedUntil) throw Object.assign(new Error('Torn API 限流冷却中，请稍后手动启动'), { fatal: true });
+      signal?.throwIfAborted(); globalNext = Date.now() + globalSpacingMs;
+    });
+    globalQueue = job.catch(() => {}); return job;
+  };
+  const options = { fetchImpl, spacingMs, beforeFetch }, bootstrap = createChainApiClient(options);
+  const identity = (key, signal) => {
+    if (!identities.has(key)) {
+      const pending = bootstrap('key/info', key, signal).then(data => {
+        if (!Number.isSafeInteger(data.info?.user?.id) || data.info.user.id <= 0) throw Object.assign(new Error('无法确认 API Key 所属账号，扫描已停止'), { fatal: true });
+        return data;
+      }).catch(error => { identities.delete(key); throw error; });
+      identities.set(key, pending);
+    }
+    return identities.get(key);
+  };
+  return async (path, key, signal) => {
+    try {
+      const data = await identity(key, signal); signal?.throwIfAborted();
+      if (path === 'key/info') return data;
+      const owner = data.info.user.id;
+      if (!lanes.has(owner)) lanes.set(owner, createChainApiClient(options));
+      return await lanes.get(owner)(path, key, signal);
+    } catch (error) {
+      if ([5, 8, 9].includes(error.apiCode) || /已限流/.test(error.message)) blockedUntil = Date.now() + 60000;
+      throw error;
+    }
+  };
+}
+
+export const portalTornRequest = createTornAccountClient();
 
 export function createChainStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS torn_chain_monitors (

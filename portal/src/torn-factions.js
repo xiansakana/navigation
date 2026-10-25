@@ -25,14 +25,14 @@ export function createFactionService({ store, request = portalTornRequest, autho
     try {
       const monitor = scanner(uid);
       if (route === '/state' && req.method === 'GET') {
-        const { apiKey, ...config } = store.get(uid).config, { rows = [], ...state } = monitor.status();
+        const { apiKey, apiKeys, ...config } = store.get(uid).config, { rows = [], ...state } = monitor.status();
         const filter = url.searchParams.get('filter') || 'all';
         if (!['all', 'match', 'excluded', 'unknown', 'waiting', 'scanning'].includes(filter)) throw new Error('结果筛选无效');
         const visible = filter === 'all' ? rows : rows.filter(row => row.status === filter);
         const offset = Number(url.searchParams.get('offset') || 0), limit = 50;
         if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('分页位置无效');
         const counts = Object.fromEntries(['match', 'excluded', 'unknown', 'waiting', 'scanning'].map(status => [status, rows.filter(row => row.status === status).length]));
-        return json(res, 200, { ok: true, config: { ...config, hasKey: !!apiKey }, state, counts, rows: visible.slice(offset, offset + limit), total: visible.length, offset, limit, permissions: { configure: canFactionScan(session, 'config:edit'), control: canFactionScan(session, 'control:edit') } });
+        return json(res, 200, { ok: true, config: { ...config, hasKey: !!apiKey, keyCount: apiKeys.length }, state, counts, rows: visible.slice(offset, offset + limit), total: visible.length, offset, limit, permissions: { configure: canFactionScan(session, 'config:edit'), control: canFactionScan(session, 'control:edit') } });
       }
       if (route === '/config' && req.method === 'POST') {
         const input = await readJson(req, 4096); factionConfig(input, store.get(uid).config);

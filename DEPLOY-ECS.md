@@ -105,7 +105,7 @@ Deploy Key 需加到 **navigation** 仓库（可与 torn-scripts 共用同一密
 
 ## 六、添加非 Torn 服务
 
-Chain 页“帮派筛选”Tab 只更新 `portal`；自动新增 `torn_faction_scans`、`torn_faction_rows`、`torn_faction_networth`，备份含三表并保护其中的 Key。新模块在个人数据策略目录注册，权限路径为 Torn 工具箱 → Chain 监控 → 帮派筛选。默认不启动扫描，Public Key 在该 Tab 单独保存；历史查询与 Chain 共用队列，详见[帮派筛选](docs/torn-faction-screener.md)。
+Chain 页“帮派筛选”Tab 只更新 `portal`；自动新增 `torn_faction_scans`、`torn_faction_rows`、`torn_faction_networth`，备份含三表并保护其中的 Key。新模块在个人数据策略目录注册，权限路径为 Torn 工具箱 → Chain 监控 → 帮派筛选。默认不启动扫描，Public Keys（最多 10 个）在该 Tab 单独保存，旧单 Key 自动兼容；按 Key 所属 Torn 账号与 Chain 共用限速队列，不同账号可分担查询。历史扫描倒序跳过不变区间，身份条件提前排除不可能命中的帮主；N 留空即全历史。无新增表或额外进程，备份仍需保护全部 Keys，详见[帮派筛选](docs/torn-faction-screener.md)。
 
 Chain 监控是 Portal 内置的 Torn 工具箱子模块，入口 `/torn-toolbox/chain/`；通知管理集成更新 `portal,qq-bot`。首次访问自动建立按用户隔离的 `torn_chain_monitors`、`torn_chain_notifications` 表；备份包含两表并按凭据保护其中的 API Key。新增权限和操作说明见 [Chain 监控](docs/torn-chain-monitor.md)。部署后不自动启动扫描或打开通知开关。
 

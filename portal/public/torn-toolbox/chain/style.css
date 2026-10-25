@@ -2,7 +2,7 @@
 .chain-panel { margin: 18px 0; padding: 20px; border: 1px solid var(--border, #425066); border-radius: 12px; background: var(--bg-card, rgba(128,128,128,.06)); }
 .chain-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
 .chain-fields label { display: grid; gap: 8px; min-width: 0; }
-.chain-fields input { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid var(--border, #64748b); border-radius: 7px; background: var(--bg-input, transparent); color: inherit; }
+.chain-fields input, .chain-fields textarea { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid var(--border, #64748b); border-radius: 7px; background: var(--bg-input, transparent); color: inherit; }
 .chain-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .chain-note, #coverage { font-size: .9rem; opacity: .8; line-height: 1.6; }
 .chain-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 20px; padding: 16px 0; border-top: 1px solid var(--border, #425066); }
@@ -47,3 +47,5 @@
 .faction-result dd { margin: 3px 0; }
 #faction-message { min-height: 1.5em; }
 @media (max-width: 700px) { .faction-result dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.chain-fields textarea { min-width: 0; resize: vertical; font: inherit; }
