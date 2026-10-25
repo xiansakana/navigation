@@ -204,3 +204,46 @@ test('revoked authorization stops the batch before another request and keeps an 
   const scanner = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, authorize: () => allowed, request: async path => { count++; const data = await base(path); if (path.endsWith('/profile')) allowed = false; return data; } });
   scanner.start(); await scanner.promise; assert.equal(count, 3); assert.equal(scanner.run.cursor, 0); assert.equal(scanner.run.rows[0].status, 'waiting'); assert.match(scanner.run.error, /权限/);
 });
+
+test('rate limit waits and retries the same request/key, then completes automatic batches', async t => {
+  const store = fixture(t), base = mockRequest(), attempts = [], waits = [];
+  let limited = true, scanner;
+  scanner = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, wait: async ms => {
+    waits.push(ms); assert.equal(scanner.running, true); assert.ok(scanner.run.retryAt); assert.match(store.get('a').run.stage, /冷却后自动重试/);
+  }, request: async (path, key) => {
+    attempts.push({ path, key });
+    if (limited && path.endsWith('/basic')) { limited = false; throw Object.assign(new Error('Torn API 错误 5'), { apiCode: 5, fatal: true }); }
+    return base(path);
+  } });
+  scanner.start(); await scanner.promise;
+  assert.deepEqual(waits, [65000]); assert.equal(scanner.run.cursor, 2); assert.ok(scanner.run.rows.every(row => row.status === 'match'));
+  assert.deepEqual(attempts[1], attempts[2]); assert.equal(scanner.run.retryAt, null); assert.ok(!scanner.run.error);
+});
+
+test('continued rate limiting backs off three times and stops without losing the current cursor', async t => {
+  const store = fixture(t), base = mockRequest(), waits = []; let attempts = 0;
+  const scanner = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, wait: async ms => { waits.push(ms); }, request: async path => {
+    if (path.endsWith('/basic')) { attempts++; throw Object.assign(new Error('Torn API 错误 5'), { apiCode: 5, fatal: true }); }
+    return base(path);
+  } });
+  scanner.start(); await scanner.promise;
+  assert.deepEqual(waits, [65000, 130000, 260000]); assert.equal(attempts, 4); assert.equal(scanner.run.cursor, 0); assert.equal(scanner.run.rows[0].status, 'waiting'); assert.match(scanner.run.error, /自动重试 3 次/); assert.equal(scanner.run.retryAt, null);
+});
+
+test('rate cooldown honors server delay, supports immediate pause and never retries bans or invalid keys', async t => {
+  const store = fixture(t), base = mockRequest(); let waiting;
+  const entered = new Promise(resolve => { waiting = resolve; });
+  const scanner = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, wait: async (ms, _, { signal }) => {
+    assert.equal(ms, 90000); waiting(); await new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  }, request: async path => {
+    if (path.endsWith('/basic')) throw Object.assign(new Error('HTTP 429'), { rateLimited: true, fatal: true, retryAfterMs: 90000 });
+    return base(path);
+  } });
+  scanner.start(); await entered; scanner.stop(); await scanner.promise;
+  assert.equal(scanner.run.retryAt, null); assert.match(scanner.run.stage, /已暂停/); assert.equal(scanner.run.cursor, 0);
+  for (const apiCode of [2, 8, 9, 14]) {
+    let waits = 0; scanner.wait = async () => { waits++; };
+    scanner.request = async () => { throw Object.assign(new Error('Torn API 错误 ' + apiCode), { apiCode, fatal: true }); };
+    scanner.start(); await scanner.promise; assert.equal(waits, 0); assert.match(scanner.run.error, new RegExp('错误 ' + apiCode));
+  }
+});

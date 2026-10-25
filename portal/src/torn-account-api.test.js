@@ -71,3 +71,17 @@ test('unverified identity and rate limits stop work without trying another crede
   const daily = createTornAccountClient({ spacingMs: 0, globalSpacingMs: 0, fetchImpl: async url => response(new URL(url).pathname.endsWith('/info') ? { info: { user: { id: 1 } } } : { error: { code: 14 } }) });
   await assert.rejects(daily('user/10/profile', keys[0]), error => error.fatal && error.apiCode === 14);
 });
+
+test('cooldown metadata honors Retry-After and distinguishes account limits from IP bans', async () => {
+  for (const code of [5, 8, 'http429']) {
+    let calls = 0;
+    const client = createTornAccountClient({ spacingMs: 0, globalSpacingMs: 0, fetchImpl: async url => {
+      calls++;
+      if (new URL(url).pathname.endsWith('/info')) return response({ info: { user: { id: 1 } } });
+      return code === 'http429' ? { status: 429, ok: false, headers: new Headers({ 'Retry-After': '90' }) } : response({ error: { code } });
+    } });
+    await assert.rejects(client('user/10/profile', keys[0]), error => code === 'http429' ? error.rateLimited && error.retryAfterMs === 90000 : error.apiCode === code);
+    await assert.rejects(client('user/10/profile', keys[0]), error => error.localCooldown && (code === 8 ? !error.rateLimited && error.apiCode === 8 : error.rateLimited && error.retryAfterMs > (code === 'http429' ? 80000 : 50000)));
+    assert.equal(calls, 2);
+  }
+});

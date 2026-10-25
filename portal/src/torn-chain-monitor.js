@@ -54,12 +54,16 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 1500, befo
       let response;
       try { response = await fetchImpl(url.href, { signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(15000)]), headers: { Accept: 'application/json' }, redirect: 'error' }); }
       catch { if (signal?.aborted) signal.throwIfAborted(); throw new Error('Torn API 网络异常或超时'); }
-      if (response.status === 429) throw Object.assign(new Error('Torn API 已限流，监控已停止，请稍后手动启动'), { fatal: true });
+      if (response.status === 429) {
+        const header = response.headers?.get?.('retry-after'), seconds = Number(header);
+        const retryAfterMs = header && Number.isFinite(seconds) ? seconds * 1000 : header ? Date.parse(header) - Date.now() : 65000;
+        throw Object.assign(new Error('Torn API 已限流'), { fatal: true, rateLimited: true, retryAfterMs: Math.max(65000, Number.isFinite(retryAfterMs) ? retryAfterMs : 65000) });
+      }
       if (!response.ok) throw new Error('Torn API HTTP ' + response.status);
       const data = await response.json().catch(() => { throw new Error('Torn API 返回无效数据'); });
       if (data.error) {
         const code = Number(data.error.code);
-        throw Object.assign(new Error('Torn API 错误 ' + code + ([1, 2, 10, 13, 16, 18].includes(code) ? '，请检查 Key 和权限' : '')), { apiCode: code, fatal: [1, 2, 5, 8, 9, 10, 13, 14, 16, 18].includes(code) });
+        throw Object.assign(new Error('Torn API 错误 ' + code + (code === 5 ? '：账号请求过多，请等待冷却' : [1, 2, 10, 13, 16, 18].includes(code) ? '，请检查 Key 和权限' : '')), { apiCode: code, fatal: [1, 2, 5, 8, 9, 10, 13, 14, 16, 18].includes(code) });
       }
       return data;
     });
@@ -72,12 +76,13 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 1500, befo
 // serially. The process also caps aggregate starts to 10/s across owners.
 export function createTornAccountClient({ fetchImpl = fetch, spacingMs = 1500, globalSpacingMs = 100 } = {}) {
   const identities = new Map(), lanes = new Map();
-  let globalQueue = Promise.resolve(), globalNext = 0, blockedUntil = 0;
+  let globalQueue = Promise.resolve(), globalNext = 0, blockedUntil = 0, blockedCode;
+  const cooldownError = () => Object.assign(new Error('Torn API 限流冷却中'), { fatal: true, localCooldown: true, apiCode: blockedCode, rateLimited: ![8, 9].includes(blockedCode), retryAfterMs: Math.max(0, blockedUntil - Date.now()) });
   const beforeFetch = signal => {
     const job = globalQueue.catch(() => {}).then(async () => {
-      if (Date.now() < blockedUntil) throw Object.assign(new Error('Torn API 限流冷却中，请稍后手动启动'), { fatal: true });
+      if (Date.now() < blockedUntil) throw cooldownError();
       await delay(Math.max(0, globalNext - Date.now()), undefined, { signal });
-      if (Date.now() < blockedUntil) throw Object.assign(new Error('Torn API 限流冷却中，请稍后手动启动'), { fatal: true });
+      if (Date.now() < blockedUntil) throw cooldownError();
       signal?.throwIfAborted(); globalNext = Date.now() + globalSpacingMs;
     });
     globalQueue = job.catch(() => {}); return job;
@@ -101,7 +106,9 @@ export function createTornAccountClient({ fetchImpl = fetch, spacingMs = 1500, g
       if (!lanes.has(owner)) lanes.set(owner, createChainApiClient(options));
       return await lanes.get(owner)(path, key, signal);
     } catch (error) {
-      if ([5, 8, 9].includes(error.apiCode) || /已限流/.test(error.message)) blockedUntil = Date.now() + 60000;
+      if (!error.localCooldown && ([5, 8, 9].includes(error.apiCode) || error.rateLimited)) {
+        blockedUntil = Math.max(blockedUntil, Date.now() + Math.max(60000, error.retryAfterMs || 0)); blockedCode = error.apiCode;
+      }
       throw error;
     }
   };

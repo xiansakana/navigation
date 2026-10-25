@@ -29,7 +29,8 @@
     $('faction-start').disabled = state.running || state.busy || !config.hasKey; $('faction-stop').disabled = !state.running; $('faction-reset').disabled = state.busy;
     $('faction-key-status').textContent = config.hasKey ? `已保存 ${config.keyCount} 个 Key（不回传浏览器）；有效账号数在扫描核验后显示` : '请保存用于公开帮派与个人统计查询的 API Keys';
     $('faction-estimate').textContent = config.historyMode === 'full' ? 'N 未填写，扫描全历史。倒序按更新时间跳过不变区间；每天变化的账号仍需逐日查询。' : `最近 ${config.historyDays} 天，仅确认窗口内高点；逐日查询上界约 ${config.batchSize * (config.historyDays + 7)} 次详情请求，另加 Key 核验和列表分页。跳过不变区间可减少请求，暂停后可继续。`;
-    $('faction-status').textContent = `${state.running ? '运行中' : state.busy ? '停止中' : '已停止'} · ${state.stage || '尚未启动'}${state.error ? ' · ' + state.error : ''}`;
+    const retry = state.running && state.retryAt ? ` · 约 ${Math.max(0, Math.ceil(state.retryAt - Date.now() / 1000))} 秒后重试` : '';
+    $('faction-status').textContent = `${state.running ? '运行中' : state.busy ? '停止中' : '已停止'} · ${state.stage || '尚未启动'}${retry}${state.error ? ' · ' + state.error : ''}`;
     $('faction-progress').textContent = `列表 ${state.listed || 0} 个 · 已处理 ${state.cursor || 0} 个 · 帮派第 ${state.factionBatch || 0} 批（自动续批） · 成功请求 ${state.requests || 0} · 缓存复用 ${state.cached || 0} · 跳过不变日期 ${state.skippedDays || 0} · 有效账号 ${state.ownerCount || '—'} · 当前帮派 ${state.currentFaction || '—'} · 当前历史日 ${day(state.currentDay)}`;
     $('faction-counts').textContent = `命中 ${counts.match} · 已排除 ${counts.excluded} · 待确认 ${counts.unknown} · 扫描中 ${counts.scanning} · 待扫描 ${counts.waiting}（列表完整后按 respect 升序）`;
     const rows = data.rows.map(row => {

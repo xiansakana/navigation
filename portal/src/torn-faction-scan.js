@@ -1,5 +1,5 @@
 import { DAY, FACTION_DEFAULTS, factionConfig, historicNetworth, validHistoricPoint, analyzeFactionHistory, possibleFactionEvent, redactFactionKeys } from './torn-faction-analysis.js';
-import { setImmediate as yieldScan } from 'node:timers/promises';
+import { setImmediate as yieldScan, setTimeout as waitForRetry } from 'node:timers/promises';
 
 export const HISTORY_BATCH_DAYS = 100;
 
@@ -38,8 +38,8 @@ export function createFactionStore(db) {
 }
 
 export class FactionScanner {
-  constructor({ uid, store, request, authorize = () => true, now = () => Math.floor(Date.now() / 1000) }) {
-    Object.assign(this, { uid, store, request, authorize, now }); this.running = false; this.busy = false; this.run = store.get(uid).run;
+  constructor({ uid, store, request, authorize = () => true, now = () => Math.floor(Date.now() / 1000), wait = waitForRetry }) {
+    Object.assign(this, { uid, store, request, authorize, now, wait }); this.running = false; this.busy = false; this.run = store.get(uid).run;
   }
   status() { return { ...this.run, running: this.running, busy: this.busy }; }
   stop() { this.running = false; this.controller?.abort(); }
@@ -59,9 +59,28 @@ export class FactionScanner {
     };
     const persist = () => this.store.saveRun(this.uid, this.run);
     let keys = config.apiKeys, keyCursor = 0;
-    const request = async (path, selectedKey) => { check(); const data = await this.request(path, selectedKey || keys[keyCursor++ % keys.length], signal); check(); this.run.requests = (this.run.requests || 0) + 1; return data; };
+    const request = async (path, selectedKey) => {
+      const key = selectedKey || keys[keyCursor++ % keys.length];
+      const stage = this.run.stage;
+      for (let attempt = 0; ; attempt++) {
+        check();
+        try {
+          const data = await this.request(path, key, signal); check();
+          this.run.requests = (this.run.requests || 0) + 1; return data;
+        } catch (error) {
+          if (signal.aborted || !this.running || !this.authorize()) throw error;
+          if (error.apiCode !== 5 && !error.rateLimited || [8, 9].includes(error.apiCode)) throw error;
+          if (attempt >= 3) throw Object.assign(new Error('Torn API 持续限流，自动重试 3 次后停止；进度与缓存保留，请减少同账号其他工具的请求后继续'), { fatal: true });
+          const ms = Math.max(65000 * 2 ** attempt, Number(error.retryAfterMs) || 0);
+          this.run.retryAt = this.now() + Math.ceil(ms / 1000); this.run.rateLimitRetries = attempt + 1;
+          this.run.stage = 'Torn API 请求过多，冷却后自动重试（' + (attempt + 1) + '/3）'; persist();
+          try { await this.wait(ms, undefined, { signal }); check(); }
+          finally { this.run.retryAt = null; this.run.rateLimitRetries = 0; this.run.stage = stage; persist(); }
+        }
+      }
+    };
     try {
-      check(); this.run.error = ''; this.run.startedAt = this.now();
+      check(); this.run.error = ''; this.run.retryAt = null; this.run.rateLimitRetries = 0; this.run.startedAt = this.now();
       const requestsBeforeKeys = this.run.requests || 0;
       let owners = null;
       if (keys.length > 1) {
