@@ -266,7 +266,9 @@ export class ChainMonitor {
     try {
       check(); const candidates = new Map(), visited = new Set(), skipped = new Set();
       const belowMinimum = hits => Number.isSafeInteger(hits) && hits >= 0 && hits < this.config.minHits;
-      let path = 'faction/warfarechains?cat=active&limit=100', pages = 0;
+      // Oldest starts first: default descending pages expose older pages as
+      // `prev`, while `next` can be null even on a full first page.
+      let path = 'faction/warfarechains?cat=active&limit=100&sort=asc', pages = 0;
       while (path) {
         check(); if (visited.has(path)) { stats.partial = true; break; } visited.add(path);
         const data = await this.request(path, this.config.apiKey, signal); check();
@@ -277,7 +279,13 @@ export class ChainMonitor {
           candidates.set(row.id, row); skipped.delete(row.id); if (old) old.listedAt = this.now();
         }
         path = data._metadata?.links?.next || null; pages++;
-        if (data.warfarechains.length === 100 && !data._metadata?.links) stats.partial = true;
+        // Live active responses can omit BOTH links on a full ascending page.
+        // `from` is inclusive; retain the boundary and deduplicate Chain IDs.
+        if (!path && data.warfarechains.length === 100) {
+          const starts = data.warfarechains.map(row => row.start);
+          if (starts.every(start => Number.isSafeInteger(start) && start > 0)) path = 'faction/warfarechains?cat=active&limit=100&sort=asc&from=' + Math.max(...starts);
+          else stats.partial = true;
+        }
         if (path && pages >= 10) { stats.partial = true; break; }
       }
       const listedIds = new Set(candidates.keys());

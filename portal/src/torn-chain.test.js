@@ -147,6 +147,26 @@ test('minimum hits filters before details without truncating pages and admits ch
   assert.deepEqual(calls, [1, 2, 3]); assert.equal(m.status().belowMinimum, 0);
 });
 
+test('full ascending active pages without links continue by inclusive start cursor instead of hiding long chains', async t => {
+  const store = fixture(t), paths = [], details = [];
+  const m = monitor(store, async path => {
+    if (path.includes('warfarechains')) {
+      paths.push(path); assert.match(path, /sort=asc/);
+      if (path.includes('from=1099')) return page([{ ...candidate(100), chain: 50, start: 1099 }, { ...candidate(101), chain: 300, start: 1100 }]);
+      return page(Array.from({ length: 100 }, (_, i) => ({ ...candidate(i + 1), chain: 50, start: 1000 + i })));
+    }
+    const id = Number(path.split('/')[1]) - 100; details.push(id); return detail(id, 300);
+  });
+  m.start(); await m.promise; m.stop();
+  assert.equal(paths.length, 2); assert.deepEqual(details, [101]); assert.equal(m.status().candidates, 1); assert.equal(m.status().belowMinimum, 100); assert.equal(m.status().partial, false);
+});
+
+test('a full same-timestamp page reports incomplete coverage instead of looping or claiming an empty complete list', async t => {
+  const store = fixture(t); let pages = 0;
+  const m = monitor(store, async () => { pages++; return page(Array.from({ length: 100 }, (_, i) => ({ ...candidate(i + 1), chain: 50, start: 1000 }))); });
+  m.start(); await m.promise; m.stop(); assert.equal(pages, 2); assert.equal(m.status().partial, true);
+});
+
 test('previously qualifying active chains survive short/absent listings to detect cooldown', async t => {
   const store = fixture(t); let phase = 0;
   const m = monitor(store, async path => {
