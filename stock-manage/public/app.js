@@ -399,8 +399,10 @@ function holdingsCellContent(h, key, ctx) {
     case 'cost':
       return maskCol('cost', formatPrice(h.avgCost, cur) + lots);
     case 'price': {
+      const sourceLabel = h.quoteSource === 'cboe-delayed-midpoint' ? 'Cboe 延时报价（买卖中间价）'
+        : h.quoteSource === 'polygon-daily-delayed' ? 'Polygon 延时日线' : `${h.quoteSource || '供应商'}延时行情`;
       const delayHint = h.delayed
-        ? ` <span class="hint" title="期权实时快照未授权，当前为 Polygon 延时日线${h.quoteAsOf ? `（截至 ${h.quoteAsOf}）` : ''}">延时</span>`
+        ? ` <span class="hint" title="${escapeHtml(sourceLabel + (h.quoteAsOf ? `（截至 ${h.quoteAsOf}）` : ''))}">延时</span>`
         : '';
       return maskCol('price', `<span>${formatPrice(h.price, cur)}</span>${delayHint}${can('refresh', 'edit') ? ` <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>` : ''}`);
     }
