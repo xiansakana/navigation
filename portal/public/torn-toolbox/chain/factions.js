@@ -25,6 +25,7 @@
     if (!dirty) for (const field of fields) $('faction-' + field).value = config[field] ?? '';
     for (const field of [...fields, 'apiKeys']) $('faction-' + field).disabled = !permissions.configure;
     $('faction-save').hidden = !permissions.configure;
+    $('faction-readonly-note').hidden = permissions.configure || permissions.control;
     for (const name of ['start', 'stop', 'reset']) $('faction-' + name).hidden = !permissions.control;
     $('faction-start').disabled = state.running || state.busy || !config.hasKey; $('faction-stop').disabled = !state.running; $('faction-reset').disabled = state.busy;
     const skipped = (state.skippedKeys || []).map(key => `Key #${key.index}（${key.reason}）`).join('、');

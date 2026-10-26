@@ -187,7 +187,9 @@ test('networth automatically crosses sample batches and can pause while filling 
 test('new tab permissions declare full hierarchy and personal data policy registration', () => {
   assert.equal(accessModules([]).find(row => row.id === 'torn-factions').kind, 'personal');
   for (const permission of SYSTEM_PERMISSIONS.filter(row => row.id.startsWith('torn-factions:'))) assert.deepEqual(permission.permissionPath.slice(0, 4), ['首页', 'Torn 工具箱', 'Chain 监控', '帮派筛选']);
-  assert.equal(canFactionScan({ userId: 'a', permissions: ['*'], isGuest: true }), false);
+  assert.equal(canFactionScan({ userId: 'a', permissions: ['*'], isGuest: true }), true);
+  assert.equal(canFactionScan({ userId: 'a', permissions: ['*'], isGuest: true }, 'control:edit'), false);
+  assert.equal(canFactionScan({ userId: 'a', permissions: ['*'], isGuest: true }, 'config:edit'), false);
   assert.equal(canFactionScan({ userId: 'a', permissions: ['*'], dataAccess: { permissions: ['torn-chain:view', 'torn-factions:view'] } }, 'control:edit'), false);
 });
 

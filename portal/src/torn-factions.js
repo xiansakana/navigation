@@ -9,7 +9,7 @@ import { createFactionStore, FactionScanner } from './torn-faction-scan.js';
 
 export function canFactionScan(session, action = 'view') {
   const permissions = session?.dataAccess?.permissions || session?.permissions || [];
-  return !!session?.userId && !session.isGuest && hasPermission(permissions, 'torn-chain:view') && hasPermission(permissions, 'torn-factions:view') && hasPermission(permissions, 'torn-factions:' + action);
+  return !!session?.userId && (!session.isGuest || action === 'view') && hasPermission(permissions, 'torn-chain:view') && hasPermission(permissions, 'torn-factions:view') && hasPermission(permissions, 'torn-factions:' + action);
 }
 
 export function createFactionService({ store, request = portalTornRequest, authorize = () => true, scannerOptions = {} }) {

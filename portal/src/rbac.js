@@ -411,6 +411,10 @@ function ensureGuestAccess(data, config) {
         guestRole.permissions = Array.from(new Set((guestRole.permissions || []).concat('torn-chain:view')));
         data.guestChainBrowsingVersion = 1;
     }
+    if (newGuestRole || !data.guestFactionBrowsingVersion) {
+        guestRole.permissions = Array.from(new Set((guestRole.permissions || []).concat('torn-factions:view')));
+        data.guestFactionBrowsingVersion = 1;
+    }
     if (!data.guestCashPermissionsMigrated) guestRole.permissions = (guestRole.permissions || []).filter(function(permission) {
         return permission !== stockManageFeaturePermissionId('cash', 'view')
             && permission !== stockManageFeaturePermissionId('cash', 'edit');

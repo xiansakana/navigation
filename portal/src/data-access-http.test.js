@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { startAccessPortal } from './test-fixtures/access-portal.js';
 import { createChainStore } from './torn-chain-monitor.js';
 import { modulePolicy } from './access-policy.js';
+import { createFactionStore } from './torn-faction-scan.js';
 
 test('real Portal enforces shared read/write scopes, spoofing protection, policy revocation and audit identity', { timeout: 20000 }, async () => {
   const f = await startAccessPortal();
@@ -59,6 +60,17 @@ test('anonymous Chain browsing follows only explicit read grants and rejects all
     }
     assert.equal((await fetch(f.baseUrl + '/api/torn-chain/start', { method: 'POST', headers: { 'X-Navigation-Data-Scope': 'self' } })).status, 403);
     assert.equal((await fetch(f.baseUrl + '/api/torn-chain/state', { headers: { 'X-Navigation-Data-Scope': 'user:' + f.a.id } })).status, 403);
+    const factions = createFactionStore(f.db), secondKey = 'abcdef1234567890';
+    factions.save(f.b.id, { apiKeys: [key, secondKey] });
+    factions.saveRun(f.b.id, { cursor: 1, listed: 1, listComplete: true, rows: [{ id: 5, respect: 100, leaderId: 1000, status: 'match', name: 'Shared screening result' }] });
+    f.update(r => { r.accessPolicy.modules['torn-factions'] = { ...modulePolicy(r, 'torn-factions'), grants: [{ kind: 'role', id: 'role_guest', scope, read: true, write: false }] }; });
+    const factionResponse = await fetch(f.baseUrl + '/api/torn-factions/state?filter=match&offset=0', { headers: { Cookie: 'portal_scope_torn-factions=self' } });
+    const factionData = await factionResponse.json(); assert.equal(factionResponse.status, 200); assert.equal(factionData.rows[0].id, 5); assert.deepEqual(factionData.permissions, { configure: false, control: false });
+    assert.ok(!JSON.stringify(factionData).includes(key)); assert.ok(!JSON.stringify(factionData).includes(secondKey));
+    for (const route of ['config', 'start', 'stop', 'reset']) assert.equal((await fetch(f.baseUrl + '/api/torn-factions/' + route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 403);
+    assert.equal((await fetch(f.baseUrl + '/api/torn-factions/state', { headers: { 'X-Navigation-Data-Scope': 'user:' + f.a.id } })).status, 403);
+    f.update(r => { r.accessPolicy.modules['torn-factions'].grants = []; });
+    assert.equal((await fetch(f.baseUrl + '/api/torn-factions/state', { headers: { 'X-Navigation-Data-Scope': scope } })).status, 403);
     f.update(r => { r.accessPolicy.modules['torn-chain'].grants = []; });
     assert.equal((await fetch(f.baseUrl + '/api/torn-chain/state', { headers: { 'X-Navigation-Data-Scope': scope } })).status, 403);
     assert.equal((await (await fetch(f.baseUrl + '/api/torn-chain/state')).json()).history.length, 0);

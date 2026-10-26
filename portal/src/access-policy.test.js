@@ -31,8 +31,11 @@ test('guest Chain view is granted once and later administrator revocation is res
   const rbac = { users: [], roles: [] }, config = { services: [] };
   ensureGuestAccess(rbac, config); const role = rbac.roles.find(role => role.id === 'role_guest');
   assert.ok(role.permissions.includes('torn-chain:view')); assert.ok(!role.permissions.includes('torn-chain:control:edit'));
+  assert.ok(role.permissions.includes('torn-factions:view')); assert.ok(!role.permissions.includes('torn-factions:control:edit'));
   role.permissions = role.permissions.filter(p => p !== 'torn-chain:view'); ensureGuestAccess(rbac, config);
   assert.ok(!role.permissions.includes('torn-chain:view'));
+  role.permissions = role.permissions.filter(p => p !== 'torn-factions:view'); ensureGuestAccess(rbac, config);
+  assert.ok(!role.permissions.includes('torn-factions:view'));
 });
 test('personal scope does not implicitly grant another owner even to an administrator', () => {
   const rbac = fixture();

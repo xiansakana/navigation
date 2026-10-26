@@ -81,7 +81,7 @@ test('sync preserves permissions saved for every existing role', function() {
 
     assert.deepEqual(
         data.roles.find(function(role) { return role.id === 'role_guest'; }).permissions,
-        ['service:piclist:view', 'service:notifications:edit', 'codex-cli:view', 'knowledge:view', 'knowledge:notes:view', 'mingli:view', 'mingli:chart:calculate', 'torn-chain:view']
+        ['service:piclist:view', 'service:notifications:edit', 'codex-cli:view', 'knowledge:view', 'knowledge:notes:view', 'mingli:view', 'mingli:chart:calculate', 'torn-chain:view', 'torn-factions:view']
     );
     assert.deepEqual(
         data.roles.find(function(role) { return role.id === 'role_custom'; }).permissions,
