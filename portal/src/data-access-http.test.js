@@ -51,6 +51,8 @@ test('anonymous Chain browsing follows only explicit read grants and rejects all
     f.update(r => { r.accessPolicy.modules['torn-chain'] = { ...modulePolicy(r, 'torn-chain'), grants: [{ kind: 'role', id: 'role_guest', scope, read: true, write: false }] }; });
     const read = await fetch(f.baseUrl + '/api/torn-chain/state'), data = await read.json();
     assert.equal(read.status, 200); assert.equal(data.history[0].id, 77); assert.ok(!JSON.stringify(data).includes(key)); assert.equal(data.permissions.control, false);
+    const formerSelf = await fetch(f.baseUrl + '/api/torn-chain/state', { headers: { Cookie: 'portal_scope_torn-chain=self' } });
+    assert.equal((await formerSelf.json()).history[0].id, 77); // An administrator's prior self-scope cookie cannot hide the guest share.
     assert.equal((await fetch(f.baseUrl + '/torn-toolbox/chain/')).status, 200);
     for (const [path, method] of [['config', 'POST'], ['start', 'POST'], ['stop', 'POST'], ['history', 'DELETE'], ['notifications/test', 'POST']]) {
       assert.equal((await fetch(f.baseUrl + '/api/torn-chain/' + path, { method, headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 403);
