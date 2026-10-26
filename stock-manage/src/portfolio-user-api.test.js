@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import XLSX from 'xlsx';
 import { createRequire } from 'node:module';
 import { createBookkeepingStore } from '../../portal/src/bookkeeping-store.js';
@@ -18,7 +18,13 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
   await new Promise((resolve) => listener.close(resolve));
   fs.writeFileSync(path.join(directory, 'config.json'), JSON.stringify({ server: { host: '127.0.0.1', port }, dbPath: path.join(directory, 'db.sqlite'), dataFile: path.join(directory, 'empty.json') }));
   const server = fileURLToPath(new URL('./server.js', import.meta.url));
-  const child = spawn(process.execPath, [server], { cwd: directory, env: { ...process.env, NAVIGATION_DB_PATH: path.join(directory, 'db.sqlite') }, stdio: 'ignore' });
+  const provider = path.join(directory, 'quote-provider.mjs');
+  fs.writeFileSync(provider, `globalThis.fetch = async url => {
+    if (String(url).includes('/chart/AAPL')) return Response.json({chart:{result:[{meta:{regularMarketPrice:25,chartPreviousClose:20}}]}});
+    if (String(url).includes('fredgraph.csv')) return new Response('observation_date,DEXCHUS\\n2026-10-23,7.1\\n');
+    throw new Error('Unexpected fixture request');
+  };`);
+  const child = spawn(process.execPath, ['--import', pathToFileURL(provider).href, server], { cwd: directory, env: { ...process.env, NAVIGATION_DB_PATH: path.join(directory, 'db.sqlite') }, stdio: 'ignore' });
   const base = `http://127.0.0.1:${port}/api`;
   const call = (url, user, method = 'GET', body) => fetch(base + url, { method, headers: { ...(user ? { 'x-portal-user-id': user, 'x-portal-permissions': Buffer.from('["*"]').toString('base64url') } : {}), 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
   try {
@@ -70,6 +76,13 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.equal(assigned.trades[0].account_id, investment.id);
     assert.equal(assigned.holdings[0].accountName, '券商');
     assert.equal(assigned.cashUsd, 100);
+    assert.deepEqual(assigned.missingQuotes, ['AAPL']);
+    assert.equal(assigned.summary.totalAssets, null);
+    const refreshed = await (await call('/quotes/refresh', 'a', 'POST', { symbol: 'AAPL' })).json();
+    assert.equal(refreshed.refresh.ok, 1);
+    assert.deepEqual(refreshed.missingQuotes, []);
+    assert.equal(refreshed.summary.totalAssets, 125);
+    assert.equal(refreshed.cashUsd, 100);
     const readonly = await fetch(base + '/accounts', { headers: { 'x-portal-user-id': 'a', 'x-portal-permissions': Buffer.from('["service:stock-manage:accounts:view"]').toString('base64url') } });
     const masked = await readonly.json();
     assert.equal('cash' in masked.accounts[0], false);

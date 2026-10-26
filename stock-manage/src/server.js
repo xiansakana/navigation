@@ -176,6 +176,7 @@ function portfolioForRequest(req, data = store.read()) {
   portfolio.investmentAccounts = accounts.map(({ id, name, currency }) => ({ id, name, currency }));
   portfolio.accountCashEnabled = !!data.accountCashEnabled;
   const incomplete = accounts.filter((a) => (!req.query.accountId || req.query.accountId === a.id) && a.missingQuotes.length);
+  portfolio.missingQuotes = [...new Set(incomplete.flatMap(a => a.missingQuotes))];
   if (incomplete.length) {
     portfolio.summary.totalAssets = null; portfolio.summary.totalAssetsCny = null; portfolio.summary.totalMv = null;
     if (incomplete.some((a) => a.currency === 'USD')) portfolio.summary.assetsUsd = null;
@@ -976,8 +977,8 @@ app.post('/api/quotes/refresh', async (req, res) => {
   }
   data.quotes = updated;
   data.cash = cashUsdEquivalent(data.cashUsd, data.cashCny, data.usdCnyRate);
-  store.write(data);
-  const payload = portfolioForRequest(req, data);
+  const saved = store.write(data);
+  const payload = portfolioForRequest(req, saved);
   payload.refresh = { ok, failed: errors.length, errors };
   if (!ok && errors.length) {
     return res.status(502).json({ error: '行情刷新全部失败', ...payload });

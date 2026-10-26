@@ -574,8 +574,35 @@ export function createQuoteService(config) {
     };
   }
 
+  let cboeOptionCache = null;
+  let cboeOptionPending = null;
+  async function getCboeOption(upper, parsed) {
+    if (parsed.underlying !== 'QQQ') throw new Error('Cboe 备用期权行情目前仅支持 QQQ');
+    if (!cboeOptionCache || Date.now() - cboeOptionCache.at >= 60000) {
+      if (!cboeOptionPending) cboeOptionPending = (async () => {
+        const data = await fetchJson('https://cdn.cboe.com/api/global/delayed_quotes/options/QQQ.json');
+        const asOf = cboeUtcTimestampToIso(data?.timestamp);
+        if (!asOf) throw new Error('Cboe 行情缺少有效报价时间');
+        const prices = new Map((data?.data?.options || []).map(row => [row.option, {
+          bid: row.bid, ask: row.ask, prevClose: row.prev_day_close
+        }]));
+        cboeOptionCache = { at: Date.now(), asOf, prices };
+      })().finally(() => { cboeOptionPending = null; });
+      await cboeOptionPending;
+    }
+    const row = cboeOptionCache.prices.get(toPolygonOptionSymbol(upper).slice(2));
+    if (!row) throw new Error(`Cboe 未找到合约 ${upper}`);
+    const bid = row.bid == null ? NaN : Number(row.bid);
+    const ask = row.ask == null ? NaN : Number(row.ask);
+    if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid < 0 || ask < bid || !(ask > 0)) throw new Error(`Cboe 合约 ${upper} 无有效买卖报价`);
+    const price = (bid + ask) / 2;
+    const prevClose = Number(row.prevClose) > 0 ? Number(row.prevClose) : undefined;
+    return { price, prevClose, change: prevClose ? price - prevClose : 0,
+      changePercent: prevClose ? (price / prevClose - 1) * 100 : 0,
+      delayed: true, asOf: cboeOptionCache.asOf, source: 'cboe-delayed-midpoint', details: {} };
+  }
+
   async function getOption(symbol) {
-    if (!polygonKey) throw new Error('未配置 Polygon API Key');
     const upper = String(symbol).toUpperCase();
     const parsed = parseOptionSymbol(upper);
     if (!parsed) throw new Error('期权代码格式错误');
@@ -584,15 +611,16 @@ export function createQuoteService(config) {
     let quote = null;
     let snapErr = null;
     try {
+      if (!polygonKey) throw new Error('未配置 Polygon API Key');
       quote = await getOptionFromSnapshot(polygonSymbol, parsed.underlying);
     } catch (e) {
       snapErr = e;
       try {
+        if (!polygonKey) throw new Error('未配置 Polygon API Key');
         quote = await getOptionFromDailyBars(polygonSymbol);
       } catch (e2) {
-        throw new Error(
-          `Polygon 期权价格不可用（snapshot: ${snapErr.message}; daily: ${e2.message}）`
-        );
+        try { quote = await getCboeOption(upper, parsed); }
+        catch (fallback) { throw new Error(`期权行情不可用（Polygon: ${snapErr.message}; daily: ${e2.message}; Cboe: ${fallback.message}）`); }
       }
     }
 
@@ -600,7 +628,7 @@ export function createQuoteService(config) {
     const details = quote.details || {};
     if (details.expiration_date || details.strike_price) {
       name = `${parsed.underlying} ${details.expiration_date || parsed.expiration} ${details.contract_type || parsed.type} $${details.strike_price || parsed.strike}`;
-    } else {
+    } else if (polygonKey && quote.source !== 'cboe-delayed-midpoint') {
       try {
         const contractUrl =
           `https://api.polygon.io/v3/reference/options/contracts/${encodeURIComponent(polygonSymbol)}` +
@@ -612,6 +640,8 @@ export function createQuoteService(config) {
       } catch {
         name = `${parsed.underlying} ${parsed.expiration} ${parsed.type} $${parsed.strike}`;
       }
+    } else {
+      name = `${parsed.underlying} ${parsed.expiration} ${parsed.type} $${parsed.strike}`;
     }
 
     return {

@@ -291,6 +291,7 @@ function renderDashboard() {
       <div class="sm-summary-card sm-summary-card--accent sm-summary-card--assets">
         <div class="label">总资产</div>
         <div class="value">${maskDashboardValue(totalAssetsLine)}</div>
+        ${state.missingQuotes?.length ? `<div class="hint">缺少报价：${state.missingQuotes.map(escapeHtml).join('、')}。请刷新价格；报价补齐后恢复总资产。</div>` : ''}
         <div class="sm-asset-split">
           <div class="sm-asset-split-item">
             <span class="sm-asset-split-label">美元资产</span>
@@ -1240,8 +1241,12 @@ async function refreshQuotes(symbol) {
   if (quotesRefreshBusy || !can('refresh', 'edit')) return;
   quotesRefreshBusy = true;
   const btn = $('#btn-refresh');
+  const buttonText = btn?.textContent;
+  const status = $('#quote-refresh-status');
+  const report = (message) => { if (status) { status.hidden = false; status.textContent = message; } };
+  report(symbol ? `正在刷新 ${symbol} 报价…` : '正在刷新持仓报价，请稍候…');
   const rowBtns = [...document.querySelectorAll('[data-refresh]')];
-  if (btn) btn.disabled = true;
+  if (btn) { btn.disabled = true; btn.textContent = '刷新中…'; }
   rowBtns.forEach((el) => { el.disabled = true; });
   try {
     const body = symbol ? { symbol } : undefined;
@@ -1250,15 +1255,20 @@ async function refreshQuotes(symbol) {
     const r = data.refresh;
     if (r?.failed) {
       const msg = r.errors.slice(0, 5).map((e) => `${e.symbol}: ${e.error}`).join(' · ');
-      toastRefresh('warn', `已刷新 ${r.ok} 个，失败 ${r.failed} 个：${msg}`);
+      const message = `已刷新 ${r.ok} 个，失败 ${r.failed} 个：${msg}`;
+      report(message);
+      toastRefresh('warn', message);
     } else if (r?.ok) {
-      toastRefresh('success', symbol ? `已刷新 ${symbol} 报价` : `已刷新 ${r.ok} 个报价`);
+      const message = symbol ? `已刷新 ${symbol} 报价` : `已刷新 ${r.ok} 个报价`;
+      report(message);
+      toastRefresh('success', message);
     }
   } catch (e) {
+    report(`刷新失败：${e.message}`);
     toastRefresh('error', e.message);
   } finally {
     quotesRefreshBusy = false;
-    if (btn) btn.disabled = false;
+    if (btn) { btn.disabled = false; btn.textContent = buttonText; }
     rowBtns.forEach((el) => { el.disabled = false; });
   }
 }

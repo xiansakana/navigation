@@ -24,6 +24,46 @@ function response(data, status = 200) {
   };
 }
 
+test('held QQQ option uses an exact Cboe match without Polygon and shares concurrent requests', async (context) => {
+  const originalFetch = global.fetch;
+  context.after(() => { global.fetch = originalFetch; });
+  let requests = 0;
+  global.fetch = async url => {
+    requests++;
+    assert.match(String(url), /cdn\.cboe\.com.*QQQ\.json/);
+    return response({ timestamp: '2026-10-26 14:49:08', data: { options: [
+      { option: 'QQQ261027C00715000', bid: 1.55, ask: 1.56, prev_day_close: 2.21 },
+      { option: 'QQQ261027P00720000', bid: 2, ask: 2.2, prev_day_close: 3 }
+    ] } });
+  };
+  const service = createQuoteService({});
+  const [call, put] = await Promise.all([service.getOption('QQQ261027C715'), service.getOption('QQQ261027P720')]);
+  assert.ok(Math.abs(call.price - 1.555) < 1e-9);
+  assert.equal(call.delayed, true);
+  assert.equal(call.asOf, '2026-10-26T14:49:08.000Z');
+  assert.equal(call.source, 'cboe-delayed-midpoint');
+  assert.ok(Math.abs(call.change - (1.555 - 2.21)) < 1e-9);
+  assert.equal(put.price, 2.1);
+  await service.getOption('QQQ261027C715');
+  assert.equal(requests, 1);
+  await assert.rejects(service.getOption('QQQ261027C999'), /Cboe 未找到合约/);
+});
+
+test('held QQQ quote falls back after Polygon errors and rejects invalid books', async (context) => {
+  const originalFetch = global.fetch;
+  context.after(() => { global.fetch = originalFetch; });
+  global.fetch = async url => String(url).includes('polygon.io') ? response({}, 403) : response({ timestamp: '2026-10-26 14:49:08', data: { options: [
+    { option: 'QQQ261027C00715000', bid: 1, ask: 1.2 }
+  ] } });
+  assert.equal((await createQuoteService({ polygonApiKey: 'fixture' }).getOption('QQQ261027C715')).source, 'cboe-delayed-midpoint');
+  for (const row of [{bid:2,ask:1},{bid:0,ask:0},{bid:null,ask:2}]) {
+    global.fetch = async () => response({ timestamp:'2026-10-26 14:49:08', data:{options:[{option:'QQQ261027C00715000',...row}]} });
+    await assert.rejects(createQuoteService({}).getOption('QQQ261027C715'), /无有效买卖报价/);
+  }
+  global.fetch = async () => response({ data:{options:[]} });
+  await assert.rejects(createQuoteService({}).getOption('QQQ261027C715'), /缺少有效报价时间/);
+});
+
 test('US stock quote falls back to Yahoo when Finnhub is not configured', async (context) => {
   const originalFetch = global.fetch;
   context.after(() => { global.fetch = originalFetch; });
