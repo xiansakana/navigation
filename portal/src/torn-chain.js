@@ -8,8 +8,9 @@ import { BONUS_HITS } from './torn-chain-bonuses.js';
 import { ChainMonitor, portalTornRequest, createChainStore, chainConfig } from './torn-chain-monitor.js';
 
 export function canTornChain(session, action = 'view') {
-  return !!session?.userId && !session.isGuest && hasPermission(session.permissions || [], 'torn-chain:view')
-    && hasPermission(session.permissions || [], 'torn-chain:' + action);
+  const permissions = session?.dataAccess?.permissions || session?.permissions || [];
+  return !!session?.userId && (!session.isGuest || action === 'view') && hasPermission(permissions, 'torn-chain:view')
+    && hasPermission(permissions, 'torn-chain:' + action);
 }
 
 export function createTornChainService({ store, request = portalTornRequest, authorize = () => true, authorizeNotify = () => false, sendNotification = async () => { throw new Error('通知管理连接未配置'); }, monitorOptions = {} }) {

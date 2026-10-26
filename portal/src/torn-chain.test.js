@@ -240,7 +240,7 @@ test('Portal API enforces permissions, CSRF, user ownership and key redaction', 
   }
   const initial = await call('state'); assert.equal(initial.status, 200); assert.ok(!JSON.stringify(initial).includes(key)); assert.equal(initial.data.permissions.control, false);
   assert.equal((await call('start', 'POST')).status, 403);
-  assert.equal((await call('state', 'GET', undefined, { isGuest: true, permissions: ['*'] })).status, 403);
+  assert.equal((await call('state', 'GET', undefined, { isGuest: true, permissions: ['*'] })).status, 200);
   const admin = { permissions: ['*'] };
   assert.equal((await call('config', 'POST', { minHits: 200 }, admin, { origin: 'https://evil.test' })).status, 403);
   assert.equal((await call('config', 'POST', { minHits: 200 }, admin)).status, 200);
@@ -262,4 +262,19 @@ test('native Chain page and API bypass toolbox proxies and declare action permis
   assert.equal(resolveRoute(services, '/torn-toolbox/company/', 'GET').kind, 'proxy');
   assert.ok(!canTornChain({ userId: 'a', permissions: ['torn-chain:control:edit'] }, 'control:edit'));
   for (const permission of SYSTEM_PERMISSIONS.filter(p => p.id.startsWith('torn-chain:'))) assert.deepEqual(permission.permissionPath.slice(0, 3), permission.id.startsWith('torn-chain:notify:') ? ['首页', '通知管理', '业务提醒'] : ['首页', 'Torn 工具箱', 'Chain 监控']);
+});
+
+test('guests can read the authorized owner state but can never mutate, obtain keys or read notification settings', async t => {
+  const store = fixture(t); store.record('a', candidate(1), detail(1, 100, 2000).chain, false, 1000);
+  const service = createTornChainService({ store, request: async () => { throw new Error('read must not call Torn'); } });
+  const session = { userId: 'a', actorUserId: 'guest', isGuest: true, permissions: ['*'], dataAccess: { permissions: ['torn-chain:view'] } };
+  const call = async (route, method = 'GET') => {
+    const req = Readable.from([Buffer.from('{}')]); req.method = method; req.headers = { host: 'local' };
+    let result; await service.handle(req, { setHeader() {} }, new URL('http://local/api/torn-chain/' + route), session, (_, status, data) => { result = { status, data }; }); return result;
+  };
+  const state = await call('state'); assert.equal(state.status, 200); assert.equal(state.data.history.length, 1); assert.ok(!JSON.stringify(state.data).includes(key));
+  assert.deepEqual(state.data.permissions, { configure: false, control: false, clear: false });
+  for (const [route, method] of [['config', 'POST'], ['start', 'POST'], ['stop', 'POST'], ['history', 'DELETE'], ['notifications', 'GET'], ['notifications/test', 'POST']]) assert.equal((await call(route, method)).status, 403);
+  assert.equal(canTornChain({ userId: 'guest', isGuest: true, permissions: ['*'] }, 'control:edit'), false);
+  assert.equal(canTornChain({ userId: 'a', permissions: ['*'], dataAccess: { permissions: ['torn-chain:view'] } }, 'control:edit'), false);
 });

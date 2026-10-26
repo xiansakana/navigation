@@ -21,6 +21,7 @@
     <section id="chain-view" role="tabpanel" aria-labelledby="tab-chain">
     <p>冷却通知可在<a href="/notifications/#chain-notifications">通知管理 → 业务提醒 → Chain 冷却</a>中配置。</p>
     <p>发现进入冷却的 Chain，手动打开 report。首次扫描已有的冷却记录标记为“首次发现”；持续观察到 Active → Cooldown 才标记为“刚进入冷却”。</p>
+    <p id="chain-readonly-note" class="chain-note" hidden>当前为只读查看，可查看已授权的监控状态和冷却记录；修改配置、启停及清空记录需要编辑权限。</p>
     <p class="chain-note">API 请求间隔可设 1–60 秒，默认 2 秒；轮次间隔是整轮完成后的等待。同一 Torn 账号同时用于两个功能时，按较慢的 API 间隔共享额度；同账号多个 Key 不叠加。</p>
     <section class="chain-panel">
       <form id="config-form">
@@ -85,7 +86,7 @@
   </main>
   <script src="/theme.js"></script>
   <script src="/layout.js?v=layout-20261018"></script>
-  <script src="/torn-toolbox/chain/app.js?v=8"></script>
+  <script src="/torn-toolbox/chain/app.js?v=9"></script>
   <script src="/torn-toolbox/chain/factions.js?v=8"></script>
 </body>
 </html>

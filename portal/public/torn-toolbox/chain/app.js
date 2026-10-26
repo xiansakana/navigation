@@ -55,6 +55,7 @@
     $('save').hidden = $('clear-key').hidden = !permissions.configure;
     $('start').hidden = $('stop').hidden = !permissions.control;
     $('clear-history').hidden = !permissions.clear;
+    $('chain-readonly-note').hidden = permissions.configure || permissions.control || permissions.clear;
     $('clear-key').disabled = !config.hasKey;
     $('start').disabled = state.running || state.busy || !config.hasKey;
     $('stop').disabled = !state.running;

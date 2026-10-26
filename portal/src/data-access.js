@@ -27,9 +27,12 @@ export function stripPortalIdentity(req) {
 }
 export function requestDataAccess(req, session, moduleId, config, action) {
   const url = new URL(req.url, 'http://localhost');
-  const scope = req.headers['x-navigation-data-scope'] || parseCookies(req)[scopeCookie(moduleId)];
+  let scope = req.headers['x-navigation-data-scope'] || parseCookies(req)[scopeCookie(moduleId)];
   if (scope && (typeof scope !== 'string' || scope.length > 256)) throw Object.assign(new Error('数据范围无效'), { status: 400 });
   const rbac = loadRbac(config);
+  if (!scope && session.isGuest && moduleId === 'torn-chain') {
+    scope = listDataAccess(rbac, session, moduleId, config.services).find(item => /^(user|team):/.test(item.scope))?.scope;
+  }
   const access = resolveDataAccess(rbac, session, moduleId, scope, action || dataRequestAction(req, url.pathname), config.services);
   access.writable = false;
   try { resolveDataAccess(rbac, session, moduleId, access.scope, 'write', config.services); access.writable = true; } catch { /* Keep the API and UI read-only. */ }

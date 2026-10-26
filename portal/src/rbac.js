@@ -407,6 +407,10 @@ function ensureGuestAccess(data, config) {
         )));
         data.guestModuleBrowsingVersion = 1;
     }
+    if (newGuestRole || !data.guestChainBrowsingVersion) {
+        guestRole.permissions = Array.from(new Set((guestRole.permissions || []).concat('torn-chain:view')));
+        data.guestChainBrowsingVersion = 1;
+    }
     if (!data.guestCashPermissionsMigrated) guestRole.permissions = (guestRole.permissions || []).filter(function(permission) {
         return permission !== stockManageFeaturePermissionId('cash', 'view')
             && permission !== stockManageFeaturePermissionId('cash', 'edit');
