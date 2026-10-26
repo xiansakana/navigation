@@ -36,6 +36,10 @@ test('management page and redacted config API are available', async function() {
         assert.equal(body.config.napcat.hasAccessToken, true);
         assert.equal(body.config.napcat.accessToken, undefined);
         assert.equal(body.channels[0].ready, true);
+        const login = await (await fetch(base + '/api/monitors/qq-login')).json();
+        assert.equal(login.ok, true);
+        assert.equal(login.status, null);
+        assert.equal(login.bookkeeping.connected, false);
     });
 });
 

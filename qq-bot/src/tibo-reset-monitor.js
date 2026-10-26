@@ -231,24 +231,31 @@ function formatMessage(tweet, decision) {
 
 export async function deliverToChannels(config, message, alreadySent, send, onDelivered) {
     var sent = new Set(alreadySent || []);
-    for (var channel of config.monitors?.tiboReset?.channels || ['qq']) {
-        if (sent.has(channel)) continue;
-        var qq = config.monitors?.tiboReset?.qq;
-        if (channel === 'qq' && qq?.useDefaultTarget === false) {
-            if (!qq.targets?.length) throw new Error('Tibo 未配置 QQ 通知目标');
-            for (var target of qq.targets) {
-                var deliveryKey = 'qq:' + target.id;
-                if (sent.has(deliveryKey)) continue;
-                await send(config, channel, message, target);
-                sent.add(deliveryKey);
-                onDelivered?.(Array.from(sent));
+    var failures = [];
+    await Promise.all((config.monitors?.tiboReset?.channels || ['qq']).map(async function(channel) {
+        if (sent.has(channel)) return;
+        try {
+            var qq = config.monitors?.tiboReset?.qq;
+            if (channel === 'qq' && qq?.useDefaultTarget === false) {
+                if (!qq.targets?.length) throw new Error('Tibo 未配置 QQ 通知目标');
+                for (var target of qq.targets) {
+                    var deliveryKey = 'qq:' + target.id;
+                    if (sent.has(deliveryKey)) continue;
+                    try {
+                        await send(config, channel, message, target);
+                        sent.add(deliveryKey);
+                        onDelivered?.(Array.from(sent));
+                    } catch { failures.push(deliveryKey); }
+                }
+                if (!qq.targets.every(target => sent.has('qq:' + target.id))) return;
+            } else {
+                await send(config, channel, message);
             }
-        } else {
-            await send(config, channel, message);
-        }
-        sent.add(channel);
-        onDelivered?.(Array.from(sent));
-    }
+            sent.add(channel);
+            onDelivered?.(Array.from(sent));
+        } catch { failures.push(channel); }
+    }));
+    if (failures.length) throw new Error('Tibo 通知未全部投递（' + failures.join('、') + '），未成功的目标会自动重试');
     return Array.from(sent);
 }
 

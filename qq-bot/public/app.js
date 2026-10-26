@@ -108,6 +108,17 @@ async function loadMonitor() {
     catch (err) { byId('monitor-detail').textContent = '状态读取失败：' + err.message; }
 }
 
+async function loadQqHealth() {
+    try {
+        var data = await api('api/monitors/qq-login'), status = data.status;
+        var connection = data.bookkeeping?.connected ? '已连接 NapCat（不代表 QQ 在线）' : '未连接 NapCat';
+        var login = !status ? '自动检测未启用' : status.online === true ? 'QQ 账号在线' : status.online === false ? 'QQ 账号离线／登录失效' : 'QQ 登录状态待检测';
+        byId('qq-login-status').textContent = login + ' · 消息接收：' + connection + (status?.lastCheckedAt ? ' · 检查于 ' + new Date(status.lastCheckedAt).toLocaleString('zh-CN') : '');
+        var channels = (status?.alertChannels || []).map(function(c) { return (c.id === 'email' ? '邮件' : 'Slack') + (c.ready ? '已接入' : '未启用或配置不完整'); });
+        byId('qq-alert-status').textContent = '独立掉线告警：' + (channels.join('；') || '未启用') + '。确认掉线后告警并尝试自动恢复，恢复失败及重新在线各通知一次。' + (status?.alertError || '');
+    } catch (err) { byId('qq-login-status').textContent = 'QQ 登录状态读取失败：' + err.message; }
+}
+
 function renderStatus(channels) {
     var enabled = channels.filter(function(item) { return item.enabled; }).length;
     var ready = channels.filter(function(item) { return item.enabled && item.ready; }).length;
@@ -262,5 +273,6 @@ document.querySelectorAll('[data-test]').forEach(function(button) {
 
 Promise.all([api('api/config'), loadAccess()]).then(function(results) {
     fill(results[0]);
-    return loadMonitor();
+    return Promise.all([loadMonitor(), loadQqHealth()]);
 }).catch(function(err) { toast('加载失败：' + err.message, true); }).finally(function() { window.navigationSkeleton?.finish(); });
+setInterval(function() { if (!document.hidden) { loadQqHealth(); loadMonitor(); } }, 30000);

@@ -9,6 +9,9 @@ export async function sendEmail(channel, message, options) {
         host: smtp.host,
         port: Number(smtp.port) || 465,
         secure: smtp.secure !== false,
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000,
         auth: smtp.user ? { user: smtp.user, pass: smtp.pass || '' } : undefined,
         disableFileAccess: true,
         disableUrlAccess: true

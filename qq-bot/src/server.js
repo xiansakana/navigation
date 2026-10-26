@@ -86,11 +86,11 @@ async function sendThrough(config, channel, body, adapters) {
     if (!body.message) throw new Error('缺少 message 字段');
     if (channel === 'qq') {
         if (!config.channels.qq.enabled) throw new Error('QQ 渠道未启用');
-        return sendMessage(config.napcat, qqTarget(config, body), body.message);
+        return (adapters?.sendQq || sendMessage)(config.napcat, qqTarget(config, body), body.message);
     }
     if (channel === 'email') {
         if (!config.channels.email.enabled) throw new Error('邮件渠道未启用');
-        return sendEmail(config.channels.email, body.message, body);
+        return (adapters?.sendEmail || sendEmail)(config.channels.email, body.message, body);
     }
     if (channel === 'slack') {
         if (!config.channels.slack.enabled) throw new Error('Slack 渠道未启用');
@@ -118,6 +118,10 @@ function channelStatus(config) {
 
 export function createNotificationServer(initialConfig, options) {
     var config = initialConfig || loadConfig();
+    var watchdog = options?.startMonitors ? startLoginWatchdog(() => config, {
+        ...options?.watchdog,
+        send: (channel, message, meta) => sendThrough(config, channel, { message, ...meta }, options)
+    }) : null;
     var business = createBusinessService(config, {
         fetcher: options?.fetch || fetch,
         persist: options?.saveBusiness || saveConfig,
@@ -140,7 +144,7 @@ export function createNotificationServer(initialConfig, options) {
         var url = new URL(req.url, 'http://127.0.0.1');
         try {
             if (req.method === 'GET' && url.pathname === '/health') {
-                return json(res, 200, { ok: true, channels: channelStatus(config), bookkeeping:receiver.status(), codex:codex.status() });
+                return json(res, 200, { ok: true, channels: channelStatus(config), bookkeeping:receiver.status(), codex:codex.status(), qqLogin: watchdog?.status() || null });
             }
             if (req.method === 'GET' && url.pathname === '/api/config') {
                 return json(res, 200, { ok: true, config: publicConfig(config), channels: channelStatus(config) });
@@ -170,6 +174,9 @@ export function createNotificationServer(initialConfig, options) {
             }
             if (req.method === 'GET' && url.pathname === '/api/monitors/tibo-reset') {
                 return json(res, 200, { ok: true, status: monitor?.status() || null });
+            }
+            if (req.method === 'GET' && url.pathname === '/api/monitors/qq-login') {
+                return json(res, 200, { ok: true, status: watchdog?.status() || null, bookkeeping: receiver.status() });
             }
             if (req.method === 'POST' && url.pathname === '/api/monitors/tibo-reset/check') {
                 if (!monitor) return json(res, 503, { ok: false, error: '监听器未启动' });
@@ -211,7 +218,8 @@ export function createNotificationServer(initialConfig, options) {
             return json(res, 400, { ok: false, error: err.message });
         }
     });
-    server.on('close',()=>{receiver.stop();codex.stop();});
+    server.on('close',()=>{receiver.stop();codex.stop();watchdog?.stop();monitor?.stop();});
+    server.loginWatchdog = watchdog;
     server.codexService = codex;
     server.bookkeepingReceiver = receiver;
     server.tiboResetMonitor = monitor;
@@ -228,7 +236,6 @@ async function main() {
         const wait = setInterval(() => {if(!server.codexService.status().running){clearInterval(wait);process.exit(0);}},100);
         setTimeout(()=>process.exit(1),10000).unref();
     });
-    startLoginWatchdog(config);
     server.listen(port, host, function() {
         console.log('通知管理服务已启动: http://' + host + ':' + port);
         console.log('管理页面: GET /');

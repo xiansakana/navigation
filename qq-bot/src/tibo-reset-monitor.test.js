@@ -138,11 +138,11 @@ test('Tibo delivers custom targets and resumes at the failed QQ target', async f
         if (target?.id === 'b' && fail) throw new Error('retry');
         delivered.push(target || channel);
     };
-    await assert.rejects(deliverToChannels(config, 'signal', [], sender, function(sent) { checkpoint = sent; }), /retry/);
-    assert.deepEqual(checkpoint, ['qq:a']);
+    await assert.rejects(deliverToChannels(config, 'signal', [], sender, function(sent) { checkpoint = sent; }), /qq:b/);
+    assert.deepEqual(checkpoint, ['qq:a', 'slack']);
     fail = false;
     await deliverToChannels(config, 'signal', checkpoint, sender);
-    assert.deepEqual(delivered, [config.monitors.tiboReset.qq.targets[0], config.monitors.tiboReset.qq.targets[1], 'slack']);
+    assert.deepEqual(delivered, [config.monitors.tiboReset.qq.targets[0], 'slack', config.monitors.tiboReset.qq.targets[1]]);
 });
 
 test('tweet source uses IPv4 HTTPS transport and reports response failures', async function() {
@@ -194,10 +194,22 @@ test('failed Slack delivery resumes without repeating QQ', async function() {
     await assert.rejects(deliverToChannels(config, 'signal', [], async function(_, channel) {
         sent.push(channel);
         if (channel === 'slack') throw new Error('temporarily unavailable');
-    }, function(channels) { checkpoint = channels; }), /temporarily unavailable/);
+    }, function(channels) { checkpoint = channels; }), /slack/);
     assert.deepEqual(checkpoint, ['qq']);
     await deliverToChannels(config, 'signal', checkpoint, async function(_, channel) {
         sent.push(channel);
     });
     assert.deepEqual(sent, ['qq', 'slack', 'slack']);
+});
+
+test('a pending QQ transport never delays the independent Slack send', async () => {
+    let releaseQq, slackDelivered;
+    const qq = new Promise(resolve => { releaseQq = resolve; });
+    const slack = new Promise(resolve => { slackDelivered = resolve; });
+    const job = deliverToChannels({ monitors: { tiboReset: { channels: ['qq', 'slack'] } } }, 'signal', [], async (_, channel) => {
+        if (channel === 'qq') await qq;
+        else slackDelivered();
+    });
+    try { await Promise.race([slack, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('Slack blocked by QQ')), 1000); timer.unref(); })]); }
+    finally { releaseQq(); await job; }
 });

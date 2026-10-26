@@ -81,6 +81,8 @@
                     <label class="switch"><input id="qq-enabled" type="checkbox"><span></span></label>
                 </div>
                 <div class="status-row"><span class="status-dot"></span><span class="status-text">检查中</span></div>
+                <p id="qq-login-status" class="biz-hint" role="status">正在检查 QQ 登录与消息接收连接…</p>
+                <p id="qq-alert-status" class="biz-hint">掉线告警使用已启用且配置完整的 Slack／邮件，不依赖 QQ。</p>
                 <div class="form-grid">
                     <label class="wide">NapCat 地址<input id="qq-base-url" placeholder="http://127.0.0.1:3000"></label>
                     <label class="wide">Access Token<input id="qq-token" type="password" autocomplete="new-password" placeholder="留空则保持原值"></label>
@@ -136,7 +138,7 @@
     <div class="toast" id="toast" hidden></div>
     <script src="/skeleton/skeleton.js?v=1"></script>
     <script src="qq-targets.js?v=multi-mentions1"></script>
-    <script src="app.js?v=chain-status-2"></script>
+    <script src="app.js?v=qq-login-alerts-1"></script>
     <script src="integrations.js?v=qq-codex-group-picker2"></script>
     <script src="chain-notifications.js?v=chain-status-2"></script>
     <script src="codex.js?v=qq-codex-group-picker2"></script>
