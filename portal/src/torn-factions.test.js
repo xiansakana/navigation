@@ -230,6 +230,52 @@ test('rate limit waits and retries the same request/key, then completes automati
   assert.deepEqual(attempts[1], attempts[2]); assert.equal(scanner.run.retryAt, null); assert.ok(!scanner.run.error);
 });
 
+test('Torn midnight automatically resumes the unfinished faction without resetting the list or completed results', async t => {
+  const store = fixture(t), base = mockRequest(), calls = []; let clock = today * DAY + 3600, crossed = false;
+  const scanner = new FactionScanner({ uid: 'a', store, now: () => clock, request: async path => {
+    calls.push(path);
+    if (!crossed && path.includes('user/1020/personalstats')) { crossed = true; clock = (today + 1) * DAY + 10; }
+    return base(path);
+  } });
+  scanner.start(); await scanner.promise;
+  assert.equal(scanner.run.cursor, 2); assert.equal(scanner.run.today, today + 1); assert.equal(scanner.run.rollovers, 1); assert.equal(scanner.run.stage, '本次列表扫描完成');
+  assert.equal(scanner.run.rows[0].analysisDay, today); assert.equal(scanner.run.rows[1].analysisDay, today + 1);
+  assert.ok(scanner.run.rows.every(row => row.status === 'match')); assert.equal(calls.filter(path => path.includes('/search')).length, 1);
+  assert.equal(calls.filter(path => path === 'faction/10/basic').length, 2); // completed faction not re-scanned
+  assert.equal(store.point('a', 1010, today), null); assert.ok(store.point('a', 1010, today - 1));
+});
+
+test('resuming a previous-date job preserves its cursor and expires only its provisional date cache', async t => {
+  const store = fixture(t), base = mockRequest();
+  store.saveRun('a', { today: today - 1, listComplete: true, listed: 2, cursor: 1, rows: [{ ...faction(10, 100), leaderId: 1010, status: 'match', analysisDay: today - 1 }, { ...faction(20, 500), leaderId: 1020, status: 'waiting' }] });
+  store.savePoint('a', 1010, { day: today - 1, timestamp: (today - 1) * DAY, value: 1 });
+  store.savePoint('a', 1010, { day: today - 2, timestamp: (today - 2) * DAY, value: 2 });
+  const calls = [], scanner = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, request: async path => { calls.push(path); return base(path); } });
+  scanner.start(); await scanner.promise;
+  assert.equal(scanner.run.cursor, 2); assert.equal(scanner.run.rows[0].analysisDay, today - 1); assert.equal(scanner.run.rows[1].analysisDay, today);
+  assert.equal(calls.some(path => path.includes('/search') || path === 'faction/10/basic'), false); assert.equal(store.point('a', 1010, today - 1), null); assert.ok(store.point('a', 1010, today - 2));
+});
+
+test('crossing midnight during rate-limit cooldown continues automatically and clears stale retry state', async t => {
+  const store = fixture(t), base = mockRequest(); let clock = today * DAY + 1, limited = true, waits = 0;
+  const scanner = new FactionScanner({ uid: 'a', store, now: () => clock, wait: async () => { waits++; clock += DAY; }, request: async path => {
+    if (limited && path.endsWith('/basic')) { limited = false; throw Object.assign(new Error('rate limited'), { apiCode: 5, fatal: true }); }
+    return base(path);
+  } });
+  scanner.start(); await scanner.promise;
+  assert.equal(waits, 1); assert.equal(scanner.run.rollovers, 1); assert.equal(scanner.run.cursor, 2); assert.equal(scanner.run.retryAt, null); assert.equal(scanner.run.rateLimitRetries, 0); assert.ok(!scanner.run.error);
+});
+
+test('transient gateway errors retry the same search request and continue the whole scan', async t => {
+  const store = fixture(t), base = mockRequest(), waits = []; let searches = 0;
+  const scanner = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, wait: async ms => { waits.push(ms); }, request: async path => {
+    if (path.includes('/search') && !searches++) throw Object.assign(new Error('Torn API HTTP 504'), { transient: true });
+    return base(path);
+  } });
+  scanner.start(); await scanner.promise;
+  assert.deepEqual(waits, [10000]); assert.equal(searches, 2); assert.equal(scanner.run.cursor, 2); assert.ok(!scanner.run.error);
+});
+
 test('continued rate limiting backs off three times and stops without losing the current cursor', async t => {
   const store = fixture(t), base = mockRequest(), waits = []; let attempts = 0;
   const scanner = new FactionScanner({ uid: 'a', store, now: () => today * DAY + 3600, wait: async ms => { waits.push(ms); }, request: async path => {

@@ -60,8 +60,8 @@
     </section>
     <section id="faction-view" role="tabpanel" aria-labelledby="tab-factions" hidden>
       <h2>帮派筛选 · Leader networth</h2>
-      <p>按 respect 升序自动连续分批检查 Leader，networth 历史也自动续批，无需逐批点击。选择最近一次满足降幅、且之后没有任何日快照回到下跌前高点的日期，计算 A、B、C；仅 C≥A 且 A−B 在配置范围内才命中。</p>
-      <p class="chain-note">API 请求间隔可设 1–60 秒，默认 2 秒。同一 Torn 账号与 Chain 监控共用额度，同时运行时采用较慢的设置。仅修改 API 间隔会保留列表、结果及历史缓存，保存后点击继续扫描。</p>
+      <p>按 respect 升序自动连续分批检查 Leader，networth 历史也自动续批，跨 Torn 日期自动刷新当前帮派继续，无需手动启动。选择最近一次满足降幅、且之后没有任何日快照回到下跌前高点的日期，计算 A、B、C；仅 C≥A 且 A−B 在配置范围内才命中。</p>
+      <p class="chain-note">API 请求间隔可设 1–60 秒，默认 2 秒。同一 Torn 账号与 Chain 监控共用额度，同时运行时采用较慢的设置。仅修改 API 间隔会保留列表、结果及历史缓存，保存后点击继续扫描。长扫描跨日时保留已完成结果，A/B/C 以各行显示的核验基准日为准。</p>
       <section class="chain-panel"><form id="faction-form"><div class="chain-fields faction-fields">
         <label>Public API Keys（每行一个，最多 10 个）<textarea id="faction-apiKeys" rows="3" maxlength="200" autocomplete="off" spellcheck="false" placeholder="留空保留已保存 Keys；填写后替换整个列表" disabled></textarea></label>
         <label>最小 respect<input id="faction-minRespect" type="number" min="0" required disabled></label>
@@ -86,6 +86,6 @@
   <script src="/theme.js"></script>
   <script src="/layout.js?v=layout-20261018"></script>
   <script src="/torn-toolbox/chain/app.js?v=8"></script>
-  <script src="/torn-toolbox/chain/factions.js?v=7"></script>
+  <script src="/torn-toolbox/chain/factions.js?v=8"></script>
 </body>
 </html>
