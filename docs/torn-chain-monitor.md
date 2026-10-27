@@ -1,99 +1,46 @@
-# Torn 工具箱：Chain 监控
+# Torn 工具箱：监控
 
-入口：`/torn-toolbox/` → Chain 监控，页面 `/torn-toolbox/chain/`。这是 navigation 的 Portal 内置模块，独立于浏览器用户脚本和原有压价/公司监听服务。
+入口 `/torn-toolbox/` → **监控**，页面 `/torn-toolbox/chain/`。包含“帮派摧毁监控”和“帮派筛选”两个 Tab。原 Chain 冷却监控已被帮派摧毁监控替换，不再调用 warfarechains、Chain 详情或 report；路由、权限 ID `torn-chain:*` 和已有数据范围授权保持兼容。
 
-同页新增“帮派筛选”Tab：通过 faction/search 按 respect 升序扫描 Leader 的历史 networth、最后活动和入帮天数，配置两种跌幅及 A−B，按 C≥A 判断。配置和状态独立，详见[帮派筛选说明](torn-faction-screener.md)。两个功能按 Torn 游戏账号共享 Portal Torn API 限速队列；通过 key/info 核验归属，同账号不同 Key 不叠加额度，不同账号的队列可独立运行。
+## 帮派摧毁监控
 
-## 使用
+使用官方 `/v2/faction/search`，Public Key 即可。完整分页读取 `notDestroyed` 和 respect 范围内的存活帮派，按 respect 升序显示。首次扫描建立存活基线，之后持续自动扫描，不等待 Chain 结束，不受原每轮 40 条详情核验限制。
 
-1. 管理员分配 `torn-chain:view`，按需分配 `torn-chain:config:edit`、`torn-chain:control:edit`、`torn-chain:history:edit`。工具箱首页还需要原有工具箱访问权限；游客默认可只读访问；不能保存配置、启停、清空记录或访问通知配置。
-2. 保存 Torn Public API Keys（最多 10 个，每行一个）、长度上下限及轮次间隔。默认最小 100、最大不限、间隔 60 秒，范围包含边界，间隔最短 30 秒。留空保留已有 Keys；填写替换整个列表，自动去重；独立按钮删除全部 Keys。旧单 Key 配置自动兼容。
-3. 点击启动。首次看见已冷却的 Chain 记录为“首次发现”；同次持续运行中核验到 Active → Cooldown 才记录为“刚进入冷却”。点击 report 链接手动打开报告。
+- respect 默认 0–10000，包含边界，上限可留空；输入非负整数。
+- 完整一轮结束后默认等 15 秒，再开始下一轮；可配置 5–3600 秒。
+- 请求间隔默认 2 秒/账号，可配置 1–60 秒，支持小数。同一 Torn 账号与帮派筛选共享较慢的间隔，同账号多个 Key 不叠加额度。最多 10 个已授权 Public Keys，每行一个，留空保存保留原值，填写替换全部，重复自动去除，独立按钮删除全部。
+- 所有页面状态每 5 秒从 Portal 读取；服务器在关闭浏览器后继续运行，服务重启后需启动。配置保存会停止监控，再手动启动。
 
-每条记录显示“进入冷却（推算）”“发现于”和“冷却结束”三个时间，均为浏览器本地时区。“进入冷却”依据[官方每 hit 冷却 6 秒规则](https://wiki.torn.com/wiki/Chain)，从 API 冷却结束时间减去 Chain 长度 × 6 秒推算，并非轮询发现时间。新记录保存 `cooldownStartedAt`；旧记录读取时根据已有长度和结束时间补算，无需清空或额外请求。优先使用同 ID 列表的完整 Chain 长度；无效、结果晚于发现时间或不能可靠推算时显示“—”。API `end` 的语义未明确说明冷却开始时间，不直接作为该时间使用。
+## 确认与防误报
 
-保存配置会停止运行；停止/重启会重新建立观察基线。关闭浏览器不会停止服务器监控；Portal 服务重启后需手动启动。报告由用户手动打开。
+保存每个存活帮派的 ID、名称、respect、Leader 和最后确认存活时间。若完整列表中未再看到已跟踪帮派，额外查询 `filters=id:=:{id}`，不附加 respect 或存活过滤条件。
 
-## 监控明细
+只有返回同一 ID 且 `is_destroyed=true`，并已有存活基线，才记录“存活→摧毁”事件。返回存活但 respect 超出范围，则更新快照并退出范围；返回空、错误或无有效字段，只标记“待确认”，后续继续核验。列表缺页、重复、网络失败都不能据此推断摧毁，分页未完成不更新基线。已确认摧毁是永久状态，后续陈旧的存活 API 缓存不会使其复活。
 
-“监控状态”保留汇总数字，并逐条显示当前候选帮派名称/ID、Chain ID/report 链接、长度、状态/计时、最近成功核验时间和具体说明。状态分为待核验、核验中、活动中、冷却中、已结束、核验失败、状态不明；可在页面按异常、待核验或各状态筛选。筛选只影响页面展示，不改变扫描或通知规则，沿用 `torn-chain:view` 权限。
+首次已摧毁的帮派不会通知；两次轮询之间出现并被摧毁、未被观察到存活的帮派也不会通知。respect 筛选根据最近观察值：之前在范围外且直接被打至摧毁的帮派无法覆盖。应按需要扩大监控范围。
 
-成功核验后立即更新对应行；异常或错误 Chain ID 不沿用旧状态冒充本次成功。未核验的长度标为“列表值”，冷却复用标为缓存，40 条预算外显示等待轮换。活动计时为核验当时 API 返回的断链剩余秒数，冷却计时显示结束时间；时间均为浏览器本地时区。候选列表中明确低于最小长度的 Chain 在详情请求前过滤，不占每轮 40 条核验名额；汇总显示跳过数量。长度达到门槛（含等于）后会自动加入后续轮次；长度未知仍核验。此前已确认达到门槛的 Active Chain，即使列表长度突然缩小或消失，也保留跟踪冷却。最大长度仍在记录/通知阶段判断。官方列表接口不支持长度参数，不把 from/to 时间参数误用为长度。按开始时间升序读取（优先较早开始的 Chain），API 满100条却缺少 next 时按本页最大 start 构造包含边界的 from 游标续页，按 Chain ID 去重；避免默认降序首页 next 为空而误判读完。同时间戳满页无法继续或达到10页预算时明确显示列表不完整。失败行显示具体原因及最近尝试时间，历史成功结果只作为“上次确认”参考。
+实际发现延迟包括 API 数据更新及缓存、整轮分页及补查耗时、账号限速和轮次等待。不能保证秒级或精确摧毁时刻。界面展示最后确认存活时间到发现摧毁时间的区间；API 查询时间不等于事件发生时间。
 
-页面仍每 5 秒读取现有状态 API，不额外请求 Torn。若本轮列表读取失败，保留并标明上次明细，不把旧快照当成新结果。明细按当前登录账号隔离，错误文本过滤 Key。最近候选/失败明细只在监控进程中保留；成功观测的长度和核验时间复用 `torn_chain_observations` 保存，无需新表迁移。手机上按逐项卡片排列，避免表格撑宽。
+## 通知与记录
 
-## Bonus hit 被打玩家与 Leader 筛选
+通知管理 → 业务提醒 → **帮派摧毁**，沿用原 QQ/Slack 开关和目标；不自动发送测试消息。通知包含帮派链接、最后存活快照中的 Leader profile、respect 前后值、最后存活时间和发现摧毁时间（通知使用 UTC ISO 时间，页面使用浏览器本地时间）。不伪造 Chain report，也不把摧毁归因于 Bonus。
 
-Chain 监控配置中可多选 13 个标准档位：10、25、50、100、250、500、1000、2500、5000、10000、25000、50000、100000。默认不选，不增加 report 请求。保存后重新启动监控，记录及通知附上所选且已达到档位的**被打玩家**链接 `https://www.torn.com/profiles.php?XID={defender_id}`；不使用出手玩家的 attacker_id。
+摧毁事件及去重先在 SQLite 事务中保存再发送，最多保留 200 条记录，清空历史不清除去重。通知发送失败显示错误，事件保留且不自动重复发送；进程在提交后、发送前中断可能漏发，但重启不会重复推送。
 
-身份筛选为“全部 / 仅 Leader / 排除 Leader”，默认全部。开启身份筛选需要至少选择一个档位，至少一名所选档位被打玩家符合身份条件，记录才显示、通知才投递，且只展示匹配玩家的链接。身份未知不会被当成非 Leader；无 faction 的玩家确认属于非 Leader。Co-leader 不属于 Leader。身份以 API 查询时的当前 faction 为准，缓存查询时间快照，不能还原攻击发生时的职位。
+## Key 与失败处理
 
-仅开启身份筛选时读取玩家公开 `profile.faction_id`，再读取该 faction 的 `basic.leader_id`，用数值 ID 对比，避免自定义职位名称误判。不缓存无关玩家资料。每轮最多核验 10 位不同玩家，同 faction 在本轮复用 Leader 查询，玩家核验成功结果最多复用 5 分钟；记录中已确认的身份作为历史快照保存。
+沿用多账号归属核验、同账号备用 Key、账号共享限速及全局请求节流。Key 错误 1/2/10/13/16/18 或无法确认归属时跳过该 Key，状态只显示编号与原因。全部 Key 不可用才停止，重启重新检查，保存的 Keys 不删除。
 
-每条符合范围的新冷却记录最多额外读取一次 report，缓存其有效 bonus defender ID。report ID/faction ID 必须匹配。暂不可用不伪造链接，最多尝试 3 次，相邻尝试至少 60 秒；未开启身份筛选时仍正常发送 report 链接，并标记被打玩家暂不可用。开启身份筛选后，未完成核验的通知延后；查询失败最多 3 次，未知不匹配，冷却已经结束的延后通知不补发。投递本身依旧不自动重试，避免重复。
+错误 5/HTTP429 同 Key 同请求等待 65/130/260 秒，尊重更长 Retry-After；网络超时、HTTP408/5xx 等待 10/20/40 秒，最多三次重试。IP 封锁 8/9、日额度 14、重试耗尽停止。非致命列表或单帮派资料异常保留状态，在后续轮次继续；停止立即取消等待并释放配额设置。
 
-兼容部分新结束 Chain 在 v2 report 返回错误 6（Incorrect ID）、官方 v1 却正常的情况：仅此错误时，在同一限速队列中额外请求 `https://api.torn.com/torn/{chainId}?selections=chainreport`，校验 v1 的 `factionID`、最终 `chain` 长度和 bonus 数据，再把 `bonuses[].defender` 转换为被打玩家 ID。凭据错误、限流和私有数据错误不触发兼容读取。记录保存 `bonusSource`（api-v1/api-v2）；旧版本已耗尽的 report 尝试次数在兼容读取版本中有一次新的有限重试周期，不重发历史通知。
+## 存储、兼容与权限
 
-QQ 和 Slack 的 Report、被打玩家标签与完整 HTTPS 网址分别独立成行，并显示被打玩家数字 ID，避免中文标点紧贴网址干扰客户端识别。QQ 是否转成蓝色可点击链接或预览卡片由客户端决定；已发送的旧消息不会自动改变。
+新表 `torn_destruction_monitors` 存各 Portal user_id 的配置及历史，`torn_destruction_observations` 按 user_id/faction_id 保存观察与永久摧毁去重。使用幂等建表，不需要手工迁移。首次读取该用户的新配置时复制原 Chain Keys 和 API 请求间隔；原长度、Bonus、Leader 筛选不用于新监控，轮次间隔初始化为 15 秒。
 
-旧记录在监控启动后每轮最多补查 5 条，补查本身不重发已发通知；未完成的延后通知在身份核验后投递一次。切换所选档位可立即使用已经缓存的 report 数据；尚未缓存的档位在后续轮次中补查。开启更多档位或身份核验会增加单轮耗时，所有请求仍按 Torn 账号共用 2 秒串行队列。
+原 `torn_chain_monitors`、`torn_chain_observations` 和旧冷却历史保留，不混入摧毁记录。通知继续使用 `torn_chain_notifications`。后续新监控配置独立保存，不覆盖旧 Chain 配置。旧运行时实现仅作为兼容测试保留，生产入口使用 DestructionMonitor。
 
-## 通知管理
+保留权限 `torn-chain:view/config:edit/control:edit/history:edit`；通知使用 `torn-chain:notify:view/notify:edit/notify:test:edit`，权限名称和模块目录显示“监控”。游客仅可查看显式授权共享用户/团队的数据，服务器拒绝所有修改、启停、清空和通知配置操作。状态 API 不返回 apiKey/apiKeys，错误过滤全部 Keys；不隐式展示其他用户数据。
 
-进入 `/notifications/#chain-notifications` 的业务提醒区域，配置“Torn · Chain 冷却”。QQ 支持当前账号的独立群聊、@、私聊目标，Slack 复用通知管理的公共渠道。两种推送默认关闭，不继承其他用户或业务的目标。保存通知配置不影响扫描运行。
+“帮派筛选”Tab 的配置、历史缓存、进度与权限独立，详见[帮派筛选说明](torn-faction-screener.md)。
 
-通知查看、保存、测试分别需要 `torn-chain:notify:view`、`torn-chain:notify:edit`、`torn-chain:notify:test:edit`；同时需要 Chain 主模块查看权限，进入通知管理还需原有通知服务权限。后台投递前复查账号及通知保存权限，撤销后不再投递。
-
-新发现且仍在冷却、符合范围的 Chain 推送一次，包括首次扫描发现的冷却记录；超出范围、重复扫描、重启后的已见 Chain 不重复推送。开启 Leader 筛选时还需满足上述身份条件。报告先持久化再投递；失败不自动重试，以免部分投递后重复推送。Chain 页状态显示最近投递异常；下一次成功投递或重启监控清除该提示。测试按钮使用已经保存的配置。
-
-Portal 通过通知服务的本机 `/notify` 接口、共享集成配置中的 `notifyToken` 投递，不暴露 Token 给浏览器。通知请求与测试均不得在开发验证时真实发送；自动测试使用 mock。
-
-## API 与覆盖范围
-
-只访问官方公开 API，不抓取游戏页面或调用游戏操作接口：
-
-- `GET https://api.torn.com/v2/faction/warfarechains?cat=active&limit=100`，读取 `_metadata.links.next` 分页，最多 10 页。分页只允许官方域名和预期接口，不跟随 HTTP 跳转。
-- `GET https://api.torn.com/v2/faction/{id}/chain`，必须与列表的 Chain ID 一致，再依据 `cooldown` Unix 秒时间戳和 `timeout` 核验状态。未知/失败结果保留原观察，不推测为已冷却。
-- 选择 Bonus hit 后：`GET /v2/faction/{chainId}/chainreport`，只使用 `bonuses[].chain` 和 `bonuses[].defender_id`；根据[官方公开 API schema](https://www.torn.com/swagger/openapi.json)校验 report 身份。
-- v2 错误 6 时的兼容读取：官方 v1 `GET /torn/{chainId}?selections=chainreport`；仅允许该选择，不允许任意 v1 API。参见[官方 API 说明](https://www.torn.com/api.html)。兼容请求与其他请求共用原有 2 秒间隔。
-- 开启身份筛选后：`GET /v2/user/{id}/profile`、`GET /v2/faction/{id}/basic`，均使用 Public Key；仅比对 `profile.faction_id` 和 `basic.leader_id`，不访问游戏页面。
-- 每轮最多核验 40 条，其余轮换；已确认且未到期的冷却记录不重复核验。近期从列表消失的已知活动 Chain 最多继续核验 10 分钟。
-
-请求先通过 key/info 确认 Key 所属游戏账号，在 Portal 本进程按 Torn 账号共用串行队列，间隔至少 2 秒（每账号约 30 次/分钟，另有初次归属核验），不同账号可独立运行；全进程还限制请求启动间隔至少 100ms。轮次间隔从本轮结束计算，含排队时间，因此发现有延迟；多用户或大量候选时可能漏过短冷却。页面显示核验失败、待轮换和分页不完整状态。错误5或HTTP429自动等待65/130/260秒重试同一请求，遵守更长Retry-After；临时网络/超时/HTTP408或5xx按10/20/40秒重试。每个请求最多重试3次，成功后继续当前轮且不重复已完成的详情核验；达到上限才停止。无效Key、IP封禁、每日额度错误立即停止。等待期间显示原因和倒计时，可随时手动暂停；列表、详情、报告及Leader查询统一使用此策略，通知投递本身不自动重试。其他 Torn 工具的请求仍共享 Torn 用户配额，本模块无法协调外部进程的用量。
-
-官方参考：[API Playground](https://api-playground.torn.com/)、[API v2 更新讨论](https://www.torn.com/forums.php?a=0&b=0&f=63&p=threads&start=360&t=16401584)、[Chain 说明](https://wiki.torn.com/wiki/Chain)。`cat=active` 包含活动与冷却项；状态判断仍依赖详情核验。
-
-## 数据与权限
-
-`torn_chain_monitors` 在共享 SQLite 中按已认证 `user_id` 保存配置、最近 200 条报告（含 Bonus 缓存、身份快照、有限重试状态）和最近 5000 个去重 ID；`torn_chain_notifications` 按同一用户保存通知开关与目标。`torn_chain_observations` 保存近期活动 Chain 观察以便重启后继续核验，进程不会自动恢复运行。清空报告保留去重 ID。API Key 保存在服务器数据库中，状态 API 只回传 `hasKey`，不返回密钥。数据库备份需要按凭据保护。新增 Bonus/Leader 配置使用原有 JSON 字段，旧配置默认空选和全部，不需要表迁移。
-
-页面、各操作 API 均检查 RBAC，写请求检查同源。后台每次请求前后复查运行权限，撤权或禁用账号后停止。报告名称使用文本节点渲染；链接固定为 `https://www.torn.com/war.php?step=chainreport&chainID={id}`，由用户手动打开。
-
-## 验证与部署
-
-- `node scripts/test.mjs portal`：Portal 全量测试，包含范围、基线/转换、去重、分页轮换、停止、用户隔离、Key 隐藏、权限和路由优先级。
-- `node scripts/test-torn-chain-ui.cjs`：需 Playwright 和 Edge；本地模拟 API，阻断所有外部请求。检查工具箱及 Chain 页全宽切换/刷新持久化，390/320px 无溢出，权限和手动按钮。
-- `node scripts/test-chain-notify-ui.cjs`：本机通过真实 Portal 代理外壳渲染通知管理卡片，验证目标保存/刷新、模拟测试、权限和 320/390px 布局。通知管理 1600px 下主体 1120→1600、导航栏 1440→1600；切回恢复，刷新保存状态。
-- 通知管理渠道状态只在 `.channel-grid .channel-card` 中更新，Chain 推送开关使用独立 `data-chain-channel` 标记。回归测试和浏览器验证均覆盖 Chain 先于渠道配置返回的加载顺序，避免把复选框误当状态卡片而触发 `textContent` 空节点错误。
-- 通知集成全量服务测试：`node scripts/test.mjs portal qq-bot`。线上 `scripts/verify-platform.mjs` 只读取 Chain 通知配置及通知管理 HTML，不投递消息、不启动扫描。
-- 桌面 1600px 实测：工具箱主体 720→1600、Chain 主体 1100→1600、两页导航栏均 1440→1600；切回恢复原尺寸。
-
-通知集成版本部署 `portal,qq-bot`，无新增进程或公网端口。首次授权访问自动创建表；备份共享数据库时包含 `torn_chain_monitors` 和 `torn_chain_notifications`。按仓库 Git/SHA 部署流程运行 `scripts/ecs-update.sh --expected-sha <sha> --only portal,qq-bot`，部署本身不会启动扫描或打开通知开关。
-
-## API 请求间隔配置
-
-本 Tab 表单的 API 请求间隔（apiIntervalSeconds）默认 2 秒，可设 1–60 秒（支持小数），按 Portal 账号保存在各自配置中。与 Chain 轮次间隔分开；每个 Torn 账号共享请求队列，同时运行的任务以较慢间隔为准，停止/完成后释放该任务的间隔设置。不同 Torn 账号独立限速，同账号多个 Key 不叠加额度；初次 Key 归属核验仍经默认队列。仅修改帮派筛选 API 间隔保留已扫列表/结果和历史缓存，保存后手动继续；更改其他筛选条件仍重置本轮结果。无新增权限，沿用各 Tab 配置权限。
-
-## 游客只读共享
-
-游客角色一次性补充 torn-chain:view；管理员后续撤销权限不会被重新补回。通过既有模块与数据范围界面给游客角色授予某一数据所属账号的 user:账号ID 或共享空间 team:空间ID，只勾选查看。未指定范围时，Chain 游客页面优先选择已授权的共享范围；没有共享授权时仅能查看自己的空数据，不会自动读取任何管理员的数据。显式指定未授权账号仍返回403。
-
-前端隐藏写操作、禁用配置字段，并提示只读；API即使收到伪造请求或游客角色误配编辑权限，也始终拒绝游客的保存、启停、清空、通知配置与测试请求。状态接口始终去除API Key；共享读取不启动监控或调用Torn。帮派筛选Tab也可单独授权给游客只读查看，沿用独立torn-factions数据范围授权，配置/启停/重取列表仍禁止。
-
-## 多 API Key
-
-启动时核验多个 Key 的所属账号；不同已授权 Torn 账号轮流分担列表、详情、报告和 Leader 查询，同账号仅一个 Key 参与轮换，其余作为备用。同账号继续与帮派筛选共享请求间隔，不叠加额度。单 Key 仍兼容原有流程，底层客户端核验归属。
-
-错误 1/2/10/13/16/18 会跳过该 Key，并使用剩余可用账号或同账号备用 Key 重试当前请求；无法确认归属的 Key 不参与分配。全部不可用才停止，保存的 Key 和历史记录保留，重新启动重新核验。限流与网络重试保持同 Key、同请求，不切 Key 绕过限流；IP 封锁和日额度错误仍停止。
-
-监控状态显示可用 Key 数、账号数和已跳过 Key 的序号/原因；原始 Keys 不返回浏览器，包括游客只读 API，错误也过滤全部 Keys。
+依据：[官方 OpenAPI](https://www.torn.com/swagger/openapi.json) 的 faction/search、ApiFactionSearchFilter、FactionSearch；[官方帮派摧毁规则](https://wiki.torn.com/wiki/Faction#Faction_Destruction)。

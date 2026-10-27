@@ -233,7 +233,7 @@ test('official API client rejects redirects/off-origin pages and stops on rate l
 });
 
 test('Portal API enforces permissions, CSRF, user ownership and key redaction', async t => {
-  const store = fixture(t), service = createTornChainService({ store, request: async () => page([]), monitorOptions: { schedule: () => 1, cancel: () => {} } });
+  const store = fixture(t), service = createTornChainService({ store, Monitor: ChainMonitor, validateConfig: chainConfig, request: async () => page([]), monitorOptions: { schedule: () => 1, cancel: () => {} } });
   const session = { userId: 'a', permissions: ['torn-chain:view'] };
   async function call(path, method = 'GET', body, extra = {}, headers = {}) {
     const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]); req.method = method; req.headers = { host: 'localhost', ...headers };
@@ -262,12 +262,12 @@ test('native Chain page and API bypass toolbox proxies and declare action permis
   assert.equal(resolveRoute(services, '/api/torn-chain/state', 'GET').kind, 'portal-api');
   assert.equal(resolveRoute(services, '/torn-toolbox/company/', 'GET').kind, 'proxy');
   assert.ok(!canTornChain({ userId: 'a', permissions: ['torn-chain:control:edit'] }, 'control:edit'));
-  for (const permission of SYSTEM_PERMISSIONS.filter(p => p.id.startsWith('torn-chain:'))) assert.deepEqual(permission.permissionPath.slice(0, 3), permission.id.startsWith('torn-chain:notify:') ? ['首页', '通知管理', '业务提醒'] : ['首页', 'Torn 工具箱', 'Chain 监控']);
+  for (const permission of SYSTEM_PERMISSIONS.filter(p => p.id.startsWith('torn-chain:'))) assert.deepEqual(permission.permissionPath.slice(0, 3), permission.id.startsWith('torn-chain:notify:') ? ['首页', '通知管理', '业务提醒'] : ['首页', 'Torn 工具箱', '监控']);
 });
 
 test('guests can read the authorized owner state but can never mutate, obtain keys or read notification settings', async t => {
   const store = fixture(t); store.save('a', { apiKeys: [key, 'abcdef1234567890'] }); store.record('a', candidate(1), detail(1, 100, 2000).chain, false, 1000);
-  const service = createTornChainService({ store, request: async () => { throw new Error('read must not call Torn'); } });
+  const service = createTornChainService({ store, Monitor: ChainMonitor, validateConfig: chainConfig, request: async () => { throw new Error('read must not call Torn'); } });
   const session = { userId: 'a', actorUserId: 'guest', isGuest: true, permissions: ['*'], dataAccess: { permissions: ['torn-chain:view'] } };
   const call = async (route, method = 'GET') => {
     const req = Readable.from([Buffer.from('{}')]); req.method = method; req.headers = { host: 'local' };

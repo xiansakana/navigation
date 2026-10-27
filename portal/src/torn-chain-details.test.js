@@ -76,7 +76,7 @@ test('waiting candidates and stale list errors remain visible without extra API 
 
 test('monitor detail API stays isolated by authenticated Portal user', async t => {
   const { store } = setup(t, async () => ({}));
-  const service = createTornChainService({ store, monitorOptions: { now: () => 1000, schedule: () => 1, cancel: () => {} }, request: async path => path.includes('warfarechains') ? { warfarechains: [candidate(1)] } : { chain: { id: 1, current: 200, cooldown: 0, timeout: 100 } } });
+  const service = createTornChainService({ store, Monitor: ChainMonitor, monitorOptions: { now: () => 1000, schedule: () => 1, cancel: () => {} }, request: async path => path.includes('warfarechains') ? { warfarechains: [candidate(1)] } : { chain: { id: 1, current: 200, cooldown: 0, timeout: 100 } } });
   async function call(uid, route, method = 'GET') {
     const req = Readable.from([]); req.method = method; req.headers = {};
     let result; await service.handle(req, { setHeader() {} }, new URL('http://local/api/torn-chain/' + route), { userId: uid, permissions: ['*'] }, (_, status, data) => { result = { status, data }; }); return result;

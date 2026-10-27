@@ -53,7 +53,7 @@ test('first discoveries and observed transitions notify once; delivery failure p
 
 test('notification API uses separate view/save/test permissions and saved settings', async t => {
   const store = fixture(t), deliveries = [];
-  const service = createTornChainService({ store, sendNotification: async (config, row) => { deliveries.push({ config, row }); return { sent: 1 }; } });
+  const service = createTornChainService({ store, Monitor: ChainMonitor, sendNotification: async (config, row) => { deliveries.push({ config, row }); return { sent: 1 }; } });
   const base = ['torn-chain:view', 'torn-chain:notify:view'];
   async function call(method, suffix = '', permissions = base, body = settings(), headers = {}) {
     const req = Readable.from([Buffer.from(JSON.stringify(body))]); req.method = method; req.headers = { host: 'localhost', ...headers };
@@ -72,7 +72,7 @@ test('notification API uses separate view/save/test permissions and saved settin
 test('background notification permission revocation suppresses delivery', async t => {
   const store = fixture(t); store.save('a', { apiKey: '1234567890abcdef' }); store.saveNotify('a', settings());
   let phase = 0, sent = 0;
-  const service = createTornChainService({ store, authorizeNotify: () => false, sendNotification: async () => { sent++; }, monitorOptions: { now: () => 1000, schedule: () => 1, cancel: () => {} }, request: async path => path.includes('warfarechains') ? { warfarechains: [{ id: 1, faction: { id: 1 } }] } : { chain: { id: 1, current: 200, timeout: 300, cooldown: phase ? 2000 : 0 } } });
+  const service = createTornChainService({ store, Monitor: ChainMonitor, authorizeNotify: () => false, sendNotification: async () => { sent++; }, monitorOptions: { now: () => 1000, schedule: () => 1, cancel: () => {} }, request: async path => path.includes('warfarechains') ? { warfarechains: [{ id: 1, faction: { id: 1 } }] } : { chain: { id: 1, current: 200, timeout: 300, cooldown: phase ? 2000 : 0 } } });
   let result; const req = Readable.from([]); req.method = 'POST'; req.headers = {};
   await service.handle(req, { setHeader() {} }, new URL('http://local/api/torn-chain/start'), { userId: 'a', permissions: ['*'] }, (_, status) => { result = status; }); assert.equal(result, 200);
   const m = service.monitors.get('a'); await m.promise; phase = 1; await m.scan(); assert.equal(sent, 0); assert.equal(store.get('a').history[0].fresh, true); m.stop();

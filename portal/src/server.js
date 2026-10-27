@@ -710,7 +710,7 @@ async function handleRequest(req, res) {
     if (url.pathname === '/torn-toolbox/chain' || url.pathname.startsWith('/torn-toolbox/chain/')) {
         const chainSession = requireAuth(req, res);
         if (!chainSession) return;
-        if (!canTornChain(chainSession)) return sendError(req, res, url, 403, '无权访问 Chain 监控');
+        if (!canTornChain(chainSession)) return sendError(req, res, url, 403, '无权访问监控');
         const file = url.pathname.replace(/^\/torn-toolbox\/chain\/?/, '') || 'index.html';
         if (!['index.html', 'app.js', 'factions.js', 'style.css'].includes(file)) return json(res, 404, { ok: false, error: 'Not Found' });
         res.setHeader('Cache-Control', 'no-store');

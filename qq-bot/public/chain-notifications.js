@@ -5,14 +5,14 @@
     const response = await fetch('/api/torn-chain/notifications' + (method === 'POST' ? '/test' : ''), { method, credentials: 'same-origin', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
     if (response.status === 403 && method === 'GET') { host.hidden = true; return null; }
     const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.error || 'Chain 通知操作失败');
+    if (!response.ok || !data.ok) throw new Error(data.error || '帮派摧毁通知操作失败');
     return data;
   }
   function render() {
     host.hidden = false;
-    host.innerHTML = '<article class="business-card" data-source="chain"><div class="business-card-head"><div><h3>Torn · Chain 冷却</h3><p>当前账号的 Chain 监控</p></div><a href="/torn-toolbox/chain/">打开监控 →</a></div>'
+    host.innerHTML = '<article class="business-card" data-source="chain"><div class="business-card-head"><div><h3>Torn · 帮派摧毁</h3><p>当前账号的帮派摧毁监控</p></div><a href="/torn-toolbox/chain/">打开监控 →</a></div>'
       + '<div class="biz-global"><label class="biz-check"><input data-chain-channel="qq" type="checkbox"' + (state.settings.qq.enabled ? ' checked' : '') + '> QQ 推送</label><label class="biz-check"><input data-chain-channel="slack" type="checkbox"' + (state.settings.slack.enabled ? ' checked' : '') + '> Slack 推送</label></div>'
-      + '<p class="biz-hint">推送符合长度范围、首次发现仍在冷却的 Chain，附 report 链接；所选 Bonus hit 的被打玩家 profile 在 Chain 监控页多选配置。QQ 使用下方目标，Slack 使用通知管理上方已配置的渠道。</p>'
+      + '<p class="biz-hint">推送监控范围内已观察到的存活→摧毁变化，附帮派和原 Leader 链接；初次建立基线不推送历史摧毁。QQ 使用下方目标，Slack 使用通知管理上方已配置的渠道。</p>'
       + '<h4>QQ 通知目标</h4>' + bizTargets(state.settings.targets, 'chain')
       + '<div class="biz-actions"><button type="button" class="test-btn compact" data-action="chain-save">保存提醒配置</button><button type="button" class="test-btn compact" data-action="chain-test">发送测试</button></div></article>';
     host.querySelectorAll('input,select').forEach(input => { input.disabled = !state.permissions.save; });
@@ -23,7 +23,7 @@
   }
   async function load() {
     try { const data = await request(); if (data) { state = data; render(); } }
-    catch (error) { host.hidden = false; host.textContent = 'Chain 通知读取失败：' + error.message; }
+    catch (error) { host.hidden = false; host.textContent = '帮派摧毁通知读取失败：' + error.message; }
   }
   host.addEventListener('change', event => {
     if (event.target.dataset.field !== 'type') return;
@@ -44,8 +44,8 @@
     }
     button.disabled = true;
     try {
-      if (action === 'chain-save') { const data = await request('PUT', state.settings); state.settings = data.settings; render(); toast('Chain 提醒配置已保存'); }
-      if (action === 'chain-test') { await request('POST'); toast('Chain 测试通知已发送（使用已保存配置）'); }
+      if (action === 'chain-save') { const data = await request('PUT', state.settings); state.settings = data.settings; render(); toast('帮派摧毁提醒配置已保存'); }
+      if (action === 'chain-test') { await request('POST'); toast('帮派摧毁测试通知已发送（使用已保存配置）'); }
     } catch (error) { toast(error.message, true); }
     finally { button.disabled = false; }
   });

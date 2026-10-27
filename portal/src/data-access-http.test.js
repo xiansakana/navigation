@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startAccessPortal } from './test-fixtures/access-portal.js';
-import { createChainStore } from './torn-chain-monitor.js';
+import { createDestructionStore } from './torn-destruction-monitor.js';
 import { modulePolicy } from './access-policy.js';
 import { createFactionStore } from './torn-faction-scan.js';
 
@@ -46,8 +46,8 @@ test('real Portal enforces shared read/write scopes, spoofing protection, policy
 test('anonymous Chain browsing follows only explicit read grants and rejects all guest mutations', { timeout: 20000 }, async () => {
   const f = await startAccessPortal();
   try {
-    const store = createChainStore(f.db), key = '1234567890abcdef';
-    store.save(f.b.id, { apiKey: key }); store.record(f.b.id, { id: 77, chain: 100, faction: { id: 5, name: 'Shared faction' } }, { id: 77, current: 100, cooldown: 2000 }, false, 1000);
+    const store = createDestructionStore(f.db), key = '1234567890abcdef';
+    store.save(f.b.id, { apiKey: key }); store.observe(f.b.id, { id: 77, name: 'Shared faction', leaderId: 5, leaderName: 'Leader', respect: 100, isDestroyed: false, checkedAt: 1000 }); store.observe(f.b.id, { id: 77, respect: 0, isDestroyed: true, checkedAt: 1100 });
     const scope = 'user:' + f.b.id;
     f.update(r => { r.accessPolicy.modules['torn-chain'] = { ...modulePolicy(r, 'torn-chain'), grants: [{ kind: 'role', id: 'role_guest', scope, read: true, write: false }] }; });
     const read = await fetch(f.baseUrl + '/api/torn-chain/state'), data = await read.json();
