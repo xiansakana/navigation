@@ -61,7 +61,7 @@ test('actual cross-currency destination amounts and linked adjustments reverse e
 test('CNY aggregates honor per-bill historical rates rather than current rates and date bounds crop asset history',()=>{
  const entries=[e('支出',10,{currency:'USD',date:'2026-10-01T12:00:00',cnyAmount:60,cnyFee:0,historicalRate:6}),e('支出',10,{currency:'USD',date:'2026-10-02T12:00:00',cnyAmount:70,cnyFee:0,historicalRate:7})];
  const result=analyzeBookkeeping(entries,entries,null,settings,{start:'2026-10-01',end:'2026-10-02'},day,{CNY:1,USD:8});assert.equal(result.equivalentSummary.totals.CNY.expense,130);assert.equal(result.billing.points.length,2);
- const assets=assetTrends([{id:'a',currency:'CNY',included:true,balance:100}],entries,day,{CNY:1,USD:8},{start:'2026-10-01',end:'2026-10-02'});assert.deepEqual(assets.points,[{date:'2026-10-01',currency:'CNY',balance:170},{date:'2026-10-02',currency:'CNY',balance:100}]);
+ const assets=assetTrends([{id:'a',currency:'CNY',included:true,balance:100}],entries,day,{CNY:1,USD:8},{start:'2026-10-01',end:'2026-10-02'});assert.deepEqual(assets.points,[{date:'2026-09-30',currency:'CNY',balance:230,periodBoundary:'opening'},{date:'2026-10-01',currency:'CNY',balance:170},{date:'2026-10-02',currency:'CNY',balance:100}]);
 });
 test('inclusive start/end filtering works across months and rejects reversed or impossible dates',()=>{
  const db=new Database(':memory:');try{const s=createBookkeepingStore(db);s.saveEntry('a',e('支出',1,{date:'2026-09-30T12:00:00'}));s.saveEntry('a',e('支出',2,{date:'2026-10-01T12:00:00'}));assert.equal(s.entries('a',{start:'2026-09-30',end:'2026-10-01'}).length,2);assert.equal(s.entries('a',{start:'2026-10-01',end:'2026-10-01'}).length,1);assert.throws(()=>s.entries('a',{start:'2026-10-02',end:'2026-10-01'}),/不能晚于/);assert.throws(()=>s.entries('a',{start:'2026-02-30'}),/日期/);}finally{db.close();}
@@ -76,11 +76,17 @@ test('asset period change uses the preceding day opening and includes the first 
   const accounts=[{id:'a',currency:'CNY',balance:125,included:true}];
   const all=assetTrends(accounts,entries,'2026-06-04',{CNY:1},{start:'2026-06-01',end:'2026-06-03'});
   assert.deepEqual(all.period,{start:'2026-06-01',end:'2026-06-03',openingAsOf:'2026-05-31',opening:100,closing:125,change:25});
-  assert.equal(all.points[0].balance,90); // Graph points are day-end balances, distinct from period opening.
+  assert.equal(all.points[0].balance,100);assert.equal(all.points[0].date,'2026-05-31');
+  assert.equal(all.points[0].periodBoundary,'opening');
+  assert.equal(all.points.at(-1).balance-all.points[0].balance,all.period.change);
   const single=assetTrends(accounts,entries,'2026-06-04',{CNY:1},{start:'2026-06-01',end:'2026-06-01'});
   assert.equal(single.period.change,-10);assert.equal(single.period.closing,90);
   const later=assetTrends(accounts,entries,'2026-06-04',{CNY:1},{start:'2026-06-02',end:'2026-06-02'});
   assert.equal(later.period.opening,90);assert.equal(later.period.change,30);
+  for(const result of [single,later]) {
+    assert.equal(result.points.length,2);
+    assert.equal(result.points.at(-1).balance-result.points[0].balance,result.period.change);
+  }
   const billing=analyzeBookkeeping(entries,entries,accounts,settings,{start:'2026-06-01',end:'2026-06-03'},'2026-06-04',{CNY:1});
   assert.equal(billing.equivalentSummary.totals.CNY.net,-5);assert.equal(billing.asset.period.change,25);
 });
@@ -88,7 +94,8 @@ test('asset period change uses the preceding day opening and includes the first 
 test('asset period handles empty histories, all dates, month bounds, future ranges and missing FX',()=>{
   const accounts=[{id:'a',currency:'CNY',balance:100,included:true}];
   const empty=assetTrends(accounts,[],'2026-10-13',{CNY:1},{start:'2026-10-01',end:'2026-10-31'});
-  assert.deepEqual(empty.period,{start:'2026-10-01',end:'2026-10-13',openingAsOf:'2026-09-30',opening:100,closing:100,change:0});
+  assert.deepEqual(empty.period,{start:'2026-10-01',end:'2026-10-13',openingAsOf:'2026-09-30',opening:100,closing:100,change:0,closingSource:'current',closingAsOf:'2026-10-13'});
+  assert.equal(empty.points.at(-1).source,'current');
   assert.equal(assetTrends(accounts,[],'2026-10-13',{CNY:1},{month:'2026-10'}).period.openingAsOf,'2026-09-30');
   assert.equal(assetTrends(accounts,[],'2026-10-13',{CNY:1},{start:'2026-11-01',end:'2026-11-30'}).period,null);
   const all=assetTrends(accounts,[e('收入',10,{accountId:'a'})],day,{CNY:1});

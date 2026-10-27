@@ -38,11 +38,11 @@
         svg+='<polyline points="'+points.map((p,i)=>x(i)+','+y(p[line.key])).join(' ')+'" fill="none" stroke="'+line.color+'" stroke-width="2.5"/>';
         svg+=points.map((p,i)=>{
           if(!granularity && i%Math.max(1,Math.ceil(points.length/60))!==0 && i!==points.length-1)return '';
-          const title=p.date+' '+line.label+' '+money(p[line.key],p.currency)+(p.source==='ledger'?' · 账单反推':p.source==='valuation'?' · 估值快照':p.source==='carried'?' · 沿用 '+p.asOf+' 观测':'');
+          const title=(p.periodBoundary==='opening'?'范围期初 · ':'')+p.date+' '+line.label+' '+money(p[line.key],p.currency)+(p.source==='current'?' · 今日暂估':p.source==='ledger'?' · 账单反推':p.source==='valuation'?' · 估值快照':p.source==='carried'?' · 沿用 '+p.asOf+' 观测':'');
           return '<circle cx="'+x(i)+'" cy="'+y(p[line.key])+'" r="4.5" fill="'+line.color+'"'+(granularity?' tabindex="0" role="button" aria-label="'+esc(title+'，查看账单')+'"'+attr(period(p,granularity,line.key==='income'?'income':line.key==='expense'?'expense':'cumulative')):'')+'><title>'+esc(title)+'</title></circle>';
         }).join('');
       }
-      for(const i of [...new Set([0,Math.floor((points.length-1)/2),points.length-1])])svg+='<text x="'+x(i)+'" y="'+(height-10)+'" text-anchor="middle">'+esc(points[i].date)+'</text>';
+      for(const i of [...new Set([0,Math.floor((points.length-1)/2),points.length-1])])svg+='<text x="'+x(i)+'" y="'+(height-10)+'" text-anchor="middle">'+esc((points[i].periodBoundary==='opening'?'期初 ':points[i].source==='current'?'暂估 ':'')+points[i].date)+'</text>';
       svg+='</svg>';
       const last=points.at(-1);
       return '<div class="bk-chart-card"><h3>'+esc(label)+'</h3><div class="bk-chart-legend">'+lines.map(l=>'<span style="--line-color:'+l.color+'">'+esc(l.label+(['income','expense'].includes(l.key)?'合计':''))+' '+m(['income','expense'].includes(l.key)?Math.round(points.reduce((n,p)=>n+p[l.key],0)*100)/100:last[l.key],last.currency)+'</span>').join('')+'</div>'+svg+(points.length===1?'<p class="bk-muted">目前仅有一个基准点，后续账单会形成走势。</p>':'')+'</div>';

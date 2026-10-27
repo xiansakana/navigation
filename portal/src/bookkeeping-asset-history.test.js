@@ -97,7 +97,8 @@ test('state API restores owned linked asset history without exposing it to users
     const allowed=await get('history-a',[...basic,'service:stock-manage:cash:view']);
     assert.equal(allowed.analysis.asset.historyMode,'hybrid');
     assert.equal(allowed.accounts[0].balance,100);
-    assert.equal(allowed.analysis.asset.points.at(-1).balance,150);
+    assert.equal(allowed.analysis.asset.points.at(-1).balance,100);
+    assert.equal(allowed.analysis.asset.period.closingSource,'current');
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM bookkeeping_asset_snapshots').get().n,0);
     createAssetHistory(db).capture('history-a',store.accounts('history-a'),[],{CNY:1});
     const saved=db.prepare('SELECT * FROM bookkeeping_asset_snapshots').get();
@@ -114,6 +115,40 @@ test('state API restores owned linked asset history without exposing it to users
     closeDatabase();if(prior==null)delete process.env.NAVIGATION_DB_PATH;else process.env.NAVIGATION_DB_PATH=prior;
     fs.rmSync(dir,{recursive:true,force:true});
   }
+});
+
+test('today estimate reconciles period and chart boundaries without modifying frozen history or daily observations',()=>{
+  const db=new Database(':memory:');
+  try {
+    const h=createAssetHistory(db);
+    h.capture('a',accounts,entries,rates,now);
+    const saved=db.prepare('SELECT * FROM bookkeeping_asset_snapshots').all();
+    const baseline=db.prepare('SELECT * FROM bookkeeping_asset_baselines').get();
+    const current=1460.25,today='2026-10-16';
+    for(const filter of [{month:'2026-10'},{start:today,end:today},{start:'2026-10-01',end:'2026-12-31'},{}]) {
+      const result=h.read('a',filter,today,current);
+      assert.equal(result.period.closing,current);
+      assert.equal(result.period.closingAsOf,today);
+      assert.equal(result.period.closingSource,'current');
+      assert.equal(result.points[0].date,result.period.openingAsOf);
+      assert.equal(result.points[0].periodBoundary,'opening');
+      assert.equal(result.points[0].balance,result.period.opening);
+      assert.equal(result.points.at(-1).date,result.period.end);
+      assert.equal(result.points.at(-1).balance,current);
+      assert.equal(Math.round((result.points.at(-1).balance-result.points[0].balance)*100)/100,result.period.change);
+    }
+    const historical=h.read('a',{start:'2026-10-15',end:'2026-10-15'},today,99999);
+    assert.equal(historical.period.closing,1500);
+    assert.equal(historical.period.closingSource,'valuation');
+    assert.ok(historical.points.every(p=>p.source!=='current'));
+    assert.equal(h.read('a',{start:'2026-10-17',end:'2026-10-20'},today,current).period,null);
+    assert.equal(h.read('a',{},today,0).period.closing,0);
+    assert.notEqual(h.read('a',{},today,null).period.closingSource,'current');
+    // An intraday read also replaces an existing observation only in the response.
+    assert.equal(h.read('a',{},'2026-10-15',1400).period.closing,1400);
+    assert.deepEqual(db.prepare('SELECT * FROM bookkeeping_asset_snapshots').all(),saved);
+    assert.deepEqual(db.prepare('SELECT * FROM bookkeeping_asset_baselines').get(),baseline);
+  } finally {db.close();}
 });
 
 test('daily collector waits until Beijing 23:59 and saves once per day, including after restarts',async()=>{

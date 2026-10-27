@@ -52,25 +52,32 @@ export function createAssetHistory(db) {
       return true;
     })();
   }
-  function read(userId, filter = {}, today = assetDate(Date.now())) {
+  function read(userId, filter = {}, today = assetDate(Date.now()), currentBalance = null) {
     const baseline = db.prepare('SELECT * FROM bookkeeping_asset_baselines WHERE user_id=?').get(userId);
     if (!baseline) return null;
     const history = JSON.parse(baseline.history);
     const snapshots = db.prepare('SELECT date,balance,captured_at FROM bookkeeping_asset_snapshots WHERE user_id=? AND date<=? ORDER BY date').all(userId,today);
     const points = [...history.points.map(p=>({...p,source:'ledger'})),...snapshots.map(p=>({date:p.date,currency:'CNY',balance:p.balance,source:'valuation',capturedAt:p.captured_at}))];
     if (!points.length) return null;
-    const start = filter.start || (filter.month ? filter.month + '-01' : points[0].date);
+    // Today's observation is a display-only estimate; never rewrite daily snapshots.
+    const live = Number.isFinite(currentBalance);
+    if (live) {
+      const index=points.findIndex(p=>p.date===today);
+      if(index>=0)points.splice(index);
+      points.push({date:today,currency:'CNY',balance:round(currentBalance),source:'current'});
+    }
+    const start = filter.start || (filter.month ? filter.month + '-01' : history.period?.start || points[0].date);
     const requestedEnd = filter.end || (filter.month ? new Date(Date.UTC(Number(filter.month.slice(0,4)),Number(filter.month.slice(5,7)),0)).toISOString().slice(0,10) : today);
     const end = requestedEnd < today ? requestedEnd : today;
     const at = date => points.filter(p=>p.date<=date).at(-1) || points[0];
     const boundary = date => {const p=at(date);return {...p,date,asOf:p.date,source:p.date===date?p.source:'carried'};};
     const openingAsOf = previousDate(start), opening = at(openingAsOf), closing = at(end);
-    const scoped = start<=end ? [boundary(start),...points.filter(p=>p.date>start && p.date<end),...(end>start?[boundary(end)]:[])] : [];
+    const scoped = start<=end ? [{...boundary(openingAsOf),periodBoundary:'opening'},boundary(start),...points.filter(p=>p.date>start && p.date<end),...(end>start?[boundary(end)]:[])] : [];
     return { points:scoped, missingCurrencies:[], estimatedTransfers:history.estimatedTransfers, unlinkedEntries:history.unlinkedEntries,
       historyMode:'hybrid', valuationCutover:baseline.cutover_date, latestValuation:snapshots.at(-1)?.captured_at || null,
       current:points.at(-1).balance, asOf:points.at(-1).date,
       period:start<=end?{start,end,openingAsOf,opening:opening.balance,closing:closing.balance,change:round(closing.balance-opening.balance),openingSource:opening.source,closingSource:closing.source,closingAsOf:closing.date}:null,
-      note:`${baseline.cutover_date} 前保留账单与余额调整反推的历史账面资产；从该日起按采集时的账户范围、现金及证券最新可用行情记录 CNY 估值，每天北京时间 23:59 采集一次。当前资产单独读取最新估值，刷新页面不会改写历史快照。未采集日期沿用上一观测，不代表当日实际收盘净值；切换日可能包含账面与行情估值的口径差额，资产变化不等同投资收益。历史反推数据已冻结，不随最新股价重算。` };
+      note:`${baseline.cutover_date} 前保留账单与余额调整反推的历史账面资产；从该日起按采集时的账户范围、现金及证券最新可用行情记录 CNY 估值，每天北京时间 23:59 采集一次。曲线包含范围首日前一日日末的期初基准，首尾差值与范围内资产变化一致。范围覆盖今天时使用当前账户余额、最新可用证券行情及当前汇率显示“今日暂估”，刷新不会改写历史快照。其他未采集日期沿用上一观测，不代表当日实际收盘净值；切换日可能包含账面与行情估值的口径差额，资产变化不等同投资收益。历史反推数据已冻结，不随最新股价重算。` };
   }
   return { capture, read };
 }
