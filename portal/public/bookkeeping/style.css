@@ -84,3 +84,11 @@
   .bk-period-dock-caption span { font-size:12px; }
   .bk-period-dock-caption small { font-size:10px; }
 }
+
+/* Chart legends remain usable when amounts are hidden. */
+.bk-series-toggle { display:inline-flex; align-items:center; gap:6px; min-height:40px; padding:8px 12px; border:1px solid var(--border); border-radius:999px; background:var(--hover-bg); color:var(--text); font:inherit; cursor:pointer; }
+.bk-series-toggle::before { content:''; width:10px; height:10px; flex:0 0 10px; border-radius:50%; background:var(--line-color); box-sizing:border-box; }
+.bk-series-toggle[aria-pressed="false"] { color:var(--muted); background:transparent; }
+.bk-series-toggle[aria-pressed="false"]::before { border:2px solid var(--line-color); background:transparent; opacity:.5; }
+.bk-series-toggle[aria-pressed="false"] .bk-series-label { text-decoration:line-through; }
+.bk-series-toggle:focus-visible { outline:2px solid var(--bk-gold); outline-offset:3px; }
