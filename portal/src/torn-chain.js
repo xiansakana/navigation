@@ -42,12 +42,12 @@ export function createTornChainService({ store, request = portalTornRequest, aut
           return json(res, 200, { ok: true, result });
         }
         if (route === '/state' && req.method === 'GET') {
-          const { config: { apiKey, ...config }, history } = store.get(uid);
-          return json(res, 200, { ok: true, config: { ...config, hasKey: !!apiKey }, bonusHitOptions: BONUS_HITS, state: monitor(uid).status(), history: [...history].reverse(), permissions: { configure: canTornChain(session, 'config:edit'), control: canTornChain(session, 'control:edit'), clear: canTornChain(session, 'history:edit') } });
+          const { config: { apiKey, apiKeys, ...config }, history } = store.get(uid);
+          return json(res, 200, { ok: true, config: { ...config, hasKey: !!apiKey, keyCount: apiKeys.length }, bonusHitOptions: BONUS_HITS, state: monitor(uid).status(), history: [...history].reverse(), permissions: { configure: canTornChain(session, 'config:edit'), control: canTornChain(session, 'control:edit'), clear: canTornChain(session, 'history:edit') } });
         }
         if (route === '/config' && req.method === 'POST') {
-          const input = await readJson(req, 4096); chainConfig(input, store.get(uid).config);
-          monitor(uid).stop(); store.save(uid, input);
+          const input = await readJson(req, 8192); chainConfig(input, store.get(uid).config);
+          const current = monitor(uid); current.stop(); await current.promise; store.save(uid, input);
           return json(res, 200, { ok: true });
         }
         if (route === '/start' && req.method === 'POST') { monitor(uid).start(); return json(res, 200, { ok: true }); }

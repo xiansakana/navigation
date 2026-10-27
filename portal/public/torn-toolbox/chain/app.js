@@ -59,10 +59,13 @@
     $('clear-key').disabled = !config.hasKey;
     $('start').disabled = state.running || state.busy || !config.hasKey;
     $('stop').disabled = !state.running;
-    $('key-status').textContent = config.hasKey ? '已保存 Key（不回传浏览器）' : '请保存具有公开信息权限的 Torn API Key';
+    $('key-status').textContent = config.hasKey ? `已保存 ${config.keyCount || 1} 个 Key（不回传浏览器）` : '请保存具有公开信息权限的 Torn API Key';
     const retry = state.running && state.retryAt ? ` · ${state.retryMessage} · 约 ${Math.max(0, Math.ceil(state.retryAt - Date.now() / 1000))} 秒后重试` : '';
     $('status').textContent = `${state.running ? state.busy ? '扫描中' : '运行中' : state.busy ? '正在停止' : '已停止'} · 已完成 ${state.rounds} 轮 · 最近扫描 ${date(state.lastScanAt)} · 下轮 ${date(state.nextScanAt)}${retry}`;
     $('coverage').textContent = `候选 ${state.candidates} · 本轮核验 ${state.confirmed} · 已跳过短 Chain ${state.belowMinimum || 0} · 失败/状态不明 ${state.failed}${state.remainingCandidates ? ' · 待轮换 ' + state.remainingCandidates : ''}${state.partial ? ' · 列表不完整，覆盖受限' : ''}${state.error ? ' · ' + state.error : ''}${state.notificationError ? ' · ' + state.notificationError : ''}`;
+    const keySummary = Number.isInteger(state.keyCount) ? ` · Key 可用 ${state.availableKeyCount}/${state.keyCount} · 账号 ${state.ownerCount}` : '';
+    const skipped = (state.skippedKeys || []).map(row => `Key #${row.index}：${row.reason}`).join('；');
+    $('coverage').textContent += keySummary + (skipped ? ' · 已跳过 ' + skipped : '');
     renderMonitor(state);
     const leaderFilter = config.leaderFilter || 'all';
     const matchesLeader = bonus => leaderFilter === 'all' || leaderFilter === 'leader' && bonus?.isLeader === true || leaderFilter === 'non-leader' && bonus?.isLeader === false;
@@ -109,12 +112,12 @@
   $('config-form').addEventListener('submit', async event => {
     event.preventDefault();
     const body = { minHits: $('min-hits').value, maxHits: $('max-hits').value, intervalSeconds: $('interval').value, apiIntervalSeconds: $('api-interval').value, bonusHits: Array.from($('bonus-options').querySelectorAll('input:checked'), input => Number(input.value)), leaderFilter: $('leader-filter').value };
-    if ($('api-key').value.trim()) body.apiKey = $('api-key').value.trim();
+    if ($('api-key').value.trim()) body.apiKeys = $('api-key').value.trim();
     try { await api('config', 'POST', body); editing = false; $('api-key').value = ''; $('message').textContent = '配置已保存，请启动监控'; await refresh(); } catch (error) { $('message').textContent = error.message; }
   });
   $('start').onclick = () => action('start', 'POST');
   $('stop').onclick = () => action('stop', 'POST');
-  $('clear-key').onclick = () => { if (confirm('删除已保存的 API Key 并停止监控？')) action('config', 'POST', { apiKey: '' }); };
+  $('clear-key').onclick = () => { if (confirm('删除全部已保存的 API Keys 并停止监控？')) action('config', 'POST', { apiKeys: [] }); };
   $('clear-history').onclick = () => { if (confirm('清空自己的冷却记录？')) action('history', 'DELETE'); };
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
   setInterval(() => { if (!document.hidden) refresh(); }, 5000);

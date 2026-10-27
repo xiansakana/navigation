@@ -3,7 +3,7 @@ import { DEFAULT_CHAIN_NOTIFY, chainNotifySettings } from './torn-chain-notifica
 import { normalizeBonusHits, reportBonusDefenders, legacyReportBonusDefenders, lookupDefenderLeader, selectedBonusDefenders } from './torn-chain-bonuses.js';
 import { apiIntervalSeconds } from './torn-api-config.js';
 
-export const DEFAULT_CHAIN_CONFIG = { minHits: 100, maxHits: null, intervalSeconds: 60, apiIntervalSeconds: 2, apiKey: '', bonusHits: [], leaderFilter: 'all' };
+export const DEFAULT_CHAIN_CONFIG = { minHits: 100, maxHits: null, intervalSeconds: 60, apiIntervalSeconds: 2, apiKey: '', apiKeys: [], bonusHits: [], leaderFilter: 'all' };
 
 // Torn's documented cooldown duration is six seconds per hit. The public API
 // explicitly defines cooldown as its end timestamp; `end` does not document
@@ -14,7 +14,7 @@ export function estimateCooldownStart(until, hits, detectedAt) {
   return start > 0 && start <= detectedAt && start < until ? start : null;
 }
 export function chainConfig(input, previous = DEFAULT_CHAIN_CONFIG) {
-  const result = { ...previous };
+  const result = { ...DEFAULT_CHAIN_CONFIG, ...previous };
   result.apiIntervalSeconds = apiIntervalSeconds('apiIntervalSeconds' in input ? input.apiIntervalSeconds : previous.apiIntervalSeconds);
   if ('bonusHits' in input) result.bonusHits = normalizeBonusHits(input.bonusHits);
   if ('leaderFilter' in input) {
@@ -30,11 +30,11 @@ export function chainConfig(input, previous = DEFAULT_CHAIN_CONFIG) {
     result[field] = Number(value);
   }
   if (result.maxHits !== null && result.maxHits < result.minHits) throw new Error('最大长度不能小于最小长度');
-  if ('apiKey' in input) {
-    const key = String(input.apiKey || '').trim();
-    if (key && !/^[a-zA-Z0-9]{16}$/.test(key)) throw new Error('API Key 应为 16 位字母或数字');
-    result.apiKey = key;
-  }
+  const supplied = 'apiKeys' in input ? input.apiKeys : 'apiKey' in input ? input.apiKey : previous.apiKeys?.length ? previous.apiKeys : previous.apiKey || '';
+  if (!Array.isArray(supplied) && typeof supplied !== 'string') throw new Error('API Keys 格式无效');
+  const keys = typeof supplied === 'string' ? supplied.trim().split(/[\s,，;；]+/).filter(Boolean) : supplied;
+  if (keys.length > 10 || keys.some(key => typeof key !== 'string' || !/^[A-Za-z0-9]{16}$/.test(key))) throw new Error('最多保存 10 个 API Key，每个应为 16 位字母或数字');
+  result.apiKeys = [...new Set(keys)]; result.apiKey = result.apiKeys[0] || '';
   return result;
 }
 
@@ -94,7 +94,7 @@ export function createTornAccountClient({ fetchImpl = fetch, spacingMs = 2000, g
   const identity = (key, signal) => {
     if (!identities.has(key)) {
       const pending = bootstrap('key/info', key, signal).then(data => {
-        if (!Number.isSafeInteger(data.info?.user?.id) || data.info.user.id <= 0) throw Object.assign(new Error('无法确认 API Key 所属账号，扫描已停止'), { fatal: true });
+        if (!Number.isSafeInteger(data.info?.user?.id) || data.info.user.id <= 0) throw Object.assign(new Error('无法确认 API Key 所属账号'), { fatal: true, keyOwnerUnknown: true });
         return data;
       }).catch(error => { identities.delete(key); throw error; });
       identities.set(key, pending);
@@ -135,7 +135,7 @@ export function createChainStore(db) {
   const get = uid => {
     ensure(uid); const row = db.prepare('SELECT * FROM torn_chain_monitors WHERE user_id=?').get(uid);
     const history = JSON.parse(row.history_json).map(record => ({ ...record, cooldownStartedAt: Object.hasOwn(record, 'cooldownStartedAt') ? record.cooldownStartedAt : estimateCooldownStart(record.cooldownUntil, record.hits, record.detectedAt) }));
-    return { config: { ...DEFAULT_CHAIN_CONFIG, ...JSON.parse(row.config_json) }, history, seen: JSON.parse(row.seen_json) };
+    return { config: chainConfig({}, { ...DEFAULT_CHAIN_CONFIG, ...JSON.parse(row.config_json) }), history, seen: JSON.parse(row.seen_json) };
   };
   return {
     get,
@@ -171,8 +171,60 @@ export class ChainMonitor {
     this.state = { running: false, rounds: 0, candidates: 0, confirmed: 0, failed: 0, partial: false, error: '', lastScanAt: null, nextScanAt: null, retryAt: null, retryAttempt: 0, retryMessage: '', chains: [], detailsAt: null, detailsStale: false };
   }
   status() { return { ...this.state, chains: this.state.chains.map(row => ({ ...row })), running: this.running, busy: this.busy }; }
-  safeError(error) { const message = String(error?.message || '请求失败'); return (this.config?.apiKey ? message.replaceAll(this.config.apiKey, '[Key]') : message).slice(0, 240); }
-  async api(path, key, signal) {
+  safeError(error) {
+    let message = String(error?.message || '请求失败');
+    for (const key of this.config?.apiKeys || [this.config?.apiKey]) if (key) message = message.replaceAll(key, '[Key]');
+    return message.slice(0, 240);
+  }
+  resetKeys() {
+    this.rejectedKeys = new Set(); this.verifiedKeys = new Map(); this.keyCursor = 0; this.keysReady = false;
+    this.state.skippedKeys = []; this.updateKeys();
+  }
+  updateKeys() {
+    const owners = new Map();
+    for (const key of this.config.apiKeys) if (!this.rejectedKeys.has(key) && (this.config.apiKeys.length === 1 || this.verifiedKeys.has(key))) {
+      const owner = this.verifiedKeys.get(key) || 'single';
+      if (!owners.has(owner)) owners.set(owner, key);
+    }
+    this.keys = [...owners.values()];
+    Object.assign(this.state, { keyCount: this.config.apiKeys.length, availableKeyCount: this.config.apiKeys.length - this.rejectedKeys.size, ownerCount: owners.size });
+  }
+  rejectKey(key, error) {
+    if (!this.rejectedKeys.has(key)) {
+      this.rejectedKeys.add(key);
+      this.state.skippedKeys.push({ index: this.config.apiKeys.indexOf(key) + 1, code: error.apiCode || null, reason: error.apiCode ? 'API 错误 ' + error.apiCode : '无法确认所属账号' });
+    }
+    this.updateKeys();
+  }
+  noKeys() { return Object.assign(new Error('所有 API Key 均不可用或无法确认所属账号，监控已停止；已保存记录保留'), { fatal: true }); }
+  async prepareKeys(signal) {
+    if (this.keysReady) return;
+    if (this.config.apiKeys.length > 1) for (const key of this.config.apiKeys) {
+      try {
+        const data = await this.requestWithRetry('key/info', key, signal), id = data.info?.user?.id;
+        if (!Number.isSafeInteger(id) || id <= 0) { this.rejectKey(key, {}); continue; }
+        this.verifiedKeys.set(key, id);
+      } catch (error) {
+        if ((!error.keyOwnerUnknown && ![1, 2, 10, 13, 16, 18].includes(error.apiCode)) || signal.aborted) throw error;
+        this.rejectKey(key, error);
+      }
+    }
+    this.updateKeys(); if (!this.keys.length) throw this.noKeys();
+    this.keysReady = true;
+  }
+  async api(path, signal) {
+    let key = this.keys[this.keyCursor++ % this.keys.length];
+    while (key) {
+      try { return await this.requestWithRetry(path, key, signal); }
+      catch (error) {
+        if ((!error.keyOwnerUnknown && ![1, 2, 10, 13, 16, 18].includes(error.apiCode)) || signal.aborted || !this.running) throw error;
+        this.rejectKey(key, error);
+        key = this.keys[this.keyCursor++ % this.keys.length];
+      }
+    }
+    throw this.noKeys();
+  }
+  async requestWithRetry(path, key, signal) {
     const check = () => { if (!this.running || signal?.aborted || !this.authorize()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true }); };
     for (let attempt = 0; ; attempt++) {
       check();
@@ -192,8 +244,9 @@ export class ChainMonitor {
   start() {
     if (this.running || this.busy) throw new Error('监控正在运行或上次请求尚未结束');
     if (!this.authorize()) throw new Error('无权启动 Chain 监控');
-    this.config = this.store.get(this.uid).config;
-    if (!this.config.apiKey) throw new Error('请先保存 Public API Key');
+    this.config = chainConfig({}, this.store.get(this.uid).config);
+    if (!this.config.apiKeys.length) throw new Error('请先保存 Public API Key');
+    this.resetKeys();
     // Restore recent active observations so chains disappearing from the active
     // listing during a restart still receive a detail check. Cooldown dedup is
     // handled by the durable seen IDs, not this optimization cache.
@@ -212,7 +265,7 @@ export class ChainMonitor {
     try {
       let parsed, bonusSource = 'api-v2';
       try {
-        const { chainreport } = await this.api('faction/' + row.id + '/chainreport', this.config.apiKey, signal); check();
+        const { chainreport } = await this.api('faction/' + row.id + '/chainreport', signal); check();
         parsed = reportBonusDefenders(chainreport, row);
       } catch (error) {
         // Some newly completed public reports return v2 error 6 even though
@@ -220,7 +273,7 @@ export class ChainMonitor {
         // Never fall back on authentication, rate limits or private-data errors.
         if (error.apiCode !== 6 || error.fatal) throw error;
         check();
-        const { chainreport } = await this.api('https://api.torn.com/torn/' + row.id + '?selections=chainreport', this.config.apiKey, signal); check();
+        const { chainreport } = await this.api('https://api.torn.com/torn/' + row.id + '?selections=chainreport', signal); check();
         parsed = legacyReportBonusDefenders(chainreport, row); bonusSource = 'api-v1';
       }
       const bonusDetails = parsed.map(bonus => ({ ...row.bonusDetails?.find(old => old.hit === bonus.hit && old.defenderId === bonus.defenderId), ...bonus }));
@@ -245,7 +298,7 @@ export class ChainMonitor {
       if (!cached) {
         this.leaderBudget--;
         try {
-          const result = await lookupDefenderLeader(bonus.defenderId, async path => { check(); const data = await this.api(path, this.config.apiKey, signal); check(); return data; }, this.factionCache);
+          const result = await lookupDefenderLeader(bonus.defenderId, async path => { check(); const data = await this.api(path, signal); check(); return data; }, this.factionCache);
           cached = { ...result, leaderCheckedAt: this.now() };
         } catch (error) {
           if (error.fatal || signal.aborted) throw error;
@@ -290,14 +343,14 @@ export class ChainMonitor {
     this.leaderBudget = 10; this.leaderCache ||= new Map(); this.factionCache = new Map();
     for (const [id, cached] of this.leaderCache) if (this.now() - cached.leaderCheckedAt >= 300) this.leaderCache.delete(id);
     try {
-      check(); const candidates = new Map(), visited = new Set(), skipped = new Set();
+      check(); await this.prepareKeys(signal); check(); const candidates = new Map(), visited = new Set(), skipped = new Set();
       const belowMinimum = hits => Number.isSafeInteger(hits) && hits >= 0 && hits < this.config.minHits;
       // Oldest starts first: default descending pages expose older pages as
       // `prev`, while `next` can be null even on a full first page.
       let path = 'faction/warfarechains?cat=active&limit=100&sort=asc', pages = 0;
       while (path) {
         check(); if (visited.has(path)) { stats.partial = true; break; } visited.add(path);
-        const data = await this.api(path, this.config.apiKey, signal); check();
+        const data = await this.api(path, signal); check();
         if (!Array.isArray(data.warfarechains)) throw new Error('API 未返回 Chain 列表');
         for (const row of data.warfarechains) if (Number.isSafeInteger(row?.id) && row.id > 0 && Number.isSafeInteger(row.faction?.id) && row.faction.id > 0) {
           const old = this.known.get(row.id);
@@ -334,7 +387,7 @@ export class ChainMonitor {
         const row = detailRows.get(candidate.id); row.status = 'checking'; row.reason = '正在核验'; row.attemptedAt = this.now();
         let detailConfirmed = false;
         try {
-          const { chain } = await this.api('faction/' + candidate.faction.id + '/chain', this.config.apiKey, signal); check();
+          const { chain } = await this.api('faction/' + candidate.faction.id + '/chain', signal); check();
           if (!chain || chain.id !== candidate.id || !['current', 'cooldown', 'timeout'].every(field => Number.isSafeInteger(chain[field]) && chain[field] >= 0)) {
             row.status = 'unknown'; row.reason = chain && Number.isSafeInteger(chain.id) && chain.id !== candidate.id ? `返回的 Chain ID ${chain.id} 与候选 ${candidate.id} 不一致，未判定状态` : 'API 缺少有效的 Chain 长度或计时数据，未判定状态';
             stats.failed++; this.state.failed = stats.failed; continue;
@@ -366,7 +419,7 @@ export class ChainMonitor {
       for (const [id, old] of this.known) if (this.now() - old.listedAt > 86400) this.known.delete(id);
       this.state.rounds++; this.state.lastScanAt = this.now();
     } catch (error) {
-      if (!signal.aborted) { stats.error = String(error.message).replaceAll(this.config.apiKey, '[Key]'); if (error.fatal) this.stop(); }
+      if (!signal.aborted) { stats.error = this.safeError(error); if (error.fatal) this.stop(); }
     } finally {
       for (const row of this.state.chains) if (row.status === 'checking') { row.status = 'waiting'; row.reason = '核验未完成，等待下一轮'; }
       this.store.saveKnown(this.uid, this.known);

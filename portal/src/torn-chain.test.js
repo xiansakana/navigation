@@ -213,9 +213,10 @@ test('Chain retry waits cancel on stop and invalid keys or bans never trigger au
 });
 
 test('stop cancels in-flight results and revoked authorization prevents further requests', async t => {
-  const store = fixture(t); let release, allowed = true, calls = 0;
-  const m = monitor(store, async () => { calls++; return new Promise(resolve => { release = resolve; }); }, { authorize: () => allowed });
-  m.start(); assert.throws(() => m.start()); m.stop(); release(page([candidate(1)])); await m.promise;
+  const store = fixture(t); let release, entered, allowed = true, calls = 0;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const m = monitor(store, async () => { calls++; return new Promise(resolve => { release = resolve; entered(); }); }, { authorize: () => allowed });
+  m.start(); assert.throws(() => m.start()); await waiting; m.stop(); release(page([candidate(1)])); await m.promise;
   assert.equal(calls, 1); assert.deepEqual(store.get('a').history, []);
   allowed = false; assert.throws(() => m.start());
 });
@@ -265,7 +266,7 @@ test('native Chain page and API bypass toolbox proxies and declare action permis
 });
 
 test('guests can read the authorized owner state but can never mutate, obtain keys or read notification settings', async t => {
-  const store = fixture(t); store.record('a', candidate(1), detail(1, 100, 2000).chain, false, 1000);
+  const store = fixture(t); store.save('a', { apiKeys: [key, 'abcdef1234567890'] }); store.record('a', candidate(1), detail(1, 100, 2000).chain, false, 1000);
   const service = createTornChainService({ store, request: async () => { throw new Error('read must not call Torn'); } });
   const session = { userId: 'a', actorUserId: 'guest', isGuest: true, permissions: ['*'], dataAccess: { permissions: ['torn-chain:view'] } };
   const call = async (route, method = 'GET') => {
@@ -273,6 +274,7 @@ test('guests can read the authorized owner state but can never mutate, obtain ke
     let result; await service.handle(req, { setHeader() {} }, new URL('http://local/api/torn-chain/' + route), session, (_, status, data) => { result = { status, data }; }); return result;
   };
   const state = await call('state'); assert.equal(state.status, 200); assert.equal(state.data.history.length, 1); assert.ok(!JSON.stringify(state.data).includes(key));
+  assert.equal(state.data.config.keyCount, 2); assert.ok(!('apiKeys' in state.data.config)); assert.ok(!('apiKey' in state.data.config)); assert.ok(!JSON.stringify(state.data).includes('abcdef1234567890'));
   assert.deepEqual(state.data.permissions, { configure: false, control: false, clear: false });
   for (const [route, method] of [['config', 'POST'], ['start', 'POST'], ['stop', 'POST'], ['history', 'DELETE'], ['notifications', 'GET'], ['notifications/test', 'POST']]) assert.equal((await call(route, method)).status, 403);
   assert.equal(canTornChain({ userId: 'guest', isGuest: true, permissions: ['*'] }, 'control:edit'), false);
