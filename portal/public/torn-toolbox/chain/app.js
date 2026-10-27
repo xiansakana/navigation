@@ -1,6 +1,6 @@
 (() => {
   const $ = id => document.getElementById(id), date = value => value ? new Date(value * 1000).toLocaleString() : '—';
-  let dirty = false, loading = false, latest, offset = 0;
+  let dirty = false, loading = false, queued = false, latest, offset = 0;
   async function api(path, method = 'GET', body) {
     const response = await fetch('/api/torn-chain/' + path, { method, credentials: 'same-origin', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
     const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.error || '操作失败'); return data;
@@ -47,7 +47,15 @@
     if (!articles.length) { const empty = document.createElement('p'); empty.textContent = '暂无确认的存活 → 摧毁记录。'; articles.push(empty); }
     $('history').replaceChildren(...articles);
   }
-  async function refresh() { if (loading) return; loading = true; try { render(await api('state?offset=' + offset + '&filter=' + $('monitor-filter').value)); } catch (error) { $('message').textContent = error.message; } finally { loading = false; } }
+  async function refresh() {
+    if (loading) { queued = true; return; }
+    loading = true; const requestedOffset = offset, filter = $('monitor-filter').value;
+    try {
+      const data = await api('state?offset=' + requestedOffset + '&filter=' + filter);
+      if (requestedOffset === offset && filter === $('monitor-filter').value) render(data);
+    } catch (error) { $('message').textContent = error.message; }
+    finally { loading = false; if (queued) { queued = false; refresh(); } }
+  }
   async function action(path, method = 'POST', body) { try { await api(path, method, body); $('message').textContent = '操作成功'; await refresh(); } catch (error) { $('message').textContent = error.message; } }
   $('config-form').oninput = () => { dirty = true; };
   $('config-form').onsubmit = async event => {
