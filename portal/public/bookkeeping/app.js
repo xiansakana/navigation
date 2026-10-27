@@ -115,8 +115,14 @@
     for (const a of state.accounts) if ((!a.archived || $('show-archived-accounts').checked) && (!selectedGroup || a.group===selectedGroup) && (!$('asset-search').value || (a.name+' '+a.note).toLowerCase().includes($('asset-search').value.toLowerCase()))) (grouped[a.group] ||= []).push(a);
     $('account-groups').innerHTML = Object.entries(grouped).map(([g,list]) => '<details open class="bk-panel bk-account-group"><summary>' + esc(g) + ' · ' + list.length + ' 个账户</summary><p class="bk-muted">' + (list.some(a=>a.balance==null)?'证券行情待补齐，暂不显示部分合计':Object.entries(list.reduce((t,a)=>{t[a.currency]=(t[a.currency]||0)+a.balance;return t;},{})).map(([c,v])=>esc(c)+' '+m(v,c)).join(' · ')) + '（当前列表余额）</p>' + list.map(a => '<div class="bk-account"><span class="bk-badge">' + esc(a.icon || '◈') + '</span><div class="bk-entry-main"><strong>' + esc(a.name) + (a.balanceSource==='portfolio'?' <small class="bk-muted">证券联动</small>':'') + (a.archived?' <small class="bk-muted">已归档</small>':'') + (!a.included?' <small class="bk-muted">不计入</small>':'') + '</strong><p>' + esc(a.currency + ' · ' + a.accountType + (a.note?' · '+a.note:'')) + '</p>' + (a.creditLimit ? '<p>可用额度 ' + m(a.creditLimit+a.balance,a.currency) + (a.billDay?' · 账单日 '+a.billDay+' 日':'') + (a.dueDay?' · 还款日 '+a.dueDay+' 日':'') + '</p>':'') + '<div class="bk-asset-controls"><button data-account-ledger="' + a.id + '">明细</button>' + (a.investment && (me.permissions.includes('*') || me.permissions.includes('service:stock-manage:edit') || me.permissions.includes('service:stock-manage:accounts:view'))?'<a href="/stock-manage/?accountId='+encodeURIComponent(a.investment.id)+'&showAccounts=1">证券明细／现金核对</a>':'') + (can('accounts:edit')?'<button data-account-edit="' + a.id + '">编辑</button>' + (!a.archived && !a.investment?'<button data-account-adjust="' + a.id + '">核对余额</button>':'') + management.accountActions(a):'') + '</div></div><div class="bk-entry-amount ' + (a.balance<0?'bk-expense':'') + '">' + (a.balance==null?'行情待补齐':m(a.balance,a.currency)) + '</div></div>').join('') + '</details>').join('') || '<p class="bk-empty">暂无账户。可新增账户或导入账户快照。</p>';
   }
-  let periodSave = Promise.resolve();
-  const periods = window.createBookkeepingPeriods({ $, load, clearFocus:()=>analysis.clearFocus(), save:value=>{periodSave=periodSave.then(()=>write('/preferences',value,'PUT')).catch(e=>{$('error').textContent='日期筛选保存失败：'+e.message;$('error').classList.remove('hidden');});} });
+  let periodSave = Promise.resolve(), periodReload=0;
+  const periods = window.createBookkeepingPeriods({ $, load:reloadPeriod, clearFocus:()=>analysis.clearFocus(), save:value=>{periodSave=periodSave.then(()=>write('/preferences',value,'PUT')).catch(e=>{$('error').textContent='日期筛选保存失败：'+e.message;$('error').classList.remove('hidden');});} });
+  const periodDock = window.createBookkeepingPeriodDock({ $, can });
+  async function reloadPeriod() {
+    const ticket=++periodReload, restore=periodDock.capturePosition();periodDock.setLoading(true);
+    await load();
+    if(ticket===periodReload){restore?.();periodDock.setLoading(false);}
+  }
   const analysis = window.createBookkeepingAnalysis({ $, esc, m, money, can, load, tab, getState:()=>state, periods });
   const management = window.createBookkeepingManagement({ $, esc, can, api, write, load, field, select, options, getState:()=>state, openEditor });
   const details = window.createBookkeepingDetails({ $, esc, m, can, api, getState:()=>state, tab, openEditor, remove:async item=>{
@@ -143,6 +149,7 @@
     document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active',b.dataset.tab===(name==='entry-detail'?'entries':name)));
     document.querySelectorAll('.bk-view').forEach(v => v.classList.toggle('hidden',v.id!==name+'-view'));
     $('filters').classList.toggle('hidden',['accounts','catalog','entry-detail'].includes(name));$('period-selector').classList.toggle('hidden',['catalog','entry-detail'].includes(name));
+    periodDock.setTab(name);
     if(name==='entries' && previousTab==='entry-detail')details.restoreList(()=>activeTab==='entries');
   }
   function field(name, label, value = '', extra = '') { return '<label>' + esc(label) + '<input name="' + name + '" value="' + esc(value) + '" ' + extra + '></label>'; }

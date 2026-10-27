@@ -47,7 +47,7 @@ async function fixture(extra={},permissions=['*']) {
     } else throw new Error('Unexpected request '+url);
     return {ok:true,json:async()=>JSON.parse(JSON.stringify(data))};
   };
-  for(const name of ['periods','analysis','management','details','app'])w.eval(fs.readFileSync(new URL('../public/bookkeeping/'+name+'.js',import.meta.url),'utf8'));
+  for(const name of ['periods','period-dock','analysis','management','details','app'])w.eval(fs.readFileSync(new URL('../public/bookkeeping/'+name+'.js',import.meta.url),'utf8'));
   const wait=async condition=>{
     const deadline=performance.now()+2000;
     while(!condition()){

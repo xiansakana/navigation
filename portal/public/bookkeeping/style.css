@@ -67,3 +67,20 @@
 #assets-summary { grid-template-columns:repeat(4,minmax(0,1fr)); }@media(max-width:1100px) { #assets-summary { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 
 @media(min-width:761px) { #trend-panel { display:flex; flex-direction:column; contain:size; min-height:0; } #trend-panel #trend { flex:1; height:0; min-height:0; max-height:none; overflow-y:auto; } }
+
+.bk-period-dock { position:fixed; z-index:90; display:grid; grid-template-columns:44px minmax(0,1fr) 44px; align-items:center; gap:10px; padding:6px 12px; border:1px solid var(--border); border-top:0; border-radius:0 0 16px 16px; background:var(--card); box-shadow:0 8px 20px #0003; }
+.bk-period-dock .btn { padding:8px; min-height:44px; }
+.bk-period-dock-caption { display:flex; justify-content:center; align-items:center; gap:16px; min-height:44px; min-width:0; padding:6px; border:0; color:var(--text); background:transparent; font:inherit; cursor:pointer; }
+.bk-period-dock-caption span { font-size:14px; font-weight:600; }
+.bk-period-dock-caption small { color:var(--muted); white-space:nowrap; }
+.bk-period-dock[aria-busy="true"] .bk-period-dock-caption small { opacity:.5; }
+.bk-period-dock-editor { width:min(760px,calc(100vw - 40px)); }
+.bk-period-dock-editor .bk-period-selector { display:block; margin-bottom:12px; }
+.bk-period-dock-editor .bk-period-buttons,.bk-period-dock-editor .bk-period-navigation { max-width:none; }
+.bk-period-dock-editor .bk-filters { margin-bottom:0; }
+@media(max-width:760px) {
+  .bk-period-dock { gap:4px; padding:4px; }
+  .bk-period-dock-caption { flex-direction:column; gap:1px; }
+  .bk-period-dock-caption span { font-size:12px; }
+  .bk-period-dock-caption small { font-size:10px; }
+}
