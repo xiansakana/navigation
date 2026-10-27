@@ -85,3 +85,14 @@ test('API scopes statistics, assets and drill-through while ordinary details rem
     await request('PUT','analysis-scope',{enabled:false,accountIds:[p]});assert.equal((await request('GET','state')).data.analysis.asset.current,original.analysis.asset.current);
   } finally {closeDatabase();if(prior==null)delete process.env.NAVIGATION_DB_PATH;else process.env.NAVIGATION_DB_PATH=prior;fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('filtered multi-currency snapshots round the retained subtotal once instead of subtracting from an already rounded total',()=>{
+  const db=new Database(':memory:');
+  try {
+    const h=createAssetHistory(db),accounts=[{id:'cash',currency:'CNY',balance:1,included:true},{id:'social',group:SOCIAL_ACCOUNT_GROUP,currency:'USD',balance:0.01,included:true},{id:'stock',currency:'USD',balance:0.15,ledgerBalance:0.15,balanceSource:'portfolio',included:true}],rates={CNY:1,USD:6.7};
+    h.capture('a',accounts,[],rates,Date.parse('2026-10-15T10:00:00Z'));
+    const result=h.read('a',{start:'2026-10-15',end:'2026-10-15'},'2026-10-16',2.01,{excludedAccountIds:['social'],accounts,entries:[],rates});
+    assert.equal(result.period.closing,2.01);
+    assert.equal(db.prepare('SELECT balance FROM bookkeeping_asset_snapshots').get().balance,2.07);
+  } finally {db.close();}
+});

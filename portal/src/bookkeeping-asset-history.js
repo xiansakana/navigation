@@ -91,7 +91,7 @@ export function createAssetHistory(db) {
       const dates=[...new Set([...legacy.map(p=>p.date),...curves.flat().map(p=>p.date).filter(date=>date>=legacy[0].date&&date<=legacy.at(-1).date)])].sort();
       legacy=dates.map(date=>({date,currency:'CNY',source:'ledger',balance:round(atCurve(history.points,date)-curves.reduce((sum,curve)=>sum+atCurve(curve,date),0)),...(estimated?{scopeEstimated:true}:{})}));
     }
-    const points=[...legacy,...snapshots.map(p=>({date:p.date,currency:'CNY',balance:excluded.size?round(p.balance-JSON.parse(p.details).filter(a=>excluded.has(a.id)).reduce((sum,a)=>sum+a.balance*a.rate,0)):p.balance,source:'valuation',capturedAt:p.captured_at}))];
+    const points=[...legacy,...snapshots.map(p=>({date:p.date,currency:'CNY',balance:excluded.size?round(JSON.parse(p.details).filter(a=>!excluded.has(a.id)).reduce((sum,a)=>sum+a.balance*a.rate,0)):p.balance,source:'valuation',capturedAt:p.captured_at}))];
     if (!points.length) return null;
     // Today's observation is a display-only estimate; never rewrite daily snapshots.
     const live = Number.isFinite(currentBalance);
