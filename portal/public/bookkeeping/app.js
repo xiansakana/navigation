@@ -43,6 +43,7 @@
   }
   function renderEntries() {
     const converted=state.equivalentSummary||state.analysis?.equivalentSummary, missing=state.conversionMissing||state.analysis?.billing.missingCurrencies||[];
+    const dayTotals=new Map((converted?.days||[]).filter(day=>day.currency==='CNY').map(day=>[day.date,day]));
     const summary=missing.length?'<p class="bk-muted">缺少 '+esc(missing.join('、'))+' 历史汇率，CNY 汇总待补齐。</p>':summaryHtml(converted||state.summary,true);
     $('summary').innerHTML=summary;$('stats-summary').innerHTML=summary;
     $('count').textContent = state.count + ' 笔';
@@ -51,7 +52,12 @@
     $('entry-list').innerHTML = ledgerNote + (state.entries.map(e => {
       const day = e.date.slice(0,10), title = [e.category,e.subcategory].filter(Boolean).join(' · ');
       let heading = '';
-      if (day !== lastDay) { lastDay = day; heading = '<div class="bk-day"><span>' + esc(day) + '</span><span>' + esc(new Date(day + 'T12:00:00').toLocaleDateString('zh-CN',{weekday:'long'})) + '</span></div>'; }
+      if (day !== lastDay) {
+        lastDay=day;
+        const total=dayTotals.get(day)||{income:0,expense:0},net=Math.round((total.income-total.expense)*100)/100;
+        const daily=missing.length||!converted?'<span>CNY 合计待补齐汇率</span>':'<span class="bk-day-currency">CNY</span><span>收入 '+m(total.income,'CNY')+'</span><span>净支出 '+m(total.expense,'CNY')+'</span><span class="'+(net<0?'bk-expense':'bk-income')+'">结余 '+m(net,'CNY')+'</span>';
+        heading='<div class="bk-day" data-day="'+esc(day)+'"><span class="bk-day-date"><time datetime="'+esc(day)+'">'+esc(day)+'</time><span>'+esc(new Date(day+'T12:00:00').toLocaleDateString('zh-CN',{weekday:'long'}))+'</span></span><span class="bk-day-totals" aria-label="当日 CNY 合计">'+daily+'</span></div>';
+      }
       const expense = ['支出','已报销'].includes(e.type), transfer = transferTypes.includes(e.type) || e.type === '余额调整';
       const account = [e.accountName, e.toAccountName].filter(Boolean).join(' → ');
       const subtitle = [e.date.slice(11,16), account, e.note || e.tags].filter(Boolean).join(' · ');

@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom';
 import { summarize } from './bookkeeping-store.js';
 import { analyzeBookkeeping } from './bookkeeping-analysis.js';
 
-async function fixture(extra={},permissions=['*']) {
+async function fixture(extra={},permissions=['*'],{additionalEntries=[],pageLimit=Infinity}={}) {
   const html=fs.readFileSync(new URL('../public/bookkeeping/index.html',import.meta.url),'utf8');
   const dom=new JSDOM(html,{url:'http://localhost/bookkeeping/',runScripts:'outside-only'}),w=dom.window;
   const $=id=>w.document.getElementById(id),writes=[];
@@ -13,8 +13,8 @@ async function fixture(extra={},permissions=['*']) {
     accountName:'现金',note:'<img src=x onerror=alert(1)>',tags:'午餐',location:'天津',book:'个人账本',fee:1.23,refund:0,discount:2,historical:false,cnyAmount:10,cnyFee:1.23,historicalRate:1,rateDate:'2026-10-17',...extra};
   const accounts=[{id:'cash',name:'现金',currency:'CNY',balance:100,included:true,group:'资金账户'}, {id:'usd',name:'美元卡',currency:'USD',balance:7,included:true,group:'资金账户'}];
   const state=()=>{
-    const entries=entry?[entry]:[],settings={budgets:{},rates:{CNY:1,USD:7}},analysis=analyzeBookkeeping(entries,entries,accounts,settings,{},'2026-10-17');
-    return {ok:true,entries,accounts,summary:summarize(entries),equivalentSummary:analysis.equivalentSummary,analysis,settings,fx:{rates:settings.rates,quotes:{}},books:['个人账本'],categories:['餐饮'],categoryTree:[{id:'cat',name:'餐饮',kind:'expense',parentId:null,icon:'◈',count:1}],accountGroups:[{id:'group',name:'资金账户',count:2}],count:entries.length};
+    const entries=entry?[entry,...additionalEntries]:additionalEntries,settings={budgets:{},rates:{CNY:1,USD:7}},analysis=analyzeBookkeeping(entries,entries,accounts,settings,{},'2026-10-17');
+    return {ok:true,entries:entries.slice(0,pageLimit),accounts,summary:summarize(entries),equivalentSummary:analysis.equivalentSummary,analysis,settings,fx:{rates:settings.rates,quotes:{}},books:['个人账本'],categories:['餐饮'],categoryTree:[{id:'cat',name:'餐饮',kind:'expense',parentId:null,icon:'◈',count:1}],accountGroups:[{id:'group',name:'资金账户',count:2}],count:entries.length};
   };
   let scrollY=1800;
   Object.defineProperty(w,'scrollY',{get:()=>scrollY});
@@ -136,5 +136,38 @@ test('read-only entry details provide no edit or delete action',async()=>{
     assert.equal(f.$('entry-detail-view').querySelector('[data-detail-action="delete"]'),null);
     assert.ok([...f.$('entry-detail-view').querySelectorAll('[data-detail-field]')].every(e=>e.disabled));
     f.edit('amount');assert.equal(f.$('editor').open,false);
+  } finally {f.dom.window.close();}
+});
+
+test('daily CNY totals use the full filtered summary across pages with historical FX, refunds, fees and adjustments',async()=>{
+  const base={date:'2026-10-17T11:00:00',currency:'CNY',category:'其他',fee:0,accountId:'cash',cnyFee:0};
+  const additionalEntries=[
+    {...base,id:'income',type:'收入',amount:20,currency:'USD',fee:1,cnyAmount:120,cnyFee:6,historicalRate:6},
+    {...base,id:'refund',type:'退款入账',amount:5,currency:'USD',cnyAmount:30,historicalRate:6},
+    {...base,id:'transfer',type:'转账',amount:500,fee:2,cnyAmount:500,cnyFee:2,toAccountId:'usd'},
+    {...base,id:'adjustment',type:'余额调整',amount:10000,cnyAmount:10000},
+    {...base,id:'yesterday',date:'2026-10-16T11:00:00',type:'支出',amount:5,cnyAmount:5}
+  ];
+  const f=await fixture({},['*'],{additionalEntries,pageLimit:1});
+  try {
+    assert.equal(f.$('entry-list').querySelectorAll('[data-entry]').length,1);
+    const heading=f.$('entry-list').querySelector('[data-day="2026-10-17"]');
+    assert.equal(heading.querySelector('time').dateTime,'2026-10-17');
+    assert.match(heading.textContent,/CNY/);
+    assert.match(heading.textContent,/收入 ¥120\.00/);
+    assert.match(heading.textContent,/净支出 -¥10\.77/);
+    assert.match(heading.textContent,/结余 ¥130\.77/);
+    assert.equal(heading.querySelectorAll('[data-money]').length,3);
+    assert.equal(f.$('entry-list').querySelector('[data-day="2026-10-16"]'),null);
+    assert.equal(f.$('more').classList.contains('hidden'),false);
+  } finally {f.dom.window.close();}
+});
+
+test('daily totals do not claim zero when historical FX is missing',async()=>{
+  const f=await fixture({currency:'USD',fxMissing:true});
+  try {
+    const heading=f.$('entry-list').querySelector('.bk-day');
+    assert.match(heading.textContent,/CNY 合计待补齐汇率/);
+    assert.equal(heading.querySelector('[data-money]'),null);
   } finally {f.dom.window.close();}
 });

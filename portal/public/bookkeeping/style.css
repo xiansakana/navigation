@@ -92,3 +92,9 @@
 .bk-series-toggle[aria-pressed="false"]::before { border:2px solid var(--line-color); background:transparent; opacity:.5; }
 .bk-series-toggle[aria-pressed="false"] .bk-series-label { text-decoration:line-through; }
 .bk-series-toggle:focus-visible { outline:2px solid var(--bk-gold); outline-offset:3px; }
+.bk-day { align-items:center; }
+.bk-day-date { display:flex; align-items:center; gap:10px; flex-shrink:0; }
+.bk-day-totals { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:6px 12px; }
+.bk-day-totals>span { white-space:nowrap; }
+.bk-day-currency { font-size:10px; }
+@media(max-width:760px) { .bk-day { flex-wrap:wrap; }.bk-day-totals { width:100%; justify-content:flex-start; gap:6px 10px; font-size:11px; } }
