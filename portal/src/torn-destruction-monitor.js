@@ -79,11 +79,11 @@ export class DestructionMonitor extends ChainMonitor {
     this.busy = true; const signal = this.controller.signal;
     const valid = () => this.running && !signal.aborted && this.authorize();
     const check = () => { if (!valid()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true }); };
-    Object.assign(this.state, { pages: 0, confirmed: 0, failed: 0, partial: false, error: '', detailsStale: true, problems: [] });
+    Object.assign(this.state, { pages: 0, confirmed: 0, failed: 0, outsideRange: 0, partial: false, error: '', detailsStale: true, problems: [] });
     try {
       check(); await this.prepareKeys(signal); check();
       const filters = ['notDestroyed', 'respect:>=:' + this.config.minRespect, ...(this.config.maxRespect === null ? [] : ['respect:<=:' + this.config.maxRespect])];
-      const current = new Map(), visited = new Set(); let offset = 0, path = this.searchPath(filters);
+      const current = new Map(), visited = new Set(), rawSeen = new Set(); let offset = 0, path = this.searchPath(filters);
       while (path) {
         check(); if (visited.has(path) || visited.size >= 1000) throw new Error('帮派分页未完成，本轮不更新基线，稍后自动重试');
         visited.add(path); const data = await this.api(path, signal); check();
@@ -91,13 +91,22 @@ export class DestructionMonitor extends ChainMonitor {
         let added = 0;
         for (const item of data.search) {
           const row = factionRow(item, this.now());
-          if (row.isDestroyed || !inRespectRange(row, this.config)) throw new Error('API 列表与存活帮派筛选不符，本轮不更新基线');
-          if (!current.has(row.id)) added++; current.set(row.id, row);
+          if (!rawSeen.has(row.id)) added++; rawSeen.add(row.id);
+          // Listings can shift during pagination; only keep live in-range rows.
+          if (row.isDestroyed || !inRespectRange(row, this.config)) { this.state.outsideRange++; continue; }
+          current.set(row.id, row);
         }
         if (data.search.length && !added) throw new Error('API 分页重复，本轮不更新基线');
         this.state.pages++; this.state.confirmed = current.size;
-        offset += 100;
-        path = data._metadata?.links?.next || (data.search.length === 100 ? this.searchPath(filters, offset) : null);
+        const next = data._metadata?.links?.next;
+        if (next) {
+          const url = new URL(next, 'https://api.torn.com/v2/faction/search');
+          const value = url.searchParams.get('offset'), nextOffset = Number(value);
+          if (url.origin !== 'https://api.torn.com' || url.pathname !== '/v2/faction/search' || value === null || !Number.isSafeInteger(nextOffset) || nextOffset <= offset) throw new Error('API 分页地址或 offset 无效，本轮不更新基线');
+          offset = nextOffset;
+          // API next links may lose filters/limit: reconstruct our own request.
+          path = this.searchPath(filters, offset);
+        } else { offset += 100; path = data.search.length === 100 ? this.searchPath(filters, offset) : null; }
       }
       check();
       const missing = this.store.observations(this.uid).filter(row => !row.isDestroyed && inRespectRange(row, this.config) && !current.has(row.id));

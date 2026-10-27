@@ -83,6 +83,19 @@ test('incomplete pagination cannot update baseline, and transient requests retry
   assert.deepEqual(waits, [10000]); assert.equal(f.m.status().partial, true); assert.equal(f.m.running, true);
   assert.equal(f.store.observations('a')[0].respect, 100); assert.ok(calls.every(k => k === key));
 });
+test('pagination retains filters omitted by API next links and skips rows changing out of range', async t => {
+  const filters = [];
+  const f = fixture(t, async path => {
+    const url = new URL(path, 'https://api.torn.com/v2/'); filters.push(url.searchParams.get('filters'));
+    assert.equal(url.searchParams.get('limit'), '100');
+    if (url.searchParams.get('offset') === '0') return page([faction(1)], 'https://api.torn.com/v2/faction/search?offset=100');
+    return page([faction(2), faction(3, 20000), faction(4, 0, true)]);
+  });
+  f.m.start(); await f.m.promise;
+  assert.deepEqual(filters, ['notDestroyed,respect:>=:0,respect:<=:10000', 'notDestroyed,respect:>=:0,respect:<=:10000']);
+  assert.equal(f.m.status().rounds, 1); assert.equal(f.m.status().outsideRange, 2);
+  assert.deepEqual(f.store.observations('a').map(row => row.id), [1, 2]); assert.equal(f.sent.length, 0);
+});
 test('multi-key rejection skips bad keys and never rotates for a rate-limit retry', async t => {
   const calls = [], waits = []; let limited = true;
   const f = fixture(t, async (path, used) => {
