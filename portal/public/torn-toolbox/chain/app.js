@@ -10,19 +10,19 @@
   const leaderLink = row => link((row.leaderName || 'Leader') + ' [' + row.leaderId + ']', 'https://www.torn.com/profiles.php?XID=' + Number(row.leaderId));
   function renderRows() {
     const state = latest.state, problems = new Map((state.problems || []).map(row => [row.id, row.reason]));
-    const rows = (state.factions || []).filter(row => $('monitor-filter').value !== 'problem' || problems.has(row.id));
-    if (offset >= rows.length) offset = Math.max(0, Math.floor((rows.length - 1) / 50) * 50);
-    $('monitor-count').textContent = '(' + rows.length + ')'; $('monitor-table').hidden = !rows.length; $('monitor-empty').hidden = !!rows.length;
+    const rows = state.factions || [], total = state.factionsTotal ?? rows.length;
+    offset = state.factionsOffset ?? 0;
+    $('monitor-count').textContent = '(' + total + ')'; $('monitor-table').hidden = !rows.length; $('monitor-empty').hidden = !!rows.length;
     $('monitor-empty').textContent = $('monitor-filter').value === 'problem' ? '没有待确认的帮派。' : '尚无存活基线，请启动监控。';
-    $('monitor-chains').replaceChildren(...rows.slice(offset, offset + 50).map(row => {
+    $('monitor-chains').replaceChildren(...rows.map(row => {
       const tr = document.createElement('tr'); tr.dataset.factionId = row.id;
       const change = Number.isSafeInteger(row.previousRespect) ? row.respect - row.previousRespect : null;
       for (const [label, content] of [['帮派', factionLink(row)], ['Leader', leaderLink(row)], ['respect', row.respect.toLocaleString()], ['变化', change === null ? '基线' : (change > 0 ? '+' : '') + change], ['最近存活', date(row.lastAliveAt)], ['核验说明', problems.get(row.id) || 'API 确认存活']]) {
         const td = document.createElement('td'); td.dataset.label = label; if (typeof content === 'string') td.textContent = content; else td.append(content); tr.append(td);
       } return tr;
     }));
-    $('monitor-page').textContent = `${rows.length ? offset + 1 : 0}–${Math.min(offset + 50, rows.length)} / ${rows.length}`;
-    $('monitor-prev').disabled = !offset; $('monitor-next').disabled = offset + 50 >= rows.length;
+    $('monitor-page').textContent = `${total ? offset + 1 : 0}–${Math.min(offset + 50, total)} / ${total}`;
+    $('monitor-prev').disabled = !offset; $('monitor-next').disabled = offset + 50 >= total;
   }
   function render(data) {
     latest = data; const { config, state, history, permissions } = data;
@@ -47,7 +47,7 @@
     if (!articles.length) { const empty = document.createElement('p'); empty.textContent = '暂无确认的存活 → 摧毁记录。'; articles.push(empty); }
     $('history').replaceChildren(...articles);
   }
-  async function refresh() { if (loading) return; loading = true; try { render(await api('state')); } catch (error) { $('message').textContent = error.message; } finally { loading = false; } }
+  async function refresh() { if (loading) return; loading = true; try { render(await api('state?offset=' + offset + '&filter=' + $('monitor-filter').value)); } catch (error) { $('message').textContent = error.message; } finally { loading = false; } }
   async function action(path, method = 'POST', body) { try { await api(path, method, body); $('message').textContent = '操作成功'; await refresh(); } catch (error) { $('message').textContent = error.message; } }
   $('config-form').oninput = () => { dirty = true; };
   $('config-form').onsubmit = async event => {
@@ -58,7 +58,7 @@
   $('start').onclick = () => action('start'); $('stop').onclick = () => action('stop');
   $('clear-key').onclick = () => { if (confirm('删除全部 Keys 并停止监控？')) action('config', 'POST', { apiKeys: [] }); };
   $('clear-history').onclick = () => { if (confirm('清空摧毁记录？去重状态保留。')) action('history', 'DELETE'); };
-  $('monitor-filter').onchange = () => { offset = 0; if (latest) renderRows(); };
-  $('monitor-prev').onclick = () => { offset = Math.max(0, offset - 50); renderRows(); }; $('monitor-next').onclick = () => { offset += 50; renderRows(); };
+  $('monitor-filter').onchange = () => { offset = 0; refresh(); };
+  $('monitor-prev').onclick = () => { offset = Math.max(0, offset - 50); refresh(); }; $('monitor-next').onclick = () => { offset += 50; refresh(); };
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); }); setInterval(() => { if (!document.hidden) refresh(); }, 5000); refresh();
 })();

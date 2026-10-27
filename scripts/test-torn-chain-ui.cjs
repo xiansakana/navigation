@@ -57,13 +57,13 @@ async function main() {
     assert.equal(await page.locator('#bonus-options').count(), 0);
     await page.locator('#start').click(); await page.waitForFunction(() => document.querySelector('#status').textContent.includes('已完成 1 轮'));
     assert.match(await page.locator('#coverage').innerText(), /Key 可用 2\/3/); assert.equal(await page.locator('#monitor-chains tr').count(), 50);
-    await page.locator('#monitor-next').click(); assert.equal(await page.locator('#monitor-chains tr').count(), 5);
+    await page.locator('#monitor-next').click(); await page.waitForFunction(() => document.querySelectorAll('#monitor-chains tr').length === 5); assert.equal(await page.locator('#monitor-chains tr').count(), 5);
     const advanced = await context.request.post(f.origin + '/fixture/advance'); assert.equal((await advanced.json()).notifications, 1);
     await page.reload(); await page.waitForSelector('#history article');
     assert.equal(await page.locator('#history article').count(), 1); assert.equal(await page.locator('#history img').count(), 0);
     assert.match(await page.locator('#history').innerText(), /最后存活/); assert.match(await page.locator('#history').innerText(), /发现摧毁/);
     assert.equal(await page.locator('#history a').last().getAttribute('href'), 'https://www.torn.com/profiles.php?XID=1001');
-    await page.locator('#monitor-filter').selectOption('problem'); assert.equal(await page.locator('#monitor-chains tr').count(), 1);
+    await page.locator('#monitor-filter').selectOption('problem'); await page.waitForFunction(() => document.querySelectorAll('#monitor-chains tr').length === 1); assert.equal(await page.locator('#monitor-chains tr').count(), 1);
     await page.locator('#monitor-filter').selectOption('all');
     await page.locator('#stop').click(); await page.locator('#max-respect').fill('20000'); await page.locator('#save').click();
     await page.waitForFunction(() => document.querySelector('#message').textContent.includes('配置已保存'));

@@ -43,7 +43,16 @@ export function createTornChainService({ store, request = portalTornRequest, aut
         }
         if (route === '/state' && req.method === 'GET') {
           const { config: { apiKey, apiKeys, ...config }, history } = store.get(uid);
-          return json(res, 200, { ok: true, config: { ...config, hasKey: !!apiKey, keyCount: apiKeys.length }, state: monitor(uid).status(), history: [...history].reverse(), permissions: { configure: canTornChain(session, 'config:edit'), control: canTornChain(session, 'control:edit'), clear: canTornChain(session, 'history:edit') } });
+          const state = monitor(uid).status();
+          if (state.kind === 'destruction') {
+            const problems = new Set((state.problems || []).map(row => row.id));
+            const rows = state.factions.filter(row => url.searchParams.get('filter') !== 'problem' || problems.has(row.id));
+            const requested = Number(url.searchParams.get('offset') || 0), limit = 50;
+            const offset = Math.min(Number.isSafeInteger(requested) && requested >= 0 ? Math.floor(requested / limit) * limit : 0, Math.max(0, Math.floor((rows.length - 1) / limit) * limit));
+            Object.assign(state, { factions: rows.slice(offset, offset + limit), factionsTotal: rows.length, factionsOffset: offset, factionsLimit: limit });
+            state.problems = (state.problems || []).filter(row => state.factions.some(faction => faction.id === row.id));
+          }
+          return json(res, 200, { ok: true, config: { ...config, hasKey: !!apiKey, keyCount: apiKeys.length }, state, history: [...history].reverse(), permissions: { configure: canTornChain(session, 'config:edit'), control: canTornChain(session, 'control:edit'), clear: canTornChain(session, 'history:edit') } });
         }
         if (route === '/config' && req.method === 'POST') {
           const input = await readJson(req, 8192); validateConfig(input, store.get(uid).config);

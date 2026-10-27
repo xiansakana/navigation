@@ -140,6 +140,16 @@ test('new monitoring API hides all keys, validates ranges and enforces guest and
   assert.equal(f.store.get('a').config.maxRespect, 50); assert.equal(f.store.get('a').config.apiKeys.length, 2);
   assert.equal((await call('config', 'POST', { minRespect: 51 })).status, 400);
   assert.equal((await call('config', 'POST', {}, undefined, { origin: 'https://evil.test' })).status, 403);
+  for (let i = 1; i <= 55; i++) f.store.observe('a', { id: i, name: 'Faction ' + i, respect: 1, leaderId: 1000 + i, isDestroyed: false, checkedAt: 1000 });
+  const first = (await call('state', 'GET', null, guest)).data;
+  assert.equal(first.state.factions.length, 50); assert.equal(first.state.factionsTotal, 55);
+  const second = (await call('state?offset=50', 'GET', null, guest)).data;
+  assert.equal(second.state.factions.length, 5); assert.equal(second.state.factions[0].id, 51); assert.equal(second.state.factionsOffset, 50);
+  const monitor = service.monitors.get('a'); monitor.state.problems = [{ id: 52, reason: 'unknown' }];
+  const problems = (await call('state?filter=problem', 'GET', null, guest)).data;
+  assert.equal(problems.state.factionsTotal, 1); assert.equal(problems.state.factions[0].id, 52);
+  const invalidOffset = (await call('state?offset=bad', 'GET', null, guest)).data;
+  assert.equal(invalidOffset.state.factionsOffset, 0);
 });
 test('destruction notifications contain faction, former Leader and observation times without a fake Chain report', async () => {
   const messages = []; const send = createChainNotifier({ endpoint: 'http://127.0.0.1:8787', token: 'test-token', fetchImpl: async (_, opts) => { messages.push(JSON.parse(opts.body).message); return { ok: true, json: async () => ({ ok: true }) }; } });
