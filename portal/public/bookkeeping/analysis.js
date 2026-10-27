@@ -9,6 +9,7 @@
     function drill(data) {
       if(!can('view'))return;
       if(!saved)saved={values:Object.fromEntries(fields.map(id=>[id,$(id).value])),focus:{...focus}};
+      if(!$('stats-view').classList.contains('hidden'))focus.analysisScope='1';
       for(const id of ['currency','month','category']) if(data[id]!==undefined)$(id).value=data[id];
       periods.focusDate(data);
       if(data.month!==undefined){focus.day=data.day||'';focus.through='';}
@@ -16,7 +17,7 @@
       if(data.through!==undefined){focus.through=data.through;focus.day='';}
       if(data.flow!==undefined)focus.flow=data.flow;
       const names={expense:'净支出构成（含退款、报销和手续费）',income:'收入',net:'收入与净支出构成'};
-      $('drill-label').textContent=[$('category').value,focus.day||$('month').value, focus.through?'截至 '+focus.through:'',$('currency').value,names[focus.flow]].filter(Boolean).join(' · ');
+      $('drill-label').textContent=[$('category').value,focus.day||$('month').value, focus.through?'截至 '+focus.through:'',$('currency').value,names[focus.flow],focus.analysisScope&&getState()?.analysisScope?.excludedAccountIds?.length?'已排除社保公积金等账户':''].filter(Boolean).join(' · ');
       $('drill-context').classList.remove('hidden');tab('entries');load();$('drill-context').scrollIntoView({block:'nearest'});
     }
     document.querySelector('.bk-shell').addEventListener('click',e=>{const target=e.target.closest('[data-drill]');if(target)drill(JSON.parse(target.dataset.drill));});
@@ -81,7 +82,8 @@
     }
     function renderBilling() {
       const billing=getState()?.analysis?.billing;
-      $('billing-charts').innerHTML=!billing?'':billing.missingCurrencies.length?'<p class="bk-empty">缺少 '+esc(billing.missingCurrencies.join('、'))+' 汇率，暂不能汇总 CNY 走势。</p>':chart(billing.points,billingLines,'CNY 等效总收支走势',billing.granularity,true);
+      const excluded=getState()?.analysisScope?.excludedAccountIds?.length||0;
+      $('billing-charts').innerHTML=(!billing?'':billing.missingCurrencies.length?'<p class="bk-empty">缺少 '+esc(billing.missingCurrencies.join('、'))+' 汇率，暂不能汇总 CNY 走势。</p>':chart(billing.points,billingLines,'CNY 等效总收支走势',billing.granularity,true))+(excluded?'<p class="bk-muted">统计已排除社保公积金等分组中的 '+excluded+' 个账户。</p>':'');
     }
     return {render,attr,query:()=>focus,clearFocus,drill};
   };

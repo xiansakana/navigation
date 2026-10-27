@@ -45,7 +45,9 @@
     const converted=state.equivalentSummary||state.analysis?.equivalentSummary, missing=state.conversionMissing||state.analysis?.billing.missingCurrencies||[];
     const dayTotals=new Map((converted?.days||[]).filter(day=>day.currency==='CNY').map(day=>[day.date,day]));
     const summary=missing.length?'<p class="bk-muted">缺少 '+esc(missing.join('、'))+' 历史汇率，CNY 汇总待补齐。</p>':summaryHtml(converted||state.summary,true);
-    $('summary').innerHTML=summary;$('stats-summary').innerHTML=summary;
+    $('summary').innerHTML=summary;
+    const statistics=state.analysis?.equivalentSummary||converted||state.summary;
+    $('stats-summary').innerHTML=state.analysis?.billing.missingCurrencies.length?'<p class="bk-muted">统计范围历史汇率待补齐。</p>':summaryHtml(statistics,true);
     $('count').textContent = state.count + ' 笔';
     let lastDay = '';
     const ledgerNote=can('accounts:view') && $('account').value && state.entries.some(e=>e.balanceEstimated)?(state.accounts.find(a=>a.id===$('account').value)?.investment?'<p class="bk-muted bk-ledger-note">本页展示记账流水；证券账户总资产包含持仓估值，不由这些流水反推历史余额。现金和持仓详情请打开资产页的证券明细。</p>':'<p class="bk-muted bk-ledger-note">历史余额按当前余额、账单及余额调整反推；截图核对的调整余额按原币显示，其他反推或跨币种估算值标注 ≈。</p>'):'';
@@ -65,8 +67,8 @@
       return heading + '<button class="bk-entry" data-entry="' + e.id + '"><span class="bk-badge">' + (icons[e.type] || state.categoryTree?.find(c=>c.kind===(e.type==='收入'?'income':'expense') && c.name===(e.subcategory||e.category) && (e.subcategory?state.categoryTree.some(p=>p.id===c.parentId && p.name===e.category):!c.parentId))?.icon || icons[e.category] || '◈') + '</span><span class="bk-entry-main"><strong>' + esc(title) + '</strong><p>' + esc(subtitle) + '</p>' + (e.location ? '<p>⌖ ' + esc(e.location) + '</p>' : '') + '</span><span class="bk-entry-amount ' + (expense?'bk-expense':transfer?'bk-transfer':'bk-income') + '">' + m(expense?-e.amount:e.amount,e.currency) + (e.currency!=='CNY'?'<small>'+ (e.fxMissing?'CNY 等效待获取': '≈ '+m(expense?-e.cnyAmount:e.cnyAmount,'CNY')+' · 汇率日 '+esc(e.rateDate))+'</small>':'') + '<small>' + esc(e.type) + (e.historical?' · 历史':'') + '</small>' + balance + '</span></button>';
     }).join('') || '<div class="bk-empty">还没有符合条件的账单<br>记下第一笔，或从 iCost 导入历史记录。</div>');
     $('more').classList.toggle('hidden', state.entries.length >= state.count);
-    $('mini-categories').innerHTML = categoriesHtml(state.equivalentSummary?.categories || state.summary.categories,6,!!state.equivalentSummary); $('categories').innerHTML = categoriesHtml(state.equivalentSummary?.categories || state.summary.categories,1000,!!state.equivalentSummary);
-    $('income-categories').innerHTML=missing.length?'<p class="bk-empty">缺少历史汇率，分类收入待折算。</p>':categoriesHtml(converted?.incomeCategories || [],1000,true,'income');
+    $('mini-categories').innerHTML = categoriesHtml(state.equivalentSummary?.categories || state.summary.categories,6,!!state.equivalentSummary); $('categories').innerHTML = categoriesHtml(statistics.categories,1000,true);
+    $('income-categories').innerHTML=state.analysis?.billing.missingCurrencies.length?'<p class="bk-empty">缺少历史汇率，分类收入待折算。</p>':categoriesHtml(statistics.incomeCategories || [],1000,true,'income');
     renderStats();
   }
   function renderStats() {
@@ -105,10 +107,11 @@
   }
   function renderAccounts() {
     const totals = {};
-    for (const a of state.accounts) if (a.included) { const t = totals[a.currency] ||= { assets:0, debt:0 }; if (a.balance >= 0) t.assets += a.balance; else t.debt -= a.balance; }
+    const excluded=new Set(state.analysisScope?.excludedAccountIds||[]);
+    for (const a of state.accounts) if (a.included&&!excluded.has(a.id)) { const t = totals[a.currency] ||= { assets:0, debt:0 }; if (a.balance >= 0) t.assets += a.balance; else t.debt -= a.balance; }
     const rates=state.fx?.rates||state.settings.rates, missing=Object.keys(totals).filter(c=>!rates[c]);
     const asset=state.analysis?.asset, period=asset?.period;
-    const incomplete=state.accounts.filter(a=>a.included && a.balance==null);
+    const incomplete=state.accounts.filter(a=>a.included&&!excluded.has(a.id)&&a.balance==null);
     let metrics=incomplete.length?metric('当前 CNY 净资产','—','待补齐证券行情：'+incomplete.map(a=>a.name).join('、')):missing.length?metric('CNY 净资产','—','待获取汇率：'+missing.join('、')):metric('当前 CNY 净资产',m(Object.entries(totals).reduce((n,[c,t])=>n+(t.assets-t.debt)*rates[c],0)),'按当前汇率折算');
     if(period) {
       metrics+=metric('范围期初净资产',m(period.opening),'截至 '+period.openingAsOf+' 日末 · '+(asset.historyMode==='hybrid'?'反推／估值快照':'历史反推'));
@@ -124,6 +127,7 @@
   let periodSave = Promise.resolve(), periodReload=0;
   const periods = window.createBookkeepingPeriods({ $, load:reloadPeriod, clearFocus:()=>analysis.clearFocus(), save:value=>{periodSave=periodSave.then(()=>write('/preferences',value,'PUT')).catch(e=>{$('error').textContent='日期筛选保存失败：'+e.message;$('error').classList.remove('hidden');});} });
   const periodDock = window.createBookkeepingPeriodDock({ $, can });
+  const accountScope = window.createBookkeepingScope({$,esc,can,write,load,capturePosition:()=>periodDock.capturePosition()});
   async function reloadPeriod() {
     const ticket=++periodReload, restore=periodDock.capturePosition();periodDock.setLoading(true);
     await load();
@@ -146,7 +150,7 @@
       window.initQqBookkeeping(can,state);
       for(const id of ['add-entry','add-account','add-category'])$(id).disabled=false;
       populate('book',state.books,'所有账本'); populate('category',state.categories,'所有分类'); populate('account',state.accounts.map(a => ({ value:a.id, label:a.name })),'所有账户');
-      renderEntries(); renderAccounts(); management.render();
+      renderEntries(); renderAccounts(); management.render();accountScope.render(state.analysisScope);
     } catch (e) { $('error').textContent = e.message; $('error').classList.remove('hidden'); }
   }
   function tab(name) {
@@ -156,6 +160,7 @@
     document.querySelectorAll('.bk-view').forEach(v => v.classList.toggle('hidden',v.id!==name+'-view'));
     $('filters').classList.toggle('hidden',['accounts','catalog','entry-detail'].includes(name));$('period-selector').classList.toggle('hidden',['catalog','entry-detail'].includes(name));
     periodDock.setTab(name);
+    accountScope.setTab(name);
     if(name==='entries' && previousTab==='entry-detail')details.restoreList(()=>activeTab==='entries');
   }
   function field(name, label, value = '', extra = '') { return '<label>' + esc(label) + '<input name="' + name + '" value="' + esc(value) + '" ' + extra + '></label>'; }

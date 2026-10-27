@@ -98,3 +98,11 @@
 .bk-day-totals>span { white-space:nowrap; }
 .bk-day-currency { font-size:10px; }
 @media(max-width:760px) { .bk-day { flex-wrap:wrap; }.bk-day-totals { width:100%; justify-content:flex-start; gap:6px 10px; font-size:11px; } }
+.bk-analysis-scope { padding:14px 16px; margin:0 0 18px; border:1px solid var(--border); border-radius:14px; background:var(--card); display:flex; gap:12px 24px; flex-wrap:wrap; align-items:center; }
+.bk-analysis-scope>.bk-check { font-size:14px; font-weight:600; }
+.bk-analysis-scope details { font-size:13px; }
+.bk-analysis-scope summary { cursor:pointer; color:var(--bk-gold); }
+.bk-scope-options { display:flex; flex-wrap:wrap; gap:10px 18px; margin-top:12px; }
+.bk-analysis-scope p { width:100%; font-size:12px; margin:0; }
+.bk-analysis-scope .bk-error:empty { display:none; }
+.bk-analysis-scope input[type=checkbox] { width:18px; height:18px; flex-shrink:0; }

@@ -11,6 +11,7 @@ import { hasPermission } from './rbac.js';
 import { createBookkeepingStore, summarize } from './bookkeeping-store.js';
 import { parseIcost, exportIcost } from './bookkeeping-import.js';
 import { effectiveBookkeepingFx, refreshBookkeepingFx } from './bookkeeping-fx.js';
+import { analyticsScope, scopedBills } from './bookkeeping-scope.js';
 
 const imports = new Map();
 const ttl = 15 * 60 * 1000;
@@ -38,7 +39,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
   res.setHeader('Cache-Control', 'no-store');
   if (!canBookkeep(session)) return json(res, 403, { ok: false, error: '请登录并获取记账查看权限' });
   const route = url.pathname.slice('/api/bookkeeping'.length), method = req.method;
-  const permission = route === '/preferences' ? 'view' : route === '/location' ? 'location:edit' : route.startsWith('/qq') ? 'qq:edit' : route.startsWith('/categories') ? (method === 'GET' ? 'categories:view' : 'categories:edit') : route.startsWith('/groups') ? (method === 'GET' ? 'accounts:view' : 'accounts:edit') : route === '/fx/refresh' ? 'fx:edit' : route.startsWith('/import') ? 'import:edit' : route === '/export' ? 'export:view' : route.startsWith('/settings') && method !== 'GET' ? 'settings:edit' :
+  const permission = route === '/analysis-scope' ? 'accounts:view' : route === '/preferences' ? 'view' : route === '/location' ? 'location:edit' : route.startsWith('/qq') ? 'qq:edit' : route.startsWith('/categories') ? (method === 'GET' ? 'categories:view' : 'categories:edit') : route.startsWith('/groups') ? (method === 'GET' ? 'accounts:view' : 'accounts:edit') : route === '/fx/refresh' ? 'fx:edit' : route.startsWith('/import') ? 'import:edit' : route === '/export' ? 'export:view' : route.startsWith('/settings') && method !== 'GET' ? 'settings:edit' :
     route.startsWith('/accounts') ? (method === 'GET' ? 'accounts:view' : 'accounts:edit') : method === 'GET' ? 'view' : 'entries:edit';
   if (!canBookkeep(session, permission)) return json(res, 403, { ok: false, error: '无权执行此记账操作' });
   if (!sameOriginWrite(req)) {
@@ -60,6 +61,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
     }
     if (route === '/preferences' && method === 'GET') return json(res,200,{ok:true,period:store.settings(uid).period || null});
     if (route === '/preferences' && method === 'PUT') return json(res,200,{ok:true,period:store.savePeriodPreferences(uid,await body(req))});
+    if (route === '/analysis-scope' && method === 'PUT') return json(res,200,{ok:true,scope:store.saveAnalysisScope(uid,await body(req))});
     if (route === '/fx' && method === 'GET') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
     if (route === '/fx/refresh' && method === 'POST') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
     if (route === '/state' && method === 'GET') {
@@ -68,27 +70,32 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       const ledgerAccount=permittedAccounts?.find(a=>a.id===url.searchParams.get('accountId'));
       const ledgerQuotes=ledgerAccount?allOriginal.filter(e=>e.accountId===ledgerAccount.id || e.toAccountId===ledgerAccount.id).map(e=>({...e,currency:ledgerAccount.currency})):[];
       await history.ensure([...allOriginal,...destinations,...ledgerQuotes]);
-      const entries = store.entries(uid, Object.fromEntries(url.searchParams)).map(history.enrich);
+      const settings=store.settings(uid), fx=effectiveBookkeepingFx(settings);
+      const scope=analyticsScope(permittedAccounts||[],settings.analysisScope);
+      const excluded=new Set(scope.excludedAccountIds);
+      const listed=store.entries(uid,Object.fromEntries(url.searchParams)).map(history.enrich);
+      const entries=url.searchParams.get('analysisScope')==='1'?scopedBills(listed,excluded):listed;
       const balances=accountLedger(allOriginal,ledgerAccount,history.quote);
       for(const e of entries){if(balances.has(e.id))Object.assign(e,balances.get(e.id));delete e.balanceCheckpoint;}
       const offset = Math.max(0, Math.min(50000, Number(url.searchParams.get('offset')) || 0));
       const limit = Math.max(1, Math.min(200, Number(url.searchParams.get('limit')) || 100));
       const all = allOriginal.map(history.enrich), accounts = permittedAccounts;
-      const settings=store.settings(uid), fx=effectiveBookkeepingFx(settings);
       for(const e of all){if(e.toAccountId){const a=accounts?.find(a=>a.id===e.toAccountId);if(a){e.toHistoricalRate=history.quote(a.currency,e.date.slice(0,10))?.rate||null;if(e.toAmount!=null && !e.toHistoricalRate)e.toFxMissing=a.currency;}}}
-      const budgetMonth=url.searchParams.get('month'), budgetData=budgetMonth?analyzeBookkeeping(all.filter(e=>e.date.startsWith(budgetMonth)),all,null,settings,{month:budgetMonth},undefined,fx.rates):null;
-      const calculation=analyzeBookkeeping(entries,all,canBookkeep(session,'analysis:view')?accounts:null,settings,Object.fromEntries(url.searchParams),undefined,fx.rates);
+      const scopedAll=scopedBills(all,excluded), scopedAccounts=accounts?.map(a=>({...a,included:a.included&&!excluded.has(a.id)}));
+      const budgetMonth=url.searchParams.get('month'), budgetData=budgetMonth?analyzeBookkeeping(scopedAll.filter(e=>e.date.startsWith(budgetMonth)),scopedAll,null,settings,{month:budgetMonth},undefined,fx.rates):null;
+      const calculation=analyzeBookkeeping(scopedBills(entries,excluded),scopedAll,canBookkeep(session,'analysis:view')?scopedAccounts:null,settings,Object.fromEntries(url.searchParams),undefined,fx.rates,all);
+      const ledgerCalculation=excluded.size?analyzeBookkeeping(entries,all,null,settings,Object.fromEntries(url.searchParams),undefined,fx.rates):calculation;
       if (canBookkeep(session,'analysis:view') && accounts?.some(a=>a.included && a.balanceSource==='portfolio') && !accounts.some(a=>a.included && a.investment?.permissionMissing)) {
         const historyStore=createAssetHistory(getDatabase());
         historyStore.capture(uid,ownedAccounts,all,fx.rates,Date.now(),{snapshot:false});
-        const included=accounts.filter(a=>a.included);
+        const included=scopedAccounts.filter(a=>a.included);
         const currentBalance=included.every(a=>Number.isFinite(a.balance) && fx.rates[a.currency]>0)
           ? included.reduce((total,a)=>total+a.balance*fx.rates[a.currency],0) : null;
-        calculation.asset=historyStore.read(uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),currentBalance) || calculation.asset;
+        calculation.asset=historyStore.read(uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),currentBalance,{excludedAccountIds:scope.excludedAccountIds,accounts,entries:all,rates:fx.rates}) || calculation.asset;
       }
-      return json(res, 200, { ok: true, equivalentSummary:calculation.equivalentSummary, conversionMissing:calculation.billing.missingCurrencies, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),
+      return json(res, 200, { ok: true, equivalentSummary:ledgerCalculation.equivalentSummary, conversionMissing:ledgerCalculation.billing.missingCurrencies, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),
         budgetExpense: budgetData?(budgetData.billing.missingCurrencies.length?null:budgetData.equivalentSummary.totals.CNY?.expense||0):null,
-        accounts: accounts || [], settings, fx,
+        accounts: accounts || [], settings:permittedAccounts?settings:{...settings,analysisScope:undefined}, fx, analysisScope:scope,
         analysis: canBookkeep(session,'analysis:view') ? calculation : null,
         categoryTree: store.catalog.list(uid), accountGroups: canBookkeep(session,'accounts:view') ? store.catalog.groupList(uid) : [],
         books: [...new Set(all.map(e => e.book))], categories: [...new Set(all.map(e => e.category))],

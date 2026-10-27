@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { SOCIAL_ACCOUNT_GROUP } from './bookkeeping-scope.js';
 import { decorateInvestmentBalances, assertUnboundLedgerAccount, investmentRows } from '../../shared/investment-accounts.js';
 import { createBookkeepingCatalog, categoryKind } from './bookkeeping-catalog.js';
 
@@ -209,6 +210,16 @@ export function createBookkeepingStore(db) {
     db.prepare('INSERT INTO bookkeeping_settings VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data').run(userId, JSON.stringify(next));
     return period;
   }
+  function saveAnalysisScope(userId, input) {
+    if(typeof input.enabled!=='boolean')fail('排除开关必须为布尔值');
+    if(input.accountIds!=null && (!Array.isArray(input.accountIds)||input.accountIds.length>200))fail('排除账户列表无效');
+    const allowed=new Set(accounts(userId).filter(a=>a.group===SOCIAL_ACCOUNT_GROUP).map(a=>a.id));
+    if(input.accountIds?.some(id=>!allowed.has(id)))fail('只能选择当前用户社保公积金等分组的账户');
+    const value={enabled:input.enabled,accountIds:input.accountIds==null?null:[...new Set(input.accountIds)]};
+    const next=settings(userId);next.analysisScope=value;
+    db.prepare('INSERT INTO bookkeeping_settings VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data').run(userId,JSON.stringify(next));
+    return value;
+  }
   function saveAutoRates(userId, quotes) {
     const next = settings(userId); next.autoRates ||= {};
     for (const [c, quote] of Object.entries(quotes)) {
@@ -303,7 +314,7 @@ export function createBookkeepingStore(db) {
       ['accounts','entries','settings','categories','groups'].map(name=>['bookkeeping_'+name,db.prepare('SELECT * FROM bookkeeping_'+name+' WHERE user_id=?').all(userId)])
     )}))();
   }
-  return { accounts, saveAccount, entries, saveEntry, removeEntry, removeAccount, reorderAccounts, archiveAccount, adjust, settings, saveSettings, savePeriodPreferences, saveAutoRates, importRows, importBalanceAdjustments, backup, catalog };
+  return { accounts, saveAccount, entries, saveEntry, removeEntry, removeAccount, reorderAccounts, archiveAccount, adjust, settings, saveSettings, savePeriodPreferences, saveAnalysisScope, saveAutoRates, importRows, importBalanceAdjustments, backup, catalog };
 }
 
 export function summarize(entries) {

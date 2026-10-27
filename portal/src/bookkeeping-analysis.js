@@ -77,7 +77,7 @@ export function assetTrends(accounts, entries, today, rates={CNY:1}, filter={}) 
     ...[...new Set([startDate,...points.map(p=>p.date).filter(d=>d>=startDate && d<=endDate),endDate])].sort().map(date=>({date,currency:'CNY',balance:date===endDate?closing:at(date),...(date===today?{source:'current'}:{})}))]:[];
   return {points:scoped,missingCurrencies:[],note,estimatedTransfers,unlinkedEntries,current,asOf:end,period};
 }
-export function analyzeBookkeeping(entries, allEntries, accounts, settings, filter={}, today=new Date(Date.now()+8*60*60*1000).toISOString().slice(0,10), fxRates=settings.rates||{CNY:1}) {
+export function analyzeBookkeeping(entries, allEntries, accounts, settings, filter={}, today=new Date(Date.now()+8*60*60*1000).toISOString().slice(0,10), fxRates=settings.rates||{CNY:1}, assetEntries=allEntries) {
   entries=entries.filter(e=>e.type!=='余额调整');
   const rates={...fxRates,CNY:1}, converted=conversion(entries,rates);
   const summary=summarize(converted.entries), month=filter.month||'', previous=month?previousMonth(month):null;
@@ -98,6 +98,6 @@ export function analyzeBookkeeping(entries, allEntries, accounts, settings, filt
     if(!suggestions.length && lead)suggestions.push({kind:'review',category:lead.category});
     insights.push({currency,count:entries.length,...t,topCategory:lead||null,share:lead && positive?lead.amount/positive:0,comparison:change===null?null:{month:previous,expense:prev.expense,change},budget,suggestions});
   }
-  const asset=accounts?assetTrends(accounts,allEntries,today,rates,filter):null;
+  const asset=accounts?assetTrends(accounts,assetEntries,today,rates,filter):null;
   return {billing:{...series(converted.entries,month,today,filter),missingCurrencies:converted.missing},equivalentSummary:summary,insights,asset,rates,conversionNote:'账单按日期的历史参考汇率折算 CNY；非报价日或尚未发布的日期使用此前最近已发布报价日，最多回溯 14 天；筛选货币仍指原始账单币种。',comparisonNote:!month?'周、年和自定义范围不直接计算整月环比，可选择完整月份进行比较。':month===today.slice(0,7)?'本月尚未结束，不与完整上月直接比较。':filter.day||filter.flow||filter.through?'当前为穿透筛选，不计算整月环比。':'环比基于相同筛选范围的上一完整月份；缺少上月支出时不计算。'};
 }
