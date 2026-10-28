@@ -106,3 +106,37 @@ test('historical trading curves leave missing prices as real gaps and keep zero 
     f.$('asset-tab-balance').click();assert.equal(f.controller.query().investmentHistory,undefined);
   }finally{f.dom.window.close();}
 });
+
+test('securities legends toggle independently, retain choices on data reload and never change billing or snapshot charts',()=>{
+  const f=fixture();
+  try{
+    f.state.analysis.investmentReturns={note:'snapshot',points:[{date:'2026-10-25',currency:'CNY',profit:0},{date:'2026-10-28',currency:'CNY',profit:9}],period:null,trading:{note:'history',issues:[],points:[
+      {date:'2026-10-25',currency:'CNY',realized:1000,unrealized:0,total:1000},
+      {date:'2026-10-26',currency:'CNY',realized:1000,unrealized:null,total:null},
+      {date:'2026-10-28',currency:'CNY',realized:1000,unrealized:30,total:1030}
+    ]}};
+    f.controller.render();f.$('asset-tab-returns').click();
+    const host=f.$('asset-overview-charts'),button=key=>host.querySelector('[data-trading-series="'+key+'"]');
+    const billing=f.$('billing-charts').innerHTML,snapshot=host.querySelector('[data-chart-series=profit]').outerHTML;
+    const totals=host.querySelector('.bk-trading-history .bk-chart-legend').textContent;
+    const originalAxis=[...host.querySelectorAll('[data-chart-series=unrealized] polyline')].at(-1).getAttribute('points');
+    host.querySelector('.bk-trading-history details').open=true;
+    button('realized').click();button('total').click();
+    assert.equal(host.querySelectorAll('.bk-trading-history [data-chart-series]').length,1);
+    assert.equal(button('realized').getAttribute('aria-pressed'),'false');
+    assert.equal(button('unrealized').getAttribute('aria-pressed'),'true');
+    assert.notEqual([...host.querySelectorAll('[data-chart-series=unrealized] polyline')].at(-1).getAttribute('points'),originalAxis);
+    assert.equal(host.querySelector('.bk-trading-history details').open,true);
+    assert.equal(f.w.document.activeElement,button('total'));
+    button('unrealized').click();assert.match(host.querySelector('.bk-trading-history').textContent,/所有折线已隐藏/);
+    assert.equal(host.querySelectorAll('.bk-trading-history polyline').length,0);
+    button('total').click();assert.equal(host.querySelectorAll('.bk-trading-history [data-chart-series]').length,1);
+    assert.equal(host.querySelector('[data-chart-series=total]').querySelectorAll('polyline').length,2);
+    assert.equal(host.querySelector('.bk-trading-history .bk-chart-legend').textContent,totals);
+    assert.equal(f.$('billing-charts').innerHTML,billing);assert.equal(host.querySelector('[data-chart-series=profit]').outerHTML,snapshot);
+    f.state.analysis.investmentReturns.trading.points=[];f.controller.render();
+    f.state.analysis.investmentReturns.trading.points=[{date:'2026-11-01',currency:'CNY',realized:10,unrealized:null,total:null}];f.controller.render();
+    assert.equal(button('realized').getAttribute('aria-pressed'),'false');assert.equal(button('unrealized').getAttribute('aria-pressed'),'false');assert.equal(button('total').getAttribute('aria-pressed'),'true');
+    assert.match(button('total').textContent,/待补齐/);assert.doesNotMatch(host.innerHTML,/NaN|Infinity/);
+  }finally{f.dom.window.close();}
+});

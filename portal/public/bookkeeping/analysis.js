@@ -17,6 +17,17 @@
       event.preventDefault();buttons[event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowLeft'?-1:1)+buttons.length)%buttons.length].click();
     });
     const hiddenBillingSeries=new Set(), billingLines=[{key:'income',label:'收入',color:'var(--green)'},{key:'expense',label:'净支出',color:'var(--red)'},{key:'cumulative',label:'累计账单结余',color:'#d89812'}];
+    const hiddenTradingSeries=new Set(),tradingLines=[{key:'realized',label:'累计已实现净收益',color:'var(--green)'},{key:'unrealized',label:'未实现浮盈',color:'#579cf0'},{key:'total',label:'累计证券总收益',color:'#d89812'}];
+    const tradingChart=points=>chart(points,tradingLines,'CNY 历史证券收益走势（自首笔交易累计）',null,'trading');
+    $('asset-overview-charts').addEventListener('click',event=>{
+      const key=event.target.closest('[data-trading-series]')?.dataset.tradingSeries;
+      if(!tradingLines.some(line=>line.key===key))return;
+      if(hiddenTradingSeries.has(key))hiddenTradingSeries.delete(key);else hiddenTradingSeries.add(key);
+      const points=getState()?.analysis?.investmentReturns?.trading?.points,card=$('asset-overview-charts').querySelector('.bk-trading-history .bk-chart-card');
+      if(!points||!card)return;
+      card.outerHTML=tradingChart(points);
+      $('asset-overview-charts').querySelector('[data-trading-series="'+key+'"]').focus({preventScroll:true});
+    });
     const attr = data => ' data-drill="'+esc(JSON.stringify(data))+'"';
     function clearFocus() {focus={};saved=null;periods.restore();$('drill-context').classList.add('hidden');}
     function drill(data) {
@@ -48,7 +59,9 @@
     }
     function chart(points,lines,label,granularity=null,toggle=false) {
       if(!points.length)return '<p class="bk-empty">暂无记录</p>';
-      const visibleLines=toggle?lines.filter(line=>!hiddenBillingSeries.has(line.key)):lines;
+      const hiddenSeries=toggle==='trading'?hiddenTradingSeries:hiddenBillingSeries;
+      const seriesAttribute=toggle==='trading'?'data-trading-series':'data-billing-series';
+      const visibleLines=toggle?lines.filter(line=>!hiddenSeries.has(line.key)):lines;
       const width=600,height=230,left=76,right=20,top=18,bottom=36;
       const values=points.flatMap(p=>visibleLines.map(l=>p[l.key])).filter(Number.isFinite), min=Math.min(0,...values), max=Math.max(0,...values), span=max-min||1;
       const time=p=>Date.parse((p.date.length===7?p.date+'-01':p.date)+'T12:00:00Z'),firstTime=time(points[0]),lastTime=time(points.at(-1));
@@ -74,7 +87,7 @@
       const last=points.at(-1);
       return '<div class="bk-chart-card"><h3>'+esc(label)+'</h3><div class="bk-chart-legend"'+(toggle?' role="group" aria-label="折线显隐，点击图例切换"':'')+'>'+lines.map(l=>{
         const title=l.label+(['income','expense'].includes(l.key)?'合计':''),amount=Number.isFinite(last[l.key])?m(['income','expense'].includes(l.key)?Math.round(points.reduce((n,p)=>n+p[l.key],0)*100)/100:last[l.key],last.currency):'待补齐';
-        return toggle?'<button type="button" class="bk-series-toggle" data-billing-series="'+l.key+'" aria-pressed="'+!hiddenBillingSeries.has(l.key)+'" aria-label="'+esc(title+'折线')+'" style="--line-color:'+l.color+'"><span class="bk-series-label">'+esc(title)+'</span>'+amount+'</button>':'<span style="--line-color:'+l.color+'">'+esc(title)+' '+amount+'</span>';
+        return toggle?'<button type="button" class="bk-series-toggle" '+seriesAttribute+'="'+l.key+'" aria-pressed="'+!hiddenSeries.has(l.key)+'" aria-label="'+esc(title+'折线')+'" style="--line-color:'+l.color+'"><span class="bk-series-label">'+esc(title)+'</span>'+amount+'</button>':'<span style="--line-color:'+l.color+'">'+esc(title)+' '+amount+'</span>';
       }).join('')+'</div>'+svg+(points.length===1?'<p class="bk-muted">目前仅有一个基准点，后续账单会形成走势。</p>':'')+'</div>';
     }
     function suggestion(item,currency) {
@@ -108,7 +121,7 @@
           const metrics=period?'<div class="bk-summary bk-return-summary">'+[['观测资产变化',period.assetChange],['账单净资金流',period.netFlow],['余额调整',period.adjustments],['综合投资收益（估算）',period.profit]].map(([label,value])=>'<div class="bk-metric"><p>'+esc(label)+'</p><strong>'+m(value,'CNY')+'</strong></div>').join('')+'</div><p class="bk-muted">'+esc(period.openingAsOf+' 至 '+period.closingAsOf)+(period.provisional?' · 今日暂估':'')+(period.partial?' · 仅含可比观测区间':'')+'</p>':'';
           const trading=returns.trading;
           if(trading)$('asset-overview-note').textContent='历史证券收益由成交记录和历史收盘价重建，包含已实现收益与持仓浮盈；与全资产快照收益分开展示，缺失行情处留空。';
-          const history=trading?'<section class="bk-trading-history"><h3>历史证券收益 · 成交重建</h3><details><summary>计算口径与覆盖范围</summary><p class="bk-muted">'+esc(trading.note)+'</p></details>'+(trading.pending?'<p role="status" class="bk-muted">后台正在补齐 '+trading.pending+' 个证券的历史行情；缺失处留空。</p>':'')+(trading.issues?.length?'<p class="bk-error">'+esc(trading.issues.slice(0,10).join('；'))+(trading.issues.length>10?' 等 '+trading.issues.length+' 项':'')+'</p>':'')+(trading.missingSymbols?.length?'<details><summary>缺失行情、汇率或历史持仓成本：'+trading.missingSymbols.length+' 个证券</summary><p class="bk-muted">'+esc(trading.missingSymbols.join('、'))+'</p></details>':'')+chart(trading.points,[{key:'realized',label:'累计已实现净收益',color:'var(--green)'},{key:'unrealized',label:'未实现浮盈',color:'#579cf0'},{key:'total',label:'累计证券总收益',color:'#d89812'}],'CNY 历史证券收益走势（自首笔交易累计）')+'</section>':'';
+          const history=trading?'<section class="bk-trading-history"><h3>历史证券收益 · 成交重建</h3><details><summary>计算口径与覆盖范围</summary><p class="bk-muted">'+esc(trading.note)+'</p></details>'+(trading.pending?'<p role="status" class="bk-muted">后台正在补齐 '+trading.pending+' 个证券的历史行情；缺失处留空。</p>':'')+(trading.issues?.length?'<p class="bk-error">'+esc(trading.issues.slice(0,10).join('；'))+(trading.issues.length>10?' 等 '+trading.issues.length+' 项':'')+'</p>':'')+(trading.missingSymbols?.length?'<details><summary>缺失行情、汇率或历史持仓成本：'+trading.missingSymbols.length+' 个证券</summary><p class="bk-muted">'+esc(trading.missingSymbols.join('、'))+'</p></details>':'')+tradingChart(trading.points)+'</section>':'';
           $('asset-overview-charts').innerHTML=history+'<h3>全资产收益 · 估值快照</h3>'+(trading?'<details><summary>快照计算口径</summary><p class="bk-muted">'+esc(returns.note)+'</p></details>':'')+metrics+(returns.points.length?chart(returns.points,[{key:'profit',label:'累计综合投资收益（估算）',color:'#d89812'}],'CNY 等效综合投资收益走势'):'<p class="bk-empty">暂无可比快照收益数据，请查看计算口径。</p>');
           return;
         }
