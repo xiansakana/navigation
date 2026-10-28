@@ -2,7 +2,11 @@
   'use strict';
   window.createBookkeepingPeriods=function({$,load,clearFocus,save=()=>{}}){
     const iso=d=>new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);
-    const today=iso(new Date());
+    const currentDate=()=>{
+      const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).map(p=>[p.type,p.value]));
+      return parts.year+'-'+parts.month+'-'+parts.day;
+    };
+    const today=currentDate();
     let rangeStart=today,rangeEnd=today;
     $('period-anchor').value=today;
     function update(reload=true){
@@ -24,6 +28,7 @@
     }
     function choose(kind,reload=true){if(kind==='range'){$('range-start').value=rangeStart;$('range-end').value=rangeEnd;}$('period-kind').value=kind;update(reload);}
     for(const id of ['period-anchor','range-start','range-end'])$(id).addEventListener('change',()=>update());
+    $('period-today').onclick=()=>{$('period-anchor').value=currentDate();update();};
     $('period-buttons').onclick=e=>{const b=e.target.closest('[data-period]');if(b)choose(b.dataset.period);};
     for(const [id,step] of [['period-prev',-1],['period-next',1]])$(id).onclick=()=>{const a=new Date($('period-anchor').value+'T12:00:00'),kind=$('period-kind').value;if(kind==='week')a.setDate(a.getDate()+7*step);if(kind==='month'){a.setDate(1);a.setMonth(a.getMonth()+step);}if(kind==='year'){a.setDate(1);a.setFullYear(a.getFullYear()+step);} $('period-anchor').value=iso(a);update();};
     function query(){const kind=$('period-kind').value;if(kind==='all')return {};return {start:$('range-start').value,end:$('range-end').value};}

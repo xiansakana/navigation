@@ -37,3 +37,23 @@ test('custom range survives month/all switches and temporary statistics drill-do
   p.choose('range');
   assert.equal(p.query().start,'2025-07-01');
 });
+
+test('today returns to the current Shanghai week, month or year, persists the choice and stays current across midnight',()=>{
+  const nodes=new Map(),saved=[];let stamp=Date.parse('2026-10-28T16:10:00Z'),loads=0,clears=0;
+  class Clock extends Date {constructor(...args){super(...(args.length?args:[stamp]));}static now(){return stamp;}}
+  const $=id=>{if(!nodes.has(id))nodes.set(id,{value:id==='period-kind'?'month':'',classList:{toggle(){}},addEventListener(){}});return nodes.get(id);};
+  const context={window:{},document:{querySelectorAll:()=>[]},Date:Clock,Intl};
+  vm.runInNewContext(fs.readFileSync(new URL('../public/bookkeeping/periods.js',import.meta.url),'utf8'),context);
+  const p=context.window.createBookkeepingPeriods({$,load(){loads++;},clearFocus(){clears++;},save:value=>saved.push(value)});
+  p.hydrate({kind:'month',anchor:'2025-01-01',rangeStart:'2025-07-01',rangeEnd:'2026-10-14'});
+  for(const [kind,start,end] of [['week','2026-10-26','2026-11-01'],['month','2026-10-01','2026-10-31'],['year','2026-01-01','2026-12-31']]){
+    p.choose(kind);$('period-anchor').value='2025-01-01';const before={saved:saved.length,loads,clears};
+    $('period-today').onclick();
+    assert.equal($('period-anchor').value,'2026-10-29');assert.equal($('period-kind').value,kind);
+    assert.equal(p.query().start,start);assert.equal(p.query().end,end);
+    assert.equal(saved.at(-1).anchor,'2026-10-29');assert.equal(saved.length,before.saved+1);assert.equal(loads,before.loads+1);assert.equal(clears,before.clears+1);
+  }
+  stamp=Date.parse('2026-10-31T16:10:00Z');p.choose('month');$('period-today').onclick();
+  assert.equal($('period-anchor').value,'2026-11-01');assert.equal(p.query().start,'2026-11-01');assert.equal(p.query().end,'2026-11-30');
+  p.choose('range');assert.equal(p.query().start,'2025-07-01');assert.equal(p.query().end,'2026-10-14');
+});
