@@ -116,6 +116,8 @@ test('state API restores owned linked asset history without exposing it to users
     assert.equal(hidden.accounts[0].balance,null);
     const other=await get('history-b',[...basic,'service:stock-manage:cash:view']);
     assert.deepEqual(other.accounts,[]);assert.deepEqual(other.analysis.asset.points,[]);
+    db.prepare('UPDATE investment_accounts SET bookkeeping_id=NULL WHERE user_id=?').run('history-a');
+    assert.equal((await get('history-a',[...basic,'bookkeeping:accounts:returns:view'])).analysis.investmentReturns,null);
   } finally {
     closeDatabase();if(prior==null)delete process.env.NAVIGATION_DB_PATH;else process.env.NAVIGATION_DB_PATH=prior;
     fs.rmSync(dir,{recursive:true,force:true});

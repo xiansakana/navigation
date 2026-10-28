@@ -15,10 +15,10 @@ import { analyticsScope, scopedBills } from './bookkeeping-scope.js';
 
 const imports = new Map();
 const ttl = 15 * 60 * 1000;
+const portfolioCashAllowed = session => (session?.permissions||[]).some(p=>['*','service:stock-manage:edit','service:stock-manage:cash:view','service:stock-manage:cash:edit'].includes(p));
 export const publicAccounts = (accounts, session) => accounts.map((a) => {
   if (!a.investment) return a;
-  const permissions = session?.permissions || [];
-  const cashAllowed = permissions.includes('*') || permissions.includes('service:stock-manage:edit') || permissions.includes('service:stock-manage:cash:view') || permissions.includes('service:stock-manage:cash:edit');
+  const cashAllowed = portfolioCashAllowed(session);
   const { ledgerBalance, ...visible } = a;
   return { ...visible, balance: cashAllowed ? a.balance : null, investment: { id: a.investment.id, name: a.investment.name, ...(cashAllowed ? { cash: a.investment.cash, marketValue: a.investment.marketValue } : { permissionMissing: true }), baselineAt: a.investment.baselineAt, missingQuotes: a.investment.missingQuotes } };
 });
@@ -94,7 +94,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
           ? included.reduce((total,a)=>total+a.balance*fx.rates[a.currency],0) : null;
         calculation.asset=historyStore.read(uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),currentBalance,{excludedAccountIds:scope.excludedAccountIds,accounts,entries:all,rates:fx.rates}) || calculation.asset;
       }
-      if(canBookkeep(session,'analysis:view') && canBookkeep(session,'accounts:returns:view') && accounts && !calculation.investmentReturns && !accounts.some(a=>a.included && a.investment?.permissionMissing))calculation.investmentReturns=createAssetHistory(getDatabase()).returns(uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),accounts,all,fx.rates,scope.excludedAccountIds);
+      if(canBookkeep(session,'analysis:view') && canBookkeep(session,'accounts:returns:view') && accounts && !accounts.some(a=>a.included && a.investment?.permissionMissing))calculation.investmentReturns=createAssetHistory(getDatabase()).returns(uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),accounts,all,fx.rates,scope.excludedAccountIds,portfolioCashAllowed(session));
       return json(res, 200, { ok: true, equivalentSummary:ledgerCalculation.equivalentSummary, conversionMissing:ledgerCalculation.billing.missingCurrencies, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),
         budgetExpense: budgetData?(budgetData.billing.missingCurrencies.length?null:budgetData.equivalentSummary.totals.CNY?.expense||0):null,
         accounts: accounts || [], settings:permittedAccounts?settings:{...settings,analysisScope:undefined}, fx, analysisScope:scope,
