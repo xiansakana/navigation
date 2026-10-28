@@ -11,6 +11,7 @@ export function isUsageQuery(text) {
 
 const failure = '额度查询失败：请检查服务器 Codex CLI 版本、ChatGPT 登录状态及代理连接后重试。';
 const loginFailure = '额度查询失败：服务器 ChatGPT 登录已失效，请在服务器重新登录 Codex 后重试。';
+const loginError = () => Object.assign(new Error(loginFailure),{code:'CODEX_AUTH_REQUIRED'});
 const authError = error => /\b401\b|token_expired|token.*expired|refresh_token|authentication required|not authenticated|not logged in/i.test(String(error?.message || ''));
 
 export function readCodexUsage(config, { signal, timeout = 20000, spawnProcess = spawn } = {}) {
@@ -55,14 +56,14 @@ export function readCodexUsage(config, { signal, timeout = 20000, spawnProcess =
           if(message.id===2&&initialized&&authError(message.error)){
             send({method:'account/read',id:3,params:{refreshToken:true}});continue;
           }
-          finish(new Error(message.id===3||authError(message.error)?loginFailure:failure));return;
+          finish(authError(message.error)?loginError():new Error(failure));return;
         }
         if (message.id === 1 && !initialized) {
           initialized = true;
           send({ method: 'initialized', params: {} });
           send({ method: 'account/rateLimits/read', id: 2 });
         } else if(message.id===3&&initialized){
-          if(!message.result?.account){finish(new Error(loginFailure));return;}
+          if(!message.result?.account){finish(loginError());return;}
           send({method:'account/rateLimits/read',id:4});
         } else if ([2,4].includes(message.id) && initialized) {
           const result = message.result;
