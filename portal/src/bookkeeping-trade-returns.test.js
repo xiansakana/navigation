@@ -61,6 +61,9 @@ test('price backfill is bounded, deduplicated, cached per user and does not fabr
     release();const deadline=Date.now()+2000;while(history.read('one').pending && Date.now()<deadline)await new Promise(r=>setTimeout(r,5));
     assert.equal(history.read('one').quote('AAPL','2026-10-27').close,12);assert.equal(history.read('two').quote('AAPL','2026-10-27'),null);
     history.ensure('one',[request]);assert.equal(calls,1);
+    history.ensure('one',[{...request,start:'2026-09-01'}]);
+    while(history.read('one').pending && Date.now()<deadline)await new Promise(r=>setTimeout(r,5));
+    assert.equal(calls,2); // Successful short caches may expand immediately when the user changes range.
     history.ensure('one',[{...request,symbol:'QQQ250221P500'}]);
     while(history.read('one').pending && Date.now()<deadline)await new Promise(r=>setTimeout(r,5));
     assert.equal(history.read('one').quote('QQQ250221P500','2026-10-27'),null);assert.ok(history.read('one').unavailable.includes('QQQ250221P500'));

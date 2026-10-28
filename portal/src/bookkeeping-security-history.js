@@ -79,7 +79,7 @@ export function createSecurityHistory(db,{request=fetchQuoteResource,key=polygon
     for(const r of requests){const id=JSON.stringify([userId,r.symbol]);if(pending.has(id))continue;
       const meta=db.prepare('SELECT * FROM bookkeeping_security_history_meta WHERE user_id=? AND symbol=?').get(userId,r.symbol);
       const covered=meta?.status==='ready'&&meta.start<=r.start&&meta.end>=r.end;
-      if(covered || (meta && clock()-meta.attempted_at<6*3600000))continue;
+      if(covered || (meta && meta.status!=='ready' && clock()-meta.attempted_at<6*3600000))continue;
       pending.add(id);queue.push({...r,userId,id});
     }
     drain();
