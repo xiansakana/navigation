@@ -12,6 +12,7 @@ import { createBookkeepingStore, summarize } from './bookkeeping-store.js';
 import { parseIcost, exportIcost } from './bookkeeping-import.js';
 import { effectiveBookkeepingFx, refreshBookkeepingFx } from './bookkeeping-fx.js';
 import { analyticsScope, scopedBills } from './bookkeeping-scope.js';
+import { tradeHistoryReturns } from './bookkeeping-trade-history.js';
 
 const imports = new Map();
 const ttl = 15 * 60 * 1000;
@@ -95,6 +96,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
         calculation.asset=historyStore.read(uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),currentBalance,{excludedAccountIds:scope.excludedAccountIds,accounts,entries:all,rates:fx.rates}) || calculation.asset;
       }
       if(canBookkeep(session,'analysis:view') && canBookkeep(session,'accounts:returns:view') && accounts && !accounts.some(a=>a.included && a.investment?.permissionMissing))calculation.investmentReturns=createAssetHistory(getDatabase()).returns(uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),accounts,all,fx.rates,scope.excludedAccountIds,portfolioCashAllowed(session));
+      if(url.searchParams.get('investmentHistory')==='1' && calculation.investmentReturns && portfolioCashAllowed(session) && hasPermission(session.permissions||[],'service:stock-manage:trades:view'))calculation.investmentReturns.trading=await tradeHistoryReturns(getDatabase(),uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),accounts,scope.excludedAccountIds);
       return json(res, 200, { ok: true, equivalentSummary:ledgerCalculation.equivalentSummary, conversionMissing:ledgerCalculation.billing.missingCurrencies, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),
         budgetExpense: budgetData?(budgetData.billing.missingCurrencies.length?null:budgetData.equivalentSummary.totals.CNY?.expense||0):null,
         accounts: accounts || [], settings:permittedAccounts?settings:{...settings,analysisScope:undefined}, fx, analysisScope:scope,

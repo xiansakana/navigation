@@ -88,3 +88,21 @@ test('asset return tab is accessible, retains selection across reloads, masks am
     f.state.analysis.investmentReturns=null;f.controller.render();assert.equal(f.$('asset-tab-returns').hidden,true);
   } finally {f.dom.window.close();}
 });
+
+test('historical trading curves leave missing prices as real gaps and keep zero profits visible',()=>{
+  const f=fixture();
+  try{
+    f.state.analysis.investmentReturns={note:'snapshot',points:[],period:null,trading:{note:'historical',issues:[],missingSymbols:['AAPL'],pending:1,points:[
+      {date:'2026-10-25',currency:'CNY',realized:0,unrealized:0,total:0},
+      {date:'2026-10-26',currency:'CNY',realized:1,unrealized:null,total:null},
+      {date:'2026-10-27',currency:'CNY',realized:2,unrealized:3,total:5},
+      {date:'2026-10-28',currency:'CNY',realized:2,unrealized:null,total:null}
+    ]}};
+    f.controller.render();f.$('accounts-view').classList.remove('hidden');f.$('asset-tab-returns').click();
+    assert.equal(f.$('asset-overview-charts').querySelector('[data-chart-series=total]').querySelectorAll('polyline').length,2);
+    assert.match(f.$('asset-overview-charts').textContent,/后台正在补齐/);
+    assert.doesNotMatch(f.$('asset-overview-charts').innerHTML,/NaN|Infinity/);
+    assert.equal(f.controller.query().investmentHistory,'1');
+    f.$('asset-tab-balance').click();assert.equal(f.controller.query().investmentHistory,undefined);
+  }finally{f.dom.window.close();}
+});

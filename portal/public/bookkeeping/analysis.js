@@ -8,6 +8,7 @@
     assetChartTabs.addEventListener('click',event=>{
       const button=event.target.closest('[data-asset-chart]');if(!button || button.hidden)return;
       assetChart=button.dataset.assetChart;renderAsset();button.focus({preventScroll:true});
+      if(assetChart==='returns')load();
     });
     assetChartTabs.addEventListener('keydown',event=>{
       if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
@@ -49,7 +50,7 @@
       if(!points.length)return '<p class="bk-empty">暂无记录</p>';
       const visibleLines=toggle?lines.filter(line=>!hiddenBillingSeries.has(line.key)):lines;
       const width=600,height=230,left=76,right=20,top=18,bottom=36;
-      const values=points.flatMap(p=>visibleLines.map(l=>p[l.key])), min=Math.min(0,...values), max=Math.max(0,...values), span=max-min||1;
+      const values=points.flatMap(p=>visibleLines.map(l=>p[l.key])).filter(Number.isFinite), min=Math.min(0,...values), max=Math.max(0,...values), span=max-min||1;
       const time=p=>Date.parse((p.date.length===7?p.date+'-01':p.date)+'T12:00:00Z'),firstTime=time(points[0]),lastTime=time(points.at(-1));
       const x=i=>left+(points.length===1?(width-left-right)/2:(time(points[i])-firstTime)/(lastTime-firstTime||1)*(width-left-right));
       const y=value=>height-bottom-(value-min)/span*(height-top-bottom);
@@ -57,10 +58,13 @@
       if(!visibleLines.length)svg+='<text x="'+width/2+'" y="'+height/2+'" text-anchor="middle">所有折线已隐藏，点击图例重新显示</text>';
       else for(let i=0;i<=4;i++) {const value=min+span*i/4;svg+='<line x1="'+left+'" x2="'+(width-right)+'" y1="'+y(value)+'" y2="'+y(value)+'" class="bk-grid-line"/><text x="'+(left-9)+'" y="'+(y(value)+4)+'" text-anchor="end">'+esc(new Intl.NumberFormat('zh-CN',{notation:'compact',maximumFractionDigits:1}).format(value))+'</text>';}
       for(const line of visibleLines) {
-        svg+='<g data-chart-series="'+line.key+'"><polyline points="'+points.map((p,i)=>x(i)+','+y(p[line.key])).join(' ')+'" fill="none" stroke="'+line.color+'" stroke-width="2.5"/>';
+        const segments=[];let segment=[];
+        points.forEach((p,i)=>{if(Number.isFinite(p[line.key]))segment.push(x(i)+','+y(p[line.key]));else if(segment.length){segments.push(segment);segment=[];}});if(segment.length)segments.push(segment);
+        svg+='<g data-chart-series="'+line.key+'">'+segments.map(s=>'<polyline points="'+s.join(' ')+'" fill="none" stroke="'+line.color+'" stroke-width="2.5"/>').join('');
         svg+=points.map((p,i)=>{
-          if(!granularity && i%Math.max(1,Math.ceil(points.length/60))!==0 && i!==points.length-1)return '';
-          const title=(p.periodBoundary==='opening'?'范围期初 · ':'')+p.date+' '+line.label+' '+money(p[line.key],p.currency)+(p.source==='current'?' · 今日暂估':p.source==='ledger'?' · 账单反推':p.source==='valuation'?' · 估值快照':p.source==='carried'?' · 沿用 '+p.asOf+' 观测':'');
+          if(!Number.isFinite(p[line.key]))return '';
+          if(!granularity && i%Math.max(1,Math.ceil(points.length/60))!==0 && i!==points.length-1 && Number.isFinite(points[i-1]?.[line.key]) && Number.isFinite(points[i+1]?.[line.key]))return '';
+          const title=(p.periodBoundary==='opening'?'范围期初 · ':'')+p.date+' '+line.label+' '+money(p[line.key],p.currency)+(p.source==='current'?' · 今日暂估':p.source==='ledger'?' · 账单反推':p.source==='valuation'?' · 估值快照':p.source==='trades'?' · 成交记录／历史收盘重建':p.source==='carried'?' · 沿用 '+p.asOf+' 观测':'');
           return '<circle cx="'+x(i)+'" cy="'+y(p[line.key])+'" r="4.5" fill="'+line.color+'"'+(granularity?' tabindex="0" role="button" aria-label="'+esc(title+'，查看账单')+'"'+attr(period(p,granularity,line.key==='income'?'income':line.key==='expense'?'expense':'cumulative')):'')+'><title>'+esc(title)+'</title></circle>';
         }).join('');
         svg+='</g>';
@@ -69,7 +73,7 @@
       svg+='</svg>';
       const last=points.at(-1);
       return '<div class="bk-chart-card"><h3>'+esc(label)+'</h3><div class="bk-chart-legend"'+(toggle?' role="group" aria-label="折线显隐，点击图例切换"':'')+'>'+lines.map(l=>{
-        const title=l.label+(['income','expense'].includes(l.key)?'合计':''),amount=m(['income','expense'].includes(l.key)?Math.round(points.reduce((n,p)=>n+p[l.key],0)*100)/100:last[l.key],last.currency);
+        const title=l.label+(['income','expense'].includes(l.key)?'合计':''),amount=Number.isFinite(last[l.key])?m(['income','expense'].includes(l.key)?Math.round(points.reduce((n,p)=>n+p[l.key],0)*100)/100:last[l.key],last.currency):'待补齐';
         return toggle?'<button type="button" class="bk-series-toggle" data-billing-series="'+l.key+'" aria-pressed="'+!hiddenBillingSeries.has(l.key)+'" aria-label="'+esc(title+'折线')+'" style="--line-color:'+l.color+'"><span class="bk-series-label">'+esc(title)+'</span>'+amount+'</button>':'<span style="--line-color:'+l.color+'">'+esc(title)+' '+amount+'</span>';
       }).join('')+'</div>'+svg+(points.length===1?'<p class="bk-muted">目前仅有一个基准点，后续账单会形成走势。</p>':'')+'</div>';
     }
@@ -102,7 +106,10 @@
           const returns=analysis.investmentReturns,period=returns.period;
           $('asset-overview-note').textContent=returns.note;
           const metrics=period?'<div class="bk-summary bk-return-summary">'+[['观测资产变化',period.assetChange],['账单净资金流',period.netFlow],['余额调整',period.adjustments],['综合投资收益（估算）',period.profit]].map(([label,value])=>'<div class="bk-metric"><p>'+esc(label)+'</p><strong>'+m(value,'CNY')+'</strong></div>').join('')+'</div><p class="bk-muted">'+esc(period.openingAsOf+' 至 '+period.closingAsOf)+(period.provisional?' · 今日暂估':'')+(period.partial?' · 仅含可比观测区间':'')+'</p>':'';
-          $('asset-overview-charts').innerHTML=metrics+(returns.points.length?chart(returns.points,[{key:'profit',label:'累计综合投资收益（估算）',color:'#d89812'}],'CNY 等效综合投资收益走势'):'<p class="bk-empty">暂无可比投资收益数据，请查看上方说明。</p>');
+          const trading=returns.trading;
+          if(trading)$('asset-overview-note').textContent='历史证券收益由成交记录和历史收盘价重建，包含已实现收益与持仓浮盈；与全资产快照收益分开展示，缺失行情处留空。';
+          const history=trading?'<section class="bk-trading-history"><h3>历史证券收益 · 成交重建</h3><details><summary>计算口径与覆盖范围</summary><p class="bk-muted">'+esc(trading.note)+'</p></details>'+(trading.pending?'<p role="status" class="bk-muted">后台正在补齐 '+trading.pending+' 个证券的历史行情；缺失处留空。</p>':'')+(trading.issues?.length?'<p class="bk-error">'+esc(trading.issues.slice(0,10).join('；'))+(trading.issues.length>10?' 等 '+trading.issues.length+' 项':'')+'</p>':'')+(trading.missingSymbols?.length?'<details><summary>缺失行情、汇率或历史持仓成本：'+trading.missingSymbols.length+' 个证券</summary><p class="bk-muted">'+esc(trading.missingSymbols.join('、'))+'</p></details>':'')+chart(trading.points,[{key:'realized',label:'累计已实现净收益',color:'var(--green)'},{key:'unrealized',label:'未实现浮盈',color:'#579cf0'},{key:'total',label:'累计证券总收益',color:'#d89812'}],'CNY 历史证券收益走势（自首笔交易累计）')+'</section>':'';
+          $('asset-overview-charts').innerHTML=history+'<h3>全资产收益 · 估值快照</h3>'+(trading?'<details><summary>快照计算口径</summary><p class="bk-muted">'+esc(returns.note)+'</p></details>':'')+metrics+(returns.points.length?chart(returns.points,[{key:'profit',label:'累计综合投资收益（估算）',color:'#d89812'}],'CNY 等效综合投资收益走势'):'<p class="bk-empty">暂无可比快照收益数据，请查看计算口径。</p>');
           return;
         }
         $('asset-overview-note').textContent=assets.note+(assets.currentOnly || assets.historyMode==='hybrid'?'':' 反推使用全部关联账单，再按所选日期范围截取；账本、分类等收支筛选不改变反推基础。');
@@ -114,6 +121,6 @@
       const excluded=getState()?.analysisScope?.excludedAccountIds?.length||0;
       $('billing-charts').innerHTML=(!billing?'':billing.missingCurrencies.length?'<p class="bk-empty">缺少 '+esc(billing.missingCurrencies.join('、'))+' 汇率，暂不能汇总 CNY 走势。</p>':chart(billing.points,billingLines,'CNY 等效总收支走势',billing.granularity,true))+(excluded?'<p class="bk-muted">统计已排除社保公积金等分组中的 '+excluded+' 个账户。</p>':'');
     }
-    return {render,attr,query:()=>focus,clearFocus,drill};
+    return {render,attr,query:()=>({...focus,...(assetChart==='returns'&&!$('accounts-view').classList.contains('hidden')?{investmentHistory:'1'}:{})}),clearFocus,drill};
   };
 })();

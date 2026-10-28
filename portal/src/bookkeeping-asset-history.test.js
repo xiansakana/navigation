@@ -89,9 +89,9 @@ test('state API restores owned linked asset history without exposing it to users
     const aid=store.saveAccount('history-a',{name:'证券',currency:'CNY',balance:150});
     saveInvestmentAccount(db,'history-a',{name:'证券',currency:'CNY',bookkeepingId:aid,baselineCash:100});
     const basic=['bookkeeping:view','bookkeeping:accounts:view','bookkeeping:analysis:view'];
-    const get=async(userId,permissions)=>{
+    const get=async(userId,permissions,query='')=>{
       let status,data;
-      await handleBookkeepingApi({method:'GET',headers:{}},{setHeader(){}},new URL('http://localhost/api/bookkeeping/state'),{userId,permissions},(_,s,b)=>{status=s;data=b;});
+      await handleBookkeepingApi({method:'GET',headers:{}},{setHeader(){}},new URL('http://localhost/api/bookkeeping/state'+query),{userId,permissions},(_,s,b)=>{status=s;data=b;});
       assert.equal(status,200);return data;
     };
     const allowed=await get('history-a',[...basic,'service:stock-manage:cash:view']);
@@ -116,6 +116,11 @@ test('state API restores owned linked asset history without exposing it to users
     assert.equal(hidden.accounts[0].balance,null);
     const other=await get('history-b',[...basic,'service:stock-manage:cash:view']);
     assert.deepEqual(other.accounts,[]);assert.deepEqual(other.analysis.asset.points,[]);
+    const returnPermissions=[...basic,'bookkeeping:accounts:returns:view','service:stock-manage:cash:view'];
+    assert.equal((await get('history-a',returnPermissions,'?investmentHistory=1')).analysis.investmentReturns.trading,undefined);
+    const trading=await get('history-a',[...returnPermissions,'service:stock-manage:trades:view'],'?investmentHistory=1');
+    // No trades: authorisation succeeds without issuing market-data requests.
+    assert.equal(trading.analysis.investmentReturns.trading,null);
     db.prepare('UPDATE investment_accounts SET bookkeeping_id=NULL WHERE user_id=?').run('history-a');
     assert.equal((await get('history-a',[...basic,'bookkeeping:accounts:returns:view'])).analysis.investmentReturns,null);
   } finally {
