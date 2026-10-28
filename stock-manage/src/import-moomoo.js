@@ -1,4 +1,5 @@
 import XLSX from 'xlsx';
+import { parseBbaeBuffer } from './import-bbae.js';
 import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
 import { isOptionSymbol, optionMult, roundMoney, roundPrice } from './trades.js';
 
@@ -253,6 +254,8 @@ export function parseAppBackupBuffer(buffer) {
 }
 
 export function parseImportBuffer(buffer) {
+  const bbae = parseBbaeBuffer(buffer);
+  if (bbae !== null) return bbae;
   const moomoo = parseMoomooBuffer(buffer);
   if (moomoo.length) return moomoo;
   return parseAppBackupBuffer(buffer);

@@ -753,53 +753,61 @@ function openTradeModal(trade = {}) {
   });
 }
 
-const importState = { buffer: null, count: 0, preview: [], error: null, mode: 'merge' };
+const importState = { buffer: null, count: 0, preview: [], error: null, mode: 'merge', accountId: '', summary: null };
 
 function renderImportPreviewSection() {
-  if (importState.error) return `<div class="sm-error-box">${importState.error}</div>`;
+  if (importState.error) return `<div class="sm-error-box">${escapeHtml(importState.error)}</div>`;
   if (!importState.count) return '';
   const rows = importState.preview.map((t) => `
     <tr>
       <td>${formatLocalDateTime(t.trade_date)}</td>
       <td>${typeLabel(t)}</td>
-      <td>${t.symbol}</td>
-      <td>${t.name || ''}</td>
+      <td>${escapeHtml(t.symbol)}</td>
+      <td>${escapeHtml(t.name || '')}</td>
       <td>${t.type === 'other' ? '—' : t.shares}</td>
       <td>${t.type === 'other' ? '—' : formatPrice(t.price, 'USD')}</td>
+      <td>${fmtUsd(t.total_amount)}</td><td>${fmtUsd(t.commission)}</td>
+      <td>${({ added: '新增', updated: '更新（需确认）', skipped: '重复跳过' })[t.importAction] || '新增'}</td>
     </tr>`).join('');
   return `
     <div class="sm-import-preview">
-      <div class="sm-import-preview-head">预览（前 5 条，共 ${importState.count} 条）</div>
+      <div class="sm-import-preview-head">预览（显示 ${importState.preview.length} 条，共 ${importState.count} 条）</div>
+      ${importState.summary ? `<p class="hint">BBAE：新增 ${importState.summary.added}，更新 ${importState.summary.updated}，重复跳过 ${importState.summary.skipped}。时间按北京时间；费用按“总计”反推，非融资购买力或委托价。</p>` : ''}
       <div class="sm-table-wrap">
         <table class="sm-table">
           <thead><tr>
-            <th>时间</th><th>类型</th><th>代码</th><th>名称</th><th>数量</th><th>价格</th>
+            <th>时间</th><th>类型</th><th>代码</th><th>名称</th><th>数量</th><th>价格</th><th>本金</th><th>总费用</th><th>处理</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
-      ${importState.count > 5 ? `<p class="hint">... 还有 ${importState.count - 5} 条记录</p>` : ''}
+      ${importState.count > importState.preview.length ? `<p class="hint">... 还有 ${importState.count - importState.preview.length} 条记录</p>` : ''}
     </div>`;
 }
 
 function bindImportModal(layer) {
   $('#import-mode', layer)?.addEventListener('change', (e) => { importState.mode = e.target.value; });
-  $('#import-file', layer)?.addEventListener('change', async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    importState.buffer = await file.arrayBuffer();
+  let revision = 0;
+  const previewFile = async () => {
+    if (!importState.buffer) return;
+    const current = ++revision;
+    $('#import-allow-updates', layer).checked = false;
+    $('#import-confirm', layer).disabled = true;
     try {
-      const res = await fetch('./api/trades/import/preview', {
+      const res = await fetch('./api/trades/import/preview' + (importState.accountId ? '?accountId=' + encodeURIComponent(importState.accountId) : ''), {
         method: 'POST',
         headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
         body: importState.buffer
       });
       const data = await res.json();
+      if (current !== revision) return;
       if (!res.ok) throw new Error(data.error || '解析失败');
       importState.count = data.count;
       importState.preview = data.preview || data.trades || [];
+      importState.summary = data.summary || null;
       importState.error = null;
     } catch (err) {
+      if (current !== revision) return;
       importState.count = 0;
       importState.preview = [];
       importState.error = err.message;
@@ -812,6 +820,13 @@ function bindImportModal(layer) {
       btn.disabled = importState.count === 0;
       btn.textContent = importState.count > 0 ? `导入 (${importState.count} 条)` : '导入';
     }
+  };
+  $('#import-account', layer)?.addEventListener('change', async e => { importState.accountId = e.target.value; await previewFile(); });
+  $('#import-file', layer)?.addEventListener('change', async e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    importState.buffer = await file.arrayBuffer();
+    await previewFile();
   });
 }
 
@@ -821,14 +836,18 @@ function openImportModal() {
   importState.preview = [];
   importState.error = null;
   importState.mode = 'merge';
+  importState.accountId = selectedAccountId === 'unassigned' ? '' : selectedAccountId;
+  importState.summary = null;
   const layer = openModal('导入交易', `
-    <p class="hint">支持 Moomoo 历史 xlsx 或本应用导出的「交易记录」xlsx。选择文件后将显示预览，确认后再导入。</p>
+    <p class="hint">支持 BBAE 股票／期权订单、Moomoo 历史及本应用备份 xlsx。BBAE 必须指定美元账户、使用合并模式；只导入实际成交数量。重复订单跳过，累计部分成交或历史金额有变化时须勾选确认更新。样例可能只是部分日期，不会自动替换整个账户。</p>
     <form id="import-form" class="sm-form-grid">
+      <label>所属证券账户<select id="import-account"><option value="">请选择账户（BBAE 必选）</option>${(state.investmentAccounts || []).map(a => `<option value="${a.id}" ${a.id === importState.accountId ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></label>
       <label>导入模式<select name="mode" id="import-mode">
         <option value="merge">合并到现有记录</option>
         <option value="replace">替换全部记录</option>
       </select></label>
       <label>选择文件<input type="file" id="import-file" class="sm-file-input" accept=".xlsx,.xls"></label>
+      <label><input type="checkbox" id="import-allow-updates"> 已核对预览，允许用券商数据更新匹配记录的数量、价格、费用和成交时间</label>
     </form>
     <div id="import-preview-area"></div>`, `
     <button type="button" class="btn ghost" data-close>取消</button>
@@ -836,10 +855,11 @@ function openImportModal() {
   bindImportModal(layer);
   $('#import-confirm', layer)?.addEventListener('click', async () => {
     if (!importState.buffer || !importState.count) return;
+    if (importState.summary?.updated && !$('#import-allow-updates', layer)?.checked) { toastErr('存在待更新记录，请核对预览并勾选允许更新'); return; }
     if (layer.dataset.busy === '1') return;
     setModalBusy(layer, true, '导入中…');
     try {
-      const res = await fetch('./api/trades/import?mode=' + encodeURIComponent(importState.mode) + (selectedAccountId && selectedAccountId !== 'unassigned' ? '&accountId=' + encodeURIComponent(selectedAccountId) : ''), {
+      const res = await fetch('./api/trades/import?mode=' + encodeURIComponent(importState.mode) + (importState.accountId ? '&accountId=' + encodeURIComponent(importState.accountId) : '') + ($('#import-allow-updates', layer)?.checked ? '&allowUpdates=1' : ''), {
         method: 'POST',
         headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
         body: importState.buffer
@@ -848,7 +868,7 @@ function openImportModal() {
       if (!res.ok) throw new Error(data.error || '导入失败');
       closeModal(layer);
       applyPortfolio(data);
-      toastOk(`已导入 ${importState.count} 条交易`);
+      toastOk(data.importSummary ? `新增 ${data.importSummary.added}，更新 ${data.importSummary.updated}，跳过重复 ${data.importSummary.skipped}` : `已导入 ${importState.count} 条交易`);
       window._refreshTradeModal?.();
     } catch (err) {
       setModalBusy(layer, false);

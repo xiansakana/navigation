@@ -18,6 +18,7 @@ import { createYoloBacktestJobs } from './yolo-backtest-jobs.js';
 import { createYoloCollector, isUsOptionMarketOpen } from './yolo-collector.js';
 import { createQuoteService } from './quotes.js';
 import { parseImportBuffer } from './import-moomoo.js';
+import { mergeBbaeTrades } from './import-bbae.js';
 import { normalizeNamedTrade } from './trade-name.js';
 import { computeTradeReview } from './trade-review.js';
 import {
@@ -335,7 +336,7 @@ app.put('/api/trades/:id', async (req, res) => {
     const i = data.trades.findIndex((t) => t.id === req.params.id);
     if (i < 0) return res.status(404).json({ error: '未找到' });
     const old = data.trades[i];
-    data.trades[i] = { ...trade, id: req.params.id, created_at: old.created_at || trade.created_at };
+    data.trades[i] = { ...trade, ...(old.broker_order_key ? { broker: old.broker, broker_order_key: old.broker_order_key, broker_net: old.broker_net } : {}), id: req.params.id, created_at: old.created_at || trade.created_at };
     Object.assign(data, applyCashDelta(undoCashDelta(data, old), trade));
     store.write(data);
     sendPortfolio(res, req);
@@ -355,6 +356,12 @@ app.delete('/api/trades/:id', (req, res) => {
   sendPortfolio(res, req);
 });
 
+function bbaeImportPlan(req, trades, data) {
+  const account = investmentRows(portfolioDb, currentPortfolioUserId()).find(a => a.id === req.query.accountId && a.currency === 'USD');
+  if (!account) throw new Error('BBAE 导入请选择本人名下的美元证券账户');
+  return mergeBbaeTrades(data.trades, trades, account.id);
+}
+
 app.post('/api/trades/import/preview', express.raw({
   type: ['application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
   limit: '20mb'
@@ -364,7 +371,8 @@ app.post('/api/trades/import/preview', express.raw({
   try {
     const trades = parseImportBuffer(buf);
     if (!trades.length) return res.status(400).json({ error: '未解析到有效记录' });
-    res.json({ count: trades.length, trades: trades.slice(0, 5), preview: trades.slice(0, 5) });
+    const plan = trades[0]?.broker === 'bbae' ? bbaeImportPlan(req, trades, store.read()) : null;
+    res.json({ count: trades.length, format: plan ? 'bbae' : 'other', summary: plan?.summary, trades: trades.slice(0, 5), preview: (plan?.preview || trades).slice(0, plan ? 50 : 5) });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -381,7 +389,13 @@ app.post('/api/trades/import', express.raw({
     if (!imported.length) return res.status(400).json({ error: '未解析到有效记录' });
     const data = store.read();
     const mode = String(req.query.mode || 'merge');
-    if (mode === 'replace') data.trades = req.query.accountId ? data.trades.filter((t) => t.account_id !== req.query.accountId).concat(imported) : imported;
+    let importSummary;
+    if (imported[0]?.broker === 'bbae') {
+      if (mode !== 'merge') throw new Error('BBAE 订单导出可能只含部分日期，请使用合并模式，避免删除其他交易');
+      const plan = bbaeImportPlan(req, imported, data);
+      if (plan.summary.updated && req.query.allowUpdates !== '1') throw new Error('存在待更新记录，请先预览并明确勾选允许更新匹配记录');
+      data.trades = plan.trades; importSummary = plan.summary;
+    } else if (mode === 'replace') data.trades = req.query.accountId ? data.trades.filter((t) => t.account_id !== req.query.accountId).concat(imported) : imported;
     else data.trades = data.trades.concat(imported);
     const recalc = recalcCashFromTrades(data.trades, {
       cashUsd: 0,
@@ -390,7 +404,7 @@ app.post('/api/trades/import', express.raw({
     });
     Object.assign(data, recalc);
     store.write(data);
-    sendPortfolio(res, req);
+    res.json({ ...portfolioForRequest(req), importSummary });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
