@@ -3,6 +3,7 @@ import { createBookkeepingStore } from './bookkeeping-store.js';
 import { historicalFx } from './bookkeeping-historical-fx.js';
 import { effectiveBookkeepingFx, refreshBookkeepingFx } from './bookkeeping-fx.js';
 import { SOCIAL_ACCOUNT_GROUP } from './bookkeeping-scope.js';
+import { investmentReturns } from './bookkeeping-investment-returns.js';
 
 const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
 export const assetDate = time => new Date(time + 8 * 3600000).toISOString().slice(0,10);
@@ -114,7 +115,23 @@ export function createAssetHistory(db) {
       period:start<=end?{start,end,openingAsOf,opening:opening.balance,closing:closing.balance,change:round(closing.balance-opening.balance),openingSource:opening.source,closingSource:closing.source,closingAsOf:closing.date}:null,
       note:`${baseline.cutover_date} 前保留账单与余额调整反推的历史账面资产；从该日起按采集时的账户范围、现金及证券最新可用行情记录 CNY 估值，每天北京时间 23:59 采集一次。曲线包含范围首日前一日日末的期初基准，首尾差值与范围内资产变化一致。范围覆盖今天时使用当前账户余额、最新可用证券行情及当前汇率显示“今日暂估”，刷新不会改写历史快照。其他未采集日期沿用上一观测，不代表当日实际收盘净值；切换日可能包含账面与行情估值的口径差额，资产变化不等同投资收益。历史反推数据已冻结，不随最新股价重算。`+(excluded.size?' 已按选择排除社保公积金等账户；快照段使用各账户当时的余额与汇率。':'')+(estimated?` ${baseline.cutover_date} 前原冻结数据未保存账户拆分，排除部分按最早可用账户快照及账单反推，属于估算；原始总曲线保持不变。`:'') };
   }
-  return { capture, read };
+  function returns(userId, filter, today, accounts, entries, rates, excludedAccountIds=[]) {
+    const excluded=new Set(excludedAccountIds);
+    const observations=db.prepare('SELECT date,captured_at,details FROM bookkeeping_asset_snapshots WHERE user_id=? AND date<=? ORDER BY date').all(userId,today)
+      .map(p=>({date:p.date,capturedAt:p.captured_at,source:'valuation',accounts:JSON.parse(p.details).filter(a=>!excluded.has(a.id))}));
+    const included=accounts.filter(a=>a.included && !excluded.has(a.id));
+    if(included.length && included.every(a=>Number.isFinite(a.balance) && rates[a.currency]>0)) {
+      const index=observations.findIndex(p=>p.date===today);if(index>=0)observations.splice(index);
+      observations.push({date:today,capturedAt:new Date().toISOString(),source:'current',accounts:included.map(a=>({id:a.id,currency:a.currency,balance:a.balance,rate:rates[a.currency],source:a.balanceSource||'ledger'}))});
+    }
+    const events=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='investment_account_audit'").get()
+      ? db.prepare("SELECT at,data FROM investment_account_audit WHERE user_id=? AND action IN ('cash-baseline','unlink')").all(userId).filter(e=>{
+        const data=JSON.parse(e.data),id=data.before?.bookkeeping_id || data.input?.bookkeepingId || data.bookkeepingId;
+        return !id || included.some(a=>a.id===id);
+      }) : [];
+    return investmentReturns(observations,entries,filter,today,events);
+  }
+  return { capture, read, returns };
 }
 
 export function startAssetHistory(db, { clock = Date.now, refresh = refreshBookkeepingFx, schedule = setTimeout, cancel = clearTimeout } = {}) {

@@ -69,3 +69,22 @@ test('visibility survives period data reload, no-data and missing-FX views',()=>
     f.toggle('expense');assert.equal(f.$('billing-charts').querySelectorAll('polyline').length,3);
   } finally {f.dom.window.close();}
 });
+
+test('asset return tab is accessible, retains selection across reloads, masks amounts and handles unavailable history',()=>{
+  const f=fixture();
+  try {
+    assert.equal(f.$('asset-tab-returns').hidden,true);
+    f.state.analysis.investmentReturns={points:[{date:'2026-10-26',currency:'CNY',profit:0},{date:'2026-10-28',currency:'CNY',profit:30,source:'current'}],note:'真实估值观测',period:{openingAsOf:'2026-10-26',closingAsOf:'2026-10-28',assetChange:100,netFlow:60,adjustments:10,profit:30,provisional:true,partial:true}};
+    f.controller.render();f.$('asset-tab-returns').click();
+    assert.equal(f.$('asset-tab-returns').getAttribute('aria-selected'),'true');
+    assert.equal(f.$('asset-overview-charts').getAttribute('aria-labelledby'),'asset-tab-returns');
+    assert.equal(f.$('asset-overview-charts').querySelectorAll('.bk-metric [data-money]').length,4);
+    assert.match(f.$('asset-overview-charts').textContent,/今日暂估/);
+    f.controller.render();assert.equal(f.$('asset-tab-returns').getAttribute('aria-selected'),'true');
+    f.state.analysis.investmentReturns={points:[],period:null,note:'缺少可比快照'};f.controller.render();
+    assert.match(f.$('asset-overview-note').textContent,/缺少可比快照/);assert.equal(f.$('asset-overview-charts').querySelector('polyline'),null);
+    f.$('asset-tab-returns').dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));
+    assert.equal(f.$('asset-tab-balance').getAttribute('aria-selected'),'true');
+    f.state.analysis.investmentReturns=null;f.controller.render();assert.equal(f.$('asset-tab-returns').hidden,true);
+  } finally {f.dom.window.close();}
+});

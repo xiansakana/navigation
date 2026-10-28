@@ -95,6 +95,10 @@ test('state API restores owned linked asset history without exposing it to users
       assert.equal(status,200);return data;
     };
     const allowed=await get('history-a',[...basic,'service:stock-manage:cash:view']);
+    assert.equal(allowed.analysis.investmentReturns,null);
+    const returnsAllowed=await get('history-a',[...basic,'bookkeeping:accounts:returns:view','service:stock-manage:cash:view']);
+    assert.ok(returnsAllowed.analysis.investmentReturns);
+    assert.equal(returnsAllowed.analysis.investmentReturns.period,null);
     assert.equal(allowed.analysis.asset.historyMode,'hybrid');
     assert.equal(allowed.accounts[0].balance,100);
     assert.equal(allowed.analysis.asset.points.at(-1).balance,100);
@@ -106,6 +110,7 @@ test('state API restores owned linked asset history without exposing it to users
     assert.equal(refreshed.analysis.asset.points.at(-1).balance,100);
     assert.deepEqual(db.prepare('SELECT * FROM bookkeeping_asset_snapshots').get(),saved);
     const hidden=await get('history-a',basic);
+    assert.equal((await get('history-a',[...basic,'bookkeeping:accounts:returns:view'])).analysis.investmentReturns,null);
     assert.equal(hidden.analysis.asset.historyMode,undefined);
     assert.deepEqual(hidden.analysis.asset.points,[]);
     assert.equal(hidden.accounts[0].balance,null);

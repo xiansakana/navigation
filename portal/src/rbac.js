@@ -255,6 +255,7 @@ var SYSTEM_PERMISSIONS = [
     { id: 'bookkeeping:view', name: '查看记账明细与统计', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '明细与统计'] },
     { id: 'bookkeeping:entries:edit', name: '新增、编辑和删除账单', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '明细与统计', '记一笔'] },
     { id: 'bookkeeping:accounts:view', name: '查看资产账户', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '资产'] },
+    { id: 'bookkeeping:accounts:returns:view', name: '查看综合投资收益走势', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '资产', '综合投资收益'] },
     { id: 'bookkeeping:accounts:edit', name: '管理账户及余额调整', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '资产', '管理账户'] },
     { id: 'bookkeeping:import:edit', name: '预览并导入 iCost 账单', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '导入导出', '导入'] },
     { id: 'bookkeeping:export:view', name: '导出账单', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '导入导出', '导出'] },

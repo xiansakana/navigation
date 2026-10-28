@@ -52,6 +52,7 @@ export const DEFAULT_PERSONAL_PERMISSIONS = Object.freeze([
     'bookkeeping:view',
     'bookkeeping:entries:edit',
     'bookkeeping:accounts:view',
+    'bookkeeping:accounts:returns:view',
     'bookkeeping:accounts:edit',
     'bookkeeping:import:edit',
     'bookkeeping:export:view',

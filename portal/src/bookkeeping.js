@@ -85,6 +85,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       const budgetMonth=url.searchParams.get('month'), budgetData=budgetMonth?analyzeBookkeeping(scopedAll.filter(e=>e.date.startsWith(budgetMonth)),scopedAll,null,settings,{month:budgetMonth},undefined,fx.rates):null;
       const calculation=analyzeBookkeeping(scopedBills(entries,excluded),scopedAll,canBookkeep(session,'analysis:view')?scopedAccounts:null,settings,Object.fromEntries(url.searchParams),undefined,fx.rates,all);
       const ledgerCalculation=excluded.size?analyzeBookkeeping(entries,all,null,settings,Object.fromEntries(url.searchParams),undefined,fx.rates):calculation;
+      calculation.investmentReturns=null;
       if (canBookkeep(session,'analysis:view') && accounts?.some(a=>a.included && a.balanceSource==='portfolio') && !accounts.some(a=>a.included && a.investment?.permissionMissing)) {
         const historyStore=createAssetHistory(getDatabase());
         historyStore.capture(uid,ownedAccounts,all,fx.rates,Date.now(),{snapshot:false});
@@ -93,6 +94,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
           ? included.reduce((total,a)=>total+a.balance*fx.rates[a.currency],0) : null;
         calculation.asset=historyStore.read(uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),currentBalance,{excludedAccountIds:scope.excludedAccountIds,accounts,entries:all,rates:fx.rates}) || calculation.asset;
       }
+      if(canBookkeep(session,'analysis:view') && canBookkeep(session,'accounts:returns:view') && accounts && !calculation.investmentReturns && !accounts.some(a=>a.included && a.investment?.permissionMissing))calculation.investmentReturns=createAssetHistory(getDatabase()).returns(uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),accounts,all,fx.rates,scope.excludedAccountIds);
       return json(res, 200, { ok: true, equivalentSummary:ledgerCalculation.equivalentSummary, conversionMissing:ledgerCalculation.billing.missingCurrencies, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),
         budgetExpense: budgetData?(budgetData.billing.missingCurrencies.length?null:budgetData.equivalentSummary.totals.CNY?.expense||0):null,
         accounts: accounts || [], settings:permittedAccounts?settings:{...settings,analysisScope:undefined}, fx, analysisScope:scope,

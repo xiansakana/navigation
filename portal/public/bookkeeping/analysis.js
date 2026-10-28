@@ -3,6 +3,18 @@
   window.createBookkeepingAnalysis = function ({ $, esc, m, money, can, load, tab, getState, periods }) {
     const fields=['period-kind','period-anchor','range-start','range-end','month','book','currency','type','category','account','search'];
     let focus={}, saved=null;
+    let assetChart='balance';
+    const assetChartTabs=$('asset-chart-tabs');
+    assetChartTabs.addEventListener('click',event=>{
+      const button=event.target.closest('[data-asset-chart]');if(!button || button.hidden)return;
+      assetChart=button.dataset.assetChart;renderAsset();button.focus({preventScroll:true});
+    });
+    assetChartTabs.addEventListener('keydown',event=>{
+      if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+      const buttons=[...assetChartTabs.querySelectorAll('button')].filter(b=>!b.hidden);
+      const index=buttons.indexOf(document.activeElement);if(index<0)return;
+      event.preventDefault();buttons[event.key==='Home'?0:event.key==='End'?buttons.length-1:(index+(event.key==='ArrowLeft'?-1:1)+buttons.length)%buttons.length].click();
+    });
     const hiddenBillingSeries=new Set(), billingLines=[{key:'income',label:'收入',color:'var(--green)'},{key:'expense',label:'净支出',color:'var(--red)'},{key:'cumulative',label:'累计账单结余',color:'#d89812'}];
     const attr = data => ' data-drill="'+esc(JSON.stringify(data))+'"';
     function clearFocus() {focus={};saved=null;periods.restore();$('drill-context').classList.add('hidden');}
@@ -73,9 +85,26 @@
       const analysis=getState()?.analysis;if(!analysis){for(const id of ['spending-insights','billing-charts','asset-overview-charts'])$(id).innerHTML='';$('asset-overview').classList.add('hidden');return;}
       renderBilling();
       $('spending-insights').innerHTML=analysis.insights.map(i=>'<section class="bk-insight"><h3>'+esc(i.currency)+' · '+i.count+' 笔账单</h3><p>收入 '+m(i.income,i.currency)+'，净支出 '+m(i.expense,i.currency)+'，结余 '+m(i.net,i.currency)+'。</p>'+(i.topCategory?'<p>最大支出分类 <button class="bk-text-button"'+attr({category:i.topCategory.category,currency:$('currency').value,flow:'expense'})+'>'+esc(i.topCategory.category)+' →</button> '+m(i.topCategory.amount,i.currency)+'，占正向分类支出的 <span data-money>'+(i.share*100).toFixed(1)+'%</span>。</p>':'')+(i.comparison?'<p>较 '+esc(i.comparison.month)+' '+(i.comparison.change>=0?'增长':'下降')+' <span data-money>'+Math.abs(i.comparison.change*100).toFixed(1)+'%</span>。</p>':'')+'<ul>'+i.suggestions.map(s=>'<li>'+suggestion(s,i.currency)+'</li>').join('')+'</ul></section>').join('')+'<p class="bk-muted">'+esc(analysis.comparisonNote)+' 分类建议基于当前记录，未设置预算时不推测你的收入或消费能力。</p>';
-      const assets=analysis.asset;
+      renderAsset();
+    }
+    function renderAsset() {
+      const analysis=getState()?.analysis, assets=analysis?.asset;
+      const allowed=can('accounts:returns:view') && !!analysis?.investmentReturns;
+      $('asset-tab-returns').hidden=!allowed;
+      if(assetChart==='returns' && !allowed)assetChart='balance';
+      for(const button of assetChartTabs.querySelectorAll('button')){
+        const active=button.dataset.assetChart===assetChart;button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;
+      }
+      $('asset-overview-charts').setAttribute('aria-labelledby','asset-tab-'+assetChart);
       $('asset-overview').classList.toggle('hidden',!assets);if(!assets){$('asset-overview-charts').innerHTML='';}
       if(assets) {
+        if(assetChart==='returns') {
+          const returns=analysis.investmentReturns,period=returns.period;
+          $('asset-overview-note').textContent=returns.note;
+          const metrics=period?'<div class="bk-summary bk-return-summary">'+[['观测资产变化',period.assetChange],['账单净资金流',period.netFlow],['余额调整',period.adjustments],['综合投资收益（估算）',period.profit]].map(([label,value])=>'<div class="bk-metric"><p>'+esc(label)+'</p><strong>'+m(value,'CNY')+'</strong></div>').join('')+'</div><p class="bk-muted">'+esc(period.openingAsOf+' 至 '+period.closingAsOf)+(period.provisional?' · 今日暂估':'')+(period.partial?' · 仅含可比观测区间':'')+'</p>':'';
+          $('asset-overview-charts').innerHTML=metrics+(returns.points.length?chart(returns.points,[{key:'profit',label:'累计综合投资收益（估算）',color:'#d89812'}],'CNY 等效综合投资收益走势'):'<p class="bk-empty">暂无可比投资收益数据，请查看上方说明。</p>');
+          return;
+        }
         $('asset-overview-note').textContent=assets.note+(assets.currentOnly || assets.historyMode==='hybrid'?'':' 反推使用全部关联账单，再按所选日期范围截取；账本、分类等收支筛选不改变反推基础。');
         $('asset-overview-charts').innerHTML=assets.currentOnly?'<p class="bk-muted">证券账户当前估值已联动；缺少逐日估值快照，暂不生成历史净值曲线。</p>':assets.missingValuations?.length?'<p class="bk-empty">请补齐证券行情后查看资产合计。</p>':assets.missingCurrencies.length?'<p class="bk-empty">缺少 '+esc(assets.missingCurrencies.join('、'))+' 汇率，暂不能反推 CNY 资产走势。</p>':(assets.points.length?chart(assets.points,[{key:'balance',label:assets.historyMode==='hybrid'?'历史账面／估值净资产':'反推净资产',color:'#d89812'}],'CNY 等效总资产走势')+(assets.historyMode==='hybrid'?'':'<p class="bk-muted">以当前资产余额为反推锚点，所选历史范围期末可能不同；'+assets.estimatedTransfers+' 笔跨币种转账按等值估算，'+assets.unlinkedEntries+' 笔未关联账户记录按总资产变化估算。</p>'):'<p class="bk-empty">暂无计入总资产的账户</p>');
       }

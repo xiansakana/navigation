@@ -106,3 +106,9 @@
 .bk-analysis-scope p { width:100%; font-size:12px; margin:0; }
 .bk-analysis-scope .bk-error:empty { display:none; }
 .bk-analysis-scope input[type=checkbox] { width:18px; height:18px; flex-shrink:0; }
+.bk-asset-chart-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+.bk-asset-chart-tabs button { font:inherit; font-weight:600; border:1px solid var(--border); border-radius:12px; padding:10px 16px; color:var(--text); background:var(--card); cursor:pointer; }
+.bk-asset-chart-tabs button[aria-selected=true] { background:var(--bk-gold); color:#231b08; border-color:var(--bk-gold); }
+.bk-asset-chart-tabs button:focus-visible { outline:2px solid var(--bk-gold); outline-offset:3px; }
+.bk-return-summary { grid-template-columns:repeat(4,minmax(0,1fr)); }
+@media(max-width:760px) { .bk-return-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }.bk-asset-chart-tabs button { padding:10px 12px; } }
