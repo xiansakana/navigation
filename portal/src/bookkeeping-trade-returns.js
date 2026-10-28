@@ -3,7 +3,7 @@ import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
 
 const round=n=>Math.round((n+Number.EPSILON)*100)/100;
 const shift=(date,n)=>new Date(Date.parse(date+'T12:00:00Z')+n*86400000).toISOString().slice(0,10);
-const tradeStamp=t=>{
+export const tradeStamp=t=>{
   const value=String(t.trade_date||'');
   return Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(value)?value:(/^\d{4}-\d{2}-\d{2}$/.test(value)?value+'T00:00:00':value.replace(' ','T'))+'+08:00');
 };
@@ -13,7 +13,7 @@ export const tradeDay=t=>{
 };
 export const optionSymbol=s=>/^([A-Z]+)(\d{6})([CP])(\d+(?:\.\d+)?)$/.exec(s);
 
-export function reconstructTradeReturns(trades,{start,end,today,quote,fx,splits=[]}) {
+export function reconstructTradeReturns(trades,{start,end,today,quote,fx,splits=[],hybrid=null,valuationFx=fx}) {
   const booked=new Set();
   for(const action of splits.filter(s=>!s.uncertain)){
     const same=trades.filter(t=>normalizeSymbol(t.symbol)===action.symbol&&tradeDay(t)===action.date);
@@ -50,17 +50,20 @@ export function reconstructTradeReturns(trades,{start,end,today,quote,fx,splits=
       }else if(t.type==='other')realized+=normalizeOtherAmount(t.other_category,amount)*rate;
       else {invalidCost=true;issues.add('未支持的交易类型');}
     }
+    const floatingIncluded=!hybrid || !!hybrid.cutover && date>=hybrid.cutover;
     let unrealized=0,missing=invalidCost;
     for(const lot of queues.values()){
+      if(!floatingIncluded)break;
       if(!lot.items.length)continue;
-      const q=quote(lot.symbol,date),rate=fx(lot.currency,date)?.rate,lastSplit=actions.filter(s=>s.symbol===lot.symbol&&!s.uncertain&&s.date<=date).at(-1);
-      if(lot.items.some(item=>item.uncertain)||!q||!(q.close>=0)||!Number.isFinite(q.close)||q.date>date||q.date<shift(date,-7)||!(rate>0)||(lastSplit&&q.date<=lastSplit.date)){
+      const q=quote(lot.symbol,date),rate=valuationFx(lot.currency,date)?.rate,lastSplit=actions.filter(s=>s.symbol===lot.symbol&&!s.uncertain&&s.date<=date).at(-1);
+      if(lot.items.some(item=>item.uncertain)||!q||!(q.close>=0)||!Number.isFinite(q.close)||q.date>date||q.date<shift(date,-7)||!(rate>0)||(lastSplit&&!hybrid&&q.date<=lastSplit.date)){
         missing=true;if(date>=opening)missingSymbols.add(lot.symbol);continue;
       }
       const shares=lot.items.reduce((n,item)=>n+item.shares,0),cost=lot.items.reduce((n,item)=>n+item.cost,0),mult=optionSymbol(lot.symbol)?100:1;
       unrealized+=shares*q.close*mult*rate-cost;
     }
-    if(date>=opening)points.push({date,currency:'CNY',realized:invalidCost?null:round(realized),unrealized:missing?null:round(unrealized),total:missing?null:round(round(realized)+round(unrealized)),source:'trades',...(date===opening?{periodBoundary:'opening'}:{}),...(date===today?{provisional:true}:{})});
+    if(hybrid&&floatingIncluded){if(!Number.isFinite(hybrid.anchorUnrealized))missing=true;else unrealized-=hybrid.anchorUnrealized;}
+    if(date>=opening)points.push({date,currency:'CNY',realized:invalidCost?null:round(realized),unrealized:missing?null:round(unrealized),total:missing?null:round(round(realized)+round(unrealized)),source:'trades',...(hybrid?{floatingIncluded,...(date===hybrid.cutover?{valuationBoundary:true}:{})}:{}),...(date===opening?{periodBoundary:'opening'}:{}),...(date===today?{provisional:true}:{})});
   }
   const baseline=points[0];
   const delta=(value,base)=>Number.isFinite(value)&&Number.isFinite(base)?round(value-base):null;
@@ -69,5 +72,6 @@ export function reconstructTradeReturns(trades,{start,end,today,quote,fx,splits=
     return {...p,realized,unrealized,total:realized!==null&&unrealized!==null?round(realized+unrealized):null};
   }):[];
   const last=scoped.at(-1),missingOpening=baseline&&baseline.total===null;
-  return {points:scoped,note:note+(missingOpening?' 期初估值或成本不完整，相关范围收益暂缺；补齐期初数据后恢复，不自动换用其他日期基准。':''),issues:[...issues],missingSymbols:[...missingSymbols],summary:last?{asOf:last.date,realized:last.realized,unrealized:last.unrealized,total:last.total,from:start||sorted[0].day,openingAsOf:baseline.date,opening:{realized:baseline.realized,unrealized:baseline.unrealized,total:baseline.total},complete:last.total!==null}:null};
+  const hybridNote=hybrid?'采用分段统计：'+(hybrid.cutover?hybrid.cutover+' 首份估值快照之前':'尚无估值快照，当前范围')+'仅按交易计算已实现净收益，总收益与净收益相同，未计入历史浮盈，不代表真实浮盈为零。'+(hybrid.cutover?'首份快照的已有浮盈仅作基准，不一次计入收益；之后加入相对该基准的浮盈变化，报价与汇率取自估值快照，未采集日沿用此前观测（报价最多七天），今日用最新可用报价暂估。':'')+'所有折线仍按所选范围期初归零，范围前交易继续还原 FIFO 成本；佣金、股息、税费及其他证券收支保留。不包含历史现金存量汇兑及未记录持仓。':'';
+  return {points:scoped,note:(hybrid?hybridNote:note)+(hybrid?.cutover&&hybrid.cutover<=end&&!Number.isFinite(hybrid.anchorUnrealized)?' 首份快照的持仓报价或成本不完整，暂不能确定浮盈基准。':'')+(missingOpening?' 期初估值或成本不完整，相关范围收益暂缺；补齐期初数据后恢复，不自动换用其他日期基准。':''),...(hybrid?{mode:'hybrid',valuationCutover:hybrid.cutover,anchorComplete:!hybrid.cutover||hybrid.cutover>end||Number.isFinite(hybrid.anchorUnrealized)}:{}),issues:[...issues],missingSymbols:[...missingSymbols],summary:last?{asOf:last.date,realized:last.realized,unrealized:last.unrealized,total:last.total,from:start||sorted[0].day,openingAsOf:baseline.date,opening:{realized:baseline.realized,unrealized:baseline.unrealized,total:baseline.total},complete:last.total!==null}:null};
 }

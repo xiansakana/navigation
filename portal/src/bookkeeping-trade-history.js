@@ -1,10 +1,10 @@
 import { historicalFx } from './bookkeeping-historical-fx.js';
 import { securityHistory } from './bookkeeping-security-history.js';
-import { reconstructTradeReturns, tradeDay } from './bookkeeping-trade-returns.js';
-import { inferCurrency, normalizeSymbol } from '../../stock-manage/src/markets.js';
+import { reconstructTradeReturns, tradeDay, tradeStamp } from './bookkeeping-trade-returns.js';
+import { inferCurrency } from '../../stock-manage/src/markets.js';
+import { tradeValuation } from './bookkeeping-trade-valuation.js';
 
-const shift=(date,n)=>new Date(Date.parse(date+'T12:00:00Z')+n*86400000).toISOString().slice(0,10);
-export async function tradeHistoryReturns(db,userId,filter,today,accounts,excludedIds=[],{history=securityHistory(db),fx=historicalFx(db)}={}) {
+export async function tradeHistoryReturns(db,userId,filter,today,accounts,excludedIds=[],{history=securityHistory(db),fx=historicalFx(db),currentRates={}}={}) {
   const exists=name=>db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
   if(!exists('portfolio_users'))return null;
   const data=JSON.parse(db.prepare('SELECT data FROM portfolio_users WHERE user_id=?').get(userId)?.data||'{}');
@@ -18,22 +18,19 @@ export async function tradeHistoryReturns(db,userId,filter,today,accounts,exclud
   const end=endRequested<today?endRequested:today,start=filter.start||(filter.month?filter.month+'-01':'');
   const valid=trades.filter(t=>tradeDay(t)&&tradeDay(t)<=end);
   await fx.ensure(valid.map(t=>({currency:inferCurrency(t.symbol,t.currency),date:tradeDay(t)})));
-  const symbols=new Map();
-  for(const t of valid)if(['buy','sell'].includes(t.type)){
-    const symbol=normalizeSymbol(t.symbol);if(!symbol)continue;
-    const item=symbols.get(symbol)||{symbol,start:shift(tradeDay(t),-10),end};
-    if(shift(tradeDay(t),-10)<item.start)item.start=shift(tradeDay(t),-10);symbols.set(symbol,item);
-  }
-  history.ensure(userId,[...symbols.values()]);
+  // Old option bars are intentionally not fetched: before the first saved
+  // valuation the agreed return basis is realised trades only.
   const prices=history.read(userId);
-  const quote=(symbol,date)=>{
-    const current=data.quotes?.[symbol],price=current?.price;
-    const asOf=current?Date.parse(current.asOf||current.updatedAt||current.date||''):NaN;
-    if(date===today&&price!=null&&Number.isFinite(Number(price))&&Number(price)>=0&&(!Number.isFinite(asOf)||asOf<=Date.now()))return {date,close:Number(price),source:'portfolio-current'};
-    return prices.quote(symbol,date);
-  };
-  const result=reconstructTradeReturns(valid,{start,end,today,quote,fx:fx.quote,splits:prices.splits});
+  const valuation=tradeValuation(db,userId,included,today,data.quotes||{},currentRates);
+  const first=valuation.first;
+  let anchorUnrealized=null;
+  if(first && first.date<=end){
+    const before=valid.filter(t=>tradeStamp(t)<=Date.parse(first.capturedAt));
+    const anchor=reconstructTradeReturns(before,{end:first.date,today:first.date,quote:valuation.baselineQuote,fx:fx.quote,valuationFx:valuation.baselineFx,splits:prices.splits});
+    anchorUnrealized=before.length?anchor.summary?.unrealized??null:0;
+  }
+  const result=reconstructTradeReturns(valid,{start,end,today,quote:valuation.quote,fx:fx.quote,valuationFx:valuation.fx,splits:prices.splits,hybrid:{cutover:first?.date||null,anchorUnrealized}});
   const unassigned=valid.filter(t=>!t.account_id).length;
-  return {...result,pending:prices.pending,unavailable:prices.unavailable,unassigned,tradeCount:valid.length,
-    note:result.note+' 今日点使用股票模块最新可用报价，标记暂估；这些报价不会用于过去日期。'+(unassigned?' 包含 '+unassigned+' 笔历史未归属记录，独立匹配，不与已归属账户混用成本。':'')+(prices.pending?' 历史行情后台补齐中，页面会随刷新更新。':'')};
+  return {...result,mode:'hybrid',valuationCutover:first?.date||null,pending:0,unavailable:[],unassigned,tradeCount:valid.length,
+    note:(valid.length?result.note:'当前范围没有可用证券成交记录。')+(unassigned?' 包含 '+unassigned+' 笔历史未归属记录，独立匹配，不与已归属账户混用成本。':'')};
 }

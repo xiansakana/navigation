@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import { reconstructTradeReturns, tradeDay } from './bookkeeping-trade-returns.js';
 import { parseSecurityHistory, parseSinaHistory, createSecurityHistory } from './bookkeeping-security-history.js';
 import { tradeHistoryReturns } from './bookkeeping-trade-history.js';
+import { tradeValuation } from './bookkeeping-trade-valuation.js';
 
 const t=(id,type,day,shares,amount,other={})=>({id,type,trade_date:day+'T13:00:00Z',shares,total_amount:amount,commission:0,symbol:'AAPL',currency:'USD',...other});
 const run=(trades,options={})=>reconstructTradeReturns(trades,{today:'2026-10-28',end:'2026-10-28',fx:(c,date)=>({rate:c==='CNY'?1:date<'2026-10-27'?7:8}),quote:(_,date)=>({date,close:12}),...options});
@@ -44,6 +45,39 @@ test('unknown opening valuations remain unknown even if the last day has a price
   const early=run(trades,{start:'2026-10-01'});
   assert.equal(early.points[0].date,'2026-09-30');assert.equal(early.points[0].total,0);assert.equal(early.summary.total,2);
   assert.equal(run(trades,{start:'2026-10-29'}).summary,null);
+});
+
+test('hybrid history never requests old option prices and reports realised-only returns before snapshots',()=>{
+  const trades=[t('buy','buy','2026-10-23',1,100,{symbol:'QQQ250221P500',commission:1}),t('sell','sell','2026-10-25',1,130,{symbol:'QQQ250221P500',commission:1})];
+  const result=run(trades,{hybrid:{cutover:null,anchorUnrealized:null},quote(){throw new Error('historical quote must not be requested');}});
+  assert.equal(result.summary.realized,196);assert.equal(result.summary.total,196);assert.equal(result.summary.unrealized,0);
+  assert.ok(result.points.every(p=>p.total===p.realized&&!p.floatingIncluded));assert.deepEqual(result.missingSymbols,[]);assert.match(result.note,/未计入历史浮盈/);
+});
+
+test('hybrid cutover excludes opening floating profit, remains continuous and respects ranges on either side',()=>{
+  const trades=[t('buy','buy','2026-10-23',10,100,{currency:'CNY'}),t('div','other','2026-10-24',0,10,{currency:'CNY',other_category:'股息'}),t('sell','sell','2026-10-27',5,125,{currency:'CNY'})];
+  const options={start:'2026-10-25',hybrid:{cutover:'2026-10-26',anchorUnrealized:100},quote:(_,date)=>{assert(date>='2026-10-26');return {date,close:date==='2026-10-26'?20:date==='2026-10-27'?25:30};}};
+  const result=run(trades,options),join=result.points.find(p=>p.date==='2026-10-26');
+  assert.equal(join.valuationBoundary,true);assert.equal(join.unrealized,0);assert.equal(join.total,join.realized);
+  assert.equal(result.summary.realized,75);assert.equal(result.summary.unrealized,0);assert.equal(result.summary.total,75);
+  const saleDay=run(trades,{...options,end:'2026-10-27'});assert.equal(saleDay.summary.realized,75);assert.equal(saleDay.summary.unrealized,-25);assert.equal(saleDay.summary.total,50);
+  const inside=run(trades,{...options,start:'2026-10-28'});assert.equal(inside.summary.realized,0);assert.equal(inside.summary.unrealized,25);assert.equal(inside.summary.total,25);
+  const before=run(trades,{...options,end:'2026-10-25'});assert.equal(before.summary.total,before.summary.realized);assert.equal(before.summary.unrealized,0);assert.equal(before.anchorComplete,true);
+  const unknown=run(trades,{...options,hybrid:{cutover:'2026-10-26',anchorUnrealized:null}});assert.equal(unknown.summary.total,null);assert.equal(unknown.anchorComplete,false);
+});
+
+test('valuation frames are user scoped, never use future snapshots or live prices before the cutover',()=>{
+  const db=new Database(':memory:');db.exec('CREATE TABLE bookkeeping_asset_snapshots(user_id TEXT,date TEXT,captured_at TEXT,details TEXT)');
+  try{
+    const insert=db.prepare('INSERT INTO bookkeeping_asset_snapshots VALUES(?,?,?,?)');
+    const details=price=>JSON.stringify([{id:'ledger',source:'portfolio',currency:'USD',rate:7,quotes:[{symbol:'AAPL',price}]}]);
+    insert.run('one','2026-10-26','2026-10-26T15:59:00Z',details(12));insert.run('one','2026-10-27','2026-10-27T15:59:00Z',details(13));insert.run('two','2026-10-25','2026-10-25T15:59:00Z',details(99));
+    const v=tradeValuation(db,'one',new Set(['ledger']),'2026-10-28',{AAPL:{price:15}},{USD:8});
+    assert.equal(v.first.date,'2026-10-26');assert.equal(v.quote('AAPL','2026-10-25'),null);assert.equal(v.baselineQuote('AAPL').close,12);
+    assert.equal(v.quote('AAPL','2026-10-27').close,13);assert.equal(v.quote('AAPL','2026-10-28').close,15);assert.equal(v.baselineFx('USD').rate,7);assert.equal(v.fx('USD','2026-10-28').rate,8);
+    assert.equal(tradeValuation(db,'one',new Set(),'2026-10-28',{AAPL:{price:15}}).quote('AAPL','2026-10-28'),null);
+    assert.equal(tradeValuation(db,'one',new Set(['ledger']),'2026-10-25').first,null);
+  }finally{db.close();}
 });
 
 test('split lots preserve total basis and future, stale or missing prices never fill historical floating profit',()=>{
@@ -103,11 +137,18 @@ test('trade service isolates owners, retains a distinct legacy pool and respects
   db.exec('CREATE TABLE portfolio_users(user_id TEXT PRIMARY KEY,data TEXT);CREATE TABLE investment_accounts(id TEXT,user_id TEXT,bookkeeping_id TEXT)');
   db.prepare('INSERT INTO portfolio_users VALUES(?,?)').run('one',JSON.stringify({quotes:{AAPL:{price:13}},trades:[t('a','buy','2026-10-25',1,10),t('b','buy','2026-10-25',1,10,{account_id:'included'}),t('c','buy','2026-10-25',1,100,{account_id:'excluded'})]}));
   db.prepare('INSERT INTO investment_accounts VALUES(?,?,?)').run('included','one','ledger');db.prepare('INSERT INTO investment_accounts VALUES(?,?,?)').run('excluded','one','other');
-  const history={ensure(){},read:()=>({quote:(_,date)=>({date,close:12}),splits:[],pending:0,unavailable:[]})},fx={ensure:async()=>{},quote:()=>({rate:1})};
+  const history={ensure(){throw new Error('hybrid returns must not schedule historical option downloads');},read:()=>({quote:(_,date)=>({date,close:12}),splits:[],pending:0,unavailable:[]})},fx={ensure:async()=>{},quote:()=>({rate:1})};
   try{
     const result=await tradeHistoryReturns(db,'one',{},'2026-10-28',[{id:'ledger',included:true}],[],{history,fx});
-    assert.equal(result.tradeCount,2);assert.equal(result.unassigned,1);assert.equal(result.summary.total,6);
-    assert.equal(result.points.find(p=>p.date==='2026-10-27').total,4);
+    assert.equal(result.tradeCount,2);assert.equal(result.unassigned,1);assert.equal(result.summary.total,0);
+    assert.equal(result.points.find(p=>p.date==='2026-10-27').total,0);
+    db.exec('CREATE TABLE bookkeeping_asset_snapshots(user_id TEXT,date TEXT,captured_at TEXT,details TEXT)');
+    const snapshot=JSON.stringify([{id:'ledger',currency:'USD',rate:1,source:'portfolio',quotes:[{symbol:'AAPL',price:12}]}]);
+    db.prepare('INSERT INTO bookkeeping_asset_snapshots VALUES(?,?,?,?)').run('one','2026-10-26','2026-10-26T15:59:00Z',snapshot);
+    const frozen=db.prepare('SELECT * FROM bookkeeping_asset_snapshots').all();
+    const observed=await tradeHistoryReturns(db,'one',{},'2026-10-28',[{id:'ledger',included:true}],[],{history,fx});
+    assert.equal(observed.valuationCutover,'2026-10-26');assert.equal(observed.summary.total,2);assert.equal(observed.anchorComplete,true);assert.equal(observed.pending,0);
+    assert.equal(observed.points.find(p=>p.date==='2026-10-26').unrealized,0);assert.deepEqual(db.prepare('SELECT * FROM bookkeeping_asset_snapshots').all(),frozen);
     assert.equal((await tradeHistoryReturns(db,'two',{},'2026-10-28',[{id:'ledger',included:true}],[],{history,fx})).tradeCount,0);
     assert.equal((await tradeHistoryReturns(db,'one',{},'2026-10-28',[{id:'ledger',included:true}],['ledger'],{history,fx})).tradeCount,0);
   }finally{db.close();}

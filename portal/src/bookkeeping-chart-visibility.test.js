@@ -140,3 +140,21 @@ test('securities legends toggle independently, retain choices on data reload and
     assert.match(button('total').textContent,/待补齐/);assert.doesNotMatch(host.innerHTML,/NaN|Infinity/);
   }finally{f.dom.window.close();}
 });
+
+test('hybrid securities chart discloses omitted floating returns and keeps the cutover marker when toggling',()=>{
+  const f=fixture();
+  try{
+    f.state.analysis.investmentReturns={points:[],period:null,note:'snapshot',trading:{mode:'hybrid',valuationCutover:'2026-10-26',points:[
+      {date:'2026-10-25',currency:'CNY',realized:10,unrealized:0,total:10,floatingIncluded:false},
+      {date:'2026-10-26',currency:'CNY',realized:10,unrealized:0,total:10,floatingIncluded:true,valuationBoundary:true},
+      {date:'2026-10-27',currency:'CNY',realized:20,unrealized:5,total:25,floatingIncluded:true}
+    ],note:'仅按已实现收益',pending:0}};
+    f.controller.render();f.$('asset-tab-returns').click();
+    assert.match(f.$('asset-overview-note').textContent,/未计历史浮盈/);
+    assert.match(f.$('asset-overview-charts').textContent,/浮盈起算基准：2026-10-26/);
+    assert.equal(f.$('asset-overview-charts').querySelectorAll('[data-valuation-boundary]').length,1);
+    assert.match(f.$('asset-overview-charts').querySelector('circle title').textContent,/未计历史浮盈/);
+    f.$('asset-overview-charts').querySelector('[data-trading-series=realized]').click();
+    assert.equal(f.$('asset-overview-charts').querySelectorAll('[data-valuation-boundary]').length,1);
+  }finally{f.dom.window.close();}
+});
