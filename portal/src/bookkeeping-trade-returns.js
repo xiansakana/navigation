@@ -14,8 +14,13 @@ export const tradeDay=t=>{
 export const optionSymbol=s=>/^([A-Z]+)(\d{6})([CP])(\d+(?:\.\d+)?)$/.exec(s);
 
 export function reconstructTradeReturns(trades,{start,end,today,quote,fx,splits=[]}) {
+  const booked=new Set();
+  for(const action of splits.filter(s=>!s.uncertain)){
+    const same=trades.filter(t=>normalizeSymbol(t.symbol)===action.symbol&&tradeDay(t)===action.date);
+    for(const sell of same.filter(t=>t.type==='sell'))if(same.some(buy=>buy.type==='buy'&&(buy.account_id||'')===(sell.account_id||'')&&inferCurrency(buy.symbol,buy.currency)===inferCurrency(sell.symbol,sell.currency)&&tradeStamp(buy)===tradeStamp(sell)&&Number(sell.commission||0)===0&&Number(buy.commission||0)===0&&Number(buy.shares)>0&&Number(sell.total_amount)>0&&Math.abs(Number(buy.shares)-Number(sell.shares)*action.ratio)<1&&Math.abs(Number(buy.total_amount)/Number(sell.total_amount)-Number(buy.shares)/(Number(sell.shares)*action.ratio))<0.005))booked.add(JSON.stringify([action.symbol,sell.account_id||'',tradeStamp(sell)]));
+  }
   const sorted=trades.map(t=>({...t,day:tradeDay(t),symbol:normalizeSymbol(t.symbol)})).filter(t=>t.day&&t.day<=end)
-    .sort((a,b)=>tradeStamp(a)-tradeStamp(b)||String(a.id).localeCompare(String(b.id)));
+    .sort((a,b)=>tradeStamp(a)-tradeStamp(b)||(a.symbol===b.symbol&&(a.account_id||'')===(b.account_id||'')&&booked.has(JSON.stringify([a.symbol,a.account_id||'',tradeStamp(a)]))?(a.type==='sell'?0:1)-(b.type==='sell'?0:1):0)||String(a.id).localeCompare(String(b.id)));
   const note='历史证券收益按买卖记录逐日重建：同账户、证券及币种独立 FIFO，使用实际成交金额分配成本，计入佣金、股息、税费及其他证券收支。买入成本与卖出收入分别按交易日汇率折算 CNY，持仓按当日可知的最近收盘价及当日汇率估值。美股收盘价归入北京时间次日，非交易日沿用此前收盘（最多 7 天），不使用未来价格；缺行情、缺成本或汇率处留空，不以零或当前股价代替。金额为自首笔交易累计，日期筛选仅截取展示；不是该筛选范围内新增收益。不包含历史现金存量汇兑及未记录持仓，与下方全资产快照收益口径不同。';
   if(!sorted.length)return {points:[],note,issues:[],summary:null};
   const beginning=shift(sorted[0].day,-1),opening=start?shift(start,-1):beginning;
@@ -25,7 +30,7 @@ export function reconstructTradeReturns(trades,{start,end,today,quote,fx,splits=
   let realized=0,invalidCost=false,index=0;
   const actions=[...splits].sort((a,b)=>a.date.localeCompare(b.date));let action=0;
   for(let date=beginning;date<=end;date=shift(date,1)) {
-    while(action<actions.length&&actions[action].date<=date){const s=actions[action++];for(const lot of queues.values())if(lot.symbol===s.symbol)for(const item of lot.items){if(s.uncertain)item.uncertain=true;else item.shares*=s.ratio;}}
+    while(action<actions.length&&actions[action].date<=date){const s=actions[action++];for(const [key,lot] of queues)if(lot.symbol===s.symbol){const account=JSON.parse(key)[0];if(sorted.some(t=>t.day===s.date&&t.symbol===s.symbol&&(t.account_id||'')===account&&booked.has(JSON.stringify([s.symbol,account,tradeStamp(t)]))))continue;for(const item of lot.items){if(s.uncertain)item.uncertain=true;else item.shares*=s.ratio;}}}
     while(index<sorted.length&&sorted[index].day<=date){
       const t=sorted[index++],currency=inferCurrency(t.symbol,t.currency),rate=fx(currency,t.day)?.rate;
       const fee=Number(t.commission||0),amount=Number(t.total_amount),shares=Number(t.shares),key=JSON.stringify([t.account_id||'',t.symbol,currency]);

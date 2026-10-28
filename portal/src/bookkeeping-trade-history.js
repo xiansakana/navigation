@@ -26,8 +26,14 @@ export async function tradeHistoryReturns(db,userId,filter,today,accounts,exclud
   }
   history.ensure(userId,[...symbols.values()]);
   const prices=history.read(userId);
-  const result=reconstructTradeReturns(valid,{start,end,today,quote:prices.quote,fx:fx.quote,splits:prices.splits});
+  const quote=(symbol,date)=>{
+    const current=data.quotes?.[symbol],price=current?.price;
+    const asOf=current?Date.parse(current.asOf||current.updatedAt||current.date||''):NaN;
+    if(date===today&&price!=null&&Number.isFinite(Number(price))&&Number(price)>=0&&(!Number.isFinite(asOf)||asOf<=Date.now()))return {date,close:Number(price),source:'portfolio-current'};
+    return prices.quote(symbol,date);
+  };
+  const result=reconstructTradeReturns(valid,{start,end,today,quote,fx:fx.quote,splits:prices.splits});
   const unassigned=valid.filter(t=>!t.account_id).length;
   return {...result,pending:prices.pending,unavailable:prices.unavailable,unassigned,tradeCount:valid.length,
-    note:result.note+(unassigned?' 包含 '+unassigned+' 笔历史未归属记录，独立匹配，不与已归属账户混用成本。':'')+(prices.pending?' 历史行情后台补齐中，页面会随刷新更新。':'')};
+    note:result.note+' 今日点使用股票模块最新可用报价，标记暂估；这些报价不会用于过去日期。'+(unassigned?' 包含 '+unassigned+' 笔历史未归属记录，独立匹配，不与已归属账户混用成本。':'')+(prices.pending?' 历史行情后台补齐中，页面会随刷新更新。':'')};
 }

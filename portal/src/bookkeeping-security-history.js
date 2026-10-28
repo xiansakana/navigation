@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { fetchQuoteResource } from '../../shared/quote-network.js';
 import { isAShareSymbol, ashareExchange } from '../../stock-manage/src/markets.js';
 import { optionSymbol } from './bookkeeping-trade-returns.js';
+import { verifiedCorporateActions } from './bookkeeping-corporate-actions.js';
 
 const shift=(date,n)=>new Date(Date.parse(date+'T12:00:00Z')+n*86400000).toISOString().slice(0,10);
 const day=stamp=>new Date(stamp*1000).toISOString().slice(0,10);
@@ -88,7 +89,8 @@ export function createSecurityHistory(db,{request=fetchQuoteResource,key=polygon
     const bySymbol=new Map();
     for(const p of db.prepare('SELECT symbol,date,close,source FROM bookkeeping_security_prices WHERE user_id=? ORDER BY symbol,date').all(userId)){if(!bySymbol.has(p.symbol))bySymbol.set(p.symbol,[]);bySymbol.get(p.symbol).push(p);}
     const meta=db.prepare('SELECT * FROM bookkeeping_security_history_meta WHERE user_id=?').all(userId);
-    return {quote(symbol,date){const values=bySymbol.get(symbol)||[];let low=0,high=values.length;while(low<high){const mid=(low+high)>>1;if(values[mid].date<=date)low=mid+1;else high=mid;}return values[low-1]||null;},splits:meta.flatMap(m=>JSON.parse(m.splits)),pending:[...pending].filter(k=>JSON.parse(k)[0]===userId).length,unavailable:meta.filter(m=>m.status==='unavailable').map(m=>m.symbol)};
+    const actions=new Map();for(const s of [...meta.flatMap(m=>JSON.parse(m.splits)),...verifiedCorporateActions])actions.set(s.symbol+'|'+s.date,s);
+    return {quote(symbol,date){const values=bySymbol.get(symbol)||[];let low=0,high=values.length;while(low<high){const mid=(low+high)>>1;if(values[mid].date<=date)low=mid+1;else high=mid;}return values[low-1]||null;},splits:[...actions.values()],pending:[...pending].filter(k=>JSON.parse(k)[0]===userId).length,unavailable:meta.filter(m=>m.status==='unavailable').map(m=>m.symbol)};
   }
   return {ensure,read};
 }

@@ -51,6 +51,14 @@ test('fallback raw prices flag uncertain corporate actions without guessing a sp
   const fresh=run([t('a','buy','2026-10-27',1,10)],{splits:data.splits});assert.equal(fresh.summary.unrealized,16);
 });
 
+test('an explicitly booked reverse split replays its sell then buy once without applying the share conversion twice',()=>{
+  const trades=[t('old','buy','2026-10-25',100,855,{currency:'CNY'}),t('a-new-buy','buy','2026-10-26',33,846.45,{currency:'CNY'}),t('z-old-sell','sell','2026-10-26',100,855,{currency:'CNY'})];
+  const result=run(trades,{splits:[{symbol:'AAPL',date:'2026-10-26',ratio:1/3}],quote:(_,date)=>({date,close:26})});
+  assert.equal(result.summary.realized,0);assert.equal(result.summary.unrealized,11.55);assert.deepEqual(result.issues,[]);
+  const genuine=run([t('old','buy','2026-10-25',300,855,{currency:'CNY'}),t('a-sell','sell','2026-10-26',100,2331,{currency:'CNY'}),t('b-buy','buy','2026-10-26',33,769.23,{currency:'CNY'})],{splits:[{symbol:'AAPL',date:'2026-10-26',ratio:1/3}],quote:(_,date)=>({date,close:26})});
+  assert.equal(genuine.summary.realized,1476);assert.equal(genuine.summary.unrealized,88.77);
+});
+
 test('price backfill is bounded, deduplicated, cached per user and does not fabricate failed option quotes',async()=>{
   const db=new Database(':memory:');let calls=0,release;
   const held=new Promise(resolve=>{release=resolve;});
@@ -73,12 +81,13 @@ test('price backfill is bounded, deduplicated, cached per user and does not fabr
 test('trade service isolates owners, retains a distinct legacy pool and respects account inclusion',async()=>{
   const db=new Database(':memory:');
   db.exec('CREATE TABLE portfolio_users(user_id TEXT PRIMARY KEY,data TEXT);CREATE TABLE investment_accounts(id TEXT,user_id TEXT,bookkeeping_id TEXT)');
-  db.prepare('INSERT INTO portfolio_users VALUES(?,?)').run('one',JSON.stringify({trades:[t('a','buy','2026-10-25',1,10),t('b','buy','2026-10-25',1,10,{account_id:'included'}),t('c','buy','2026-10-25',1,100,{account_id:'excluded'})]}));
+  db.prepare('INSERT INTO portfolio_users VALUES(?,?)').run('one',JSON.stringify({quotes:{AAPL:{price:13}},trades:[t('a','buy','2026-10-25',1,10),t('b','buy','2026-10-25',1,10,{account_id:'included'}),t('c','buy','2026-10-25',1,100,{account_id:'excluded'})]}));
   db.prepare('INSERT INTO investment_accounts VALUES(?,?,?)').run('included','one','ledger');db.prepare('INSERT INTO investment_accounts VALUES(?,?,?)').run('excluded','one','other');
   const history={ensure(){},read:()=>({quote:(_,date)=>({date,close:12}),splits:[],pending:0,unavailable:[]})},fx={ensure:async()=>{},quote:()=>({rate:1})};
   try{
     const result=await tradeHistoryReturns(db,'one',{},'2026-10-28',[{id:'ledger',included:true}],[],{history,fx});
-    assert.equal(result.tradeCount,2);assert.equal(result.unassigned,1);assert.equal(result.summary.total,4);
+    assert.equal(result.tradeCount,2);assert.equal(result.unassigned,1);assert.equal(result.summary.total,6);
+    assert.equal(result.points.find(p=>p.date==='2026-10-27').total,4);
     assert.equal((await tradeHistoryReturns(db,'two',{},'2026-10-28',[{id:'ledger',included:true}],[],{history,fx})).tradeCount,0);
     assert.equal((await tradeHistoryReturns(db,'one',{},'2026-10-28',[{id:'ledger',included:true}],['ledger'],{history,fx})).tradeCount,0);
   }finally{db.close();}
