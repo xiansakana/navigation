@@ -20,10 +20,30 @@ test('historical FIFO uses actual fills, dated FX, commissions, dividends and ta
 test('FIFO accounts never borrow costs, options have 100 multiplier, and historical costs precede display filter',()=>{
   const trades=[t('a','buy','2026-10-25',2,100,{symbol:'QQQ261030C700',account_id:'one'}),t('b','sell','2026-10-27',1,60,{symbol:'QQQ261030C700',account_id:'one'})];
   const result=run(trades,{start:'2026-10-27',quote:(_,date)=>({date,close:0.7})});
-  assert.equal(result.summary.realized,130);assert.equal(result.summary.unrealized,210);assert.equal(result.summary.total,340);
+  assert.equal(result.summary.realized,130);assert.equal(result.summary.unrealized,-70);assert.equal(result.summary.total,60);
   assert.equal(result.points[0].date,'2026-10-26');assert.equal(result.points[0].periodBoundary,'opening');
   const wrong=run([...trades,t('c','sell','2026-10-28',1,60,{symbol:'QQQ261030C700',account_id:'two'})]);
   assert.equal(wrong.summary.realized,null);assert.equal(wrong.summary.total,null);assert.match(wrong.issues[0],/缺少同账户买入成本/);
+});
+
+test('range returns reset all three series to opening and preserve older FIFO costs without counting old profits twice',()=>{
+  const trades=[t('buy','buy','2026-10-23',20,200,{currency:'CNY',commission:2}),t('prior-sale','sell','2026-10-24',10,150,{currency:'CNY'}),t('sale','sell','2026-10-26',10,250,{currency:'CNY',commission:1})];
+  const result=run(trades,{start:'2026-10-26',quote:(_,date)=>({date,close:20})});
+  assert.deepEqual(result.summary.opening,{realized:48,unrealized:100,total:148});
+  assert.deepEqual([result.points[0].realized,result.points[0].unrealized,result.points[0].total],[0,0,0]);
+  assert.equal(result.summary.realized,149);assert.equal(result.summary.unrealized,-100);assert.equal(result.summary.total,49);
+  assert.equal(result.summary.openingAsOf,'2026-10-25');assert.equal(result.summary.from,'2026-10-26');
+  const next=run(trades,{start:'2026-10-27',quote:(_,date)=>({date,close:20})});
+  assert.equal(next.summary.total,0);assert.equal(next.summary.realized,0);
+});
+
+test('unknown opening valuations remain unknown even if the last day has a price, and pre-trade periods start at zero',()=>{
+  const trades=[t('buy','buy','2026-10-25',1,10,{currency:'CNY'})];
+  const missing=run(trades,{start:'2026-10-27',quote:(_,date)=>date==='2026-10-26'?null:{date,close:12}});
+  assert.equal(missing.summary.realized,0);assert.equal(missing.summary.unrealized,null);assert.equal(missing.summary.total,null);assert.match(missing.note,/期初估值或成本不完整/);
+  const early=run(trades,{start:'2026-10-01'});
+  assert.equal(early.points[0].date,'2026-09-30');assert.equal(early.points[0].total,0);assert.equal(early.summary.total,2);
+  assert.equal(run(trades,{start:'2026-10-29'}).summary,null);
 });
 
 test('split lots preserve total basis and future, stale or missing prices never fill historical floating profit',()=>{

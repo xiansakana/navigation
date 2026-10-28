@@ -21,15 +21,16 @@ export function reconstructTradeReturns(trades,{start,end,today,quote,fx,splits=
   }
   const sorted=trades.map(t=>({...t,day:tradeDay(t),symbol:normalizeSymbol(t.symbol)})).filter(t=>t.day&&t.day<=end)
     .sort((a,b)=>tradeStamp(a)-tradeStamp(b)||(a.symbol===b.symbol&&(a.account_id||'')===(b.account_id||'')&&booked.has(JSON.stringify([a.symbol,a.account_id||'',tradeStamp(a)]))?(a.type==='sell'?0:1)-(b.type==='sell'?0:1):0)||String(a.id).localeCompare(String(b.id)));
-  const note='历史证券收益按买卖记录逐日重建：同账户、证券及币种独立 FIFO，使用实际成交金额分配成本，计入佣金、股息、税费及其他证券收支。买入成本与卖出收入分别按交易日汇率折算 CNY，持仓按当日可知的最近收盘价及当日汇率估值。美股收盘价归入北京时间次日，非交易日沿用此前收盘（最多 7 天），不使用未来价格；缺行情、缺成本或汇率处留空，不以零或当前股价代替。金额为自首笔交易累计，日期筛选仅截取展示；不是该筛选范围内新增收益。不包含历史现金存量汇兑及未记录持仓，与下方全资产快照收益口径不同。';
+  const note='证券收益按所选范围首日前一日日末归零：范围已实现净收益＝当日已实现净收益－期初已实现净收益；范围浮盈变化＝当日持仓浮盈－期初持仓浮盈；范围证券总收益＝两者相加。范围前的交易继续参与同账户、证券及币种的 FIFO 成本匹配，但不把范围前的收益计入范围总收益。计入佣金、股息、税费及其他证券收支，买卖按交易日汇率折算 CNY；历史持仓按当日可知的最近收盘价及当日汇率估值。美股收盘归北京时间次日，非交易日最多沿用此前七天收盘；不使用未来价格。期初或当日缺行情、成本或汇率处留空，不以零或当前股价代替。不包含历史现金存量汇兑及未记录持仓，与下方全资产快照收益口径不同。';
   if(!sorted.length)return {points:[],note,issues:[],summary:null};
   const beginning=shift(sorted[0].day,-1),opening=start?shift(start,-1):beginning;
-  if(end<opening)return {points:[],note,issues:[],summary:null};
-  if((Date.parse(end)-Date.parse(beginning))/86400000>3700)return {points:[],note:note+' 历史跨度超过十年，请先核对交易起始日期。',issues:[],summary:null};
+  if((start&&start>end)||end<opening)return {points:[],note,issues:[],summary:null};
+  const loopStart=opening<beginning?opening:beginning;
+  if((Date.parse(end)-Date.parse(loopStart))/86400000>3700)return {points:[],note:note+' 历史跨度超过十年，请先核对交易起始日期。',issues:[],summary:null};
   const queues=new Map(),points=[],issues=new Set(),missingSymbols=new Set();
   let realized=0,invalidCost=false,index=0;
   const actions=[...splits].sort((a,b)=>a.date.localeCompare(b.date));let action=0;
-  for(let date=beginning;date<=end;date=shift(date,1)) {
+  for(let date=loopStart;date<=end;date=shift(date,1)) {
     while(action<actions.length&&actions[action].date<=date){const s=actions[action++];for(const [key,lot] of queues)if(lot.symbol===s.symbol){const account=JSON.parse(key)[0];if(sorted.some(t=>t.day===s.date&&t.symbol===s.symbol&&(t.account_id||'')===account&&booked.has(JSON.stringify([s.symbol,account,tradeStamp(t)]))))continue;for(const item of lot.items){if(s.uncertain)item.uncertain=true;else item.shares*=s.ratio;}}}
     while(index<sorted.length&&sorted[index].day<=date){
       const t=sorted[index++],currency=inferCurrency(t.symbol,t.currency),rate=fx(currency,t.day)?.rate;
@@ -61,6 +62,12 @@ export function reconstructTradeReturns(trades,{start,end,today,quote,fx,splits=
     }
     if(date>=opening)points.push({date,currency:'CNY',realized:invalidCost?null:round(realized),unrealized:missing?null:round(unrealized),total:missing?null:round(round(realized)+round(unrealized)),source:'trades',...(date===opening?{periodBoundary:'opening'}:{}),...(date===today?{provisional:true}:{})});
   }
-  const last=points.at(-1);
-  return {points,note,issues:[...issues],missingSymbols:[...missingSymbols],summary:last?{asOf:last.date,realized:last.realized,unrealized:last.unrealized,total:last.total,from:sorted[0].day,complete:last.total!==null}:null};
+  const baseline=points[0];
+  const delta=(value,base)=>Number.isFinite(value)&&Number.isFinite(base)?round(value-base):null;
+  const scoped=baseline?points.map(p=>{
+    const realized=delta(p.realized,baseline.realized),unrealized=delta(p.unrealized,baseline.unrealized);
+    return {...p,realized,unrealized,total:realized!==null&&unrealized!==null?round(realized+unrealized):null};
+  }):[];
+  const last=scoped.at(-1),missingOpening=baseline&&baseline.total===null;
+  return {points:scoped,note:note+(missingOpening?' 期初估值或成本不完整，相关范围收益暂缺；补齐期初数据后恢复，不自动换用其他日期基准。':''),issues:[...issues],missingSymbols:[...missingSymbols],summary:last?{asOf:last.date,realized:last.realized,unrealized:last.unrealized,total:last.total,from:start||sorted[0].day,openingAsOf:baseline.date,opening:{realized:baseline.realized,unrealized:baseline.unrealized,total:baseline.total},complete:last.total!==null}:null};
 }
