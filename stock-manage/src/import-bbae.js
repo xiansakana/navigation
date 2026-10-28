@@ -58,9 +58,15 @@ export function mergeBbaeTrades(existing, incoming, accountId) {
   for (const t of incoming) {
     const owned = next.filter(x => x.account_id === accountId);
     let matches = owned.filter(x => x.broker_order_key === t.broker_order_key);
-    if (!matches.length) matches = owned.filter(x => !x.broker_order_key && x.symbol === t.symbol && x.type === t.type && String(x.trade_date).slice(0, 16) === t.trade_date.slice(0, 16));
+    const nearTime = x => x.symbol === t.symbol && x.type === t.type && Math.abs(Date.parse(x.trade_date) - Date.parse(t.trade_date)) <= 60000;
+    if (!matches.length) matches = owned.filter(x => !x.broker_order_key && nearTime(x));
     if (matches.length > 1 || (matches.length && used.has(matches[0].id))) throw new Error('有多条历史记录可能对应同一订单，请先人工核对，未导入');
     const old = matches[0];
+    if (!old && existing.some(x => !x.account_id && nearTime(x))) {
+      summary.unassigned = (summary.unassigned || 0) + 1;
+      preview.push({ ...t, importAction: 'needsAssignment' });
+      continue;
+    }
     const trade = { ...old, ...t, account_id: accountId, id: old?.id || `bbae-${hash([accountId, t.broker_order_key])}`, name: old?.name || t.name, created_at: old?.created_at || t.created_at };
     const action = !old ? 'added' : financial(old) === financial(trade) ? 'skipped' : 'updated';
     summary[action]++;

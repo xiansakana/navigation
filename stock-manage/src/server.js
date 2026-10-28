@@ -393,6 +393,7 @@ app.post('/api/trades/import', express.raw({
     if (imported[0]?.broker === 'bbae') {
       if (mode !== 'merge') throw new Error('BBAE 订单导出可能只含部分日期，请使用合并模式，避免删除其他交易');
       const plan = bbaeImportPlan(req, imported, data);
+      if (plan.summary.unassigned) throw new Error('存在可能重复的未归属历史，请先核对并设置账户归属，未导入');
       if (plan.summary.updated && req.query.allowUpdates !== '1') throw new Error('存在待更新记录，请先预览并明确勾选允许更新匹配记录');
       data.trades = plan.trades; importSummary = plan.summary;
     } else if (mode === 'replace') data.trades = req.query.accountId ? data.trades.filter((t) => t.account_id !== req.query.accountId).concat(imported) : imported;

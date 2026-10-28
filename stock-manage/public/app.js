@@ -767,12 +767,13 @@ function renderImportPreviewSection() {
       <td>${t.type === 'other' ? '—' : t.shares}</td>
       <td>${t.type === 'other' ? '—' : formatPrice(t.price, 'USD')}</td>
       <td>${fmtUsd(t.total_amount)}</td><td>${fmtUsd(t.commission)}</td>
-      <td>${({ added: '新增', updated: '更新（需确认）', skipped: '重复跳过' })[t.importAction] || '新增'}</td>
+      <td>${({ added: '新增', updated: '更新（需确认）', skipped: '重复跳过', needsAssignment: '先核对未归属历史' })[t.importAction] || '新增'}</td>
     </tr>`).join('');
   return `
     <div class="sm-import-preview">
       <div class="sm-import-preview-head">预览（显示 ${importState.preview.length} 条，共 ${importState.count} 条）</div>
       ${importState.summary ? `<p class="hint">BBAE：新增 ${importState.summary.added}，更新 ${importState.summary.updated}，重复跳过 ${importState.summary.skipped}。时间按北京时间；费用按“总计”反推，非融资购买力或委托价。</p>` : ''}
+      ${importState.summary?.unassigned ? `<p class="sm-error-box">${importState.summary.unassigned} 笔可能与未归属历史重复。请先核对原记录的账户归属，再重新预览；本次不会导入。</p>` : ''}
       <div class="sm-table-wrap">
         <table class="sm-table">
           <thead><tr>
@@ -817,7 +818,7 @@ function bindImportModal(layer) {
     if (area) area.innerHTML = renderImportPreviewSection();
     const btn = $('#import-confirm', layer);
     if (btn) {
-      btn.disabled = importState.count === 0;
+      btn.disabled = importState.count === 0 || !!importState.summary?.unassigned;
       btn.textContent = importState.count > 0 ? `导入 (${importState.count} 条)` : '导入';
     }
   };

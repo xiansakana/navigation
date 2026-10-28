@@ -44,6 +44,10 @@ test('manual matches retain IDs and names; ambiguous records and invalid source 
   assert.equal(plan.summary.updated,1);assert.equal(plan.trades[0].id,'manual');assert.equal(plan.trades[0].name,'QQQ Call');assert.equal(manual.commission,2.02);
   assert.throws(()=>mergeBbaeTrades([manual,{...manual,id:'another'}],[t],'a'),/多条历史记录/);
   assert.throws(()=>mergeBbaeTrades([],[t],''),/请选择/);
+  const rounded = {...manual,trade_date:'2026-10-27T15:07:00.000Z'};
+  assert.equal(mergeBbaeTrades([rounded],[t],'a').summary.updated,1);
+  const unassigned = mergeBbaeTrades([{...manual,account_id:undefined}],[t],'a');
+  assert.equal(unassigned.summary.unassigned,1);assert.equal(unassigned.summary.added,0);assert.equal(unassigned.trades.length,1);
   assert.throws(()=>parseBbaeBuffer(buffer([[...row.slice(0,2),'QQQ261028PC720',...row.slice(3)]])),/成交数据无效/);
   assert.throws(()=>parseBbaeBuffer(buffer([row,row])),/无法安全区分/);
   assert.throws(()=>parseBbaeBuffer(buffer([[...row.slice(0,5),'$999.00',...row.slice(6)]])),/矛盾/);
