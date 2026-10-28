@@ -82,6 +82,17 @@ export function mediaUrl(value) {
   return u.href;
 }
 export const qualityLabel = q => ({ 80: '1080p', 64: '720p', 32: '480p', 16: '360p' })[q] || '未知';
+function streamUrl(stream) {
+  const backup = stream.backupUrl || stream.backup_url || [];
+  const candidates = [stream.baseUrl || stream.base_url || stream.url, ...(Array.isArray(backup) ? backup : [])];
+  // Bilibili may prefer an MCDN endpoint on :8082. Use its validated HTTPS
+  // backup instead of widening the allowed ports or trusting arbitrary URLs.
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    try { return mediaUrl(candidate); } catch { /* Try the next API-provided candidate. */ }
+  }
+  throw new Error('B站视频流没有符合安全要求的HTTPS地址（域名或端口不在允许范围），请稍后重试');
+}
 function streamQuality(v) {
   return Number(v.id) || (Number(v.height) >= 1080 ? 80 : Number(v.height) >= 720 ? 64 : Number(v.height) >= 480 ? 32 : 16);
 }
@@ -98,8 +109,8 @@ export function selectBilibiliMedia(data, settings = {}) {
   const video = (data.dash?.video || []).filter(v => streamQuality(v) === selected && Number(v.codecid) === 7)
     .sort((a, b) => b.bandwidth - a.bandwidth)[0];
   const audio = (data.dash?.audio || []).sort((a, b) => b.bandwidth - a.bandwidth)[0];
-  if (video && audio) return { urls: [mediaUrl(video.baseUrl || video.base_url), mediaUrl(audio.baseUrl || audio.base_url)], quality: selected, availableQualities: available };
-  if (data.durl?.length === 1) return { urls: [mediaUrl(data.durl[0].url)], quality: selected, availableQualities: available };
+  if (video && audio) return { urls: [streamUrl(video), streamUrl(audio)], quality: selected, availableQualities: available };
+  if (data.durl?.length === 1) return { urls: [streamUrl(data.durl[0])], quality: selected, availableQualities: available };
   throw new Error('没有可下载的完整音视频流，可能需要登录；可改用上传文件');
 }
 export const selectStreams = (data, settings) => selectBilibiliMedia(data, settings).urls;

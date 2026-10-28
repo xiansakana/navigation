@@ -99,3 +99,16 @@ test('bound credentials cover metadata and playback but never shortlink redirect
   await assert.rejects(inspectBilibili(url, { fetcher: () => { attempts++; return new Response('', { status: 412 }); } }), e => e.code === 'BILIBILI_RISK_CONTROL' && /请勿连续重试/.test(e.message));
   assert.equal(attempts, 1);
 });
+
+test('MCDN nonstandard ports use validated backups without weakening URL or redirect checks', () => {
+  const blocked = 'https://xy42x101x58x168xy.mcdn.bilivideo.cn:8082/video';
+  assert.throws(() => mediaUrl(blocked));
+  const data = { dash: {
+    video: [{ id: 80, codecid: 7, baseUrl: blocked, backupUrl: ['https://evil.example/a', 'https://upos-sz-mirrorcos.bilivideo.com/video'] }],
+    audio: [{ base_url: blocked, backup_url: ['http://test.bilivideo.com/a', 'https://test.bilivideo.com/audio'] }]
+  } };
+  assert.deepEqual(selectStreams(data), ['https://upos-sz-mirrorcos.bilivideo.com/video', 'https://test.bilivideo.com/audio']);
+  assert.deepEqual(selectStreams({ quality: 80, durl: [{ url: blocked, backup_url: ['https://test.bilivideo.com/muxed'] }] }), ['https://test.bilivideo.com/muxed']);
+  data.dash.video[0].backupUrl = ['https://127.0.0.1/a', 'https://bilivideo.com.evil.example/a', 'https://user@test.bilivideo.com/a'];
+  assert.throws(() => selectStreams(data), /没有符合安全要求/);
+});
