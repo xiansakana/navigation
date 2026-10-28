@@ -25,7 +25,7 @@ function fakeServer(body, check = () => {}) {
         } else if (message.method === 'initialized') initialized = true;
         else {
           assert.ok(initialized);
-          assert.equal(message.method, 'account/rateLimits/read');
+          assert.ok(['account/rateLimits/read','account/read'].includes(message.method));
           ${body}
         }
       });
@@ -73,6 +73,18 @@ test('RPC errors, invalid snapshots and early exits never expose raw diagnostics
     });
   }
   await assert.rejects(readCodexUsage({binary:'qq-codex-nonexistent-binary'}),/额度查询失败/);
+});
+
+test('expired tokens refresh once; unavailable login reports a safe actionable error',async()=>{
+  const body=`if(message.id===2)send({id:2,error:{message:'401 token_expired SECRET_TOKEN'}});
+    else if(message.id===3){assert.equal(message.params.refreshToken,true);send({id:3,result:{account:{type:'chatgpt'}}});}
+    else {assert.equal(message.id,4);send({id:4,result:${JSON.stringify(snapshot)}});}`;
+  assert.deepEqual(await readCodexUsage({}, {spawnProcess:fakeServer(body)}),snapshot);
+  for(const response of ["{result:{account:null}}","{error:{message:'refresh_token_reused SECRET_TOKEN'}}"]){
+    await assert.rejects(readCodexUsage({}, {spawnProcess:fakeServer(`if(message.id===2)send({id:2,error:{message:'401 token_expired'}});else send({id:3,...${response}});`)}),error=>{
+      assert.match(error.message,/重新登录/);assert.doesNotMatch(error.message,/SECRET_TOKEN/);return true;
+    });
+  }
 });
 
 test('quota query timeout and cancellation terminate a hanging subprocess', async () => {
