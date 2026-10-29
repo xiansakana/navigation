@@ -1314,3 +1314,15 @@ select:focus {
   #holdings-table .sm-holding-name, #holdings-table td.empty { grid-column: 1 / -1; }
   #holdings-table td.empty::before { display: none; }
 }
+
+/* Keep the import preview inside its grid track; mobile rows show complete values. */
+.sm-modal--import .sm-modal-body { grid-template-columns: minmax(0, 1fr); }
+.sm-modal--import .sm-modal-body > *, .sm-modal--import .sm-form-grid label { min-width: 0; }
+.sm-import-preview .sm-table-wrap { margin: 0; }
+@media (max-width: 640px) {
+  .sm-import-preview .sm-table thead { display: none; }
+  .sm-import-preview .sm-table tbody, .sm-import-preview .sm-table tr { display: block; }
+  .sm-import-preview .sm-table tr { margin: 10px 0; border: 1px solid var(--border); border-radius: 10px; }
+  .sm-import-preview .sm-table td { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; white-space: normal; overflow-wrap: anywhere; }
+  .sm-import-preview .sm-table td::before { content: attr(data-label); color: var(--muted); }
+}

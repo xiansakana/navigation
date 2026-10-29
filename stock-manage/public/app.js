@@ -760,14 +760,14 @@ function renderImportPreviewSection() {
   if (!importState.count && !importState.summary) return '';
   const rows = importState.preview.map((t) => `
     <tr>
-      <td>${formatLocalDateTime(t.trade_date)}</td>
-      <td>${typeLabel(t)}</td>
-      <td>${escapeHtml(t.symbol)}</td>
-      <td>${escapeHtml(t.name || '')}</td>
-      <td>${t.type === 'other' ? '—' : t.shares}</td>
-      <td>${t.type === 'other' ? '—' : formatPrice(t.price, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
-      <td>${fmtMoney(t.total_amount, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td><td>${fmtMoney(t.commission, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
-      <td>${({ added: '新增', updated: '更新（需确认）', skipped: '重复跳过', needsAssignment: '先核对未归属历史' })[t.importAction] || '新增'}</td>
+      <td data-label="时间">${formatLocalDateTime(t.trade_date)}</td>
+      <td data-label="类型">${typeLabel(t)}</td>
+      <td data-label="代码">${escapeHtml(t.symbol)}</td>
+      <td data-label="名称">${escapeHtml(t.name || '')}</td>
+      <td data-label="数量">${t.type === 'other' ? '—' : t.shares}</td>
+      <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.price, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
+      <td data-label="本金">${fmtMoney(t.total_amount, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td><td data-label="总费用">${fmtMoney(t.commission, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
+      <td data-label="处理">${({ added: '新增', updated: '更新（需确认）', skipped: '重复跳过', needsAssignment: '先核对未归属历史' })[t.importAction] || '新增'}</td>
     </tr>`).join('');
   return `
     <div class="sm-import-preview">
@@ -846,7 +846,7 @@ function openImportModal() {
   importState.accountId = selectedAccountId === 'unassigned' ? '' : selectedAccountId;
   importState.summary = null;
   const layer = openModal('导入交易', `
-    <p class="hint">支持东方财富交割单、BBAE 股票／期权订单、Moomoo 历史及本应用备份 xlsx。东方财富必选人民币账户，导入交易、分红、利息与可关联成本的新债，理财本金和转账仅提示、不导入。BBAE 必须指定美元账户、使用合并模式；只导入实际成交数量。重复订单跳过，累计部分成交或历史金额有变化时须勾选确认更新。样例可能只是部分日期，不会自动替换整个账户。</p>
+    <p class="hint">支持东方财富交割单、BBAE 股票／期权订单、Moomoo 历史及本应用备份。请选择对应币种的账户；券商文件只合并，重复记录跳过，更新已有记录须勾选确认。</p>
     <form id="import-form" class="sm-form-grid">
       <label>所属证券账户<select id="import-account"><option value="">请选择账户（券商原始文件必选）</option>${(state.investmentAccounts || []).map(a => `<option value="${a.id}" ${a.id === importState.accountId ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></label>
       <label>导入模式<select name="mode" id="import-mode">
@@ -859,6 +859,7 @@ function openImportModal() {
     <div id="import-preview-area"></div>`, `
     <button type="button" class="btn ghost" data-close>取消</button>
     <button type="button" class="btn primary" id="import-confirm" disabled>导入</button>`, null, { size: 'wide' });
+  layer.querySelector('[role="dialog"]').classList.add('sm-modal--import');
   bindImportModal(layer);
   $('#import-confirm', layer)?.addEventListener('click', async () => {
     if (!importState.buffer || !importState.count) return;
