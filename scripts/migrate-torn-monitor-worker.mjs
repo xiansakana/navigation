@@ -9,7 +9,7 @@ import { createUndercutStore } from '../torn-toolbox-desktop/src/undercut-store.
 
 const config = loadConfig();
 if (config.runtime?.tornMonitorWorker) { console.log('Torn worker migration already applied'); process.exit(0); }
-const db = getDatabase(), base = 'http://127.0.0.1:' + config.server.port;
+const db = getDatabase(), base = new URL('http://127.0.0.1:' + config.server.port).origin;
 const rows = [];
 for (const user of loadRbacBlob(db).users.filter(user => user.enabled !== false && user.username !== (config.auth?.guestUsername || 'guest'))) {
   const headers = { Cookie: createSessionCookie(user.id, sessionSecret(config)).split(';')[0], Origin: base, 'X-Navigation-Data-Scope': 'self' };
@@ -36,14 +36,19 @@ if (!process.argv.includes('--apply')) {
 }
 // Persist intent before stopping anything, preserving stopped tasks too.
 const runs = createTornRunStore(db);
-db.transaction(() => { for (const row of rows) runs.set(row.module, row.uid, row.running); })();
+const prepared = db.prepare("SELECT value FROM meta WHERE key='torn_worker_prepared_v1'").get();
+if (!prepared) db.transaction(() => {
+  for (const row of rows) runs.set(row.module, row.uid, row.running);
+  db.prepare("INSERT INTO meta(key,value) VALUES('torn_worker_prepared_v1',?)").run(JSON.stringify({ company: legacy.company.state.running, undercut: legacy.undercut.state.running }));
+})();
+const legacyIntent = prepared ? JSON.parse(prepared.value) : { company: legacy.company.state.running, undercut: legacy.undercut.state.running };
 for (const row of rows.filter(row => row.running)) {
   const response = await fetch(base + '/api/' + row.module + '/stop', { method: 'POST', headers: row.headers });
   if (!response.ok) throw new Error('Cannot stop old ' + row.module);
 }
 for (const service of ['company', 'undercut']) {
   const { cfg, state } = legacy[service];
-  cfg[service] = { ...cfg[service], autoStart: state.running };
+  cfg[service] = { ...cfg[service], autoStart: legacyIntent[service] };
   saveServiceConfig(service, cfg);
 }
 // Preserve current undercut alerts so migration does not re-notify existing undercuts.
