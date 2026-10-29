@@ -157,6 +157,7 @@ export function isPortalApi(pathname, method) {
     if (/^\/api\/oauth\/(github|google)\/(start|callback)$/.test(pathname) && method === 'GET') return true;
     if (pathname === '/api/login' && method === 'POST') return true;
     if (pathname === '/api/me' && method === 'GET') return true;
+    if (pathname === '/api/me/torn-toolbox-access' && method === 'GET') return true;
     if (pathname === '/api/me/data-modules' && method === 'GET') return true;
     if (pathname === '/api/me/data-scopes' && ['GET', 'PUT'].includes(method)) return true;
     if (pathname === '/api/admin/data-policy' && ['GET', 'PUT'].includes(method)) return true;

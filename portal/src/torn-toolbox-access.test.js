@@ -3,6 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { tornToolboxAccess } from './torn-toolbox-access.js';
+import { resolveRoute } from './router.js';
+
+test('toolbox access endpoint reaches authenticated Portal routing without a worker proxy', () => {
+  assert.equal(resolveRoute([], '/api/me/torn-toolbox-access', 'GET').kind, 'portal-api');
+  assert.equal(resolveRoute([], '/api/me/torn-toolbox-access', 'POST').kind, 'not-found');
+});
 
 test('toolbox visibility uses scoped view permissions and denies unavailable scopes without asking the worker', () => {
   const session = { userId: 'viewer', permissions: ['*'] };
