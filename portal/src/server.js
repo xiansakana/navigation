@@ -1,5 +1,6 @@
 import { instrumentRequest } from '../../shared/request-log.js';
 import { moduleApiHandler } from './module-api.js';
+import { tornToolboxAccess } from './torn-toolbox-access.js';
 import { moduleInventory, findModuleApi } from './modules.js';
 import { requestDataAccess, scopedSession, availableDataAccess, scopeCookie, auditDataAccess, stripPortalIdentity } from './data-access.js';
 import { accessModules, modulePolicy, moduleForPath } from './access-policy.js';
@@ -173,6 +174,10 @@ function publicServices(userCtx, userAgent) {
 }
 
 async function handleApi(req, res, url, session) {
+    if (url.pathname === '/api/me/torn-toolbox-access' && req.method === 'GET') {
+        res.setHeader('Cache-Control', 'no-store');
+        return json(res, 200, { ok: true, ...tornToolboxAccess(req, session, config) });
+    }
     const moduleHandler = moduleApiHandler(url.pathname);
     if (moduleHandler) {
         try {

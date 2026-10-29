@@ -71,11 +71,6 @@
     <script src="/layout.js?v=layout-20261018"></script>
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
-    <script>
-      fetch('/api/torn-shopping/state').then(r => { if(r.ok) document.getElementById('shopping-card').hidden=false; }).catch(()=>{});
-      fetch('/api/torn-chain/state', { credentials: 'same-origin' }).then(function (r) {
-        if (r.ok) document.getElementById('chain-card').hidden = false;
-      }).catch(function () {});
-    </script>
+    <script src="/torn-toolbox/cards.js?v=1"></script>
 </body>
 </html>
