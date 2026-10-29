@@ -78,11 +78,12 @@ test('asset return tab is accessible, retains selection across reloads, masks am
     f.controller.render();f.$('asset-tab-returns').click();
     assert.equal(f.$('asset-tab-returns').getAttribute('aria-selected'),'true');
     assert.equal(f.$('asset-overview-charts').getAttribute('aria-labelledby'),'asset-tab-returns');
-    assert.equal(f.$('asset-overview-charts').querySelectorAll('.bk-metric [data-money]').length,4);
-    assert.match(f.$('asset-overview-charts').textContent,/今日暂估/);
+    assert.equal(f.$('asset-overview-charts').querySelectorAll('.bk-metric').length,0);
+    assert.match(f.$('asset-overview-charts').textContent,/暂无证券收益数据/);
+    assert.doesNotMatch(f.$('asset-overview-charts').textContent,/综合投资收益|全资产收益|账单净资金流/);
     f.controller.render();assert.equal(f.$('asset-tab-returns').getAttribute('aria-selected'),'true');
     f.state.analysis.investmentReturns={points:[],period:null,note:'缺少可比快照'};f.controller.render();
-    assert.match(f.$('asset-overview-note').textContent,/缺少可比快照/);assert.equal(f.$('asset-overview-charts').querySelector('polyline'),null);
+    assert.match(f.$('asset-overview-note').textContent,/证券收益/);assert.equal(f.$('asset-overview-charts').querySelector('polyline'),null);
     f.$('asset-tab-returns').dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));
     assert.equal(f.$('asset-tab-balance').getAttribute('aria-selected'),'true');
     f.state.analysis.investmentReturns=null;f.controller.render();assert.equal(f.$('asset-tab-returns').hidden,true);
@@ -107,7 +108,7 @@ test('historical trading curves leave missing prices as real gaps and keep zero 
   }finally{f.dom.window.close();}
 });
 
-test('securities legends toggle independently, retain choices on data reload and never change billing or snapshot charts',()=>{
+test('securities legends toggle independently, retain choices on data reload and never change billing or restore removed snapshot charts',()=>{
   const f=fixture();
   try{
     f.state.analysis.investmentReturns={note:'snapshot',points:[{date:'2026-10-25',currency:'CNY',profit:0},{date:'2026-10-28',currency:'CNY',profit:9}],period:null,trading:{note:'history',issues:[],points:[
@@ -117,7 +118,7 @@ test('securities legends toggle independently, retain choices on data reload and
     ]}};
     f.controller.render();f.$('asset-tab-returns').click();
     const host=f.$('asset-overview-charts'),button=key=>host.querySelector('[data-trading-series="'+key+'"]');
-    const billing=f.$('billing-charts').innerHTML,snapshot=host.querySelector('[data-chart-series=profit]').outerHTML;
+    const billing=f.$('billing-charts').innerHTML;
     const totals=host.querySelector('.bk-trading-history .bk-chart-legend').textContent;
     const originalAxis=[...host.querySelectorAll('[data-chart-series=unrealized] polyline')].at(-1).getAttribute('points');
     host.querySelector('.bk-trading-history details').open=true;
@@ -133,7 +134,7 @@ test('securities legends toggle independently, retain choices on data reload and
     button('total').click();assert.equal(host.querySelectorAll('.bk-trading-history [data-chart-series]').length,1);
     assert.equal(host.querySelector('[data-chart-series=total]').querySelectorAll('polyline').length,2);
     assert.equal(host.querySelector('.bk-trading-history .bk-chart-legend').textContent,totals);
-    assert.equal(f.$('billing-charts').innerHTML,billing);assert.equal(host.querySelector('[data-chart-series=profit]').outerHTML,snapshot);
+    assert.equal(f.$('billing-charts').innerHTML,billing);assert.equal(host.querySelector('[data-chart-series=profit]'),null);
     f.state.analysis.investmentReturns.trading.points=[];f.controller.render();
     f.state.analysis.investmentReturns.trading.points=[{date:'2026-11-01',currency:'CNY',realized:10,unrealized:null,total:null}];f.controller.render();
     assert.equal(button('realized').getAttribute('aria-pressed'),'false');assert.equal(button('unrealized').getAttribute('aria-pressed'),'false');assert.equal(button('total').getAttribute('aria-pressed'),'true');

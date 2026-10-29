@@ -118,13 +118,10 @@
       $('asset-overview').classList.toggle('hidden',!assets);if(!assets){$('asset-overview-charts').innerHTML='';}
       if(assets) {
         if(assetChart==='returns') {
-          const returns=analysis.investmentReturns,period=returns.period;
-          $('asset-overview-note').textContent=returns.note;
-          const metrics=period?'<div class="bk-summary bk-return-summary">'+[['观测资产变化',period.assetChange],['账单净资金流',period.netFlow],['余额调整',period.adjustments],['综合投资收益（估算）',period.profit]].map(([label,value])=>'<div class="bk-metric"><p>'+esc(label)+'</p><strong>'+m(value,'CNY')+'</strong></div>').join('')+'</div><p class="bk-muted">'+esc(period.openingAsOf+' 至 '+period.closingAsOf)+(period.provisional?' · 今日暂估':'')+(period.partial?' · 仅含可比观测区间':'')+'</p>':'';
-          const trading=returns.trading;
-          if(trading)$('asset-overview-note').textContent=trading.mode==='hybrid'?'证券收益按所选范围期初归零；首份快照之前总收益按已实现净收益统计，未计历史浮盈；之后加入相对首份快照的浮盈变化。':'证券收益以所选范围期初为基准，展示范围内已实现净收益、浮盈变化及总收益；范围前交易仅用于还原成本，缺少期初或当日估值处留空。';
+          const trading=analysis.investmentReturns.trading;
+          $('asset-overview-note').textContent=trading?(trading.mode==='hybrid'?'证券收益按所选范围期初归零；首份快照之前总收益按已实现净收益统计，未计历史浮盈；之后加入相对首份快照的浮盈变化。':'证券收益以所选范围期初为基准，展示范围内已实现净收益、浮盈变化及总收益；范围前交易仅用于还原成本，缺少期初或当日估值处留空。'):'证券收益按所选日期与账户范围展示。';
           const history=trading?'<section class="bk-trading-history"><h3>证券收益 · 分段统计</h3>'+ (trading.mode==='hybrid'?'<p class="bk-muted">'+esc(trading.valuationCutover?'浮盈起算基准：'+trading.valuationCutover+' · 此前总收益与净收益重合（未含历史浮盈）':'尚无估值快照 · 总收益与净收益重合（未含历史浮盈）')+'</p>':'')+'<details><summary>计算口径与覆盖范围</summary><p class="bk-muted">'+esc(trading.note)+'</p></details>'+(trading.pending?'<p role="status" class="bk-muted">后台正在补齐 '+trading.pending+' 个证券的历史行情；缺失处留空。</p>':'')+(trading.issues?.length?'<p class="bk-error">'+esc(trading.issues.slice(0,10).join('；'))+(trading.issues.length>10?' 等 '+trading.issues.length+' 项':'')+'</p>':'')+(trading.missingSymbols?.length?'<details><summary>缺失行情、汇率或历史持仓成本：'+trading.missingSymbols.length+' 个证券</summary><p class="bk-muted">'+esc(trading.missingSymbols.join('、'))+'</p></details>':'')+tradingChart(trading.points)+'</section>':'';
-          $('asset-overview-charts').innerHTML=history+'<h3>全资产收益 · 估值快照</h3>'+(trading?'<details><summary>快照计算口径</summary><p class="bk-muted">'+esc(returns.note)+'</p></details>':'')+metrics+(returns.points.length?chart(returns.points,[{key:'profit',label:'累计综合投资收益（估算）',color:'#d89812'}],'CNY 等效综合投资收益走势'):'<p class="bk-empty">暂无可比快照收益数据，请查看计算口径。</p>');
+          $('asset-overview-charts').innerHTML=history || '<p class="bk-empty">暂无证券收益数据。</p>';
           return;
         }
         $('asset-overview-note').textContent=assets.note+(assets.currentOnly || assets.historyMode==='hybrid'?'':' 反推使用全部关联账单，再按所选日期范围截取；账本、分类等收支筛选不改变反推基础。');
