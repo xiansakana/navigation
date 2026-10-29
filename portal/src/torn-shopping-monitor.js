@@ -5,7 +5,7 @@ import { chainNotifySettings, DEFAULT_CHAIN_NOTIFY } from './torn-chain-notifica
 export function shoppingConfig(input, previous = {}) {
   const keys = chainConfig({ ...input, minHits: 0, maxHits: null, intervalSeconds: 60, bonusHits: [], leaderFilter: 'all' }, { ...previous, bonusHits: [], leaderFilter: 'all' });
   const intervalSeconds = Number(input.intervalSeconds ?? previous.intervalSeconds ?? 30);
-  if (!Number.isInteger(intervalSeconds) || intervalSeconds < 10 || intervalSeconds > 3600) throw new Error('扫描间隔须为10–3600秒');
+  if (!Number.isInteger(intervalSeconds) || intervalSeconds < 1 || intervalSeconds > 3600) throw new Error('扫描间隔须为1–3600秒');
   const items = input.items ?? previous.items ?? [];
   if (!Array.isArray(items) || items.length > 100) throw new Error('最多监控100种物品');
   const ids = new Set();

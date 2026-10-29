@@ -4,6 +4,11 @@ import Database from 'better-sqlite3';
 import { shoppingConfig, createShoppingStore, lowListings, ShoppingMonitor } from './torn-shopping-monitor.js';
 import { Readable } from 'node:stream';
 import { canTornShopping, createTornShoppingService } from './torn-shopping.js';
+
+test('shopping round intervals accept 1–9 seconds and retain validation', () => {
+  for (const intervalSeconds of [1, 2, 9, 10, 3600]) assert.equal(shoppingConfig({ intervalSeconds }).intervalSeconds, intervalSeconds);
+  for (const intervalSeconds of [0, -1, 1.5, 3601]) assert.throws(() => shoppingConfig({ intervalSeconds }), /1–3600/);
+});
 test('shopping thresholds are independent, validated and saved per user', () => {
   const db = new Database(':memory:'); const store = createShoppingStore(db);
   try {
