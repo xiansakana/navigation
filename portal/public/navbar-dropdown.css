@@ -1,0 +1,7 @@
+.portal-nav-dropdown { display: inline-flex; align-items: center; min-width: 0; gap: 2px; }
+.portal-nav-toggle { border: 0; background: transparent; color: inherit; padding: 8px 6px; cursor: pointer; border-radius: 6px; font: inherit; }
+.portal-nav-toggle:hover, .portal-nav-toggle:focus-visible { background: var(--hover, rgba(128,128,128,.15)); outline: 2px solid var(--accent, #699aff); }
+.portal-nav-menu { position: fixed; z-index: 10050; display: grid; min-width: 210px; max-width: min(340px, calc(100vw - 16px)); overflow-y: auto; padding: 6px; border: 1px solid var(--border, #555); border-radius: 12px; background: var(--card, #222); color: var(--text, #eee); box-shadow: 0 12px 36px #0004; }
+.portal-nav-menu a, .portal-nav-menu button { display: block; text-align: left; color: inherit; background: transparent; border: 0; font: inherit; font-size: 14px; padding: 11px 14px; border-radius: 7px; text-decoration: none; cursor: pointer; overflow-wrap: anywhere; }
+.portal-nav-menu a:hover, .portal-nav-menu button:hover, .portal-nav-menu :focus-visible, .portal-nav-menu [aria-current] { background: var(--hover, rgba(128,128,128,.16)); }
+@media (pointer: coarse) { .portal-nav-toggle { min-width: 36px; min-height: 40px; } }
