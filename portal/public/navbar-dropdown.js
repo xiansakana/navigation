@@ -60,7 +60,7 @@
         function deferClose() { timer = setTimeout(close, 180); }
         wrap.addEventListener('pointerenter', function (event) { if (event.pointerType !== 'touch') open(); });
         wrap.addEventListener('pointerleave', deferClose);
-        button.addEventListener('click', function () { if (active?.button === button) close(); else open(); });
+        button.addEventListener('click', function () { if (active?.button === button && active.clicked) close(); else { open(); if (active?.button === button) active.clicked = true; } });
         button.addEventListener('keydown', function (event) { if (event.key === 'ArrowDown') { event.preventDefault(); open(); active?.panel.querySelector('a,button')?.focus(); } });
       }
       attach(navbar.querySelector('.navbar-brand'), '服务导航', function () { return home; });
