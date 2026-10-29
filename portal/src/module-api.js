@@ -1,4 +1,5 @@
 import { findModuleApi } from './modules.js';
+import { forwardTornWorker, TORN_WORKER_MODULES } from './torn-worker-transport.js';
 import { handleTornChainApi } from './torn-chain.js';
 import { handleFactionApi } from './torn-factions.js';
 import { handleBlogApi } from './blog.js';
@@ -25,5 +26,9 @@ const handlers = {
 
 export function moduleApiHandler(pathname) {
   const module = findModuleApi(pathname);
+  if (module && TORN_WORKER_MODULES.includes(module.id)) return (req, res, url, session, deps) => {
+    if (deps.config.runtime?.tornMonitorWorker && process.env.NAVIGATION_PROCESS_ROLE !== 'torn-monitor-worker') return forwardTornWorker(req, res, url, session, deps);
+    return handlers[module.id](req, res, url, session, deps);
+  };
   return module && handlers[module.id];
 }

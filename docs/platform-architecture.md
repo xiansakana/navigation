@@ -13,6 +13,7 @@
 ## 运行与配置
 
 - `portal`：Web、鉴权、业务 API、代理；`/healthz` 存活、`/readyz` 验证数据库可访问。
+- `torn-monitor-worker`：扫货、帮派摧毁、帮派筛选、公司监听、压价助手；Portal经签名本机RPC转发前三类API，公司/压价沿用8791/8790。启停意图持久化、重启检查权限后恢复，手动停止保持停止；独立于Portal发布。部署与验收见 [工作器说明](torn-monitor-worker.md)。
 - `portal-background`：博客视频恢复/处理、缩略图、媒体清理和资产历史。只有 `runtime.externalWorkers=true` 时从 Web 移出这些任务。
 - `codex-worker`：执行持久化 Codex/Todo 队列；QQ 消息接收、回复投递保留在 `qq-bot`。停止通知进程不会停止 Web 任务执行。
 - `shared/codex`：业务存储、CLI 客户端、执行、调度和状态；`shared/auth`：无 Portal 依赖的权限判断。旧 QQ 源码路径只保留兼容入口/渠道格式化。

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-const DEFAULT_STATE_FILE = fileURLToPath(new URL('../data/company-monitor-state.json', import.meta.url));
+const DEFAULT_STATE_FILE = process.env.TORN_COMPANY_STATE_FILE || fileURLToPath(new URL('../data/company-monitor-state.json', import.meta.url));
 
 export function fingerprint(value) {
     return createHash('sha256').update(String(value)).digest('hex');

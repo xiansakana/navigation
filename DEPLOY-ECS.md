@@ -2,6 +2,8 @@
 
 本仓库为 ECS 服务栈（portal / qq-bot / torn-toolbox / stock-manage / qqq-dip）。Torn 浏览器脚本在 [xiansakana-torn-scripts](https://github.com/xiansakana/xiansakana-torn-scripts)。
 
+Torn 的五类后台监控统一运行于 `torn-monitor-worker`，迁移、启停恢复及回滚边界见 [Torn监控工作器](docs/torn-monitor-worker.md)。首次切换使用 `scripts/ecs-update.sh --expected-sha <SHA> --only torn-monitor-worker,portal`；后续只更新Portal页面时使用 `--only portal`，不会重启该监控进程。修改扫描实现时须包含 `torn-monitor-worker`。旧 `--only company` / `--only undercut` 在已迁移环境会更新统一worker。
+
 **ECS 路径：** `/opt/navigation`
 
 行情服务连接策略与验收说明见 [quote-network-recovery.md](docs/quote-network-recovery.md)。仅 stock-manage、qqq-dip 启用该策略，部署后核对启动日志、采集请求审计和监控完成时间。

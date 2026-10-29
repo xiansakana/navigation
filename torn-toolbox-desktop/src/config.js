@@ -9,11 +9,11 @@ const LEGACY_EXAMPLE = path.resolve(ROOT, 'config.example.json');
 
 const SERVICE_FILES = {
     undercut: {
-        path: path.resolve(ROOT, 'config.undercut.json'),
+        path: process.env.TORN_UNDERCUT_CONFIG_PATH || path.resolve(ROOT, 'config.undercut.json'),
         example: path.resolve(ROOT, 'config.undercut.example.json')
     },
     company: {
-        path: path.resolve(ROOT, 'config.company.json'),
+        path: process.env.TORN_COMPANY_CONFIG_PATH || path.resolve(ROOT, 'config.company.json'),
         example: path.resolve(ROOT, 'config.company.example.json')
     }
 };

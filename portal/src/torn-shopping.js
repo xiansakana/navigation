@@ -81,6 +81,7 @@ export function createTornShoppingService({ store, request = portalTornRequest, 
 }
 
 let service;
+export const shoppingJobs = () => service?.monitors || new Map();
 export async function handleTornShoppingApi(req, res, url, session, json, config) {
   if (!canTornShopping(session)) return json(res, 403, { ok: false, error: '请登录并获取扫货助手权限' });
   const authorized = (uid, action) => {

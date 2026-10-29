@@ -49,6 +49,7 @@ export function createFactionService({ store, request = portalTornRequest, autho
 }
 
 let service;
+export const factionJobs = () => service?.scanners || new Map();
 export async function handleFactionApi(req, res, url, session, json, config) {
   if (!canFactionScan(session)) return json(res, 403, { ok: false, error: '无权查看帮派筛选' });
   service ||= createFactionService({ store: createFactionStore(getDatabase()), authorize: uid => {

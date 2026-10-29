@@ -4,6 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadServiceConfig, saveServiceConfig } from './config.js';
 import { UndercutMonitor } from './undercut-monitor.js';
+import { createUndercutStore } from './undercut-store.js';
+import { getDatabase } from '../../shared/db/index.js';
 import { fetchItems } from './torn-api.js';
 import { maskUndercutWatcherForClient, mergeUndercutWatcherConfig } from './watchers.js';
 import { normalizeItems } from './utils.js';
@@ -22,7 +24,7 @@ var itemsCacheByWatcher = new Map();
 function getConfig() { return config; }
 
 var sse = createSseBroadcaster();
-var undercutMonitor = new UndercutMonitor(getConfig);
+var undercutMonitor = new UndercutMonitor(getConfig, process.env.NAVIGATION_PROCESS_ROLE === 'torn-monitor-worker' ? { store: createUndercutStore(getDatabase()) } : {});
 var authorize = createAuthGuard(getConfig);
 var serveStatic = createStaticHandler(PUBLIC_DIR, SHARED_DIR);
 
@@ -114,11 +116,13 @@ async function handleApi(req, res) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/undercut/start') {
-        try { undercutMonitor.start(); return json(res, 200, { ok: true }); }
+        try { undercutMonitor.start(); config.undercut = { ...config.undercut, autoStart: true }; saveServiceConfig('undercut', config); return json(res, 200, { ok: true }); }
         catch (err) { return json(res, 400, { ok: false, error: err.message }); }
     }
 
     if (req.method === 'POST' && url.pathname === '/api/undercut/stop') {
+        config.undercut = { ...config.undercut, autoStart: false };
+        saveServiceConfig('undercut', config);
         undercutMonitor.stop();
         return json(res, 200, { ok: true });
     }
@@ -151,7 +155,8 @@ server.listen(port, host, function() {
     }
 });
 
-process.on('SIGINT', function() {
+export { server, undercutMonitor as monitor };
+if (process.env.NAVIGATION_PROCESS_ROLE !== 'torn-monitor-worker') process.on('SIGINT', function() {
     undercutMonitor.stop();
     process.exit(0);
 });

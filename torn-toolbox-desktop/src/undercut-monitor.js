@@ -11,11 +11,13 @@ import { publishBusinessEvent } from '../../shared/business-events.js';
 import { normalizeUndercutWatchers } from './watchers.js';
 
 export class UndercutMonitor extends EventEmitter {
-    constructor(getConfig) {
+    constructor(getConfig, dependencies = {}) {
         super();
         this.getConfig = getConfig;
+        this.store = dependencies.store;
         this.timer = null;
         this.running = false;
+        this.checking = false;
         this.checks = 0;
         this.alerts = 0;
         this.applications = [];
@@ -26,10 +28,12 @@ export class UndercutMonitor extends EventEmitter {
 
     ensureWatcherState(id) {
         if (!this.watcherStates.has(id)) {
+            const watcher = this.getWatchers().find(w => w.id === id);
+            const saved = watcher && this.store?.load(watcher);
             this.watcherStates.set(id, {
                 playerCache: {},
-                activeKeys: new Set(),
-                alertMap: new Map(),
+                activeKeys: new Set(saved?.activeKeys || []),
+                alertMap: new Map(saved?.alerts || []),
                 checks: 0,
                 alerts: 0,
                 lastError: ''
@@ -182,6 +186,7 @@ export class UndercutMonitor extends EventEmitter {
         if (!listings.length) {
             state.activeKeys.clear();
             state.alertMap.clear();
+            this.store?.save(watcher, state);
             var scope = [];
             if (watchBazaar) scope.push('Bazaar');
             if (watchItemMarket) scope.push('Item Market');
@@ -256,6 +261,7 @@ export class UndercutMonitor extends EventEmitter {
             if (!currentUndercuts.has(key)) state.alertMap.delete(key);
         });
         state.activeKeys = currentUndercuts;
+        this.store?.save(watcher, state);
 
         if (newAlerts.length) {
             state.alerts += newAlerts.length;
@@ -272,6 +278,13 @@ export class UndercutMonitor extends EventEmitter {
     }
 
     async runOnce() {
+        if (this.checking) return;
+        this.checking = true;
+        try { await this.scanOnce(); }
+        finally { this.checking = false; }
+    }
+
+    async scanOnce() {
         var config = this.getConfig();
         var watchers = this.getWatchers();
         if (!watchers.length) {

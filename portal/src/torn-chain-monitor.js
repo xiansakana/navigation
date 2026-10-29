@@ -46,9 +46,10 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 2000, befo
     const job = queue.catch(() => {}).then(async () => {
       signal?.throwIfAborted();
       const url = new URL(path, 'https://api.torn.com/v2/');
-      const v2 = /^\/v2\/(torn\/items|market\/\d+\/itemmarket|key\/info|faction\/(warfarechains|search|\d+\/(chain|chainreport|basic))|user\/\d+\/(profile|faction|personalstats))$/.test(url.pathname);
+      const v2 = /^\/v2\/(torn\/items|market\/\d+\/itemmarket|key\/info|faction\/(warfarechains|search|\d+\/(chain|chainreport|basic))|user\/(basic|bazaar|itemmarket)|user\/\d+\/(profile|faction|personalstats))$/.test(url.pathname);
       const legacyReport = /^\/torn\/[1-9]\d*$/.test(url.pathname) && url.searchParams.get('selections') === 'chainreport';
-      if (url.origin !== 'https://api.torn.com' || !v2 && !legacyReport) throw new Error('API 分页地址无效');
+      const companyApplications = url.pathname === '/company/' && url.searchParams.get('selections') === 'applications';
+      if (url.origin !== 'https://api.torn.com' || !v2 && !legacyReport && !companyApplications) throw new Error('API 分页地址无效');
       url.searchParams.set('key', key); url.searchParams.set('comment', 'NavChain');
       const interval = typeof spacingMs === 'function' ? spacingMs() : spacingMs;
       await delay(Math.max(0, lastAt === null ? 0 : lastAt + interval - Date.now()), undefined, { signal });

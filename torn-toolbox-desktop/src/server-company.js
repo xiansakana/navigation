@@ -125,7 +125,8 @@ server.listen(port, host, function() {
     }
 });
 
-process.on('SIGINT', function() {
+export { server, companyMonitor as monitor };
+if (process.env.NAVIGATION_PROCESS_ROLE !== 'torn-monitor-worker') process.on('SIGINT', function() {
     companyMonitor.stop();
     process.exit(0);
 });

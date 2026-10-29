@@ -69,6 +69,7 @@ export function createTornChainService({ store, request = portalTornRequest, aut
 }
 
 let service;
+export const destructionJobs = () => service?.monitors || new Map();
 export async function handleTornChainApi(req, res, url, session, json, config) {
   if (!canTornChain(session)) return json(res, 403, { ok: false, error: '请登录并获取监控权限' });
   const authorized = (uid, action) => {

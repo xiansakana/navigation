@@ -1,5 +1,9 @@
 import { API_DELAY_MS, RATE_LIMIT_RETRIES, WEAV3R_MARKETPLACE_URL, sleep, toNumber } from './utils.js';
 
+// Installed only by the unified worker. Standalone desktop servers keep their existing client.
+let workerRequest, workerBazaar, workerSignal;
+export function installWorkerApi(request, bazaar, signal) { workerRequest = request; workerBazaar = bazaar; workerSignal = signal; }
+
 function isRateLimitError(data) {
     if (!data || !data.error) return false;
     return data.error.code === 5 || String(data.error.error || '').toLowerCase().includes('too many');
@@ -11,6 +15,22 @@ function apiErrorMessage(data) {
 }
 
 export async function fetchJsonWithRetry(url, onWait) {
+    if (workerRequest) {
+        const parsed = new URL(url), key = parsed.searchParams.get('key');
+        parsed.searchParams.delete('key');
+        for (let attempt = 0; ; attempt++) {
+            try { return await workerRequest(parsed.href, key, workerSignal, { scope: 'legacy-toolbox', spacingMs: 2000 }); }
+            catch (error) {
+                if (workerSignal?.aborted) throw error;
+                const limited = error.apiCode === 5 || error.rateLimited;
+                if (attempt >= 3 || (!limited && !error.transient)) throw error;
+                const ms = limited ? Math.max(65000 * 2 ** attempt, error.retryAfterMs || 0) : 10000 * 2 ** attempt;
+                onWait?.(ms, attempt + 1);
+                const { setTimeout } = await import('node:timers/promises');
+                await setTimeout(ms, undefined, { signal: workerSignal });
+            }
+        }
+    }
     var attempt = 0;
     while (true) {
         var resp = await fetch(url);
@@ -70,11 +90,11 @@ export async function fetchMyPlayerId(apiKey, cache) {
 
 export async function fetchWeav3rBazaarLowest(itemId, myPlayerId, cache) {
     if (cache[itemId] !== undefined) return cache[itemId];
-    var resp = await fetch(WEAV3R_MARKETPLACE_URL + itemId + '?limit=100', {
+    var resp = workerBazaar ? null : await fetch(WEAV3R_MARKETPLACE_URL + itemId + '?limit=100', {
         headers: { Accept: 'application/json' }
     });
-    if (!resp.ok) throw new Error('Weav3r 巴扎 API 请求失败 (' + resp.status + ')');
-    var data = await resp.json();
+    if (resp && !resp.ok) throw new Error('Weav3r 巴扎 API 请求失败 (' + resp.status + ')');
+    var data = workerBazaar ? { listings: await workerBazaar(itemId, workerSignal) } : await resp.json();
     var listings = data.listings || [];
     var best = null;
     listings.forEach(function(row) {

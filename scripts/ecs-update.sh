@@ -1,6 +1,6 @@
 #!/bin/bash
 # 在 ECS 上更新 navigation 仓库并重启服务
-# 用法: ./scripts/ecs-update.sh --expected-sha <已推送的提交> [--only undercut,company,qq-bot,portal,napcat,stock-manage,qqq-dip,siyuan,siyuan-share,piclist,alist]
+# 用法: ./scripts/ecs-update.sh --expected-sha <已推送的提交> [--only torn-monitor-worker,undercut,company,qq-bot,portal,napcat,stock-manage,qqq-dip,siyuan,siyuan-share,piclist,alist]
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -93,7 +93,15 @@ if should_run qq-bot; then
     fi
 fi
 
-if should_run undercut || should_run company; then
+cd "$ROOT"
+TORN_WORKER=false
+if node --input-type=module -e "import {loadConfig} from './portal/src/config.js';process.exit(loadConfig().runtime?.tornMonitorWorker?0:1)"; then TORN_WORKER=true; fi
+if should_run torn-monitor-worker || { [ "$TORN_WORKER" = true ] && { should_run undercut || should_run company; }; }; then
+    bash "$ROOT/scripts/start-torn-monitor-worker.sh"
+    TORN_WORKER=true
+fi
+
+if [ "$TORN_WORKER" = false ] && { should_run undercut || should_run company; }; then
     echo "==> torn-toolbox-desktop"
     cd "$ROOT/torn-toolbox-desktop"
     npm install --production
@@ -102,7 +110,7 @@ if should_run undercut || should_run company; then
     fi
 fi
 
-if should_run undercut; then
+if [ "$TORN_WORKER" = false ] && should_run undercut; then
     if pm2 describe torn-undercut >/dev/null 2>&1; then
         pm2 restart torn-undercut
     elif pm2 describe torn-toolbox >/dev/null 2>&1; then
@@ -112,7 +120,7 @@ if should_run undercut; then
     fi
 fi
 
-if should_run company; then
+if [ "$TORN_WORKER" = false ] && should_run company; then
     if pm2 describe torn-company >/dev/null 2>&1; then
         pm2 restart torn-company
     else

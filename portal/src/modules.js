@@ -15,9 +15,9 @@ function blogApi(pathname, method) {
 
 // Single catalog for built-in module entry points, API ownership, menus and observability.
 export const PORTAL_MODULES = Object.freeze([
-  { id: 'torn-shopping', title: '扫货助手', namespace: 'torn-shopping', runtime: 'portal', tables: ['torn_shopping'], apiPrefix: '/api/torn-shopping/' },
-  { id: 'torn-factions', title: '帮派筛选', namespace: 'torn-factions', runtime: 'portal', tables: ['torn_faction_scans', 'torn_faction_rows', 'torn_faction_networth'], apiPrefix: '/api/torn-factions/' },
-  { id: 'torn-chain', title: '监控', namespace: 'torn-chain', runtime: 'portal', tables: ['torn_chain_monitors', 'torn_chain_notifications', 'torn_destruction_monitors', 'torn_destruction_observations'], apiPrefix: '/api/torn-chain/' },
+  { id: 'torn-shopping', title: '扫货助手', namespace: 'torn-shopping', runtime: 'torn-monitor-worker', tables: ['torn_shopping'], apiPrefix: '/api/torn-shopping/' },
+  { id: 'torn-factions', title: '帮派筛选', namespace: 'torn-factions', runtime: 'torn-monitor-worker', tables: ['torn_faction_scans', 'torn_faction_rows', 'torn_faction_networth'], apiPrefix: '/api/torn-factions/' },
+  { id: 'torn-chain', title: '监控', namespace: 'torn-chain', runtime: 'torn-monitor-worker', tables: ['torn_chain_monitors', 'torn_chain_notifications', 'torn_destruction_monitors', 'torn_destruction_observations'], apiPrefix: '/api/torn-chain/' },
   { id: 'blog', title: '博客', namespace: 'blog', runtime: 'portal', tables: ['blog_posts'], apiPrefix: '/api/blog/', matches: blogApi },
   { id: 'codex-cli', title: 'Codex CLI', namespace: 'codex-cli', runtime: 'qq-bot', tables: ['qq_codex_jobs'],
     path: '/codex-cli/', permission: 'codex-cli:view', icon: '⌘', sort: 9940, description: '会话工作台、任务进度、账户额度与服务器配置', apiPrefix: '/api/codex-cli/' },
@@ -51,7 +51,7 @@ export function moduleInventory(db, services = []) {
     if (module.id === 'knowledge' && tables.has('knowledge_worker_instances')) {
       return { online: db.prepare('SELECT COUNT(*) AS count FROM knowledge_worker_instances WHERE last_seen > ?').get(new Date(Date.now() - 120000).toISOString()).count, remote: true };
     }
-    const at = ['blog', 'bookkeeping'].includes(module.id) ? heartbeat('portal_background_heartbeat') : module.id === 'codex-cli' ? heartbeat('codex_worker_heartbeat') : 0;
+    const at = module.runtime === 'torn-monitor-worker' ? heartbeat('torn_monitor_worker_heartbeat') : ['blog', 'bookkeeping'].includes(module.id) ? heartbeat('portal_background_heartbeat') : module.id === 'codex-cli' ? heartbeat('codex_worker_heartbeat') : 0;
     return at ? { online: Date.now() - at < 45000 ? 1 : 0, at, remote: false } : null;
   };
   const builtin = PORTAL_MODULES.map(module => ({ id: module.id, title: module.title, path: module.path || '/',
@@ -62,6 +62,6 @@ export function moduleInventory(db, services = []) {
     records: module.tables.reduce((sum, table) => sum + (tables.has(table) ? db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count : 0), 0) }));
   return builtin.concat(services.filter(service => !PORTAL_MODULES.some(module => module.id === service.id)).map(service => ({
     id: service.id, title: service.title || service.id, path: service.path || '', type: service.type,
-    runtime: service.type === 'external' ? 'external' : service.id, status: service.enabled === false ? 'disabled' : 'registered', tasks: {}, records: null
+    runtime: ['torn-company', 'torn-undercut'].includes(service.id) ? 'torn-monitor-worker' : service.type === 'external' ? 'external' : service.id, status: service.enabled === false ? 'disabled' : 'registered', tasks: {}, records: null
   })));
 }
