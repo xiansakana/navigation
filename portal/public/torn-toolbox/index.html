@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Torn 工具箱</title>
-    <style>#chain-card[hidden] { display: none; }</style>
+    <style>#shopping-card[hidden], #chain-card[hidden] { display: none; }</style>
     <script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
     <link rel="stylesheet" href="/portal.css?v=layout-20261018">
     <link rel="stylesheet" href="/experience.css?v=mobile-sheets-1">
@@ -41,6 +41,7 @@
     </section>
 
     <main class="toolbox-grid" data-layout-container data-skeleton="cards" data-skeleton-key="page" data-skeleton-static>
+        <a id="shopping-card" class="toolbox-card" href="/torn-toolbox/shopping/" hidden><h2>扫货助手</h2><p>市场 / 巴扎独立价格阈值，低价QQ提醒</p><span>进入 →</span></a>
         <a id="chain-card" class="toolbox-card" href="/torn-toolbox/chain/" hidden>
             <div class="toolbox-card-icon">⛓️</div>
             <h2>监控</h2>
@@ -66,6 +67,7 @@
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
     <script>
+      fetch('/api/torn-shopping/state').then(r => { if(r.ok) document.getElementById('shopping-card').hidden=false; }).catch(()=>{});
       fetch('/api/torn-chain/state', { credentials: 'same-origin' }).then(function (r) {
         if (r.ok) document.getElementById('chain-card').hidden = false;
       }).catch(function () {});

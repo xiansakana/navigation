@@ -46,7 +46,7 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 2000, befo
     const job = queue.catch(() => {}).then(async () => {
       signal?.throwIfAborted();
       const url = new URL(path, 'https://api.torn.com/v2/');
-      const v2 = /^\/v2\/(key\/info|faction\/(warfarechains|search|\d+\/(chain|chainreport|basic))|user\/\d+\/(profile|faction|personalstats))$/.test(url.pathname);
+      const v2 = /^\/v2\/(market\/\d+\/itemmarket|key\/info|faction\/(warfarechains|search|\d+\/(chain|chainreport|basic))|user\/\d+\/(profile|faction|personalstats))$/.test(url.pathname);
       const legacyReport = /^\/torn\/[1-9]\d*$/.test(url.pathname) && url.searchParams.get('selections') === 'chainreport';
       if (url.origin !== 'https://api.torn.com' || !v2 && !legacyReport) throw new Error('API 分页地址无效');
       url.searchParams.set('key', key); url.searchParams.set('comment', 'NavChain');

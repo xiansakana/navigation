@@ -707,6 +707,13 @@ async function handleRequest(req, res) {
         return serveStatic(path.join(PUBLIC_DIR,'codex-cli',codexFile),res);
     }
 
+    if (url.pathname === '/torn-toolbox/shopping' || url.pathname.startsWith('/torn-toolbox/shopping/')) {
+      const session = requireAuth(req,res); if (!session) return;
+      if (!hasPermission(session.permissions, 'torn-shopping:view')) return json(res,403,{ok:false,error:'无权访问扫货助手'});
+      const file = url.pathname.replace(/^\/torn-toolbox\/shopping\/?/, '') || 'index.html';
+      if (!['index.html','app.js'].includes(file)) return json(res,404,{ok:false});
+      res.setHeader('Cache-Control','no-store'); return serveStatic(path.join(PUBLIC_DIR,'torn-toolbox','shopping',file),res);
+    }
     if (url.pathname === '/torn-toolbox/chain' || url.pathname.startsWith('/torn-toolbox/chain/')) {
         const chainSession = requireAuth(req, res);
         if (!chainSession) return;

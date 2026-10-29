@@ -1,7 +1,7 @@
 import { DEFAULT_PERSONAL_PERMISSIONS } from './access-defaults.js';
 
-const native = ['bookkeeping', 'knowledge', 'mingli', 'stock-manage', 'torn-chain', 'torn-factions', 'codex-cli', 'qq-codex'];
-const titles = { bookkeeping: '记账', knowledge: '知识库', mingli: '命理', 'stock-manage': '股票管理（含量化与梭哈）', 'torn-chain': '监控', 'torn-factions': '帮派筛选', 'codex-cli': 'Codex CLI', 'qq-codex': 'QQ Codex', blog: '博客', resources: '资源管理' };
+const native = ['torn-shopping', 'bookkeeping', 'knowledge', 'mingli', 'stock-manage', 'torn-chain', 'torn-factions', 'codex-cli', 'qq-codex'];
+const titles = { 'torn-shopping': '扫货助手', bookkeeping: '记账', knowledge: '知识库', mingli: '命理', 'stock-manage': '股票管理（含量化与梭哈）', 'torn-chain': '监控', 'torn-factions': '帮派筛选', 'codex-cli': 'Codex CLI', 'qq-codex': 'QQ Codex', blog: '博客', resources: '资源管理' };
 const fail = message => { throw Object.assign(new Error(message), { status: 403 }); };
 const key = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 const bools = value => value && typeof value.read === 'boolean' && typeof value.write === 'boolean';
@@ -12,7 +12,7 @@ export function accessModules(services = []) {
 }
 
 export function moduleForPath(pathname, services = []) {
-  return accessModules(services).map(m => ({ id: m.id, path: m.id === 'blog' ? '/' : m.id === 'torn-chain' ? '/torn-toolbox/chain/' : services.find(s => s.id === m.id)?.path || '/' + m.id + '/' }))
+  return accessModules(services).map(m => ({ id: m.id, path: m.id === 'blog' ? '/' : m.id === 'torn-shopping' ? '/torn-toolbox/shopping/' : m.id === 'torn-chain' ? '/torn-toolbox/chain/' : services.find(s => s.id === m.id)?.path || '/' + m.id + '/' }))
     .sort((a, b) => b.path.length - a.path.length)
     .find(m => m.id === 'blog' ? ['/', '/index.html'].includes(pathname) : pathname === m.path.replace(/\/$/, '') || pathname.startsWith(m.path.replace(/\/$/, '') + '/'))?.id;
 }
