@@ -106,6 +106,28 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.equal(edited.trades.find(t=>t.id===importedTrade.id).broker_order_key,importedTrade.broker_order_key);
     bbae=await (await upload(importRoute+'&allowUpdates=1')).json();
     assert.equal(bbae.importSummary.updated,1);assert.equal(bbae.trades.filter(t=>t.broker==='bbae').length,1);
+    // Eastmoney follows the same authenticated preview/confirm flow, scoped to CNY accounts.
+    const cnCreated = await call('/accounts','a','POST',{name:'东方财富',currency:'CNY',baselineCash:2000});
+    assert.equal(cnCreated.status,200);
+    const cnId = (await (await call('/accounts','a')).json()).accounts.find(a=>a.currency==='CNY').id;
+    const cnBook=XLSX.utils.book_new();
+    const cnColumns=['交收日期','发生日期','发生时间','证券代码','证券名称','交易类别','成交数量','成交均价','成交金额','发生金额','佣金','其他费用','印花税','过户费','成交编号','流水号','股东账号','币种'];
+    const cnRow=['2099-01-02','2099-01-01','13:00:00','501225','全球芯片LOF','证券买入',200,3.554,710.8,-710.98,0.15,0.03,0,0,'0001','0002','A','人民币'];
+    const cnIgnored=[...cnRow];cnIgnored[5]='天天宝申购';
+    XLSX.utils.book_append_sheet(cnBook,XLSX.utils.aoa_to_sheet([cnColumns,cnRow,cnIgnored]),'交割单');
+    const cnUpload=(route,user='a')=>fetch(base+route,{method:'POST',headers:{'x-portal-user-id':user,'x-portal-permissions':Buffer.from('["*"]').toString('base64url'),'Content-Type':'application/octet-stream'},body:XLSX.write(cnBook,{type:'buffer',bookType:'xlsx'})});
+    assert.equal((await cnUpload('/trades/import/preview')).status,400);
+    assert.equal((await cnUpload('/trades/import/preview?accountId='+investment.id)).status,400);
+    assert.equal((await cnUpload('/trades/import/preview?accountId='+cnId,'b')).status,400);
+    const cnRoute='/trades/import?accountId='+cnId;
+    const cnPreview=await (await cnUpload('/trades/import/preview?accountId='+cnId)).json();
+    assert.equal(cnPreview.count,1);assert.equal(cnPreview.format,'eastmoney');assert.equal(cnPreview.summary.excluded[0].count,1);
+    assert.equal((await cnUpload(cnRoute+'&mode=replace')).status,400);
+    let cnResult=await (await cnUpload(cnRoute)).json();
+    assert.equal(cnResult.importSummary.added,1);assert.equal(cnResult.cashCny,1289.02);
+    cnResult=await (await cnUpload(cnRoute)).json();
+    assert.equal(cnResult.importSummary.skipped,1);assert.equal(cnResult.cashCny,1289.02);
+    assert.equal((await (await call('/portfolio','b')).json()).trades.some(t=>t.broker==='eastmoney'),false);
     const readonly = await fetch(base + '/accounts', { headers: { 'x-portal-user-id': 'a', 'x-portal-permissions': Buffer.from('["service:stock-manage:accounts:view"]').toString('base64url') } });
     const masked = await readonly.json();
     assert.equal('cash' in masked.accounts[0], false);

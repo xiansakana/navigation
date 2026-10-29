@@ -21,6 +21,8 @@ test('isAShareSymbol accepts bare and decorated codes', () => {
 
 test('ashareExchange maps SH vs SZ', () => {
   assert.equal(ashareExchange('159509'), 'sz');
+  assert.equal(ashareExchange('113708'), 'sh');
+  assert.equal(ashareExchange('123001'), 'sz');
   assert.equal(ashareExchange('510300'), 'sh');
   assert.equal(ashareExchange('600519'), 'sh');
   assert.equal(ashareExchange('000001'), 'sz');

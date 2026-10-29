@@ -21,6 +21,7 @@ export function isAShareSymbol(symbol) {
 export function ashareExchange(codeOrSymbol) {
   const code = stripAShareDecorators(codeOrSymbol);
   if (!/^\d{6}$/.test(code)) return null;
+  if (code.startsWith('11')) return 'sh'; // Shanghai convertible bonds, e.g. 113708.
   const head = code[0];
   if (head === '5' || head === '6' || head === '9') return 'sh';
   return 'sz';

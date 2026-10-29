@@ -51,14 +51,14 @@ export function parseBbaeBuffer(buffer) {
 }
 
 export function mergeBbaeTrades(existing, incoming, accountId) {
-  if (!accountId || accountId === 'unassigned') throw new Error('导入 BBAE 文件前请选择实际所属证券账户');
+  if (!accountId || accountId === 'unassigned') throw new Error('导入券商文件前请选择实际所属证券账户');
   const next = [...existing], preview = [], used = new Set();
   const summary = { added: 0, updated: 0, skipped: 0 };
-  const financial = t => JSON.stringify([t.symbol, t.type, Number(t.shares), Number(t.price), Number(t.total_amount), Number(t.commission), t.trade_date]);
+  const financial = t => JSON.stringify([t.symbol, t.type, Number(t.shares), Number(t.price), Number(t.total_amount), Number(t.commission), t.trade_date, t.other_category || '']);
   for (const t of incoming) {
     const owned = next.filter(x => x.account_id === accountId);
     let matches = owned.filter(x => x.broker_order_key === t.broker_order_key);
-    const nearTime = x => x.symbol === t.symbol && x.type === t.type && Math.abs(Date.parse(x.trade_date) - Date.parse(t.trade_date)) <= 60000;
+    const nearTime = x => x.symbol === t.symbol && x.type === t.type && (t.type !== 'other' || (x.other_category || '') === (t.other_category || '') || Number(x.total_amount) === Number(t.total_amount)) && Math.abs(Date.parse(x.trade_date) - Date.parse(t.trade_date)) <= 60000;
     if (!matches.length) matches = owned.filter(x => !x.broker_order_key && nearTime(x));
     if (matches.length > 1 || (matches.length && used.has(matches[0].id))) throw new Error('有多条历史记录可能对应同一订单，请先人工核对，未导入');
     const old = matches[0];
@@ -67,7 +67,7 @@ export function mergeBbaeTrades(existing, incoming, accountId) {
       preview.push({ ...t, importAction: 'needsAssignment' });
       continue;
     }
-    const trade = { ...old, ...t, account_id: accountId, id: old?.id || `bbae-${hash([accountId, t.broker_order_key])}`, name: old?.name || t.name, created_at: old?.created_at || t.created_at };
+    const trade = { ...old, ...t, account_id: accountId, id: old?.id || `${t.broker || 'bbae'}-${hash([accountId, t.broker_order_key])}`, name: old?.name && old.name !== old.symbol ? old.name : t.name, created_at: old?.created_at || t.created_at };
     const action = !old ? 'added' : financial(old) === financial(trade) ? 'skipped' : 'updated';
     summary[action]++;
     if (old) { used.add(old.id); next[next.indexOf(old)] = trade; }

@@ -753,11 +753,11 @@ function openTradeModal(trade = {}) {
   });
 }
 
-const importState = { buffer: null, count: 0, preview: [], error: null, mode: 'merge', accountId: '', summary: null };
+const importState = { buffer: null, count: 0, preview: [], error: null, mode: 'merge', accountId: '', summary: null, format: '' };
 
 function renderImportPreviewSection() {
   if (importState.error) return `<div class="sm-error-box">${escapeHtml(importState.error)}</div>`;
-  if (!importState.count) return '';
+  if (!importState.count && !importState.summary) return '';
   const rows = importState.preview.map((t) => `
     <tr>
       <td>${formatLocalDateTime(t.trade_date)}</td>
@@ -765,14 +765,16 @@ function renderImportPreviewSection() {
       <td>${escapeHtml(t.symbol)}</td>
       <td>${escapeHtml(t.name || '')}</td>
       <td>${t.type === 'other' ? '—' : t.shares}</td>
-      <td>${t.type === 'other' ? '—' : formatPrice(t.price, 'USD')}</td>
-      <td>${fmtUsd(t.total_amount)}</td><td>${fmtUsd(t.commission)}</td>
+      <td>${t.type === 'other' ? '—' : formatPrice(t.price, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
+      <td>${fmtMoney(t.total_amount, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td><td>${fmtMoney(t.commission, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
       <td>${({ added: '新增', updated: '更新（需确认）', skipped: '重复跳过', needsAssignment: '先核对未归属历史' })[t.importAction] || '新增'}</td>
     </tr>`).join('');
   return `
     <div class="sm-import-preview">
-      <div class="sm-import-preview-head">预览（显示 ${importState.preview.length} 条，共 ${importState.count} 条）</div>
-      ${importState.summary ? `<p class="hint">BBAE：新增 ${importState.summary.added}，更新 ${importState.summary.updated}，重复跳过 ${importState.summary.skipped}。时间按北京时间；费用按“总计”反推，非融资购买力或委托价。</p>` : ''}
+      <div class="sm-import-preview-head">预览（${importState.summary?.sourceCount != null ? '来源 ' + importState.summary.sourceCount + ' 条，' : ''}可导入 ${importState.count} 条，显示 ${importState.preview.length} 条）</div>
+      ${importState.summary ? `<p class="hint">${importState.format === 'eastmoney' ? '东方财富' : 'BBAE'}：新增 ${importState.summary.added}，更新 ${importState.summary.updated}，重复跳过 ${importState.summary.skipped}。${importState.format === 'eastmoney' ? '按交收日期入账，费用包含佣金、其他费用、印花税和过户费。' : '时间按北京时间；费用按“总计”反推。'}</p>` : ''}
+      ${importState.summary?.excluded?.length ? `<details><summary>未单独导入 ${importState.summary.excluded.reduce((s,x) => s + x.count, 0)} 条来源记录（含新债合并入账），展开查看原因</summary>${importState.summary.excluded.map(x => `<p class="hint">${escapeHtml(x.reason)}：${x.count} 条</p>`).join('')}</details>` : ''}
+      ${(importState.summary?.warnings || []).map(x => `<p class="hint">${escapeHtml(x)}</p>`).join('')}
       ${importState.summary?.unassigned ? `<p class="sm-error-box">${importState.summary.unassigned} 笔可能与未归属历史重复。请先核对原记录的账户归属，再重新预览；本次不会导入。</p>` : ''}
       <div class="sm-table-wrap">
         <table class="sm-table">
@@ -806,6 +808,10 @@ function bindImportModal(layer) {
       importState.count = data.count;
       importState.preview = data.preview || data.trades || [];
       importState.summary = data.summary || null;
+      importState.format = data.format || '';
+      const modeEl = $('#import-mode', layer);
+      modeEl.disabled = ['bbae', 'eastmoney'].includes(importState.format);
+      if (modeEl.disabled) { modeEl.value = 'merge'; importState.mode = 'merge'; }
       importState.error = null;
     } catch (err) {
       if (current !== revision) return;
@@ -840,9 +846,9 @@ function openImportModal() {
   importState.accountId = selectedAccountId === 'unassigned' ? '' : selectedAccountId;
   importState.summary = null;
   const layer = openModal('导入交易', `
-    <p class="hint">支持 BBAE 股票／期权订单、Moomoo 历史及本应用备份 xlsx。BBAE 必须指定美元账户、使用合并模式；只导入实际成交数量。重复订单跳过，累计部分成交或历史金额有变化时须勾选确认更新。样例可能只是部分日期，不会自动替换整个账户。</p>
+    <p class="hint">支持东方财富交割单、BBAE 股票／期权订单、Moomoo 历史及本应用备份 xlsx。东方财富必选人民币账户，导入交易、分红、利息与可关联成本的新债，理财本金和转账仅提示、不导入。BBAE 必须指定美元账户、使用合并模式；只导入实际成交数量。重复订单跳过，累计部分成交或历史金额有变化时须勾选确认更新。样例可能只是部分日期，不会自动替换整个账户。</p>
     <form id="import-form" class="sm-form-grid">
-      <label>所属证券账户<select id="import-account"><option value="">请选择账户（BBAE 必选）</option>${(state.investmentAccounts || []).map(a => `<option value="${a.id}" ${a.id === importState.accountId ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></label>
+      <label>所属证券账户<select id="import-account"><option value="">请选择账户（券商原始文件必选）</option>${(state.investmentAccounts || []).map(a => `<option value="${a.id}" ${a.id === importState.accountId ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></label>
       <label>导入模式<select name="mode" id="import-mode">
         <option value="merge">合并到现有记录</option>
         <option value="replace">替换全部记录</option>
