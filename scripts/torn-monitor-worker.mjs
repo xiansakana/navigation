@@ -6,7 +6,7 @@ import { resolveSessionUser } from '../portal/src/auth.js';
 import { moduleApiHandler } from '../portal/src/module-api.js';
 import { verifyWorkerMessage, tornWorkerPort } from '../portal/src/torn-worker-transport.js';
 import { createTornRunStore } from '../portal/src/torn-worker-runs.js';
-import { createTornWorkerRuntime } from '../portal/src/torn-worker-runtime.js';
+import { createTornWorkerRuntime, tickTornWorker } from '../portal/src/torn-worker-runtime.js';
 import { shoppingJobs } from '../portal/src/torn-shopping.js';
 import { destructionJobs } from '../portal/src/torn-chain.js';
 import { factionJobs } from '../portal/src/torn-factions.js';
@@ -43,10 +43,7 @@ const company = await import('../torn-toolbox-desktop/src/server-company.js');
 const undercut = await import('../torn-toolbox-desktop/src/server-undercut.js');
 await runtime.resume();
 ready = true;
-const timer = setInterval(() => {
-  runtime.reconcile();
-  db.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES('torn_monitor_worker_heartbeat',?)").run(String(Date.now()));
-}, 5000);
+const timer = setInterval(() => tickTornWorker(runtime, db), 5000);
 console.log('Torn monitor worker ready (five monitors; control on loopback :' + tornWorkerPort(config) + ')');
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => {
   if (stopping) return;

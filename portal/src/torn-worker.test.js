@@ -3,11 +3,19 @@ import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import { workerSignature, verifyWorkerMessage, forwardTornWorker } from './torn-worker-transport.js';
 import { createTornRunStore } from './torn-worker-runs.js';
-import { createTornWorkerRuntime } from './torn-worker-runtime.js';
+import { createTornWorkerRuntime, tickTornWorker } from './torn-worker-runtime.js';
 import { Readable } from 'node:stream';
 import { createChainApiClient } from './torn-chain-monitor.js';
 
 const config = { auth: { sessionSecret: 'unique-test-secret-for-torn-worker-12345' } };
+test('a busy SQLite heartbeat cannot crash the worker and succeeds on the following tick', () => {
+  let busy = true, ticks = 0, writes = 0;
+  const runtime = { reconcile() { ticks++; } }, db = { prepare() { return { run() { if (busy) throw Object.assign(Error('locked'), { code: 'SQLITE_BUSY' }); writes++; } }; } };
+  assert.equal(tickTornWorker(runtime, db), false);
+  busy = false; assert.equal(tickTornWorker(runtime, db), true);
+  assert.equal(ticks, 2); assert.equal(writes, 1);
+  assert.equal(tickTornWorker({ reconcile() { throw Object.assign(Error('locked'), { code: 'SQLITE_LOCKED' }); } }, db), false);
+});
 test('worker envelopes reject tampering, expiration, replay and wrong secrets', () => {
   const text = JSON.stringify({ at: 100000, nonce: 'a'.repeat(32), path: '/api/torn-shopping/state' });
   const signature = workerSignature(text, config), seen = new Map();

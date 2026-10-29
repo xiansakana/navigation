@@ -59,6 +59,11 @@ test('one worker owns all five services and restores running intent after proces
   };
   try {
     const first = await start(); assert.equal((await api('state')).data.state.running, true);
+    const lock = new Database(dbPath);
+    lock.exec('BEGIN IMMEDIATE');
+    try { await delay(11000); } finally { lock.exec('ROLLBACK'); lock.close(); }
+    const alive = await (await fetch('http://127.0.0.1:' + port + '/healthz')).json();
+    assert.equal(alive.pid, first.pid, 'SQLite write contention must not restart the worker');
     for (const [servicePort, service] of [[companyPort, 'company'], [undercutPort, 'undercut']]) assert.equal((await (await fetch('http://127.0.0.1:' + servicePort + '/api/state')).json())[service].running, true);
     assert.equal((await api('stop', ['torn-shopping:view'])).status, 403); assert.equal((await api('state')).data.state.running, true);
     const untrusted = await fetch('http://127.0.0.1:' + port + '/dispatch', { method: 'POST', body: '{}' }); assert.equal(untrusted.status, 403);

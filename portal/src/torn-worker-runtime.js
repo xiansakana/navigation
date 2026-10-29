@@ -1,6 +1,18 @@
 import { Readable } from 'node:stream';
 import { TORN_WORKER_MODULES } from './torn-worker-transport.js';
 
+export function tickTornWorker(runtime, db, report = console.error) {
+  try {
+    runtime.reconcile();
+    db.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES('torn_monitor_worker_heartbeat',?)").run(String(Date.now()));
+    return true;
+  } catch (error) {
+    // Other services share SQLite. A delayed heartbeat must not terminate five scans.
+    if (!['SQLITE_BUSY', 'SQLITE_LOCKED'].includes(error.code)) report('Torn worker heartbeat failed; retrying next tick');
+    return false;
+  }
+}
+
 // Intent is durable; live counters remain in the worker. Shutdown never clears intent.
 export function createTornWorkerRuntime({ runs, dispatch, sessionFor, jobs, config }) {
   let closing = false;
