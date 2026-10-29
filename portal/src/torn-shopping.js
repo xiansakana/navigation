@@ -14,7 +14,7 @@ export function canTornShopping(session, action = 'view') {
 }
 
 export function createTornShoppingService({ store, request = portalTornRequest, authorize = () => true, authorizeNotify = () => false, sendNotification = async () => { throw new Error('通知管理连接未配置'); }, monitorOptions = {}, Monitor = ShoppingMonitor, validateConfig = shoppingConfig }) {
-  const monitors = new Map();
+  const monitors = new Map(), catalog = new Map();
   const monitor = uid => {
     if (!monitors.has(uid)) monitors.set(uid, new Monitor({ uid, store, request, authorize: () => authorize(uid), notify: async row => {
       if (!authorizeNotify(uid)) return;
@@ -41,10 +41,30 @@ export function createTornShoppingService({ store, request = portalTornRequest, 
           const result = await sendNotification(settings, null);
           return json(res, 200, { ok: true, result });
         }
+        if (route === '/items' && req.method === 'GET') {
+          if (!canTornShopping(session, 'items:view')) return json(res,403,{ok:false,error:'无权查询物品目录'});
+          const { apiKeys } = store.get(uid).config;
+          if (!apiKeys.length) throw new Error('请先填写并保存 API Key，再选择物品');
+          const signature = apiKeys.join(','), cached = catalog.get(uid);
+          if (cached && cached.signature === signature && Date.now()-cached.at < 86400000) return json(res,200,{ok:true,items:cached.items});
+          let data;
+          try {
+            for (const key of apiKeys) {
+              try { data = await request('torn/items',key,undefined,{scope:'shopping-catalog:'+uid,spacingMs:store.get(uid).config.apiIntervalSeconds*1000}); break; }
+              catch (error) { if (![1,2,10,13,16,18].includes(error.apiCode)) throw error; }
+            }
+          } catch { throw new Error('物品目录读取失败，请检查 Key 权限或稍后重试'); }
+          finally { request.release?.('shopping-catalog:'+uid); }
+          if (!data?.items || typeof data.items !== 'object') throw new Error('未取得有效物品目录，请检查 API Key');
+          const rows = Array.isArray(data.items) ? data.items : Object.entries(data.items).map(([id,row])=>({...row,id:row.id || Number(id)}));
+          const items = rows.filter(row=>Number.isSafeInteger(row.id)&&row.id>0&&typeof row.name==='string').map(row=>({id:row.id,name:row.name.slice(0,150)})).sort((a,b)=>a.name.localeCompare(b.name));
+          if (!items.length) throw new Error('物品目录为空，请稍后重试');
+          catalog.set(uid,{signature,at:Date.now(),items}); return json(res,200,{ok:true,items});
+        }
         if (route === '/state' && req.method === 'GET') {
           const { config: { apiKey, apiKeys, ...config }, history } = store.get(uid);
           const state = monitor(uid).status();
-          return json(res, 200, { ok: true, config: { ...config, hasKey: !!apiKey, keyCount: apiKeys.length }, state, history: [...history].reverse(), permissions: { configure: canTornShopping(session, 'config:edit'), control: canTornShopping(session, 'control:edit'), clear: canTornShopping(session, 'history:edit') } });
+          return json(res, 200, { ok: true, config: { ...config, hasKey: !!apiKey, keyCount: apiKeys.length }, state, history: [...history].reverse(), permissions: { items: canTornShopping(session, 'items:view'), configure: canTornShopping(session, 'config:edit'), control: canTornShopping(session, 'control:edit'), clear: canTornShopping(session, 'history:edit') } });
         }
         if (route === '/config' && req.method === 'POST') {
           const input = await readJson(req, 65536); validateConfig(input, store.get(uid).config);

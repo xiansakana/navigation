@@ -169,7 +169,16 @@ var SYSTEM_PERMISSIONS = [
     ].map(([id, name, parts, action]) => ({ id: 'torn-factions:' + id, name, group: 'Torn 工具箱', serviceId: 'torn-toolbox', action, permissionPath: ['首页', 'Torn 工具箱', '监控', '帮派筛选', ...parts] })),
     { id: 'admin:data-policy:view', name: '查看模块授权和数据范围', group: '系统', action: 'view', resource: 'admin:data-policy', permissionPath: ['权限管理', '模块与数据范围'] },
     { id: 'admin:data-policy:edit', name: '配置模块授权和数据范围', group: '系统', action: 'edit', resource: 'admin:data-policy', permissionPath: ['权限管理', '模块与数据范围', '保存'] },
-    ...['view', 'config:edit', 'control:edit', 'history:edit', 'notify:view', 'notify:edit', 'notify:test:edit'].map(id => ({ id: 'torn-shopping:' + id, name: '扫货助手 ' + id, group: id.startsWith('notify:') ? '通知管理' : 'Torn 工具箱', serviceId: id.startsWith('notify:') ? 'notifications' : 'torn-toolbox', action: id.endsWith('edit') ? 'edit' : 'view', permissionPath: id.startsWith('notify:') ? ['首页', '通知管理', '业务提醒', '扫货助手', id] : ['首页', 'Torn 工具箱', '扫货助手', id] })),
+    ...[
+        ['view', '查看扫货助手', []],
+        ['items:view', '查询物品目录', ['监控配置', '物品选择']],
+        ['config:edit', '保存扫货条件和 API Keys', ['监控配置', '保存配置']],
+        ['control:edit', '启动或停止扫货监控', ['监控控制']],
+        ['history:edit', '清空低价记录', ['低价记录', '清空']],
+        ['notify:view', '查看扫货通知配置', []],
+        ['notify:edit', '保存扫货通知配置', ['保存配置']],
+        ['notify:test:edit', '测试扫货通知', ['发送测试']]
+    ].map(([id,name,parts])=>({id:'torn-shopping:'+id,name,group:id.startsWith('notify:')?'通知管理':'Torn 工具箱',serviceId:id.startsWith('notify:')?'notifications':'torn-toolbox',action:id.endsWith('edit')?'edit':'view',permissionPath:id.startsWith('notify:')?['首页','通知管理','业务提醒','扫货助手',...parts]:['首页','Torn 工具箱','扫货助手',...parts]})),
     ...[
         ['view', '查看自己的监控', [], 'view'],
         ['config:edit', '保存自己的 respect 范围和 API Keys', ['配置'], 'edit'],

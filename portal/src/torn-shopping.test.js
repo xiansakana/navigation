@@ -41,3 +41,16 @@ test('shopping API strips keys and rejects guest writes and foreign origins', as
   };
   try { const state=await call('state');assert.equal(state.status,200);assert.ok(!JSON.stringify(state).includes('1234567890abcdef'));assert.ok(!('apiKeys' in state.data.config));assert.equal((await call('config','POST',true)).status,403);assert.equal((await call('config','POST',false,'https://evil.test')).status,403); } finally {db.close();}
 });
+
+test('item catalog requires its own permission, normalizes data and isolates cache by user and keys', async () => {
+  const db=new Database(':memory:'),store=createShoppingStore(db);store.save('a',{apiKey:'1234567890abcdef'});store.save('b',{apiKey:'abcdef1234567890'});let calls=0;
+  const service=createTornShoppingService({store,request:async(path,key)=>{assert.equal(path,'torn/items');calls++;return {items:{1:{name:key==='1234567890abcdef'?'First':'Second'}}};}});
+  const call=async(uid='a',permissions=['*'])=>{const req=Readable.from([]);req.method='GET';req.headers={host:'test'};let result;await service.handle(req,{setHeader(){}},new URL('http://test/api/torn-shopping/items'),{userId:uid,permissions},(_,status,data)=>{result={status,data};});return result;};
+  try{
+    assert.equal((await call('a',['torn-shopping:view','torn-shopping:config:edit'])).status,403);assert.equal(calls,0);
+    const first=await call();assert.equal(first.data.items[0].id,1);assert.equal(first.data.items[0].name,'First');assert.equal(calls,1);
+    await call();assert.equal(calls,1);assert.equal((await call('b')).data.items[0].name,'Second');assert.equal(calls,2);
+    store.save('a',{apiKey:'abcdef1234567890'});assert.equal((await call()).data.items[0].name,'Second');assert.equal(calls,3);
+    assert.equal((await call('c')).status,400);
+  }finally{db.close();}
+});
