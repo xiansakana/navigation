@@ -169,7 +169,7 @@ var SYSTEM_PERMISSIONS = [
     ].map(([id, name, parts, action]) => ({ id: 'torn-factions:' + id, name, group: 'Torn 工具箱', serviceId: 'torn-toolbox', action, permissionPath: ['首页', 'Torn 工具箱', '监控', '帮派筛选', ...parts] })),
     { id: 'admin:data-policy:view', name: '查看模块授权和数据范围', group: '系统', action: 'view', resource: 'admin:data-policy', permissionPath: ['权限管理', '模块与数据范围'] },
     { id: 'admin:data-policy:edit', name: '配置模块授权和数据范围', group: '系统', action: 'edit', resource: 'admin:data-policy', permissionPath: ['权限管理', '模块与数据范围', '保存'] },
-    ...['view', 'config:edit', 'control:edit', 'history:edit', 'notify:view', 'notify:edit', 'notify:test:edit'].map(id => ({ id: 'torn-shopping:' + id, name: '扫货助手 ' + id, group: 'Torn 工具箱', serviceId: 'torn-toolbox', action: id.endsWith('edit') ? 'edit' : 'view', permissionPath: ['首页', 'Torn 工具箱', '扫货助手', id] })),
+    ...['view', 'config:edit', 'control:edit', 'history:edit', 'notify:view', 'notify:edit', 'notify:test:edit'].map(id => ({ id: 'torn-shopping:' + id, name: '扫货助手 ' + id, group: id.startsWith('notify:') ? '通知管理' : 'Torn 工具箱', serviceId: id.startsWith('notify:') ? 'notifications' : 'torn-toolbox', action: id.endsWith('edit') ? 'edit' : 'view', permissionPath: id.startsWith('notify:') ? ['首页', '通知管理', '业务提醒', '扫货助手', id] : ['首页', 'Torn 工具箱', '扫货助手', id] })),
     ...[
         ['view', '查看自己的监控', [], 'view'],
         ['config:edit', '保存自己的 respect 范围和 API Keys', ['配置'], 'edit'],

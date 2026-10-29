@@ -1,0 +1,6 @@
+---
+description: Configure all notification features centrally in Notification Management
+alwaysApply: true
+---
+
+通知相关功能统一在“通知管理 → 业务提醒”中设置渠道开关、接收目标、@和测试；业务页面仅设置监控条件和提供入口链接，不新增独立通知配置。迁移入口时保留既有用户配置与权限隔离，不主动发送真实测试消息。

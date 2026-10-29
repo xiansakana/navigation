@@ -71,7 +71,7 @@ export async function handleTornShoppingApi(req, res, url, session, json, config
   };
   service ||= createTornShoppingService({ store: createShoppingStore(getDatabase()), authorize: uid => authorized(uid, 'control:edit'), authorizeNotify: uid => authorized(uid, 'notify:edit'), sendNotification: async (settings, row) => {
     const endpoint = config.services?.find(item => item.id === 'notifications')?.internalUrl || 'http://127.0.0.1:8787';
-    return createChainNotifier({ endpoint, token: integrationConfig().notifyToken })(settings, row);
+    return createChainNotifier({ endpoint, testMessage: '[Torn 扫货助手] 测试通知 · 配置正常', token: integrationConfig().notifyToken })(settings, row);
   } });
   return service.handle(req, res, url, session, json);
 }

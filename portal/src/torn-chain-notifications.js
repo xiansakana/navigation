@@ -21,7 +21,7 @@ export function chainNotifySettings(input) {
 
 // Reuse notification management's authenticated delivery API. Destinations are
 // saved per Portal user, never imported from another user's global settings.
-export function createChainNotifier({ endpoint, token, fetchImpl = fetch }) {
+export function createChainNotifier({ endpoint, token, fetchImpl = fetch, testMessage = '[Torn 监控] 帮派摧毁测试通知 · 配置正常' }) {
   return async (settings, row) => {
     if (row && row.leaderFilter && row.leaderFilter !== 'all' && !selectedBonusDefenders(row, row.bonusSelection, row.leaderFilter).length) return { skipped: true, reason: 'no-matching-defender' };
     const targets = [...(settings.qq.enabled ? settings.targets.map(target => ({ channel: 'qq', ...target })) : []), ...(settings.slack.enabled ? [{ channel: 'slack' }] : [])];
@@ -31,7 +31,7 @@ export function createChainNotifier({ endpoint, token, fetchImpl = fetch }) {
     let message = row ? `[Torn Chain] ${row.name} · ${row.hits} hits 刚进入冷却\nReport：\nhttps://www.torn.com/war.php?step=chainreport&chainID=${Number(row.id)}` : '[Torn Chain] 测试通知 · 配置正常';
     if (row?.kind === 'destruction') message = `[Torn 帮派摧毁] ${row.name} [${row.id}] 已确认摧毁\nrespect：${row.previousRespect} → ${row.respect}\n最后存活：${new Date(row.lastAliveAt * 1000).toISOString()}\n发现摧毁：${new Date(row.detectedAt * 1000).toISOString()}\n帮派：\nhttps://www.torn.com/factions.php?step=profile&ID=${Number(row.id)}\n原 Leader [${row.leaderId}]：\nhttps://www.torn.com/profiles.php?XID=${Number(row.leaderId)}\n摧毁原因未知，未判定为 Bonus 导致。`;
     if (row?.kind === 'shopping') message = `[Torn 扫货] ${row.name} [${row.itemId}]\n${row.source === 'market' ? '市场' : '巴扎'}：$${row.price} × ${row.quantity}\n${row.link}`;
-    if (!row) message = '[Torn 监控] 帮派摧毁测试通知 · 配置正常';
+    if (!row) message = testMessage;
     if (row && !['destruction', 'shopping'].includes(row.kind)) for (const bonus of selectedBonusDefenders(row, row.bonusSelection, row.leaderFilter)) {
       message += `\nBonus #${bonus.hit} 被打玩家${bonus.defenderId ? ' [' + bonus.defenderId + ']' : ''}${typeof bonus.isLeader === 'boolean' ? bonus.isLeader ? '（Leader）' : '（非 Leader）' : ''}：` + (bonus.defenderId ? `\nhttps://www.torn.com/profiles.php?XID=${bonus.defenderId}` : '暂不可用，请查看 report');
     }

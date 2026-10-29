@@ -68,3 +68,7 @@ Every new page, menu, tab, or action button must define a permission in `portal/
 ## Commit & Pull Request Guidelines
 
 Follow the established imperative Conventional Commit style, such as `feat: ...`, `fix: ...`, or `revert: ...`. Keep commits focused. Pull requests should describe affected services, configuration or migration impact, test commands/results, deployment considerations, and include screenshots for UI changes. Never commit API keys, production `config.json`, databases, or runtime JSON.
+
+## Unified Notification Configuration
+
+- All new or changed notification features must configure channel switches, recipients, mentions, and test delivery in Notification Management → Business Alerts. Business modules only configure monitoring conditions and link to that central location; never add independent notification forms to toolbox or business pages. Preserve existing per-user notification settings and enforce separate view/save/test permissions.

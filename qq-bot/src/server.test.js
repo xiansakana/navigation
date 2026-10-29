@@ -26,6 +26,9 @@ test('management page and redacted config API are available', async function() {
         var page = await fetch(base + '/');
         assert.equal(page.status, 200);
         assert.match(await page.text(), /通知管理/);
+        var shoppingEditor = await fetch(base + '/shopping-notifications.js');
+        assert.equal(shoppingEditor.status, 200);
+        assert.match(await shoppingEditor.text(), /torn-shopping/);
         var targetEditor = await fetch(base + '/qq-targets.js');
         assert.equal(targetEditor.status, 200);
         assert.match(await targetEditor.text(), /function bizTargets/);
