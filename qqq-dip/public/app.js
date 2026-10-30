@@ -523,7 +523,7 @@ function openBuyPreview() {
       <p class="hint">期权张数需按实际买卖价重算；有 Polygon 链上合约时会填入 OCC 代码。标记已执行会按填写金额扣减美元/人民币现金。</p>
       <div class="sm-modal-actions">
         <button type="button" class="btn ghost" id="btn-copy-buy">复制清单</button>
-        ${preview.tier ? `<button type="button" class="btn ghost" data-exec-preview="${escapeHtml(preview.tier)}">标记已执行</button>` : ''}
+        ${preview.tier ? `<button type="button" class="btn ghost" data-exec-preview="${escapeHtml(preview.tier)}">查看成交计划</button>` : ''}
         <button type="button" class="btn primary" data-close>关闭</button>
       </div>
     </div>
@@ -563,46 +563,60 @@ function openBuyPreview() {
 }
 
 function openExecModal(tierId, preview) {
-  const tier = (state.evaluation?.tiers || []).find((t) => t.id === tierId);
-  const plan = preview?.cashPlan || {};
-  const defaultUsd = plan.useUsd != null ? plan.useUsd : (tier?.usd ?? preview?.totalUsd ?? 0);
-  const defaultCny = plan.useCny != null ? plan.useCny : 0;
+  return openPlanFillModal(tierId);
+}
+
+function openPlanFillModal(tierId) {
+  const plan = state.evaluation?.round?.executionPlans?.[tierId];
+  if (!plan) { toast('error', '请先刷新行情或开启监控，待收盘确认后生成计划'); return; }
+  const requestId = crypto.randomUUID();
   openModal(`
-      <h3>标记 ${escapeHtml(tierId)} 已执行</h3>
-      <p class="hint">确认后将从现金扣减下列金额（可改）。袋内占用按美元等价合计。</p>
-      <label class="field">动用美元<input id="exec-usd" type="number" step="0.01" value="${defaultUsd}"></label>
-      <label class="field">动用人民币<input id="exec-cny" type="number" step="0.01" value="${defaultCny}"></label>
-      <label class="field">备注<input id="exec-note" type="text" placeholder="券商单号 / 合约"></label>
-      <div class="sm-modal-actions">
-        <button class="btn ghost" data-close>取消</button>
-        <button class="btn primary" id="exec-ok">确认</button>
-      </div>
-    `);
-  $('#exec-ok').addEventListener('click', async () => {
+    <h3>${escapeHtml(tierId)} 分腿实际成交登记</h3>
+    <p class="hint">${escapeHtml(state.evaluation?.cnMarket?.label || '等待A股交易时段')}。这里只补记券商实际成交，不自动下单。未填写数量的交易腿保持待执行。</p>
+    <p class="hint">有效期至 ${escapeHtml(plan.expiresAt || '日历待维护，暂停执行')}；取消不撤销已成交持仓。</p>
+    <label class="field">实际成交时间（本机时区）<input id="fill-time" type="datetime-local"></label>
+    ${plan.legs.map((leg) => `<fieldset data-fill-leg="${leg.id}" ${leg.complete || plan.cancelled ? 'disabled' : ''}>
+      <legend>${escapeHtml(leg.occSymbol || leg.symbol)} · ${leg.complete ? '已完成' : leg.spent > 0 ? '部分成交' : '待执行'} · ${escapeHtml(leg.currency)} 已用 ${maskMoneyText(String(leg.spent))} · 截止 ${escapeHtml(leg.expiresAt || '日历待维护')}</legend>
+      <label class="field">本次实际数量（期权填张数）<input data-qty type="number" min="0" step="${leg.symbol === '159509' ? '100' : '1'}"></label>
+      <label class="field">实际成交单价<input data-price type="number" min="0" step="0.001"></label>
+      <label class="field">本次费用<input data-fee type="number" min="0" step="0.01" value="0"></label>
+      <label><input data-complete type="checkbox">此腿已全部完成（不再补单）</label>
+    </fieldset>`).join('')}
+    <label><input id="fill-review" type="checkbox">已复核当前信号、159509 最新报价/停牌/溢价及真实成交；不使用昨夜估价</label>
+    <div class="sm-modal-actions"><button class="btn ghost" data-close>关闭</button>
+      <button class="btn ghost" id="plan-cancel">取消剩余计划</button>
+      <button class="btn primary" id="fill-save">登记本次成交</button></div>`);
+  $('#fill-save').addEventListener('click', async () => {
+    const button = $('#fill-save');
+    button.disabled = true;
     try {
-      const cashUsd = Number($('#exec-usd').value) || 0;
-      const cashCny = Number($('#exec-cny').value) || 0;
-      const rate = Number(state.cash?.usdCnyRate) || 0;
-      const usdEq = cashUsd + (rate > 0 ? cashCny / rate : 0);
-      const data = await api('/actions', {
-        method: 'POST',
-        body: {
-          type: 'execute',
-          tier: tierId,
-          usd: Math.round(usdEq * 100) / 100,
-          cashUsd,
-          cashCny,
-          note: $('#exec-note').value,
-          legs: Array.isArray(preview?.legs) ? preview.legs : [],
-          message: `已执行 ${tierId}，扣 USD ${cashUsd.toFixed(2)} / CNY ${cashCny.toFixed(2)}（合计 ≈$${usdEq.toFixed(2)}）`
-        }
-      });
+      const fills = [...document.querySelectorAll('[data-fill-leg]')].filter((row) => !row.disabled && Number(row.querySelector('[data-qty]').value) > 0)
+        .map((row) => ({ legId: row.dataset.fillLeg, shares: Number(row.querySelector('[data-qty]').value),
+          price: Number(row.querySelector('[data-price]').value), commission: Number(row.querySelector('[data-fee]').value),
+          complete: row.querySelector('[data-complete]').checked }));
+      const date = new Date($('#fill-time').value);
+      if (!Number.isFinite(date.getTime())) throw new Error('请填写实际成交时间');
+      const data = await api('/actions', { method: 'POST', body: { type: 'execute', tier: tierId,
+        planId: plan.id, requestId, fills, reviewed: $('#fill-review').checked, filledAt: date.toISOString(),
+        message: `登记 ${tierId} 分腿实际成交` } });
       $('#modal-root').innerHTML = '';
       applyState(data);
       await loadActions(1);
-      toast('success', '已记录并扣减现金');
-    } catch (err) { toast('error', err.message); }
+    } catch (error) { toast('error', error.message); button.disabled = false; }
   });
+  $('#plan-cancel').addEventListener('click', async () => {
+    try {
+      const data = await api('/actions', { method: 'POST', body: { type: 'execute', operation: 'cancel', tier: tierId, planId: plan.id } });
+      $('#modal-root').innerHTML = ''; applyState(data);
+    } catch (error) { toast('error', error.message); }
+  });
+}
+
+function planLabel(plan) {
+  if (plan.cancelled) return '已取消';
+  if (plan.legs.every((leg) => leg.complete)) return '已完成';
+  if (plan.expiresAt && Date.parse(plan.expiresAt) < Date.now()) return '已过期，待重新评估';
+  return `${plan.legs.some((leg) => leg.spent > 0) ? '部分成交' : '待执行'} · ${state.evaluation?.cnMarket?.label || ''}`;
 }
 
 function sleeveBySymbol(symbol) {
@@ -693,10 +707,11 @@ function renderTiers() {
       <td>${fmtPrice(t.triggerPrice)}${t.intradayPrice ? ` / 盘中 ${fmtPrice(t.intradayPrice)}` : ''}</td>
       <td>${fmtPctB(t.pctB)}%</td>
       <td>${maskMoney(fmtUsd(t.usd))}</td>
-      <td class="st-${t.status}">${statusLabel(t.status)}</td>
+      <td class="st-${t.status}">${statusLabel(t.status)}${state.evaluation?.round?.executionPlans?.[t.id]
+        ? `<div class="hint">${escapeHtml(planLabel(state.evaluation.round.executionPlans[t.id]))}</div>` : ''}</td>
       <td class="tier-action" title="${escapeHtml(action)}">${escapeHtml(action)}</td>
-      <td>${t.status === 'confirmed' || t.status === 'intraday'
-        ? (can('tier-exec', 'edit') ? `<button class="btn link" data-exec="${t.id}">标记已执行</button>` : '') : ''}</td>
+      <td>${state.evaluation?.round?.executionPlans?.[t.id]
+        ? (can('tier-exec', 'edit') ? `<button class="btn link" data-exec="${t.id}">成交/计划</button>` : '') : ''}</td>
     </tr>`;
   }).join('');
 }

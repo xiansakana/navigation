@@ -1,4 +1,5 @@
 /** QQQ dip-playbook rules. Pure functions, no I/O. */
+import { cnMarketStatus } from './cn-market-hours.js';
 
 export const TIER_ORDER = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'R1', 'R2'];
 export const LEFT_TIERS = ['T1', 'T2', 'T3', 'T4'];
@@ -315,6 +316,7 @@ export function emptyRound() {
     startedAt: null,
     budgetBase: null,
     referenceHighs: {},
+    executionPlans: {},
     r1SessionDate: null,
     firstT1At: null,
     hasSeenMinus22: false,
@@ -614,7 +616,7 @@ export function evaluate(input) {
 
     if (reset && !executed[id]) {
       status = 'void';
-    } else if (executed[id]) {
+    } else if (executed[id] && executed[id].complete !== false) {
       status = 'executed';
     } else if (id === 'T4') {
       if (closeMinus22) status = 'confirmed';
@@ -787,6 +789,7 @@ export function evaluate(input) {
   const evalBase = {
     B,
     availableCash,
+    cnMarket: cnMarketStatus(input.now || new Date()),
     bags,
     remaining,
     used,
@@ -846,7 +849,8 @@ function equityLeg(symbol, usd, price, note, pct, extras = {}) {
   const currency = extras.currency || 'USD';
   const cny = extras.cny != null ? roundMoney(extras.cny) : null;
   let shares = 0;
-  if (currency === 'CNY' && cny != null && px > 0) shares = Math.floor(cny / px);
+  if (currency === 'CNY' && cny != null && px > 0) shares = symbol === CNY_EQUITY_PROXY
+    ? Math.floor(cny / px / 100) * 100 : Math.floor(cny / px);
   else if (px > 0) shares = Math.floor(budget / px);
   const estNotional = currency === 'CNY' && cny != null
     ? roundMoney(shares * px)

@@ -268,12 +268,14 @@ export function createStore(config) {
       ? Number(payload.usd) || 0
       : roundMoneyLocal(cashUsd + (getCash().usdCnyRate > 0 ? cashCny / getCash().usdCnyRate : 0));
     const round = getRound();
+    const previous = round.executed?.[tier] || {};
     round.executed = {
       ...(round.executed || {}),
       [tier]: {
-        usd,
-        cashUsd,
-        cashCny,
+        usd: roundMoneyLocal((Number(previous.usd) || 0) + usd),
+        cashUsd: roundMoneyLocal((Number(previous.cashUsd) || 0) + cashUsd),
+        cashCny: roundMoneyLocal((Number(previous.cashCny) || 0) + cashCny),
+        complete: payload.complete !== false,
         at: new Date().toISOString(),
         note: payload.note || ''
       }

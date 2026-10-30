@@ -3,6 +3,7 @@ import { marketStatus, isOpenSummaryTime, isRth } from './market-hours.js';
 import { appendMarketSnapshot } from './notify.js';
 import { publishBusinessEvent } from '../../shared/business-events.js';
 import { withDeadline } from './deadline.js';
+import { captureExecutionPlan } from './execution-plan.js';
 
 const SYMBOLS = ['QQQ', 'TQQQ', 'SOXL', 'SPY'];
 
@@ -133,7 +134,8 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, stageTimeo
         }
       }
 
-      const nextRound = applyRoundFromEval(round, ev, { sessionDate: lastMarketStatus.ymd });
+      const nextRound = captureExecutionPlan(
+        applyRoundFromEval(round, ev, { sessionDate: lastMarketStatus.ymd }), ev.buyPreview);
       const fresh = newAlertKeys(ev, nextRound.firedAlerts || round.firedAlerts);
       const notify = store.getNotify();
       const pushResults = [];

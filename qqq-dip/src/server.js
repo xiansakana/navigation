@@ -15,8 +15,10 @@ import { createInternalNotificationSettingsHandler } from './notification-settin
 import { marketStatus } from './market-hours.js';
 import { evaluate, resetRound } from './playbook.js';
 import { createDocService } from './docs.js';
+import { prepareExecution, canExecutePlan, commitExecution } from './execution-plan.js';
 import {
   legsToTradeInputs,
+  getPortfolioStore,
   appendTradesDeductFormCash,
   appendTradesApplyCash
 } from '../../shared/db/portfolio-bridge.js';
@@ -254,38 +256,49 @@ app.post('/api/actions', (req, res) => {
   const body = req.body || {};
   let syncedTrades = [];
 
+  if (body.type === 'execute' && !canExecutePlan(req.headers['x-portal-permissions'])) {
+    return res.status(403).json({ error: '无档位成交登记权限' });
+  }
+  if (body.type === 'execute' && body.operation === 'cancel') {
+    const round = store.getRound();
+    const plan = round.executionPlans?.[body.tier];
+    if (!plan || plan.id !== body.planId || plan.inFlight) return res.status(409).json({ error: '计划不存在或写入待核对' });
+    plan.cancelled = true;
+    store.setRound(round);
+    store.addAction({ type: 'note', source: 'user', tier: body.tier, message: '取消未成交计划；已成交持仓及扣款不撤销' });
+    return res.json({ ok: true, evaluation: refreshEvaluation() });
+  }
+
   if (body.type === 'execute' && body.tier) {
-    const cashUsd = body.cashUsd != null ? Number(body.cashUsd) || 0 : Number(body.usd) || 0;
-    const cashCny = body.cashCny != null ? Number(body.cashCny) || 0 : 0;
-    const legs = Array.isArray(body.legs) ? body.legs : [];
+    let prepared;
+    const executionRound = store.getRound();
+    try {
+      prepared = prepareExecution(executionRound.executionPlans?.[body.tier], body, liveEval(), store.getCash());
+    } catch (error) { return res.status(409).json({ error: error.message }); }
+    if (prepared.duplicate) return res.json({ ok: true, duplicate: true, evaluation: refreshEvaluation() });
+    if (getPortfolioStore().read().accountCashEnabled) return res.status(409).json({ error: '已启用证券账户，请从持仓页选择账户记录；本次未写入计划或扣款' });
+    const { cashUsd, cashCny, legs } = prepared;
     const tradeInputs = legsToTradeInputs(legs, {
       tier: body.tier,
       note: body.note || '',
-      trade_date: new Date().toISOString()
+      trade_date: prepared.filledAt
     });
     const buyInputs = tradeInputs.filter((t) => t.type !== 'sell');
     const sellInputs = tradeInputs.filter((t) => t.type === 'sell');
+    if (buyInputs.length !== legs.length || sellInputs.length) return res.status(409).json({ error: '成交明细无效，不扣现金' });
 
-    // Form amounts are cash truth for buys; legs become trade rows without double-deduct.
-    if (buyInputs.length || cashUsd > 0 || cashCny > 0) {
-      const result = appendTradesDeductFormCash({
+    try {
+      const result = commitExecution(store, body, prepared, () => appendTradesDeductFormCash({
         trades: buyInputs,
         deductCashUsd: cashUsd,
         deductCashCny: cashCny
-      });
+      }));
       syncedTrades = syncedTrades.concat(result.trades);
-    }
-    if (sellInputs.length) {
-      const result = appendTradesApplyCash(sellInputs);
-      syncedTrades = syncedTrades.concat(result.trades);
-    }
-
-    store.markExecuted(body.tier, {
-      usd: body.usd,
-      cashUsd,
-      cashCny,
-      note: body.note
-    });
+    } catch (error) { return res.status(409).json({ error: `成交同步未完成，请核对账本后处理：${error.message}` }); }
+    body.legs = legs;
+    body.cashUsd = cashUsd;
+    body.cashCny = cashCny;
+    body.usd = prepared.usd;
   } else if (body.type === 'sell') {
     const symbol = String(body.symbol || '').trim();
     const shares = Number(body.shares);
