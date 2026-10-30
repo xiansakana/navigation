@@ -58,9 +58,12 @@
 
 /* One content-height flow for all asynchronously loaded business modules.
    Keep their hosts for event delegation and permissions; never reveal hidden hosts. */
-.business-panels { columns:420px; column-gap:18px; }
+.business-panels { columns:auto; display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr)); gap:18px; align-items:start; }
+.business-panels.masonry-ready { grid-auto-rows:1px; grid-auto-flow:dense; }
 .business-panels > .business-grid:not([hidden]) { display:contents; }
 .business-panels > .business-grid[hidden] { display:none; }
-.business-panels .business-card { display:inline-block; width:100%; box-sizing:border-box; vertical-align:top; break-inside:avoid; margin:0 0 18px; overflow-wrap:anywhere; }
+.business-panels .business-card { grid-column:auto; width:100%; box-sizing:border-box; margin:0; overflow-wrap:anywhere; container-type:inline-size; }
+.business-panels #chain-notifications .business-card { grid-column:auto; }
 .business-panels .business-loading { break-inside:avoid; }
-@media(max-width:800px) { .business-panels { column-count:1; column-width:auto; }.biz-target { grid-template-columns:80px minmax(0,1fr) 32px; } }
+@container(max-width:480px) { .biz-target { grid-template-columns:80px minmax(0,1fr) 32px; }.biz-target input[data-field="atUserId"],.biz-target input[data-field="userId"] { grid-column:2; }.biz-target button { grid-column:3;grid-row:1; }.business-card-head,.biz-watcher-head { flex-wrap:wrap; } }
+@media(max-width:800px) { .biz-target { grid-template-columns:80px minmax(0,1fr) 32px; } }
