@@ -9,7 +9,7 @@ export function createUndercutStore(db) {
       return row?.key_hash === fingerprint(watcher.apiKey) ? JSON.parse(row.snapshot) : null;
     },
     save(watcher, state) {
-      const snapshot = JSON.stringify({ activeKeys: [...state.activeKeys], alerts: [...state.alertMap] });
+      const snapshot = JSON.stringify({ activeKeys: [...state.activeKeys], alerts: [...state.alertMap], pendingMarket: [...(state.pendingMarket || new Map())] });
       db.prepare('INSERT INTO torn_undercut_runtime(watcher_id,key_hash,snapshot) VALUES(?,?,?) ON CONFLICT(watcher_id) DO UPDATE SET key_hash=excluded.key_hash,snapshot=excluded.snapshot')
         .run(watcher.id, fingerprint(watcher.apiKey), snapshot);
     }

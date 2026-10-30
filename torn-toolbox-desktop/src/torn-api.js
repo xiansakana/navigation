@@ -114,16 +114,52 @@ export async function fetchWeav3rBazaarLowest(itemId, myPlayerId, cache) {
     return best;
 }
 
-export async function fetchMarketLowestListing(apiKey, itemId, cache) {
+// Stackable market rows are anonymous price/quantity aggregates, not seller rows.
+// Reconcile against every own listing of this item, including lower-priced lots.
+export function marketLowestCompetitor(rows, ownRows = [], metadata = {}) {
+    const ownUids = new Set(), ownAmounts = new Map();
+    for (const row of ownRows) {
+        const uid = row.item?.uid;
+        if (uid != null && String(uid) !== '0') ownUids.add(String(uid));
+        else {
+            const price = toNumber(row.price), amount = toNumber(row.amount);
+            if (price > 0 && amount > 0) ownAmounts.set(price, (ownAmounts.get(price) || 0) + amount);
+        }
+    }
+    const totals = new Map();
+    for (const row of rows) if (row.item_details?.uid == null && Number.isSafeInteger(toNumber(row.amount)) && toNumber(row.amount) > 0) totals.set(toNumber(row.price), (totals.get(toNumber(row.price)) || 0) + toNumber(row.amount));
+    const coveredOwnListings = ownRows.filter(own => {
+        const uid = own.item?.uid, price = toNumber(own.price);
+        return uid != null && String(uid) !== '0'
+            ? rows.some(row => row.item_details?.uid != null && String(row.item_details.uid) === String(uid) && toNumber(row.price) === price)
+            : ownAmounts.has(price) && (totals.get(price) || 0) >= ownAmounts.get(price);
+    }).map(row => String(row.id));
+    let best = null;
+    for (const row of rows) {
+        const price = toNumber(row.price), uid = row.item_details?.uid;
+        if (!Number.isSafeInteger(price) || price <= 0 || uid != null && ownUids.has(String(uid))) continue;
+        let quantity = row.amount == null ? null : toNumber(row.amount);
+        if (quantity !== null && (!Number.isSafeInteger(quantity) || quantity <= 0)) continue;
+        if (uid == null && ownAmounts.has(price)) {
+            // Consume the budget once across all public rows at the same price.
+            // Unknown public quantities cannot prove that competitors remain.
+            if (quantity === null) continue;
+            const own = Math.min(quantity, ownAmounts.get(price));
+            ownAmounts.set(price, ownAmounts.get(price) - own); quantity -= own;
+            if (quantity <= 0) continue;
+        }
+        if (!best || price < best.price) best = { price, quantity };
+        else if (price === best.price) best.quantity = best.quantity === null || quantity === null ? null : best.quantity + quantity;
+    }
+    return best && { ...best, coveredOwnListings, cacheTimestamp: Number.isSafeInteger(metadata.cache_timestamp) ? metadata.cache_timestamp : null, cacheDelay: Number(metadata.cache_delay) || 0 };
+}
+export async function fetchMarketLowestListing(apiKey, itemId, cache, ownRows = []) {
     if (cache[itemId] !== undefined) return cache[itemId];
     var data = await fetchJsonWithRetry(
-        'https://api.torn.com/v2/market/' + itemId + '/itemmarket?key=' + encodeURIComponent(apiKey)
+        'https://api.torn.com/v2/market/' + itemId + '/itemmarket?key=' + encodeURIComponent(apiKey) + '&limit=100&sort=ASC'
     );
-    var listings = (data.itemmarket && data.itemmarket.listings) || [];
-    var lowest = listings.length ? listings.reduce(function(min, row) {
-        var price = toNumber(row.price);
-        return min === null || price < min.price ? { price: price, quantity: row.amount ?? null } : min;
-    }, null) : null;
+    if (!Array.isArray(data.itemmarket?.listings)) throw new Error('市场挂单数据无效');
+    const lowest = marketLowestCompetitor(data.itemmarket.listings, ownRows, data.itemmarket);
     cache[itemId] = lowest;
     return lowest;
 }

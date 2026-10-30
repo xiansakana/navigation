@@ -119,3 +119,16 @@ ssh -L 8790:127.0.0.1:8790 root@123.56.235.12
 ```
 
 然后本机打开 `http://127.0.0.1:8790/`（若设置了 adminToken 仍要带 `?token=`）。
+
+
+## 市场自身调价误报修复
+
+市场比较先使用完整的自身 `/user/itemmarket` 快照：非堆叠物品按 `item.uid` 与公共 `item_details.uid` 排除自身；堆叠物品按价格汇总自身 `amount`，从公共价格档数量中一次性扣除。多个自身价位一起参与排除，同价其他卖家余量仍算竞争数量。`available` 是库存剩余量，不用于抵扣在售数量。
+
+官方公共市场的堆叠挂单只有价格和数量，不提供卖家 ID，且为全局缓存，不能绝对证明两个接口读取时刻的实时归属。新市场提醒需至少跨 60 秒（或更长的官方 cache_delay），自身挂单快照和竞争低价均稳定，并看到 `cache_timestamp` 前进；重复同一缓存不算复核。自身当前挂单必须在读取的前 100 条公共记录中按 UID/价格或价格/数量得到核验；未出现、数量不足或无缓存时间时保持待核验，不强行推送。极高价挂单不在前 100 条时可能延迟或不产生提醒。自己改价、撤单或候选消失会重置/撤销待核验。
+
+候选状态同现有 activeKeys/alerts 一起持久化到 worker SQLite，Key 改变时失效。已确认的活跃压价继续去重；旧消息不重发、不清空。新市场通知会比原来晚至少一个缓存窗口，另加扫描排队时间。Bazaar 继续按 player_id 排除自己，不增加该等待。
+
+通知开关、渠道、目标及 @ 仍只在通知管理 → 业务提醒配置，不复制到业务页。回归测试 `src/undercut-self-price.test.js` 覆盖多价位自身挂单、UID、自调价错位、同价竞争余量、缓存不推进、缓存缺失和真正竞争低价。
+
+字段依据：[Torn 官方 OpenAPI](https://www.torn.com/swagger/openapi.json) 的 UserItemMarketListing / ItemMarketListingStackable / ItemMarketListingNonstackable / ItemMarket。

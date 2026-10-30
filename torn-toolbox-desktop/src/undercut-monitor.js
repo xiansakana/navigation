@@ -15,6 +15,7 @@ export class UndercutMonitor extends EventEmitter {
         super();
         this.getConfig = getConfig;
         this.store = dependencies.store;
+        this.now = dependencies.now || (() => Math.floor(Date.now() / 1000));
         this.timer = null;
         this.running = false;
         this.checking = false;
@@ -32,6 +33,7 @@ export class UndercutMonitor extends EventEmitter {
             const saved = watcher && this.store?.load(watcher);
             this.watcherStates.set(id, {
                 playerCache: {},
+                pendingMarket: new Map(saved?.pendingMarket || []),
                 activeKeys: new Set(saved?.activeKeys || []),
                 alertMap: new Map(saved?.alerts || []),
                 checks: 0,
@@ -143,10 +145,10 @@ export class UndercutMonitor extends EventEmitter {
 
         state.checks++;
         var myPlayerId = watchBazaar ? await fetchMyPlayerId(apiKey, state.playerCache) : null;
-        var listings = [];
+        var listings = [], ownMarket = [];
 
         if (watchItemMarket) {
-            var imRows = await fetchUserItemMarket(apiKey);
+            var imRows = await fetchUserItemMarket(apiKey); ownMarket = imRows;
             imRows.forEach(function(row) {
                 var item = row.item || {};
                 var itemId = item.id || item.ID;
@@ -184,6 +186,7 @@ export class UndercutMonitor extends EventEmitter {
         var imCount = listings.filter(function(e) { return e.kind === 'im'; }).length;
 
         if (!listings.length) {
+            state.pendingMarket.clear();
             state.activeKeys.clear();
             state.alertMap.clear();
             this.store?.save(watcher, state);
@@ -206,7 +209,7 @@ export class UndercutMonitor extends EventEmitter {
         var imPriceCache = {};
         var bazaarPriceCache = {};
         var currentUndercuts = new Set();
-        var newAlerts = [];
+        var newAlerts = [], pendingKeys = new Set();
 
         for (var i = 0; i < listings.length; i++) {
             var entry = listings[i];
@@ -228,7 +231,7 @@ export class UndercutMonitor extends EventEmitter {
                     undercutBy = { playerId: bazaarLow.playerId, playerName: bazaarLow.playerName };
                 }
             } else {
-                var marketLow = await fetchMarketLowestListing(apiKey, entry.itemId, imPriceCache);
+                var marketLow = await fetchMarketLowestListing(apiKey, entry.itemId, imPriceCache, ownMarket.filter(row => Number(row.item?.id || row.item?.ID) === Number(entry.itemId)));
                 if (marketLow) {
                     compareLow = marketLow.price;
                     undercutQuantity = marketLow.quantity;
@@ -236,6 +239,21 @@ export class UndercutMonitor extends EventEmitter {
             }
 
             if (compareLow !== null && compareLow < entry.myPrice) {
+                if (entry.kind === 'im' && !state.activeKeys.has(entry.key)) {
+                    const signature = JSON.stringify([entry.myPrice, compareLow, ownMarket.filter(row => Number(row.item?.id || row.item?.ID) === Number(entry.itemId)).map(row => [row.id, row.price, row.amount, row.item?.uid ?? null]).sort((a,b) => Number(a[0])-Number(b[0]))]);
+                    const now = this.now(), candidate = state.pendingMarket.get(entry.key);
+                    pendingKeys.add(entry.key);
+                    const minimumWait = Math.max(60, Math.min(3600, Number(marketLow?.cacheDelay) || 0));
+                    if (!candidate || candidate.signature !== signature || candidate.marketCacheAt === null && marketLow?.cacheTimestamp != null) {
+                        state.pendingMarket.set(entry.key, { signature, firstSeenAt: now, marketCacheAt: marketLow?.cacheTimestamp ?? null });
+                        continue;
+                    }
+                    // Do not "confirm" the same globally cached market snapshot.
+                    if (!marketLow.coveredOwnListings.includes(entry.key.slice(3))) continue;
+                    if (now - candidate.firstSeenAt < minimumWait || marketLow?.cacheTimestamp == null || candidate.marketCacheAt == null || marketLow.cacheTimestamp <= candidate.marketCacheAt) continue;
+                    state.pendingMarket.delete(entry.key); pendingKeys.delete(entry.key);
+                }
+
                 currentUndercuts.add(entry.key);
                 var alert = {
                     key: entry.key,
@@ -246,7 +264,7 @@ export class UndercutMonitor extends EventEmitter {
                     undercutQuantity: undercutQuantity,
                     compareLow: compareLow,
                     undercutBy: undercutBy,
-                    detectedAt: Math.floor(Date.now() / 1000),
+                    detectedAt: this.now(),
                     watcherId: watcher.id,
                     watcherLabel: watcher.label
                 };
@@ -257,6 +275,7 @@ export class UndercutMonitor extends EventEmitter {
             if (i < listings.length - 1) await sleep(API_DELAY_MS);
         }
 
+        for (const pending of state.pendingMarket.keys()) if (!pendingKeys.has(pending)) state.pendingMarket.delete(pending);
         state.activeKeys.forEach(function(key) {
             if (!currentUndercuts.has(key)) state.alertMap.delete(key);
         });
@@ -274,7 +293,7 @@ export class UndercutMonitor extends EventEmitter {
             }
         }
 
-        return { newAlerts: newAlerts, undercutCount: currentUndercuts.size };
+        return { newAlerts: newAlerts, undercutCount: currentUndercuts.size, pendingCount: state.pendingMarket.size };
     }
 
     async runOnce() {
@@ -296,7 +315,7 @@ export class UndercutMonitor extends EventEmitter {
         this.emit('state', this.getState());
 
         var totalUndercuts = 0;
-        var totalNew = 0;
+        var totalNew = 0, totalPending = 0;
 
         for (var i = 0; i < watchers.length; i++) {
             var watcher = watchers[i];
@@ -305,7 +324,7 @@ export class UndercutMonitor extends EventEmitter {
                 this.emit('state', this.getState());
                 var result = await this.scanWatcher(config, watcher);
                 totalUndercuts += result.undercutCount;
-                totalNew += result.newAlerts.length;
+                totalNew += result.newAlerts.length; totalPending += result.pendingCount || 0;
                 this.ensureWatcherState(watcher.id).lastError = '';
             } catch (err) {
                 this.ensureWatcherState(watcher.id).lastError = err.message;
@@ -317,7 +336,7 @@ export class UndercutMonitor extends EventEmitter {
             ? '发现 ' + totalNew + ' 个新压价提醒'
             : (totalUndercuts
                 ? '共 ' + totalUndercuts + ' 个货物被压价'
-                : '所有账号货物均为对应渠道最低价');
+                : totalPending ? totalPending + ' 个市场候选等待跨缓存及自身挂单核验，暂不通知' : '未发现其他卖家的更低价');
         this.emit('alerts', this.getAllAlerts());
         this.emit('state', this.getState());
 

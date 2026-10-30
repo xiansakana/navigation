@@ -5,7 +5,7 @@ import { UndercutMonitor } from './undercut-monitor.js';
 test('competitor listing quantities reach alerts and notifications and refresh without duplicate notifications', async function(t) {
   var bazaarQuantity = 1200;
   var marketAmount = 7;
-  var messages = [];
+  var messages = [], now = 1000;
   t.mock.method(globalThis, 'fetch', async function(url, options) {
     var address = String(url);
     var data;
@@ -19,7 +19,7 @@ test('competitor listing quantities reach alerts and notifications and refresh w
     } else if (address.includes('/user/bazaar')) {
       data = { bazaar: [{ ID: 101, name: 'Bazaar item', price: 200, quantity: 999 }] };
     } else if (address.includes('/market/100/itemmarket')) {
-      data = { itemmarket: { listings: [{ price: 150, amount: 555 }, { price: 100, amount: marketAmount }] } };
+      data = { itemmarket: { cache_timestamp: now, listings: [{price:200,amount:999}, { price: 150, amount: 555 }, { price: 100, amount: marketAmount }] } };
     } else {
       assert.match(address, /101\?limit=100$/);
       data = { listings: [{ player_id: 456, player_name: 'Seller', price: 100, quantity: bazaarQuantity }] };
@@ -28,13 +28,15 @@ test('competitor listing quantities reach alerts and notifications and refresh w
   });
   var watcher = { id: 'w1', label: 'Account', apiKey: 'test', watchBazaar: true, watchItemMarket: true };
   var config = { undercut: { watchers: [watcher] }, notify: { qq: { url: 'http://127.0.0.1:8787', token: 'test' } } };
-  var monitor = new UndercutMonitor(function() { return config; });
+  var monitor = new UndercutMonitor(function() { return config; }, { now: () => now });
   await monitor.scanWatcher(config, watcher);
+  assert.equal(messages.length,1,'Bazaar stays immediate; new market alert waits for cache confirmation');
+  now=1060;await monitor.scanWatcher(config, watcher);
   assert.equal(monitor.getAllAlerts().find(a => a.source === 'Bazaar').undercutQuantity, 1200);
   assert.equal(monitor.getAllAlerts().find(a => a.source === 'Item Market').undercutQuantity, 7);
   assert.equal(messages.length, 2);
-  assert.match(messages[0], /压价挂单数量：7 件/);
-  assert.match(messages[1], /压价挂单数量：1,200 件/);
+  assert.match(messages[1], /压价挂单数量：7 件/);
+  assert.match(messages[0], /压价挂单数量：1,200 件/);
 
   bazaarQuantity = 0;
   marketAmount = undefined;

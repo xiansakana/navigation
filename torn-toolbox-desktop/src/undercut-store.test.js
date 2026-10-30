@@ -8,10 +8,11 @@ const require = createRequire(import.meta.url), Database = require('../../portal
 test('undercut restart preserves active alerts and invalidates snapshot on watcher key changes', () => {
   const db = new Database(':memory:'), store = createUndercutStore(db), watcher = { id: 'a', apiKey: '1234567890abcdef', enabled: true };
   try {
-    store.save(watcher, { activeKeys: new Set(['market:1']), alertMap: new Map([['market:1', { key: 'market:1' }]]) });
+    store.save(watcher, { activeKeys: new Set(['market:1']), alertMap: new Map([['market:1', { key: 'market:1' }]]), pendingMarket:new Map([['im-2',{signature:'test',firstSeenAt:1000,marketCacheAt:1000}]]) });
     const monitor = new UndercutMonitor(() => ({ undercut: { watchers: [watcher] } }), { store });
     assert.ok(monitor.ensureWatcherState('a').activeKeys.has('market:1'));
     assert.equal(monitor.getAllAlerts().length, 1);
+    assert.equal(monitor.ensureWatcherState('a').pendingMarket.get('im-2').firstSeenAt,1000);
     assert.equal(store.load({ ...watcher, apiKey: 'different-key' }), null);
     assert.equal(store.load({ ...watcher, id: 'b' }), null);
     assert.ok(!db.prepare('SELECT snapshot,key_hash FROM torn_undercut_runtime').get().key_hash.includes(watcher.apiKey));
