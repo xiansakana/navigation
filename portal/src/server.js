@@ -1,7 +1,7 @@
 import { instrumentRequest } from '../../shared/request-log.js';
 import { moduleApiHandler } from './module-api.js';
 import { tornToolboxAccess } from './torn-toolbox-access.js';
-import { moduleInventory, findModuleApi } from './modules.js';
+import { moduleInventory, findModuleApi, TORN_MONITOR_ASSETS } from './modules.js';
 import { requestDataAccess, scopedSession, availableDataAccess, scopeCookie, auditDataAccess, stripPortalIdentity } from './data-access.js';
 import { accessModules, modulePolicy, moduleForPath } from './access-policy.js';
 import { readJson, sameOriginWrite } from '../../shared/http.js';
@@ -724,7 +724,7 @@ async function handleRequest(req, res) {
         if (!chainSession) return;
         if (!canTornChain(chainSession)) return sendError(req, res, url, 403, '无权访问监控');
         const file = url.pathname.replace(/^\/torn-toolbox\/chain\/?/, '') || 'index.html';
-        if (!['index.html', 'app.js', 'factions.js', 'style.css'].includes(file)) return json(res, 404, { ok: false, error: 'Not Found' });
+        if (!TORN_MONITOR_ASSETS.includes(file)) return json(res, 404, { ok: false, error: 'Not Found' });
         res.setHeader('Cache-Control', 'no-store');
         return serveStatic(path.join(PUBLIC_DIR, 'torn-toolbox', 'chain', file), res);
     }

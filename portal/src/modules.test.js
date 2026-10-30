@@ -28,3 +28,17 @@ test('future permission catalog additions are not automatically granted to membe
     assert.ok(!resolveLoggedInPermissions({ roles: [] }, { username: 'member' }).includes(permission.id));
   } finally { SYSTEM_PERMISSIONS.splice(SYSTEM_PERMISSIONS.indexOf(permission), 1); }
 });
+
+
+test('every native monitor HTML asset is registered in the production static allowlist', async () => {
+  const { TORN_MONITOR_ASSETS } = await import('./modules.js');
+  const { readFile } = await import('node:fs/promises');
+  const html = await readFile(new URL('../public/torn-toolbox/chain/index.html', import.meta.url), 'utf8');
+  const server = await readFile(new URL('./server.js', import.meta.url), 'utf8');
+  assert.match(server, /TORN_MONITOR_ASSETS\.includes\(file\)/);
+  for (const match of html.matchAll(/(?:src|href)="\/torn-toolbox\/chain\/([^"?]+)(?:\?[^" ]*)?"/g)) {
+    assert.ok(TORN_MONITOR_ASSETS.includes(match[1]), match[1] + ' must be served by Portal');
+    assert.ok((await readFile(new URL('../public/torn-toolbox/chain/' + match[1], import.meta.url))).length);
+  }
+  assert.ok(!TORN_MONITOR_ASSETS.includes('../config.json'));
+});

@@ -66,3 +66,6 @@ export function moduleInventory(db, services = []) {
     runtime: ['torn-company', 'torn-undercut'].includes(service.id) ? 'torn-monitor-worker' : service.type === 'external' ? 'external' : service.id, status: service.enabled === false ? 'disabled' : 'registered', tasks: {}, records: null
   })));
 }
+
+// Native monitor page assets must bypass the toolbox proxy as one allowlisted bundle.
+export const TORN_MONITOR_ASSETS = Object.freeze(['index.html', 'app.js', 'factions.js', 'users.js', 'style.css']);
