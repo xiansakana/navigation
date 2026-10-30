@@ -31,8 +31,9 @@ export function createChainNotifier({ endpoint, token, fetchImpl = fetch, testMe
     let message = row ? `[Torn Chain] ${row.name} · ${row.hits} hits 刚进入冷却\nReport：\nhttps://www.torn.com/war.php?step=chainreport&chainID=${Number(row.id)}` : '[Torn Chain] 测试通知 · 配置正常';
     if (row?.kind === 'destruction') message = `[Torn 帮派摧毁] ${row.name} [${row.id}] 已确认摧毁\nrespect：${row.previousRespect} → ${row.respect}\n最后存活：${new Date(row.lastAliveAt * 1000).toISOString()}\n发现摧毁：${new Date(row.detectedAt * 1000).toISOString()}\n帮派：\nhttps://www.torn.com/factions.php?step=profile&ID=${Number(row.id)}\n原 Leader [${row.leaderId}]：\nhttps://www.torn.com/profiles.php?XID=${Number(row.leaderId)}\n摧毁原因未知，未判定为 Bonus 导致。`;
     if (row?.kind === 'shopping') message = `[Torn 扫货] ${row.name} [${row.itemId}]\n${row.source === 'market' ? '市场' : '巴扎'}：$${row.price} × ${row.quantity}\n${row.link}`;
+    if (row?.kind === 'user-hospital') message = `[Torn 出院提醒] ${row.name} [${row.id}]\n预计出院（UTC）：${new Date(row.hospitalUntil * 1000).toISOString()}\n当前剩余 ${row.remainingSeconds} 秒（设置提前 ${row.leadMinutes} 分钟）\n${row.link}\n时间基于最近官方 API 状态，可能因医疗或再次入院变化。`;
     if (!row) message = testMessage;
-    if (row && !['destruction', 'shopping'].includes(row.kind)) for (const bonus of selectedBonusDefenders(row, row.bonusSelection, row.leaderFilter)) {
+    if (row && !['destruction', 'shopping', 'user-hospital'].includes(row.kind)) for (const bonus of selectedBonusDefenders(row, row.bonusSelection, row.leaderFilter)) {
       message += `\nBonus #${bonus.hit} 被打玩家${bonus.defenderId ? ' [' + bonus.defenderId + ']' : ''}${typeof bonus.isLeader === 'boolean' ? bonus.isLeader ? '（Leader）' : '（非 Leader）' : ''}：` + (bonus.defenderId ? `\nhttps://www.torn.com/profiles.php?XID=${bonus.defenderId}` : '暂不可用，请查看 report');
     }
     let failed = 0;

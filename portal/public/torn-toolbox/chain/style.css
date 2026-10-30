@@ -49,3 +49,5 @@
 @media (max-width: 700px) { .faction-result dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 .chain-fields textarea { min-width: 0; resize: vertical; font: inherit; }
+
+#users-view .users-table-wrap{overflow-x:auto}#users-view table{min-width:700px;width:100%}#users-history article{padding:12px 0;border-bottom:1px solid var(--border,#344254)}#users-view textarea{max-width:100%;box-sizing:border-box}#users-view p{overflow-wrap:anywhere}

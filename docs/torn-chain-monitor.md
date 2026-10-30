@@ -44,3 +44,6 @@
 “帮派筛选”Tab 的配置、历史缓存、进度与权限独立，详见[帮派筛选说明](torn-faction-screener.md)。
 
 依据：[官方 OpenAPI](https://www.torn.com/swagger/openapi.json) 的 faction/search、ApiFactionSearchFilter、FactionSearch；[官方帮派摧毁规则](https://wiki.torn.com/wiki/Faction#Faction_Destruction)。
+
+
+用户出院监控已作为同页第三个 Tab 接入，使用独立权限、Keys、运行状态和通知设置。详见 [用户监控](torn-users-monitor.md)。

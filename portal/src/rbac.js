@@ -180,6 +180,11 @@ var SYSTEM_PERMISSIONS = [
         ['notify:test:edit', '测试扫货通知', ['发送测试']]
     ].map(([id,name,parts])=>({id:'torn-shopping:'+id,name,group:id.startsWith('notify:')?'通知管理':'Torn 工具箱',serviceId:id.startsWith('notify:')?'notifications':'torn-toolbox',action:id.endsWith('edit')?'edit':'view',permissionPath:id.startsWith('notify:')?['首页','通知管理','业务提醒','扫货助手',...parts]:['首页','Torn 工具箱','扫货助手',...parts]})),
     ...[
+        ['view', '查看用户监控', []], ['config:edit', '保存监控用户、提前时间和 API Keys', ['监控配置', '保存']],
+        ['control:edit', '启动或停止用户监控', ['监控控制']], ['history:edit', '清空出院提醒记录', ['提醒记录', '清空']],
+        ['notify:view', '查看用户出院通知配置', []], ['notify:edit', '保存用户出院通知配置', ['保存配置']], ['notify:test:edit', '测试用户出院通知', ['发送测试']]
+    ].map(([id,name,parts])=>({id:'torn-users:'+id,name,group:id.startsWith('notify:')?'通知管理':'Torn 工具箱',serviceId:id.startsWith('notify:')?'notifications':'torn-toolbox',action:id.endsWith('edit')?'edit':'view',permissionPath:id.startsWith('notify:')?['首页','通知管理','业务提醒','用户出院',...parts]:['首页','Torn 工具箱','监控','用户监控',...parts]})),
+    ...[
         ['view', '查看自己的监控', [], 'view'],
         ['config:edit', '保存自己的 respect 范围和 API Keys', ['配置'], 'edit'],
         ['control:edit', '启动或停止自己的监控', ['监控控制'], 'edit'],
@@ -417,6 +422,10 @@ function ensureGuestAccess(data, config) {
             'codex-cli:view', 'knowledge:view', 'knowledge:notes:view', 'mingli:view', 'mingli:chart:calculate'
         )));
         data.guestModuleBrowsingVersion = 1;
+    }
+    if (newGuestRole || !data.guestUsersBrowsingVersion) {
+        guestRole.permissions = Array.from(new Set((guestRole.permissions || []).concat('torn-users:view')));
+        data.guestUsersBrowsingVersion = 1;
     }
     if (newGuestRole || !data.guestChainBrowsingVersion) {
         guestRole.permissions = Array.from(new Set((guestRole.permissions || []).concat('torn-chain:view')));

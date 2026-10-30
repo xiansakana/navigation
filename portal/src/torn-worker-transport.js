@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { readJson, sameOriginWrite } from '../../shared/http.js';
 import { sessionSecret } from './login-security.js';
 
-export const TORN_WORKER_MODULES = ['torn-shopping', 'torn-chain', 'torn-factions'];
+export const TORN_WORKER_MODULES = ['torn-shopping', 'torn-chain', 'torn-factions', 'torn-users'];
 export function tornWorkerPort(config) {
   const port = config.runtime?.tornMonitorWorkerPort ?? 8792;
   if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error('Invalid Torn worker port');

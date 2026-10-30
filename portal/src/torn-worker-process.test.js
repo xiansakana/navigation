@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { createUsersStore } from './torn-users-monitor.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -26,12 +27,13 @@ test('one worker owns all five services and restores running intent after proces
   db.prepare('INSERT INTO trades(id,data) VALUES(?,?)').run('fixture', '{}');
   saveRbacBlob(db, { users: [{ id: 'usr_admin', username: 'admin', enabled: true, roleIds: ['role_admin'] }], roles: [{ id: 'role_admin', permissions: ['*'] }], permissions: [], menus: [], userPrefs: {} });
   createShoppingStore(db).save('usr_admin', { apiKey: '1234567890abcdef', intervalSeconds: 1, items: [{ id: 1, market: 1 }] });
-  const runs = createTornRunStore(db); runs.set('torn-shopping', 'usr_admin', true); runs.set('torn-chain', 'usr_admin', false); runs.set('torn-factions', 'usr_admin', false);
+  createUsersStore(db).save('usr_admin', { apiKey: '1234567890abcdef', targets: [1] });
+  const runs = createTornRunStore(db); runs.set('torn-users', 'usr_admin', true); runs.set('torn-shopping', 'usr_admin', true); runs.set('torn-chain', 'usr_admin', false); runs.set('torn-factions', 'usr_admin', false);
   db.close();
   const portalFile = path.join(dir, 'portal.json'), companyFile = path.join(dir, 'company.json'), undercutFile = path.join(dir, 'undercut.json'), preload = path.join(dir, 'mock.mjs');
   await writeFile(portalFile, JSON.stringify(config));
   for (const [file, service, servicePort] of [[companyFile, 'company', companyPort], [undercutFile, 'undercut', undercutPort]]) await writeFile(file, JSON.stringify({ server: { host: '127.0.0.1', port: servicePort }, [service]: { autoStart: true, intervalSeconds: 30, watchers: [{ id: 'fixture', apiKey: '1234567890abcdef', watchBazaar: false, watchItemMarket: true }] } }));
-  await writeFile(preload, `const real=globalThis.fetch;globalThis.fetch=async(input,options)=>{const u=new URL(input);if(u.hostname==='api.torn.com')return Response.json({info:{user:{id:123}},applications:{},itemmarket:u.pathname.includes('/market/')?{listings:[]}:[],bazaar:[],player_id:123});if(u.hostname==='127.0.0.1')return real(input,options);throw Error('Unexpected external request blocked in test');};`);
+  await writeFile(preload, `const real=globalThis.fetch;globalThis.fetch=async(input,options)=>{const u=new URL(input);if(u.hostname==='api.torn.com')return Response.json({profile:{id:1,name:'Fixture',status:{state:'Hospital',until:Math.floor(Date.now()/1000)+3600}},info:{user:{id:123}},applications:{},itemmarket:u.pathname.includes('/market/')?{listings:[]}:[],bazaar:[],player_id:123});if(u.hostname==='127.0.0.1')return real(input,options);throw Error('Unexpected external request blocked in test');};`);
   await Promise.all(reservations.map(server => new Promise(resolve => server.close(resolve))));
   let child, output = '';
   const env = { ...process.env, NAVIGATION_DB_PATH: dbPath, PORTAL_CONFIG_PATH: portalFile, TORN_COMPANY_CONFIG_PATH: companyFile, TORN_UNDERCUT_CONFIG_PATH: undercutFile, TORN_COMPANY_STATE_FILE: path.join(dir, 'company-state.json') };
@@ -52,13 +54,13 @@ test('one worker owns all five services and restores running intent after proces
     const timer = setTimeout(() => child.kill('SIGKILL'), 5000);
     try { await exited; } finally { clearTimeout(timer); }
   };
-  const api = async (action, permissions = ['*']) => {
-    const text = JSON.stringify({ at: Date.now(), nonce: randomBytes(16).toString('hex'), method: action === 'state' ? 'GET' : 'POST', path: '/api/torn-shopping/' + action, session: { userId: 'usr_admin', permissions }, headers: { host: '127.0.0.1' }, body: action === 'state' ? null : {} });
+  const api = async (action, permissions = ['*'], module = 'torn-shopping') => {
+    const text = JSON.stringify({ at: Date.now(), nonce: randomBytes(16).toString('hex'), method: action === 'state' ? 'GET' : 'POST', path: '/api/' + module + '/' + action, session: { userId: 'usr_admin', permissions }, headers: { host: '127.0.0.1' }, body: action === 'state' ? null : {} });
     const response = await fetch('http://127.0.0.1:' + port + '/dispatch', { method: 'POST', headers: { 'X-Torn-Signature': workerSignature(text, config) }, body: text });
     return { status: response.status, data: await response.json() };
   };
   try {
-    const first = await start(); assert.equal((await api('state')).data.state.running, true);
+    const first = await start(); assert.equal((await api('state', ['*'], 'torn-users')).data.state.running, true); assert.equal((await api('stop', ['torn-users:view'], 'torn-users')).status, 403); assert.equal((await api('state')).data.state.running, true);
     const lock = new Database(dbPath);
     lock.exec('BEGIN IMMEDIATE');
     try { await delay(11000); } finally { lock.exec('ROLLBACK'); lock.close(); }
@@ -67,8 +69,8 @@ test('one worker owns all five services and restores running intent after proces
     for (const [servicePort, service] of [[companyPort, 'company'], [undercutPort, 'undercut']]) assert.equal((await (await fetch('http://127.0.0.1:' + servicePort + '/api/state')).json())[service].running, true);
     assert.equal((await api('stop', ['torn-shopping:view'])).status, 403); assert.equal((await api('state')).data.state.running, true);
     const untrusted = await fetch('http://127.0.0.1:' + port + '/dispatch', { method: 'POST', body: '{}' }); assert.equal(untrusted.status, 403);
-    await stop(); const second = await start(); assert.notEqual(first.pid, second.pid); assert.equal((await api('state')).data.state.running, true);
-    assert.equal((await api('stop')).status, 200); await stop(); await start(); assert.equal((await api('state')).data.state.running, false);
+    await stop(); const second = await start(); assert.equal((await api('state', ['*'], 'torn-users')).data.state.running, true); assert.notEqual(first.pid, second.pid); assert.equal((await api('state')).data.state.running, true);
+    assert.equal((await api('stop', ['*'], 'torn-users')).status, 200); assert.equal((await api('stop')).status, 200); await stop(); await start(); assert.equal((await api('state')).data.state.running, false); assert.equal((await api('state', ['*'], 'torn-users')).data.state.running, false);
     assert.ok(!JSON.stringify((await api('state')).data.config).includes('1234567890abcdef'));
   } finally {
     await stop();

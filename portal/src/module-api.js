@@ -11,7 +11,9 @@ import { handleQqCodexApi } from './qq-codex.js';
 import { handleCodexCliApi } from './codex-cli.js';
 
 import { handleTornShoppingApi } from './torn-shopping.js';
+import { handleTornUsersApi } from './torn-users.js';
 const handlers = {
+  'torn-users': (req,res,url,session,deps) => handleTornUsersApi(req,res,url,session,deps.json,deps.config),
   'torn-shopping': (req,res,url,session,deps) => handleTornShoppingApi(req,res,url,session,deps.json,deps.config),
   'torn-factions': (req, res, url, session, deps) => handleFactionApi(req, res, url, session, deps.json, deps.config),
   'torn-chain': (req, res, url, session, deps) => handleTornChainApi(req, res, url, session, deps.json, deps.config),

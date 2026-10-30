@@ -15,6 +15,7 @@ function blogApi(pathname, method) {
 
 // Single catalog for built-in module entry points, API ownership, menus and observability.
 export const PORTAL_MODULES = Object.freeze([
+  { id: 'torn-users', title: '用户监控', namespace: 'torn-users', runtime: 'torn-monitor-worker', tables: ['torn_user_monitors'], apiPrefix: '/api/torn-users/' },
   { id: 'torn-shopping', title: '扫货助手', namespace: 'torn-shopping', runtime: 'torn-monitor-worker', tables: ['torn_shopping'], apiPrefix: '/api/torn-shopping/' },
   { id: 'torn-factions', title: '帮派筛选', namespace: 'torn-factions', runtime: 'torn-monitor-worker', tables: ['torn_faction_scans', 'torn_faction_rows', 'torn_faction_networth'], apiPrefix: '/api/torn-factions/' },
   { id: 'torn-chain', title: '监控', namespace: 'torn-chain', runtime: 'torn-monitor-worker', tables: ['torn_chain_monitors', 'torn_chain_notifications', 'torn_destruction_monitors', 'torn_destruction_observations'], apiPrefix: '/api/torn-chain/' },

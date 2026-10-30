@@ -30,6 +30,8 @@ test('guest account status, roles and explicitly configured cash permissions sur
 test('guest Chain view is granted once and later administrator revocation is respected', () => {
   const rbac = { users: [], roles: [] }, config = { services: [] };
   ensureGuestAccess(rbac, config); const role = rbac.roles.find(role => role.id === 'role_guest');
+  assert.ok(role.permissions.includes('torn-users:view')); assert.ok(!role.permissions.includes('torn-users:control:edit'));
+  role.permissions = role.permissions.filter(p => p !== 'torn-users:view'); ensureGuestAccess(rbac, config); assert.ok(!role.permissions.includes('torn-users:view'));
   assert.ok(role.permissions.includes('torn-chain:view')); assert.ok(!role.permissions.includes('torn-chain:control:edit'));
   assert.ok(role.permissions.includes('torn-factions:view')); assert.ok(!role.permissions.includes('torn-factions:control:edit'));
   role.permissions = role.permissions.filter(p => p !== 'torn-chain:view'); ensureGuestAccess(rbac, config);

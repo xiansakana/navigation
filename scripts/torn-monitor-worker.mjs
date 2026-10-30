@@ -7,6 +7,7 @@ import { moduleApiHandler } from '../portal/src/module-api.js';
 import { verifyWorkerMessage, tornWorkerPort } from '../portal/src/torn-worker-transport.js';
 import { createTornRunStore } from '../portal/src/torn-worker-runs.js';
 import { createTornWorkerRuntime, tickTornWorker } from '../portal/src/torn-worker-runtime.js';
+import { userJobs } from '../portal/src/torn-users.js';
 import { shoppingJobs } from '../portal/src/torn-shopping.js';
 import { destructionJobs } from '../portal/src/torn-chain.js';
 import { factionJobs } from '../portal/src/torn-factions.js';
@@ -20,7 +21,7 @@ const startedAt = Date.now(), seen = new Map();
 let stopping = false, ready = false;
 installWorkerApi(portalTornRequest, bazaarListings, controller.signal);
 const runtime = createTornWorkerRuntime({ runs: createTornRunStore(db), config,
-  jobs: () => ({ 'torn-shopping': shoppingJobs(), 'torn-chain': destructionJobs(), 'torn-factions': factionJobs() }),
+  jobs: () => ({ 'torn-shopping': shoppingJobs(), 'torn-chain': destructionJobs(), 'torn-factions': factionJobs(), 'torn-users': userJobs() }),
   sessionFor: uid => { const current = resolveSessionUser({ userId: uid }, config); return current && { userId: current.user.id, permissions: current.permissions, isGuest: current.user.username === (config.auth?.guestUsername || 'guest') }; },
   dispatch: (req, res, url, session, deps) => moduleApiHandler(url.pathname)(req, res, url, session, deps)
 });
@@ -44,7 +45,7 @@ const undercut = await import('../torn-toolbox-desktop/src/server-undercut.js');
 await runtime.resume();
 ready = true;
 const timer = setInterval(() => tickTornWorker(runtime, db), 5000);
-console.log('Torn monitor worker ready (five monitors; control on loopback :' + tornWorkerPort(config) + ')');
+console.log('Torn monitor worker ready (six monitors; control on loopback :' + tornWorkerPort(config) + ')');
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => {
   if (stopping) return;
   stopping = true; clearInterval(timer);

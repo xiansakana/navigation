@@ -7,7 +7,7 @@
   <script defer src="/ui/back-to-top.js?v=1"></script>
   <link rel="stylesheet" href="/portal.css?v=layout-20261018">
   <link rel="stylesheet" href="/experience.css?v=mobile-sheets-1">
-  <link rel="stylesheet" href="/torn-toolbox/chain/style.css?v=factions-2">
+  <link rel="stylesheet" href="/torn-toolbox/chain/style.css?v=users-1">
 </head>
 <body class="portal-experience has-navbar portal-layout-enabled">
   <header class="navbar"><div class="navbar-inner">
@@ -17,7 +17,7 @@
   </div></header>
   <main class="chain-app" data-layout-container>
     <h1>监控</h1>
-    <div class="toolbox-tabs" role="tablist" aria-label="工具箱功能"><button type="button" id="tab-chain" role="tab" aria-selected="true" aria-controls="chain-view">帮派摧毁监控</button><button type="button" id="tab-factions" role="tab" aria-selected="false" aria-controls="faction-view" hidden>帮派筛选</button></div>
+    <div class="toolbox-tabs" role="tablist" aria-label="工具箱功能"><button type="button" id="tab-chain" role="tab" aria-selected="true" aria-controls="chain-view">帮派摧毁监控</button><button type="button" id="tab-factions" role="tab" aria-selected="false" aria-controls="faction-view" hidden>帮派筛选</button><button type="button" id="tab-users" role="tab" aria-selected="false" aria-controls="users-view" hidden>用户监控</button></div>
     <section id="chain-view" role="tabpanel" aria-labelledby="tab-chain">
       <p>持续观察范围内存活帮派的 respect。首次扫描建立基线；帮派从列表消失后按 ID 单独核验，确认已摧毁才记录和通知。摧毁原因不作 Bonus 归因。</p>
       <p>通知在<a href="/notifications/#chain-notifications">通知管理 → 业务提醒 → 帮派摧毁</a>配置，沿用原通知渠道和目标。</p>
@@ -66,10 +66,33 @@
       <section class="chain-panel"><h3>扫描进度</h3><p id="faction-status"></p><p id="faction-progress"></p></section>
       <section class="chain-panel"><div class="chain-monitor-heading"><h3>respect 升序结果</h3><label>显示 <select id="faction-filter"><option value="all">全部</option><option value="match">命中</option><option value="excluded">已排除</option><option value="unknown">待确认</option><option value="waiting">待扫描</option></select></label></div><p id="faction-counts"></p><div id="faction-results"></div><div class="chain-actions"><button type="button" id="faction-prev" class="btn ghost" disabled>上一页</button><span id="faction-page"></span><button type="button" id="faction-next" class="btn ghost" disabled>下一页</button></div></section>
     </section>
+    <section id="users-view" role="tabpanel" aria-labelledby="tab-users" hidden>
+      <h2>用户监控 · 出院提醒</h2>
+      <p>监控多个用户的 Hospital 状态，默认在预计出院前 1 分钟提醒。时间变更后重新计算；已经出院不补发。提醒依据官方 API，包含缓存、账号请求间隔及扫描延迟。</p>
+      <p>渠道、QQ 目标及 @ 在<a href="/notifications/#users-notifications">通知管理 → 业务提醒 → 用户出院</a>配置。</p>
+      <p id="users-readonly" class="chain-note" hidden>当前为只读查看；配置、启停及清空记录需要相应编辑权限。</p>
+      <section class="chain-panel"><form id="users-form"><div class="chain-fields">
+        <label>监控用户（每行一个 ID 或 Torn profile 链接，最多 100 个）<textarea id="users-targets" rows="5" required disabled></textarea></label>
+        <label>提前提醒（分钟）<input id="users-leadMinutes" type="number" min="0.1" max="1440" step="0.1" required disabled></label>
+        <label>扫描间隔（秒）<input id="users-intervalSeconds" type="number" min="5" max="3600" required disabled></label>
+        <label>API 请求间隔（秒/账号）<input id="users-apiIntervalSeconds" type="number" min="1" max="60" step="0.1" required disabled></label>
+        <label>Public API Keys（每行一个，最多 10 个）<textarea id="users-apiKeys" rows="3" maxlength="200" autocomplete="off" spellcheck="false" placeholder="留空保留已保存 Keys；填写替换" disabled></textarea></label>
+      </div><p id="users-key-status"></p><div class="chain-actions">
+        <button type="submit" id="users-save" class="btn" hidden>保存用户配置</button>
+        <button type="button" id="users-clear-keys" class="btn ghost" hidden>删除全部 Keys</button>
+        <button type="button" id="users-start" class="btn" hidden>启动用户监控</button>
+        <button type="button" id="users-stop" class="btn ghost" hidden>停止用户监控</button>
+        <button type="button" id="users-clear" class="btn ghost" hidden>清空提醒记录</button>
+      </div></form><p class="chain-note">保存配置会停止本项监控，请重新启动。同账号多个 Key 与其他 Torn 监控共享额度；失效 Key 跳过，网络或限流自动等待重试。已知提醒节点会提早安排下一次核验，仍不能保证精确提前量。首次发现已进入提醒窗口且尚未出院时也会提醒。同一用户同一出院时间只记录一次；清空记录不清除去重。服务器重启恢复运行意图。</p></section>
+      <p id="users-message" role="status" aria-live="polite"></p>
+      <section class="chain-panel"><h3>用户状态</h3><p id="users-status">正在加载…</p><p id="users-notification-error"></p><div class="users-table-wrap"><table class="chain-monitor-table"><thead><tr><th>用户</th><th>状态</th><th>预计出院</th><th>剩余时间</th><th>提醒时间</th><th>最近核验 / 问题</th></tr></thead><tbody id="users-rows"></tbody></table></div></section>
+      <section class="chain-panel"><h3>出院提醒记录</h3><div id="users-history"></div><div class="chain-actions"><button type="button" id="users-prev" class="btn ghost">上一页</button><span id="users-page"></span><button type="button" id="users-next" class="btn ghost">下一页</button></div></section>
+    </section>
   </main>
   <script src="/theme.js"></script>
   <script src="/layout.js?v=layout-20261018"></script>
   <script src="/torn-toolbox/chain/app.js?v=destruction-4"></script>
-  <script src="/torn-toolbox/chain/factions.js?v=9"></script>
+  <script src="/torn-toolbox/chain/factions.js?v=10"></script>
+  <script src="/torn-toolbox/chain/users.js?v=1"></script>
 </body>
 </html>

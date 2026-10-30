@@ -12,6 +12,9 @@
     const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.error || '帮派筛选操作失败'); return data;
   }
   function tab(factions) {
+    if (location.hash === '#users') return;
+    const users = $('users-view'); if (users) users.hidden = true;
+    $('tab-users')?.setAttribute('aria-selected','false');
     if (factions && !loaded) return;
     $('chain-view').hidden = factions; $('faction-view').hidden = !factions;
     $('tab-chain').setAttribute('aria-selected', String(!factions)); $('tab-factions').setAttribute('aria-selected', String(factions));
