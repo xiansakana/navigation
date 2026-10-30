@@ -17,7 +17,7 @@
     $('monitor-chains').replaceChildren(...rows.map(row => {
       const tr = document.createElement('tr'); tr.dataset.factionId = row.id;
       const change = Number.isSafeInteger(row.previousRespect) ? row.respect - row.previousRespect : null;
-      for (const [label, content] of [['帮派', factionLink(row)], ['Leader', leaderLink(row)], ['respect', row.respect.toLocaleString()], ['变化', change === null ? '基线' : (change > 0 ? '+' : '') + change], ['最近存活', date(row.lastAliveAt)], ['核验说明', problems.get(row.id) || 'API 确认存活']]) {
+      for (const [label, content] of [['帮派', factionLink(row)], ['Leader', leaderLink(row)], ['respect', row.respect.toLocaleString()], ['变化', change === null ? '基线' : (change > 0 ? '+' : '') + change], ['最近存活', date(row.lastAliveAt)], ['核验说明', problems.get(row.id) || (row.respect === 0 ? 'respect 已清零，尚未标记摧毁' : 'API 确认存活')]]) {
         const td = document.createElement('td'); td.dataset.label = label; if (typeof content === 'string') td.textContent = content; else td.append(content); tr.append(td);
       } return tr;
     }));
@@ -34,17 +34,17 @@
     $('key-status').textContent = config.hasKey ? `已保存 ${config.keyCount} 个 Key（不回传浏览器）` : '请保存具有公开信息权限的 Torn API Key';
     const retry = state.retryAt ? ` · ${state.retryMessage} · 约 ${Math.max(0, Math.ceil(state.retryAt - Date.now() / 1000))} 秒后重试` : '';
     $('status').textContent = `${state.running ? state.busy ? '扫描中' : '运行中' : state.busy ? '正在停止' : '已停止'} · 已完成 ${state.rounds} 轮 · 最近扫描 ${date(state.lastScanAt)} · 下轮 ${date(state.nextScanAt)}${retry}`;
-    $('coverage').textContent = `本轮列表 ${state.pages || 0} 页 · 跟踪 ${state.tracked || 0} · 核验 ${state.confirmed || 0} · 本次运行发现摧毁 ${state.destroyed || 0} · 范围外已跳过 ${state.outsideRange || 0} · 待确认 ${state.failed || 0}${state.partial ? ' · 本轮未完成' : ''}${state.error ? ' · ' + state.error : ''}${state.notificationError ? ' · ' + state.notificationError : ''}` + (Number.isInteger(state.keyCount) ? ` · Key 可用 ${state.availableKeyCount}/${state.keyCount} · 账号 ${state.ownerCount}` : '') + (state.skippedKeys || []).map(row => ` · 已跳过 Key #${row.index}：${row.reason}`).join('');
-    $('monitor-hint').textContent = state.detailsStale ? '本轮列表尚未完整返回，保留之前的存活基线。' : '最新完整列表：' + date(state.detailsAt);
+    $('coverage').textContent = `本轮列表 ${state.pages || 0} 页 · 跟踪 ${state.tracked || 0} · 核验 ${state.confirmed || 0} · 本次运行发现清零 ${state.zeroed || 0} · 其他摧毁告警 ${state.destroyed || 0} · 范围外已跳过 ${state.outsideRange || 0} · 待确认 ${state.failed || 0}${state.partial ? ' · 本轮未完成' : ''}${state.error ? ' · ' + state.error : ''}${state.notificationError ? ' · ' + state.notificationError : ''}` + (Number.isInteger(state.keyCount) ? ` · Key 可用 ${state.availableKeyCount}/${state.keyCount} · 账号 ${state.ownerCount}` : '') + (state.skippedKeys || []).map(row => ` · 已跳过 Key #${row.index}：${row.reason}`).join('');
+    $('monitor-hint').textContent = state.detailsStale ? '本轮列表尚未完整；明确清零已即时处理，其余存活基线保留。' : '最新完整列表：' + date(state.detailsAt);
     renderRows(); $('count').textContent = '(' + history.length + ')';
     const articles = history.map(row => {
       const article = document.createElement('article'); article.className = 'chain-row';
       const content = document.createElement('div'), title = document.createElement('strong'), info = document.createElement('p'), reason = document.createElement('p');
-      title.textContent = '已确认摧毁 · '; title.append(factionLink(row));
-      info.textContent = `最后存活 ${date(row.lastAliveAt)} · 发现摧毁 ${date(row.detectedAt)} · respect ${row.previousRespect} → ${row.respect}`;
-      reason.textContent = '原因未知；未判定为 Bonus 导致。'; content.append(title, info, reason); article.append(content, leaderLink(row)); return article;
+      title.textContent = row.kind === 'respect-zero' ? 'respect 已清零 · ' : '已确认摧毁 · '; title.append(factionLink(row));
+      info.textContent = `最后存活 ${date(row.lastAliveAt)} · ${row.kind === 'respect-zero' ? '发现清零' : '发现摧毁'} ${date(row.detectedAt)} · respect ${row.previousRespect ?? '未知'} → ${row.respect}`;
+      reason.textContent = (row.kind === 'respect-zero' ? row.destroyedConfirmedAt ? '后续已确认摧毁：' + date(row.destroyedConfirmedAt) + '。' : '已触发清零提醒，API 尚未标记摧毁。' : '') + '原因未知；未判定为 Bonus 导致。'; content.append(title, info, reason); article.append(content, leaderLink(row)); return article;
     });
-    if (!articles.length) { const empty = document.createElement('p'); empty.textContent = '暂无确认的存活 → 摧毁记录。'; articles.push(empty); }
+    if (!articles.length) { const empty = document.createElement('p'); empty.textContent = '暂无 respect 清零或确认摧毁记录。'; articles.push(empty); }
     $('history').replaceChildren(...articles);
   }
   async function refresh() {

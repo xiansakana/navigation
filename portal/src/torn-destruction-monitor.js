@@ -38,12 +38,28 @@ export function createDestructionStore(db) {
     // Destruction is irreversible. A stale live API cache must not revive a dead faction.
     if (old?.isDestroyed) return null;
     let event = null;
-    if (row.isDestroyed && old?.lastAliveAt) {
-      event = { kind: 'destruction', id: row.id, name: old.name, leaderId: old.leaderId, leaderName: old.leaderName, previousRespect: old.respect, respect: row.respect, lastAliveAt: old.lastAliveAt, detectedAt: row.checkedAt, cause: 'unknown' };
+    // An observed zero is actionable before Torn marks the faction destroyed.
+    // First-seen zeros are baseline-only; existing pre-upgrade live zeros are
+    // handled once on their next verification. Never reset this durable marker.
+    const zero = row.respect === 0 && old?.lastAliveAt && !old.zeroHandled;
+    if (old?.lastAliveAt && !old.zeroHandled && (zero || row.isDestroyed)) {
+      event = { kind: zero ? 'respect-zero' : 'destruction', id: row.id, name: old.name, leaderId: old.leaderId, leaderName: old.leaderName,
+        previousRespect: old.respect > 0 ? old.respect : old.lastPositiveRespect ?? null, respect: row.respect,
+        lastAliveAt: old.lastAliveAt, detectedAt: row.checkedAt, cause: 'unknown', isDestroyed: row.isDestroyed,
+        ...(row.isDestroyed ? { destroyedConfirmedAt: row.checkedAt } : {}) };
       const { history } = get(uid); history.push(event);
       db.prepare('UPDATE torn_destruction_monitors SET history_json=? WHERE user_id=?').run(JSON.stringify(history.slice(-200)), uid);
+    } else if (row.isDestroyed && old?.zeroHandled) {
+      const { history } = get(uid), found = history.find(item => item.id === row.id && item.kind === 'respect-zero');
+      if (found && !found.destroyedConfirmedAt) {
+        found.isDestroyed = true; found.destroyedConfirmedAt = row.checkedAt;
+        db.prepare('UPDATE torn_destruction_monitors SET history_json=? WHERE user_id=?').run(JSON.stringify(history), uid);
+      }
     }
-    write.run(uid, row.id, JSON.stringify({ ...row, previousRespect: old?.respect ?? null, lastAliveAt: row.isDestroyed ? old?.lastAliveAt || null : row.checkedAt }));
+    write.run(uid, row.id, JSON.stringify({ ...row, previousRespect: old?.respect ?? null,
+      zeroHandled: !!old?.zeroHandled || row.respect === 0 || row.isDestroyed,
+      lastPositiveRespect: row.respect > 0 ? row.respect : old?.lastPositiveRespect ?? (old?.respect > 0 ? old.respect : null),
+      lastAliveAt: row.isDestroyed ? old?.lastAliveAt || null : row.checkedAt }));
     return event;
   });
   return { get, observe,
@@ -59,18 +75,18 @@ export function createDestructionStore(db) {
 export class DestructionMonitor extends ChainMonitor {
   constructor(options) {
     super(options);
-    this.state = { running: false, rounds: 0, pages: 0, tracked: 0, confirmed: 0, destroyed: 0, failed: 0, partial: false, error: '', lastScanAt: null, nextScanAt: null, retryAt: null, retryAttempt: 0, retryMessage: '', chains: [], detailsAt: null, detailsStale: false };
+    this.state = { running: false, rounds: 0, pages: 0, tracked: 0, confirmed: 0, destroyed: 0, zeroed: 0, failed: 0, partial: false, error: '', lastScanAt: null, nextScanAt: null, retryAt: null, retryAttempt: 0, retryMessage: '', chains: [], detailsAt: null, detailsStale: false };
   }
   status() {
     const config = this.store.get(this.uid).config;
-    return { ...super.status(), kind: 'destruction', factions: this.store.observations(this.uid).filter(row => !row.isDestroyed && inRespectRange(row, config)).sort((a, b) => a.respect - b.respect || a.id - b.id) };
+    return { ...super.status(), kind: 'destruction', factions: this.store.observations(this.uid).filter(row => !row.isDestroyed && (inRespectRange(row, config) || row.respect === 0 && row.zeroHandled)).sort((a, b) => a.respect - b.respect || a.id - b.id) };
   }
   start() {
     if (this.running || this.busy) throw new Error('监控正在运行或上次请求尚未结束');
     if (!this.authorize()) throw new Error('无权启动监控');
     this.config = this.store.get(this.uid).config;
     if (!this.config.apiKeys.length) throw new Error('请先保存 Public API Key');
-    this.resetKeys(); this.state.error = ''; this.state.notificationError = ''; this.state.rounds = 0; this.state.destroyed = 0;
+    this.resetKeys(); this.state.error = ''; this.state.notificationError = ''; this.state.rounds = 0; this.state.destroyed = 0; this.state.zeroed = 0;
     this.running = true; this.controller = new AbortController(); this.promise = this.scan();
   }
   searchPath(filters, offset = 0) { return 'faction/search?limit=100&offset=' + offset + '&filters=' + encodeURIComponent(filters.join(',')); }
@@ -82,6 +98,15 @@ export class DestructionMonitor extends ChainMonitor {
     Object.assign(this.state, { pages: 0, confirmed: 0, failed: 0, outsideRange: 0, partial: false, error: '', detailsStale: true, problems: [] });
     try {
       check(); await this.prepareKeys(signal); check();
+      const observed = new Map(this.store.observations(this.uid).filter(row => !row.isDestroyed && (inRespectRange(row, this.config) || row.respect === 0 && row.zeroHandled)).map(row => [row.id, row]));
+      const deliver = async event => {
+        if (!event) return;
+        if (event.kind === 'respect-zero') this.state.zeroed++; else this.state.destroyed++;
+        check();
+        try { await this.notify(event); }
+        catch { this.state.notificationError = '清零/摧毁记录已保存，通知投递失败；请检查通知管理（不自动重发）'; }
+      };
+
       const filters = ['notDestroyed', 'respect:>=:' + this.config.minRespect, ...(this.config.maxRespect === null ? [] : ['respect:<=:' + this.config.maxRespect])];
       const current = new Map(), visited = new Set(), rawSeen = new Set(); let offset = 0, path = this.searchPath(filters);
       while (path) {
@@ -90,8 +115,13 @@ export class DestructionMonitor extends ChainMonitor {
         if (!Array.isArray(data.search)) throw new Error('API 未返回帮派列表');
         let added = 0;
         for (const item of data.search) {
+          check();
           const row = factionRow(item, this.now());
           if (!rawSeen.has(row.id)) added++; rawSeen.add(row.id);
+          // Explicit zero evidence does not depend on a complete listing.
+          // Other baseline updates still wait for every page to succeed.
+          if (row.respect === 0 && observed.has(row.id)) await deliver(this.store.observe(this.uid, row));
+
           // Listings can shift during pagination; only keep live in-range rows.
           if (row.isDestroyed || !inRespectRange(row, this.config)) { this.state.outsideRange++; continue; }
           current.set(row.id, row);
@@ -109,7 +139,7 @@ export class DestructionMonitor extends ChainMonitor {
         } else { offset += 100; path = data.search.length === 100 ? this.searchPath(filters, offset) : null; }
       }
       check();
-      const missing = this.store.observations(this.uid).filter(row => !row.isDestroyed && inRespectRange(row, this.config) && !current.has(row.id));
+      const missing = this.store.observations(this.uid).filter(row => !row.isDestroyed && (inRespectRange(row, this.config) || row.respect === 0 && row.zeroHandled) && !current.has(row.id));
       for (const row of current.values()) this.store.observe(this.uid, row);
       this.state.tracked = current.size + missing.length; this.state.detailsStale = false; this.state.detailsAt = this.now();
       for (const old of missing) {
@@ -118,13 +148,8 @@ export class DestructionMonitor extends ChainMonitor {
           const data = await this.api(this.searchPath(['id:=:' + old.id]), signal); check();
           if (!Array.isArray(data.search) || data.search.length !== 1 || data.search[0].id !== old.id) throw new Error('API 未确认该帮派状态，保留最后存活记录');
           const row = factionRow(data.search[0], this.now()), event = this.store.observe(this.uid, row); this.state.confirmed++;
-          if (event) {
-            this.state.destroyed++;
-            // Persist the event/dedup before delivery. A failed delivery is not replayed.
-            check();
-            try { await this.notify(event); }
-            catch { this.state.notificationError = '摧毁记录已保存，通知投递失败；请检查通知管理（不自动重发）'; }
-          }
+          // Persist/dedup before delivery; later destruction confirmation is silent.
+          await deliver(event);
         } catch (error) {
           if (error.fatal || !valid()) throw error;
           this.state.failed++; this.state.error = this.safeError(error); this.state.problems.push({ id: old.id, reason: this.safeError(error) });

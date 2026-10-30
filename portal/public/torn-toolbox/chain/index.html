@@ -19,8 +19,8 @@
     <h1>监控</h1>
     <div class="toolbox-tabs" role="tablist" aria-label="工具箱功能"><button type="button" id="tab-chain" role="tab" aria-selected="true" aria-controls="chain-view">帮派摧毁监控</button><button type="button" id="tab-factions" role="tab" aria-selected="false" aria-controls="faction-view" hidden>帮派筛选</button><button type="button" id="tab-users" role="tab" aria-selected="false" aria-controls="users-view" hidden>用户监控</button></div>
     <section id="chain-view" role="tabpanel" aria-labelledby="tab-chain">
-      <p>持续观察范围内存活帮派的 respect。首次扫描建立基线；帮派从列表消失后按 ID 单独核验，确认已摧毁才记录和通知。摧毁原因不作 Bonus 归因。</p>
-      <p>通知在<a href="/notifications/#chain-notifications">通知管理 → 业务提醒 → 帮派摧毁</a>配置，沿用原通知渠道和目标。</p>
+      <p>持续观察范围内存活帮派的 respect。已跟踪帮派降到 0 即记录并通知，不等待整点后的摧毁状态；后续确认摧毁只补充状态，不重复提醒。首次扫描建立基线，不推送首次已为 0 的帮派。</p>
+      <p>通知在<a href="/notifications/#chain-notifications">通知管理 → 业务提醒 → 帮派清零 / 摧毁</a>配置，沿用原通知渠道和目标。</p>
       <p id="chain-readonly-note" class="chain-note" hidden>当前为只读查看；修改配置、启停及清空记录需要编辑权限。</p>
       <section class="chain-panel"><form id="config-form"><div class="chain-fields">
         <label>最小 respect<input id="min-respect" type="number" min="0" step="1" required disabled></label>
@@ -32,14 +32,14 @@
         <button id="save" type="submit" class="btn" hidden>保存配置</button><button id="clear-key" type="button" class="btn ghost" hidden>删除全部 Keys</button>
         <button id="start" type="button" class="btn" hidden>启动监控</button><button id="stop" type="button" class="btn ghost" hidden>停止监控</button><button id="clear-history" type="button" class="btn ghost" hidden>清空记录</button>
       </div></form>
-      <p class="chain-note">respect 范围包含边界，默认 0–10000。每轮完成后默认等待 15 秒；实际延迟还包含 API 更新、缓存、分页和请求间隔。API 间隔默认 2 秒，同账号与帮派筛选共用额度；不同账号分担请求，失效 Key 自动跳过，限流等待原请求重试。没有每轮 40 条限制。保存配置会停止监控，请重新启动；关闭页面服务器仍继续，服务重启后需启动。旧 Chain Key 和通知配置保留，冷却历史留存但不再显示。</p></section>
+      <p class="chain-note">respect 范围包含边界，默认 0–10000。每轮完成后默认等待 15 秒；实际延迟还包含 API 更新、缓存、分页和请求间隔。API 间隔默认 2 秒，同账号与帮派筛选共用额度；不同账号分担请求，失效 Key 自动跳过，限流等待原请求重试。没有每轮 40 条限制。保存配置会停止监控，请重新启动；关闭页面服务器仍继续，服务重启后恢复原运行意图。旧 Chain Key 和通知配置保留，冷却历史留存但不再显示。</p></section>
       <p id="message" role="status" aria-live="polite"></p>
       <section class="chain-panel"><h2>监控状态</h2><p id="status">正在加载…</p><p id="coverage"></p>
         <div class="chain-monitor-heading"><h3>存活帮派 · respect 升序 <span id="monitor-count"></span></h3><label>状态筛选 <select id="monitor-filter"><option value="all">全部</option><option value="problem">待确认</option></select></label></div>
         <p id="monitor-hint" class="chain-note"></p><table id="monitor-table" class="chain-monitor-table" hidden><caption class="chain-monitor-caption">存活帮派最近一次 respect 与核验状态</caption><thead><tr><th>帮派</th><th>Leader</th><th>respect</th><th>变化</th><th>最近存活</th><th>核验说明</th></tr></thead><tbody id="monitor-chains"></tbody></table>
         <p id="monitor-empty">启动后建立存活基线。</p><div class="chain-actions"><button type="button" id="monitor-prev" class="btn ghost">上一页</button><span id="monitor-page"></span><button type="button" id="monitor-next" class="btn ghost">下一页</button></div>
       </section>
-      <section class="chain-panel"><h2>摧毁记录 <span id="count"></span></h2><p>最近 200 条。显示摧毁前最后一次确认存活至发现摧毁的时间区间，不代表精确摧毁时刻。清空记录不重置去重；首次已摧毁及两次扫描之间出现又消失的帮派不会产生存活→摧毁通知。</p><div id="history"></div></section>
+      <section class="chain-panel"><h2>清零 / 摧毁记录 <span id="count"></span></h2><p>最近 200 条。respect=0 的发现时间为 API 核验时间，不是精确清零时刻。分页发现已跟踪帮派清零即可提醒，不等待整轮完成。后续摧毁确认不重复推送；清空记录不重置去重，首次已清零/摧毁不批量推送。</p><div id="history"></div></section>
     </section>
     <section id="faction-view" role="tabpanel" aria-labelledby="tab-factions" hidden>
       <h2>帮派筛选 · Leader networth</h2>
@@ -91,7 +91,7 @@
   </main>
   <script src="/theme.js"></script>
   <script src="/layout.js?v=layout-20261018"></script>
-  <script src="/torn-toolbox/chain/app.js?v=destruction-4"></script>
+  <script src="/torn-toolbox/chain/app.js?v=respect-zero-1"></script>
   <script src="/torn-toolbox/chain/factions.js?v=10"></script>
   <script src="/torn-toolbox/chain/users.js?v=2"></script>
 </body>

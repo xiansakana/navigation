@@ -19,8 +19,9 @@ async function startFixture() {
   const service = createTornChainService({ store, authorizeNotify: () => true, sendNotification: async (settings, record) => { deliveries.push(record); }, monitorOptions: { schedule: () => 1, cancel: () => {}, now: () => 1000 + phase * 15 }, request: async (route, key) => {
     if (route === 'key/info') { if (key === keys[0]) throw Object.assign(new Error('Invalid Key'), { apiCode: 2, fatal: true }); return { info: { user: { id: key === keys[1] ? 1 : 2 } } }; }
     const filter = new URL(route, 'https://api.torn.com/v2/').searchParams.get('filters');
-    if (filter === 'id:=:1') return { search: [row(1, 0, true)] };
+    if (filter === 'id:=:1') return { search: [row(1, 0, phase >= 2)] };
     if (filter === 'id:=:2') return { search: [] };
+    if (phase === 1) return { search: [row(1,0,false), ...Array.from({length:53},(_,i)=>row(i+3,95))], _metadata: {links:{next:null}} };
     return { search: Array.from({ length: phase ? 53 : 55 }, (_, i) => row(i + (phase ? 3 : 1), phase ? 95 : 100)), _metadata: { links: { next: null } } };
   } });
   const factions = createFactionService({ store: factionStore, request: async () => { throw Error('No faction scan expected'); } });
@@ -31,6 +32,8 @@ async function startFixture() {
       if (url.pathname === '/fixture/advance' && req.method === 'POST') { phase++; const m = service.monitors.get('tester'); await m.scan(); return json(res, 200, { ok: true, notifications: deliveries.length }); }
       if (url.pathname === '/fixture/guest' && req.method === 'POST') { guest = !guest; return json(res, 200, { ok: true }); }
       const session = { userId: 'tester', isGuest: guest, permissions: ['*'] };
+      if (url.pathname === '/api/me/torn-toolbox-access') return json(res,200,{ok:true,chain:true,shopping:false});
+      if (url.pathname.startsWith('/api/torn-users/')) return json(res,403,{ok:false,error:'Not part of this fixture'});
       if (url.pathname.startsWith('/api/torn-chain/')) return service.handle(req, res, url, session, json);
       if (url.pathname.startsWith('/api/torn-factions/')) return factions.handle(req, res, url, session, json);
       const file = path.join(root, 'portal/public', url.pathname.endsWith('/') ? url.pathname + 'index.html' : url.pathname);
@@ -61,7 +64,9 @@ async function main() {
     const advanced = await context.request.post(f.origin + '/fixture/advance'); assert.equal((await advanced.json()).notifications, 1);
     await page.reload(); await page.waitForSelector('#history article');
     assert.equal(await page.locator('#history article').count(), 1); assert.equal(await page.locator('#history img').count(), 0);
-    assert.match(await page.locator('#history').innerText(), /最后存活/); assert.match(await page.locator('#history').innerText(), /发现摧毁/);
+    assert.match(await page.locator('#history').innerText(), /最后存活/); assert.match(await page.locator('#history').innerText(), /发现清零/); assert.match(await page.locator('#history').innerText(), /尚未标记摧毁/);
+    const confirmation=await context.request.post(f.origin+'/fixture/advance'); assert.equal((await confirmation.json()).notifications,1);
+    await page.reload(); await page.waitForSelector('#history article'); assert.match(await page.locator('#history').innerText(), /后续已确认摧毁/);
     assert.equal(await page.locator('#history a').last().getAttribute('href'), 'https://www.torn.com/profiles.php?XID=1001');
     await page.locator('#monitor-filter').selectOption('problem'); await page.waitForFunction(() => document.querySelectorAll('#monitor-chains tr').length === 1); assert.equal(await page.locator('#monitor-chains tr').count(), 1);
     await page.locator('#monitor-filter').selectOption('all');

@@ -10,9 +10,9 @@
   }
   function render() {
     host.hidden = false;
-    host.innerHTML = '<article class="business-card" data-source="chain"><div class="business-card-head"><div><h3>Torn · 帮派摧毁</h3><p>当前账号的帮派摧毁监控</p></div><a href="/torn-toolbox/chain/">打开监控 →</a></div>'
+    host.innerHTML = '<article class="business-card" data-source="chain"><div class="business-card-head"><div><h3>Torn · 帮派清零 / 摧毁</h3><p>当前账号的 respect 清零监控</p></div><a href="/torn-toolbox/chain/">打开监控 →</a></div>'
       + '<div class="biz-global"><label class="biz-check"><input data-chain-channel="qq" type="checkbox"' + (state.settings.qq.enabled ? ' checked' : '') + '> QQ 推送</label><label class="biz-check"><input data-chain-channel="slack" type="checkbox"' + (state.settings.slack.enabled ? ' checked' : '') + '> Slack 推送</label></div>'
-      + '<p class="biz-hint">推送监控范围内已观察到的存活→摧毁变化，附帮派和原 Leader 链接；初次建立基线不推送历史摧毁。QQ 使用下方目标，Slack 使用通知管理上方已配置的渠道。</p>'
+      + '<p class="biz-hint">已跟踪帮派 respect 降到 0 即推送，附帮派和原 Leader 链接；不等待整点后摧毁状态，后续确认不重复提醒。首次基线已清零不批量推送。QQ 使用下方目标，Slack 使用通知管理上方已配置的渠道。</p>'
       + '<h4>QQ 通知目标</h4>' + bizTargets(state.settings.targets, 'chain')
       + '<div class="biz-actions"><button type="button" class="test-btn compact" data-action="chain-save">保存提醒配置</button><button type="button" class="test-btn compact" data-action="chain-test">发送测试</button></div></article>';
     host.querySelectorAll('input,select').forEach(input => { input.disabled = !state.permissions.save; });

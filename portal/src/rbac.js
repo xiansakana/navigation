@@ -188,13 +188,13 @@ var SYSTEM_PERMISSIONS = [
         ['view', '查看自己的监控', [], 'view'],
         ['config:edit', '保存自己的 respect 范围和 API Keys', ['配置'], 'edit'],
         ['control:edit', '启动或停止自己的监控', ['监控控制'], 'edit'],
-        ['history:edit', '清空自己的 帮派摧毁记录', ['摧毁记录', '清空'], 'edit']
+        ['history:edit', '清空自己的 帮派清零/摧毁记录', ['清零 / 摧毁记录', '清空'], 'edit']
     ].map(([id, name, parts, action]) => ({ id: 'torn-chain:' + id, name, group: 'Torn 工具箱', serviceId: 'torn-toolbox', action, permissionPath: ['首页', 'Torn 工具箱', '监控', '帮派摧毁监控', ...parts] })),
     ...[
-        ['notify:view', '查看自己的 帮派摧毁通知配置', 'view', []],
-        ['notify:edit', '保存自己的 帮派摧毁通知配置', 'edit', ['保存配置']],
-        ['notify:test:edit', '测试自己的 帮派摧毁通知', 'edit', ['发送测试']]
-    ].map(([id, name, action, parts]) => ({ id: 'torn-chain:' + id, name, action, group: '通知管理', serviceId: 'notifications', permissionPath: ['首页', '通知管理', '业务提醒', '帮派摧毁', ...parts] })),
+        ['notify:view', '查看自己的 帮派清零/摧毁通知配置', 'view', []],
+        ['notify:edit', '保存自己的 帮派清零/摧毁通知配置', 'edit', ['保存配置']],
+        ['notify:test:edit', '测试自己的 帮派清零/摧毁通知', 'edit', ['发送测试']]
+    ].map(([id, name, action, parts]) => ({ id: 'torn-chain:' + id, name, action, group: '通知管理', serviceId: 'notifications', permissionPath: ['首页', '通知管理', '业务提醒', '帮派清零 / 摧毁', ...parts] })),
     ...[
         ['view','进入Codex CLI模块',[],'view'],
         ['usage:view','查看服务器账户额度',['账户与额度'],'view'],

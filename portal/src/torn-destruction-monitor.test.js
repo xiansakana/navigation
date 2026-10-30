@@ -156,3 +156,52 @@ test('destruction notifications contain faction, former Leader and observation t
   await send({ qq: { enabled: false }, slack: { enabled: true }, targets: [] }, { kind: 'destruction', id: 5, name: 'Faction', leaderId: 100, previousRespect: 55, respect: 0, lastAliveAt: 1000, detectedAt: 1015 });
   assert.match(messages[0], /ID=5/); assert.match(messages[0], /XID=100/); assert.match(messages[0], /55 → 0/); assert.match(messages[0], /摧毁原因未知/); assert.ok(!messages[0].includes('chainreport'));
 });
+
+test('respect zero alerts on the first page before destruction or full pagination; later confirmation is silent', async t => {
+  let phase = 0, entered, release;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const f = fixture(t, async path => {
+    const u = new URL(path, 'https://api.torn.com/v2/'), filter = u.searchParams.get('filters');
+    if (filter === 'id:=:1') return page([faction(1, 0, true)]);
+    if (phase === 0) return page([faction(1, 100)]);
+    if (phase === 2) return page([]);
+    if (u.searchParams.get('offset') === '0') return page([faction(1, 0, false)], 'https://api.torn.com/v2/faction/search?offset=100');
+    entered(); return new Promise(resolve => { release = resolve; });
+  });
+  f.m.start(); await f.m.promise; phase = 1; f.m.now = () => 1015;
+  const scan = f.m.scan(); await waiting;
+  assert.equal(f.sent.length, 1, 'zero notification must precede fetching the remaining list');
+  assert.equal(f.sent[0].kind, 'respect-zero'); assert.equal(f.sent[0].isDestroyed, false); assert.equal(f.sent[0].previousRespect, 100);
+  assert.equal(f.m.status().zeroed, 1); release(page([])); await scan;
+  phase = 2; f.m.now = () => 3600; await f.m.scan();
+  assert.equal(f.sent.length, 1); assert.equal(f.store.get('a').history.length, 1);
+  assert.equal(f.store.get('a').history[0].destroyedConfirmedAt, 3600);
+  f.store.clear('a'); f.m.stop(); f.m.start(); await f.m.promise; assert.equal(f.sent.length, 1);
+});
+test('first-seen zeros are baseline-only, while pre-upgrade tracked live zeros alert on their next verification', async t => {
+  const f = fixture(t, async () => page([faction(1, 0, false), faction(2, 0, false)]));
+  f.db.prepare('INSERT INTO torn_destruction_observations(user_id,faction_id,row_json) VALUES(?,?,?)').run('a', 2, JSON.stringify({ id: 2, name: 'Legacy', leaderId: 1002, respect: 0, isDestroyed: false, lastAliveAt: 999, checkedAt: 999 }));
+  f.m.start(); await f.m.promise;
+  assert.equal(f.sent.length, 1); assert.equal(f.sent[0].id, 2); assert.equal(f.sent[0].previousRespect, null);
+  await f.m.scan(); f.m.stop(); f.m.start(); await f.m.promise; assert.equal(f.sent.length, 1);
+});
+test('zero below configured minimum is still detected by ID verification for a previously in-range faction', async t => {
+  let phase = 0;
+  const f = fixture(t, async path => page(path.includes('id%3A') ? [faction(1, 0, false)] : phase ? [] : [faction(1, 100)]));
+  f.store.save('a', { minRespect: 50 }); f.m.start(); await f.m.promise; phase = 1; await f.m.scan();
+  assert.equal(f.sent.length, 1); assert.equal(f.sent[0].kind, 'respect-zero');
+  assert.equal(f.m.status().factions[0].respect, 0); await f.m.scan(); assert.equal(f.sent.length, 1);
+});
+test('explicit zero evidence alerts even if later pagination fails; no later duplication or stale cache revival', async t => {
+  let phase = 0;
+  const f = fixture(t, async path => phase ? page([faction(1, 0, false)], path) : page([faction(1)]));
+  f.m.start(); await f.m.promise; phase = 1; await f.m.scan();
+  assert.equal(f.m.status().partial, true); assert.equal(f.sent.length, 1);
+  f.store.observe('a', { ...f.store.observations('a')[0], respect: 5, checkedAt: 1010 });
+  await f.m.scan(); assert.equal(f.sent.length, 1, 'positive cache oscillation must not reset permanent dedup');
+});
+test('zero notification does not falsely claim destruction and carries both faction and Leader links', async () => {
+  const messages = [], send = createChainNotifier({ endpoint: 'http://127.0.0.1:8787', token: 'test-token', fetchImpl: async (_url, options) => { messages.push(JSON.parse(options.body).message); return { ok: true, json: async () => ({ ok: true }) }; } });
+  await send({ qq: { enabled: false }, slack: { enabled: true }, targets: [] }, { kind: 'respect-zero', id: 5, name: 'Faction', leaderId: 100, previousRespect: 55, respect: 0, detectedAt: 1015, isDestroyed: false });
+  assert.match(messages[0], /respect 清零/); assert.match(messages[0], /尚未标记摧毁/); assert.match(messages[0], /ID=5/); assert.match(messages[0], /XID=100/); assert.doesNotMatch(messages[0], /已确认摧毁|chainreport|Bonus #/);
+});
