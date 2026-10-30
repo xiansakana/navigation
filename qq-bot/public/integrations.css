@@ -55,3 +55,12 @@
 #chain-notifications { margin-top: 18px; }
 #chain-notifications[hidden] { display: none; }
 #chain-notifications .business-card { grid-column: 1 / -1; }
+
+/* One content-height flow for all asynchronously loaded business modules.
+   Keep their hosts for event delegation and permissions; never reveal hidden hosts. */
+.business-panels { columns:420px; column-gap:18px; }
+.business-panels > .business-grid:not([hidden]) { display:contents; }
+.business-panels > .business-grid[hidden] { display:none; }
+.business-panels .business-card { display:inline-block; width:100%; box-sizing:border-box; vertical-align:top; break-inside:avoid; margin:0 0 18px; overflow-wrap:anywhere; }
+.business-panels .business-loading { break-inside:avoid; }
+@media(max-width:800px) { .business-panels { column-count:1; column-width:auto; }.biz-target { grid-template-columns:80px minmax(0,1fr) 32px; } }
