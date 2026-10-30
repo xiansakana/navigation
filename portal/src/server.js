@@ -89,7 +89,7 @@ function sendError(req, res, url, status, message, pageOptions) {
         message: message,
         hint: ''
     }, pageOptions || {}));
-    return sendHtml(res, status, html.replace(/<\/head>/i, '<script defer src="/data-scope.js?v=1"></script><script defer src="/navbar-dropdown.js?v=2"></script></head>'));
+    return sendHtml(res, status, html.replace(/<\/head>/i, '<script defer src="/data-scope.js?v=1"></script><script defer src="/navbar-dropdown.js?v=3"></script></head>'));
 }
 
 function redirect(res, location, setCookie) {
@@ -110,7 +110,7 @@ function serveStatic(filePath, res) {
         '.js': 'application/javascript; charset=utf-8'
     };
     if (ext === '.html') {
-        const html = fs.readFileSync(filePath, 'utf8').replace(/<\/head>/i, '<script defer src="/data-scope.js?v=1"></script><script defer src="/navbar-dropdown.js?v=2"></script></head>');
+        const html = fs.readFileSync(filePath, 'utf8').replace(/<\/head>/i, '<script defer src="/data-scope.js?v=1"></script><script defer src="/navbar-dropdown.js?v=3"></script></head>');
         res.writeHead(200, { 'Content-Type': types[ext], 'Cache-Control': 'no-store' }); return res.end(html);
     }
     res.writeHead(200, { 'Content-Type': types[ext] || 'application/octet-stream' });

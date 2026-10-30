@@ -15,7 +15,7 @@
       var home = services.map(function (s) { return { title: s.title, href: s.path || s.url, newTab: s.newTab }; });
       var torn = [
         ['购物助手', '/torn-toolbox/shopping/', 'torn-shopping:view'],
-        ['Chain 监控', '/torn-toolbox/chain/', 'torn-chain:view'],
+        ['监控', '/torn-toolbox/chain/', 'torn-chain:view'],
         ['压价助手', '/torn-toolbox/undercut/', 'service:torn-undercut:view'],
         ['公司申请监听', '/torn-toolbox/company/', 'service:torn-company:view']
       ].filter(function (s) { return can(s[2]); }).map(function (s) { return { title: s[0], href: s[1] }; });
