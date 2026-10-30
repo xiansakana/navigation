@@ -251,6 +251,11 @@
   });
   for(const id of ['month','book','currency','type','category','account'])$(id).addEventListener('change',()=>{analysis.clearFocus();load();});
   let searchTimer; $('search').addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>load(),250);});
+  $('reset-filters').onclick=()=>{
+    clearTimeout(searchTimer);
+    for(const id of ['book','currency','type','category','account','search'])$(id).value='';
+    periods.choose('all');
+  };
   $('all-dates').onclick=()=>periods.choose('all'); $('more').onclick=()=>load(true);
   $('privacy').onclick=()=>{const on=document.querySelector('.bk-shell').classList.toggle('bk-private');$('privacy').setAttribute('aria-pressed',String(on));$('privacy').textContent=on?'显示金额':'隐藏金额';};
   $('import-shortcut').onclick=()=>tab('import');
