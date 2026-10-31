@@ -399,23 +399,24 @@ export function evaluateSleeves(tqqq, soxl, B, soxlEnabled) {
   if (soxl?.H && Number.isFinite(soxl.price)) {
     const dd = drawdownPct(soxl.price, soxl.H);
     let rec = soxlEnabled
-      ? '必须另有芯片观点。SOXL 相对自己 H −50% 才开始，−70% 才接近上限。'
+      ? '必须另有芯片观点。SOXL 相对自己 H −70% 才开始，−90% 才接近上限。'
       : '未开启芯片观点：SOXL 权重为 0，忽略此梯子。';
     let status = 'idle';
-    if (soxlEnabled && dd != null && dd <= -70) {
+    if (soxlEnabled && dd != null && dd <= -90) {
       status = 'confirmed';
-      rec = 'SOXL 相对自身 H 约 −70%：接近袖仓上限（约 8–10% 净值，或改用更多 SOXX 正股）。';
-    } else if (soxlEnabled && dd != null && dd <= -50) {
+      rec = 'SOXL 相对自身 H 已 −90%：接近袖仓上限（约 8–10% 净值，或改用更多 SOXX 正股）。';
+    } else if (soxlEnabled && dd != null && dd <= -70) {
       status = 'confirmed';
-      rec = 'SOXL 相对自身 H 已 −50%：可以开始袖仓。不要绑在 QQQ 的 T1 上。';
+      rec = 'SOXL 相对自身 H 已 −70%：可以开始袖仓。不要绑在 QQQ 的 T1 上。';
     }
     out.push({
       symbol: 'SOXL',
       H: soxl.H,
       price: soxl.price,
       drawdown: dd,
-      trigger50: roundPrice(soxl.H * 0.5),
       trigger70: roundPrice(soxl.H * 0.3),
+      trigger90: roundPrice(soxl.H * 0.1),
+      alertKey: status === 'confirmed' ? `SOXL:drawdown${dd <= -90 ? 90 : 70}:v2` : null,
       status,
       event: status === 'confirmed' ? 'sleeveSoxl' : null,
       recommendation: rec,
@@ -775,7 +776,7 @@ export function evaluate(input) {
   const sleeves = evaluateSleeves(tqqq, soxl, B, !!input.soxlEnabled);
   sleeves.forEach((s) => {
     if (s.status === 'confirmed') {
-      alerts.push({ key: s.symbol, event: s.event, symbol: s.symbol, message: s.recommendation });
+      alerts.push({ key: s.alertKey || s.symbol, event: s.event, symbol: s.symbol, message: s.recommendation });
     }
   });
 
@@ -1306,5 +1307,6 @@ export function applyRoundFromEval(prev, ev, { sessionDate } = {}) {
 
 export function newAlertKeys(ev, firedAlerts) {
   const fired = firedAlerts || {};
-  return ev.alerts.filter((a) => a.key && !fired[a.key]);
+  return ev.alerts.filter((a) => a.key && !fired[a.key]
+    && !(a.key === 'SOXL:drawdown70:v2' && fired['SOXL:drawdown90:v2']));
 }

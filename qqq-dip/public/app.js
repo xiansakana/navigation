@@ -345,7 +345,7 @@ function renderAmmo() {
       <div class="hint">T2≥25 ${ev?.vxnGates?.t2?.ok ? '过' : '未过'} · T3≥32 ${ev?.vxnGates?.t3?.ok ? '过' : '未过'}${state.quotes?.VXN?.asOf ? ` · 收盘 ${state.quotes.VXN.asOf}` : ''}</div></div>
     <div class="sm-summary-card"><div class="label">规则</div>
       <label class="hint"><input type="checkbox" id="opt-vboost" ${state.settings.variant === 'vBoost' ? 'checked' : ''}> V 型加强 55/20/25</label>
-      <label class="hint"><input type="checkbox" id="opt-soxl" ${state.settings.soxlEnabled ? 'checked' : ''}> 启用 SOXL 芯片观点</label>
+      <label class="hint"><input type="checkbox" id="opt-soxl" ${state.settings.soxlEnabled ? 'checked' : ''}> 启用 SOXL 芯片观点（−70%／−90%）</label>
       <label class="hint"><input type="checkbox" id="opt-spy" ${state.settings.showSpy !== false ? 'checked' : ''}> 显示 SPY</label></div>
   `;
   bindCash();
@@ -654,13 +654,13 @@ function nextLevelHint(label, stats) {
   }
   if (label === 'SOXL') {
     const sleeve = sleeveBySymbol('SOXL');
-    const t50 = sleeve?.trigger50 ?? roundPriceClient(H * 0.5);
     const t70 = sleeve?.trigger70 ?? roundPriceClient(H * 0.3);
+    const t90 = sleeve?.trigger90 ?? roundPriceClient(H * 0.1);
     const dd = stats.drawdownLive;
     if (!state.settings?.soxlEnabled) return `${hTxt} · 芯片观点未开`;
-    if (dd != null && dd <= -70) return `${hTxt} · 袖仓已近 −70% 上限（${fmtPrice(t70)}）`;
-    if (dd != null && dd <= -50) return `${hTxt} · 下一袖仓 −70% ${fmtPrice(t70)}`;
-    return `${hTxt} · 下一袖仓 −50% ${fmtPrice(t50)}`;
+    if (dd != null && dd <= -90) return `${hTxt} · 袖仓已到 −90% 上限档（${fmtPrice(t90)}）`;
+    if (dd != null && dd <= -70) return `${hTxt} · 已到开始档 −70% ${fmtPrice(t70)}；下一袖仓 −90% ${fmtPrice(t90)}`;
+    return `${hTxt} · 下一袖仓 −70% ${fmtPrice(t70)}；上限档 −90% ${fmtPrice(t90)}`;
   }
   return hTxt;
 }
