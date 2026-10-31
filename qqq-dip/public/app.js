@@ -179,7 +179,7 @@ function applyPermissions() {
   const cashEditable = canViewLotMoney() && can('cash', 'edit');
   ['cash-usd', 'cash-cny', 'cash-fx'].forEach((id) => {
     const el = document.getElementById(id);
-    if (el) el.readOnly = !cashEditable;
+    if (el) el.readOnly = id !== 'cash-fx' || !cashEditable;
   });
   const fxBtn = $('#btn-fx');
   if (fxBtn) fxBtn.hidden = !cashEditable;
@@ -300,7 +300,10 @@ function renderMarket() {
 
 function renderAmmo() {
   const active = document.activeElement;
-  if (active && ['cash-usd', 'cash-cny', 'cash-fx'].includes(active.id)) return;
+  // Update the readonly cash fields even while the user is editing FX.
+  if ($('#cash-usd')) $('#cash-usd').value = state.cash.strategyCashUsd ?? 0;
+  if ($('#cash-cny')) $('#cash-cny').value = state.cash.strategyCashCny ?? 0;
+  if (active?.id === 'cash-fx') return;
   const ev = state.evaluation;
   const c = state.cash;
   const B = ev?.B ?? 0;
@@ -308,16 +311,16 @@ function renderAmmo() {
   const rem = ev?.remaining;
   const showMoney = canViewLotMoney();
   const cashUsdField = showMoney
-    ? `<input type="number" step="0.01" id="cash-usd" value="${c.cashUsd ?? 0}">`
+    ? `<input type="number" readonly id="cash-usd" value="${c.strategyCashUsd ?? 0}" aria-label="抄底美元现金">`
     : `<div class="value sm-mask">${MONEY_MASK}</div>`;
   const cashCnyField = showMoney
-    ? `<input type="number" step="0.01" id="cash-cny" value="${c.cashCny ?? 0}">`
+    ? `<input type="number" readonly id="cash-cny" value="${c.strategyCashCny ?? 0}" aria-label="抄底人民币现金">`
     : `<div class="value sm-mask">${MONEY_MASK}</div>`;
   $('#ammo-cards').innerHTML = `
-    <div class="sm-summary-card"><div class="label">账户美元现金</div>
-      ${cashUsdField}</div>
-    <div class="sm-summary-card"><div class="label">账户人民币现金</div>
-      ${cashCnyField}</div>
+    <div class="sm-summary-card"><div class="label">抄底美元现金</div>
+      ${cashUsdField}<div class="hint">专用资金池可用余额，约2秒同步</div></div>
+    <div class="sm-summary-card"><div class="label">抄底人民币现金</div>
+      ${cashCnyField}<div class="hint">专用资金池可用余额，账户管理中划拨／释放</div></div>
     <div class="sm-summary-card"><div class="label">USD/CNY 汇率</div>
       <input type="number" step="0.0001" id="cash-fx" value="${c.usdCnyRate ?? 7.2}">
       <div class="hint" id="fx-hint">${escapeHtml(fmtFxHint(c))}</div>
@@ -358,16 +361,14 @@ function bindCash() {
       const data = await api('/cash', {
         method: 'PUT',
         body: {
-          cashUsd: Number($('#cash-usd')?.value),
-          cashCny: Number($('#cash-cny')?.value),
           usdCnyRate: Number($('#cash-fx')?.value)
         }
       });
       applyState(data);
-      toast('success', '现金已保存');
+      toast('success', '汇率已保存，专用现金由资金池同步');
     } catch (e) { toast('error', e.message); }
   };
-  ['cash-usd', 'cash-cny', 'cash-fx'].forEach((id) => {
+  ['cash-fx'].forEach((id) => {
     const el = document.getElementById(id);
     if (!el || el.dataset.bound) return;
     el.dataset.bound = '1';
@@ -386,8 +387,6 @@ function bindCash() {
         const data = await api('/cash', {
           method: 'PUT',
           body: {
-            cashUsd: Number($('#cash-usd')?.value),
-            cashCny: Number($('#cash-cny')?.value),
             usdCnyRate: fx.rate,
             fxSource: fx.source,
             fxUpdatedAt: new Date().toISOString()
@@ -1258,6 +1257,9 @@ function connectSse() {
     const es = new EventSource('./api/events');
     es.addEventListener('state', (ev) => {
       try { applyState(JSON.parse(ev.data)); } catch { /* ignore */ }
+    });
+    es.addEventListener('cash', (ev) => {
+      try { applyState(JSON.parse(ev.data)); } catch { /* retry on next update */ }
     });
   } catch { /* ignore */ }
 }

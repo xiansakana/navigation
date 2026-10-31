@@ -15,6 +15,7 @@ import { createInternalNotificationSettingsHandler } from './notification-settin
 import { marketStatus } from './market-hours.js';
 import { evaluate, resetRound } from './playbook.js';
 import { createDocService } from './docs.js';
+import { watchCash } from './cash-sync.js';
 import { prepareExecution, canExecutePlan, canSpendDipFunds, commitExecution } from './execution-plan.js';
 import {
   legsToTradeInputs,
@@ -128,7 +129,7 @@ function refreshEvaluation() {
 
 function snapshot() {
   const snap = monitor.buildSnapshot();
-  if (!snap.evaluation) snap.evaluation = liveEval();
+  snap.evaluation = liveEval();
   snap.market = marketStatus();
   snap.notify = maskNotifyForClient(store.getNotify());
   snap.actions = store.listActionRows({ limit: 20 });
@@ -142,7 +143,7 @@ app.get('/api/notification-settings', (_req, res) => {
 });
 
 app.get('/api/state', async (_req, res) => {
-  await maybeRefreshFx();
+  void maybeRefreshFx();
   res.json(snapshot());
 });
 
@@ -152,16 +153,20 @@ app.get('/api/events', async (req, res) => {
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive'
   });
-  await maybeRefreshFx();
-  res.write(`event: state\ndata: ${JSON.stringify(snapshot())}\n\n`);
+  void maybeRefreshFx();
+  const initial = snapshot();
+  res.write(`event: state\ndata: ${JSON.stringify(initial)}\n\n`);
   sseClients.add(res);
-  req.on('close', () => sseClients.delete(res));
+  const stopCash = watchCash({ initialCash: initial.cash, read: () => store.getCash(), send: (cash) => {
+    res.write(`event: cash\ndata: ${JSON.stringify({ cash, evaluation: liveEval() })}\n\n`);
+  } });
+  req.on('close', () => { stopCash(); sseClients.delete(res); });
 });
 
 app.put('/api/cash', (req, res) => {
   const prev = store.getCash();
-  if (prev.accountCashEnabled) return res.status(400).json({ error: '现金已由证券账户自动汇总，请在股票管理的账户管理中核对现金' });
   const body = req.body || {};
+  if ('cashUsd' in body || 'cashCny' in body) return res.status(400).json({ error: '抄底现金来自专用预留，请在账户管理中划拨或释放，不能在此改写账户现金' });
   const next = {
     cashUsd: body.cashUsd != null ? Number(body.cashUsd) || 0 : prev.cashUsd,
     cashCny: body.cashCny != null ? Number(body.cashCny) || 0 : prev.cashCny,
