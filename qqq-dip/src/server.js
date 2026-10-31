@@ -15,7 +15,7 @@ import { createInternalNotificationSettingsHandler } from './notification-settin
 import { marketStatus } from './market-hours.js';
 import { evaluate, resetRound } from './playbook.js';
 import { createDocService } from './docs.js';
-import { prepareExecution, canExecutePlan, commitExecution } from './execution-plan.js';
+import { prepareExecution, canExecutePlan, canSpendDipFunds, commitExecution } from './execution-plan.js';
 import {
   legsToTradeInputs,
   getPortfolioStore,
@@ -101,8 +101,8 @@ function liveEval() {
   const markets = store.getQuotes();
   const prev = monitor.getEvaluation() || {};
   return evaluate({
-    cashUsd: cash.cashUsd,
-    cashCny: cash.cashCny,
+    cashUsd: cash.strategyCashUsd ?? cash.cashUsd,
+    cashCny: cash.strategyCashCny ?? cash.cashCny,
     usdCnyRate: cash.usdCnyRate,
     variant: settings.variant,
     soxlEnabled: settings.soxlEnabled,
@@ -270,13 +270,18 @@ app.post('/api/actions', (req, res) => {
   }
 
   if (body.type === 'execute' && body.tier) {
+    if (!canSpendDipFunds(req.headers['x-portal-permissions'])) return res.status(403).json({ error: '无抄底专用资金成交权限' });
     let prepared;
     const executionRound = store.getRound();
     try {
       prepared = prepareExecution(executionRound.executionPlans?.[body.tier], body, liveEval(), store.getCash());
     } catch (error) { return res.status(409).json({ error: error.message }); }
     if (prepared.duplicate) return res.json({ ok: true, duplicate: true, evaluation: refreshEvaluation() });
-    if (getPortfolioStore().read().accountCashEnabled) return res.status(409).json({ error: '已启用证券账户，请从持仓页选择账户记录；本次未写入计划或扣款' });
+    const fund = store.getCash().strategyFunds?.find((f) => f.accountId === body.accountId);
+    if (!fund || fund.deficit > 0 || prepared.legs.some((leg) => leg.currency !== fund.currency)
+      || (prepared.cashUsd + prepared.cashCny) > fund.strategyAvailable + 0.01) {
+      return res.status(409).json({ error: '请选择同币种、有足额抄底预留且无缺口的证券账户，每次仅登记同一账户的成交' });
+    }
     const { cashUsd, cashCny, legs } = prepared;
     const tradeInputs = legsToTradeInputs(legs, {
       tier: body.tier,
@@ -288,11 +293,8 @@ app.post('/api/actions', (req, res) => {
     if (buyInputs.length !== legs.length || sellInputs.length) return res.status(409).json({ error: '成交明细无效，不扣现金' });
 
     try {
-      const result = commitExecution(store, body, prepared, () => appendTradesDeductFormCash({
-        trades: buyInputs,
-        deductCashUsd: cashUsd,
-        deductCashCny: cashCny
-      }));
+      const result = commitExecution(store, body, prepared, () => appendTradesApplyCash(
+        buyInputs.map((trade) => ({ ...trade, account_id: body.accountId })), { strategyFundId: body.accountId }));
       syncedTrades = syncedTrades.concat(result.trades);
     } catch (error) { return res.status(409).json({ error: `成交同步未完成，请核对账本后处理：${error.message}` }); }
     body.legs = legs;

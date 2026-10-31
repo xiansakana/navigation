@@ -47,7 +47,7 @@ export function createStore(config, options = {}) {
   if (options.userId != null) return createPortfolioStore(db, options.userId);
   return {
     read: () => createPortfolioStore(db, currentPortfolioUserId()).read(),
-    write: (data) => createPortfolioStore(db, currentPortfolioUserId()).write(data)
+    write: (data, options) => createPortfolioStore(db, currentPortfolioUserId()).write(data, options)
   };
 }
 

@@ -1,6 +1,7 @@
 import { correctDividendTaxPortfolio } from '../dividend-tax.js';
 import { requirePortfolioUserId } from '../portfolio-user.js';
 import { projectInvestments, prepareInvestmentTrades, investmentRows } from '../investment-accounts.js';
+import { applyDipCashRules } from '../dip-cash-funds.js';
 
 const DEFAULT_USD_CNY_RATE = 7.2;
 
@@ -157,7 +158,7 @@ export function createPortfolioStore(db, userId) {
       const sum = (cur) => roundMoney(accounts.filter((a) => a.currency === cur).reduce((s, a) => s + a.cash, 0));
       return { ...data, cashUsd: sum('USD'), cashCny: sum('CNY'), cash: roundMoney(sum('USD') + sum('CNY') / data.usdCnyRate), investmentAccounts: accounts, accountCashEnabled: true };
     },
-    write(input) {
+    write(input, options = {}) {
       const payload = correctDividendTaxPortfolio(normalizePortfolio(input));
       const updatedAt = new Date().toISOString();
       return db.transaction(() => {
@@ -167,6 +168,7 @@ export function createPortfolioStore(db, userId) {
           // Managed cash is derived, never write a displayed aggregate back into its baseline.
           payload.cashUsd = before.cashUsd; payload.cashCny = before.cashCny; payload.cash = before.cash;
         }
+        applyDipCashRules(db, userId, payload, before, options);
         upsert.run(userId, JSON.stringify(payload), updatedAt);
         return { ...this.read(), updatedAt };
       }).immediate();

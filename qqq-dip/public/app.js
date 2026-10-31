@@ -314,15 +314,17 @@ function renderAmmo() {
     ? `<input type="number" step="0.01" id="cash-cny" value="${c.cashCny ?? 0}">`
     : `<div class="value sm-mask">${MONEY_MASK}</div>`;
   $('#ammo-cards').innerHTML = `
-    <div class="sm-summary-card"><div class="label">美元现金</div>
+    <div class="sm-summary-card"><div class="label">账户美元现金</div>
       ${cashUsdField}</div>
-    <div class="sm-summary-card"><div class="label">人民币现金</div>
+    <div class="sm-summary-card"><div class="label">账户人民币现金</div>
       ${cashCnyField}</div>
     <div class="sm-summary-card"><div class="label">USD/CNY 汇率</div>
       <input type="number" step="0.0001" id="cash-fx" value="${c.usdCnyRate ?? 7.2}">
       <div class="hint" id="fx-hint">${escapeHtml(fmtFxHint(c))}</div>
       <button type="button" class="btn link" id="btn-fx">立即刷新汇率</button></div>
     <div class="sm-summary-card"><div class="label">本轮预算 B₀</div><div class="value">${maskMoney(fmtUsd(B))}</div>
+      <div class="hint">专用可用：${maskMoneyText(fmtUsd(c.strategyCashUsd ?? 0))} / ${maskMoneyText(fmtCny(c.strategyCashCny ?? 0))}；账户管理中划拨，不重复增加资产</div>
+      ${(c.strategyFunds || []).some((f) => f.deficit > 0) ? '<div class="hint">存在策略资金缺口：受影响账户暂停执行，请核对外部成交或释放预留。</div>' : ''}
       <div class="hint">${state.settings.variant === 'vBoost' ? 'V 型加强 55/20/25' : '默认 40/30/30'}</div></div>
     <div class="sm-summary-card"><div class="label">左侧剩余</div><div class="value">${maskMoney(fmtUsd(rem?.left))}</div>
       <div class="hint">袋 ${maskMoneyText(fmtUsd(bags?.left))}</div></div>
@@ -575,6 +577,7 @@ function openPlanFillModal(tierId) {
     <p class="hint">${escapeHtml(state.evaluation?.cnMarket?.label || '等待A股交易时段')}。这里只补记券商实际成交，不自动下单。未填写数量的交易腿保持待执行。</p>
     <p class="hint">有效期至 ${escapeHtml(plan.expiresAt || '日历待维护，暂停执行')}；取消不撤销已成交持仓。</p>
     <label class="field">实际成交时间（本机时区）<input id="fill-time" type="datetime-local"></label>
+    <label class="field">本次成交所属抄底资金池<select id="fill-account"><option value="">请选择同币种证券账户</option>${(state.cash?.strategyFunds || []).map((f) => `<option value="${escapeHtml(f.accountId)}">${escapeHtml(f.name)} · ${f.currency} · 策略可用 ${maskMoneyText(String(f.strategyAvailable))} · 缺口 ${maskMoneyText(String(f.deficit))}</option>`).join('')}</select></label>
     ${plan.legs.map((leg) => `<fieldset data-fill-leg="${leg.id}" ${leg.complete || plan.cancelled ? 'disabled' : ''}>
       <legend>${escapeHtml(leg.occSymbol || leg.symbol)} · ${leg.complete ? '已完成' : leg.spent > 0 ? '部分成交' : '待执行'} · ${escapeHtml(leg.currency)} 已用 ${maskMoneyText(String(leg.spent))} · 截止 ${escapeHtml(leg.expiresAt || '日历待维护')}</legend>
       <label class="field">本次实际数量（期权填张数）<input data-qty type="number" min="0" step="${leg.symbol === '159509' ? '100' : '1'}"></label>
@@ -585,7 +588,7 @@ function openPlanFillModal(tierId) {
     <label><input id="fill-review" type="checkbox">已复核当前信号、159509 最新报价/停牌/溢价及真实成交；不使用昨夜估价</label>
     <div class="sm-modal-actions"><button class="btn ghost" data-close>关闭</button>
       <button class="btn ghost" id="plan-cancel">取消剩余计划</button>
-      <button class="btn primary" id="fill-save">登记本次成交</button></div>`);
+      <button class="btn primary" id="fill-save" ${canStock('dip-spend', 'edit') ? '' : 'hidden'}>登记本次成交</button></div>`);
   $('#fill-save').addEventListener('click', async () => {
     const button = $('#fill-save');
     button.disabled = true;
@@ -597,7 +600,7 @@ function openPlanFillModal(tierId) {
       const date = new Date($('#fill-time').value);
       if (!Number.isFinite(date.getTime())) throw new Error('请填写实际成交时间');
       const data = await api('/actions', { method: 'POST', body: { type: 'execute', tier: tierId,
-        planId: plan.id, requestId, fills, reviewed: $('#fill-review').checked, filledAt: date.toISOString(),
+        planId: plan.id, requestId, fills, accountId: $('#fill-account').value, reviewed: $('#fill-review').checked, filledAt: date.toISOString(),
         message: `登记 ${tierId} 分腿实际成交` } });
       $('#modal-root').innerHTML = '';
       applyState(data);

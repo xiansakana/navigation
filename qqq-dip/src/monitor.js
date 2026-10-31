@@ -100,8 +100,8 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, stageTimeo
       store.setQuotes(markets);
       const lots = await stage('positionQuotes', () => enrichLots(store.getLots()));
       const ev = evaluate({
-        cashUsd: cash.cashUsd,
-        cashCny: cash.cashCny,
+        cashUsd: cash.strategyCashUsd ?? cash.cashUsd,
+        cashCny: cash.strategyCashCny ?? cash.cashCny,
         usdCnyRate: cash.usdCnyRate,
         variant: settings.variant,
         soxlEnabled: settings.soxlEnabled,

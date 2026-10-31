@@ -10,16 +10,25 @@ export async function openInvestmentAccounts({ api, openModal, closeModal, reloa
       const data = await api('/accounts');
       const root = layer.querySelector('.sm-account-manager');
       if (!root?.isConnected) return;
-      root.innerHTML = `<p class="hint">账户以币种区分，可绑定同币种的记账理财账户。现金按确认基准及后续交易、资金流水自动计算；总资产＝现金＋持仓市值。首次启用后，旧手工现金仅作快照，不重复相加。股票端记录的股息、税费已影响现金，不需在记账端重复录同一笔。行情需按供应商更新，跨页面每15秒刷新余额。未归属交易：${data.unassigned}条。</p><p class="hint">启用后，请选择证券账户记录实际成交；抄底模块原来的“按计划金额扣现金”方式暂停写入，避免计划额与成交额混记。</p>
+      root.innerHTML = `<p class="hint">账户以币种区分，可绑定同币种的记账理财账户。现金按确认基准及后续交易、资金流水自动计算；总资产＝现金＋持仓市值。首次启用后，旧手工现金仅作快照，不重复相加。股票端记录的股息、税费已影响现金，不需在记账端重复录同一笔。行情需按供应商更新，跨页面每15秒刷新余额。未归属交易：${data.unassigned}条。</p><p class="hint">普通买入仅用普通可用现金；抄底资金是账户内预留，不重复增加资产。抄底成交选择同币种专用账户和资金用途。外部券商并未冻结资金，导入后出现缺口须先核对。</p>
         ${editable ? '<button type="button" class="btn primary" data-account-new>＋ 新增证券资金账户</button>' : ''}
         ${data.accounts.map((a) => `<section class="sm-account-card"><h3>${esc(a.name)} · ${esc(a.currency)}</h3>
           <p>现金 ${amount(a.cash, a.currency)} · 持仓 ${amount(a.marketValue, a.currency)} · 总资产 ${amount(a.equity, a.currency)}</p>
+          ${a.reserved != null ? `<p>抄底预留 ${amount(a.reserved, a.currency)} · 普通可用 ${amount(a.ordinaryAvailable, a.currency)} · 策略缺口 ${amount(a.deficit, a.currency)}</p>${can('dip-funds', 'edit') && can('cash', 'edit') ? `<button type="button" class="btn ghost" data-dip-reserve="${a.id}">划拨／释放抄底资金</button>` : ''}` : ''}
           <p>记账绑定：${esc(a.bookkeepingName || '未绑定')} ${a.bookkeepingName ? '<a href="/bookkeeping/" target="_blank" rel="noopener">打开记账</a>' : ''}</p>
           <p class="hint">现金基准：${amount(a.baselineCash, a.currency)}（${esc(a.baselineAt ? new Date(a.baselineAt).toLocaleString() : '—')}）。${a.oldLedgerBalance != null ? `绑定时旧记账余额 ${amount(a.oldLedgerBalance, a.currency)}，仅供核对。` : ''}${a.missingQuotes?.length ? `缺少行情：${esc(a.missingQuotes.join('、'))}，不显示不完整的总资产。` : ''}</p>
           ${editable ? `<div class="sm-account-actions"><button type="button" class="btn ghost" data-account-edit="${a.id}">编辑／核对现金</button>${can('trade', 'edit') ? `<button type="button" class="btn ghost" data-account-assign="${a.id}">归入未归属历史</button>` : ''}${a.bookkeepingId ? `<button type="button" class="btn ghost" data-account-unlink="${a.id}">解除绑定</button>` : ''}</div>` : ''}
           <details><summary>持仓与行情时间</summary>${(a.positions || []).map((p) => `<p>${esc(p.symbol)} ${esc(p.name)} · ${p.shares} · ${amount(p.marketValue, a.currency)}<br><small class="hint">报价时间：${esc(p.quoteAsOf || '供应商未提供')} ${p.delayed ? '延时行情' : ''}</small></p>`).join('') || '<p class="hint">暂无已归属持仓</p>'}</details>
           <details><summary>基准后的资金变动（最近50条）</summary>${(a.movements || []).slice(0, 50).map((m) => `<p>${esc(m.date)} · ${esc(m.kind === 'stock' ? '股票' : '记账')} ${esc(m.symbol || m.type)} · ${amount(m.delta, a.currency)}</p>`).join('') || '<p class="hint">暂无变动</p>'}</details></section>`).join('') || '<p class="hint">尚未建立证券账户，旧持仓和现金保持原样。</p>'}`;
       root.querySelector('[data-account-new]')?.addEventListener('click', () => edit());
+      root.querySelectorAll('[data-dip-reserve]').forEach((button) => button.addEventListener('click', () => {
+        const a = data.accounts.find((row) => row.id === button.dataset.dipReserve);
+        openModal('抄底资金预留', `<form class="sm-trade-form"><p>仅调整普通/策略可用额度，不增加现金或资产。外部券商交易仍可能导致缺口。</p><label>调整后预留余额（${esc(a.currency)}）<input name="amount" type="number" min="0" step="0.01" value="${a.reserved}"></label></form>`, null, async (modal) => {
+          const amount = modal.querySelector('[name="amount"]').value;
+          await api(`/accounts/${a.id}/dip-reserve`, { method: 'PUT', body: { amount } });
+          await refresh(); await reload(); return '预留已更新，账户总现金未改变';
+        }, { reload: false });
+      }));
       root.querySelectorAll('[data-account-edit]').forEach((b) => b.addEventListener('click', () => edit(data.accounts.find((a) => a.id === b.dataset.accountEdit))));
       root.querySelectorAll('[data-account-assign]').forEach((b) => b.addEventListener('click', async () => {
         const account = data.accounts.find((a) => a.id === b.dataset.accountAssign);

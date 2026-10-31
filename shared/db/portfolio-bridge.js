@@ -1,6 +1,7 @@
 import { getDatabase, closeDatabase } from './connection.js';
 import { createPortfolioStore, DEFAULT_USD_CNY_RATE, legacyPortfolioOwner } from './portfolio-store.js';
 import { currentPortfolioUserId, requirePortfolioUserId } from '../portfolio-user.js';
+import { dipCashFunds } from '../dip-cash-funds.js';
 import {
   normalizeTrade,
   applyCashDelta,
@@ -51,7 +52,10 @@ export function getPortfolioCash(options = {}) {
   const store = getPortfolioStore(options);
   const data = store.read();
   const fx = readFxMeta(dbSingleton, store.userId);
+  const funds = dipCashFunds(dbSingleton, store.userId, data);
+  const strategyCash = (cur) => funds.filter((f) => f.currency === cur && !f.deficit).reduce((sum, f) => sum + f.strategyAvailable, 0);
   return {
+    strategyCashUsd: strategyCash('USD'), strategyCashCny: strategyCash('CNY'), strategyFunds: funds,
     cashUsd: Number(data.cashUsd) || 0,
     ...(data.accountCashEnabled ? { accountCashEnabled: true } : {}),
     cashCny: Number(data.cashCny) || 0,
@@ -261,6 +265,6 @@ export function appendTradesApplyCash(tradeInputs = [], options = {}) {
   data.cashUsd = cashState.cashUsd;
   data.cashCny = cashState.cashCny;
   data.usdCnyRate = cashState.usdCnyRate;
-  store.write(data);
+  store.write(data, { strategyFundId: options.strategyFundId });
   return { trades: created, cash: getPortfolioCash(options) };
 }

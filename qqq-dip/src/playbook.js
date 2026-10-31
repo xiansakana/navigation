@@ -1258,7 +1258,7 @@ export function applyRoundFromEval(prev, ev, { sessionDate } = {}) {
   next.variant = ev.variant;
   const active = next.startedAt || Object.keys(next.executed || {}).length
     || ev.tiers.some((tier) => tier.status === 'confirmed' || tier.status === 'intraday');
-  if (active) {
+  if (active && ev.B > 0) {
     next.startedAt ||= new Date().toISOString();
     next.budgetBase = ev.B;
     next.referenceHighs = { ...next.referenceHighs };

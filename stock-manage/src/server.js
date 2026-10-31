@@ -4,6 +4,7 @@ import { portfolioIdentityMiddleware } from '../../shared/portfolio-user.js';
 import { currentPortfolioUserId } from '../../shared/portfolio-user.js';
 import { getDatabase } from '../../shared/db/index.js';
 import { investmentRows, saveInvestmentAccount, unlinkInvestmentAccount } from '../../shared/investment-accounts.js';
+import { dipCashFunds, setDipCashReserve } from '../../shared/dip-cash-funds.js';
 import { createBookkeepingStore } from '../../portal/src/bookkeeping-store.js';
 import { configureQuoteNetwork } from '../../shared/quote-network.js';
 import express from 'express';
@@ -205,9 +206,18 @@ app.get('/api/accounts', (req, res) => {
   if (!requireStockPermission(req, res, 'accounts')) return;
   const data = store.read();
   const full = hasStockPermission(req, 'cash');
+  if (full) {
+    const funds = dipCashFunds(portfolioDb, currentPortfolioUserId(), data);
+    data.investmentAccounts = data.investmentAccounts?.map((a) => ({ ...a, ...funds.find((f) => f.accountId === a.id) }));
+  }
   const permissions = portalPermissions(req) || [];
   const ledgerDetails = permissions.includes('*') || (permissions.includes('bookkeeping:view') && permissions.includes('bookkeeping:accounts:view'));
   res.json({ accounts: (data.investmentAccounts || []).map((a) => full ? { ...a, movements: a.movements.filter((m) => m.kind === 'stock' || ledgerDetails), ...(!ledgerDetails ? { bookkeepingName: a.bookkeepingId ? '已绑定记账账户' : null, oldLedgerBalance: null } : {}) } : { id: a.id, name: a.name, currency: a.currency }), unassigned: data.trades.filter((t) => !t.account_id).length });
+});
+app.put('/api/accounts/:id/dip-reserve', (req, res) => {
+  if (!requireStockPermission(req, res, 'dip-funds', 'edit') || !requireStockPermission(req, res, 'cash', 'edit')) return;
+  try { res.json({ funds: setDipCashReserve(portfolioDb, currentPortfolioUserId(), req.params.id, req.body.amount) }); }
+  catch (error) { res.status(400).json({ error: error.message }); }
 });
 app.get('/api/accounts/bookkeeping-options', (req, res) => {
   if (!requireStockPermission(req, res, 'accounts') || !requireStockPermission(req, res, 'cash')) return;
@@ -320,10 +330,15 @@ app.put('/api/holdings-meta/:symbol', (req, res) => {
 app.post('/api/trades', async (req, res) => {
   try {
     const trade = await normalizeNamedTrade(req.body || {}, async (symbol) => ({ name: await quotes.getInstrumentName(symbol) }));
+    const strategyFundId = req.body.funding === 'dip' ? trade.account_id : undefined;
+    if (req.body.funding === 'dip') {
+      if (!requireStockPermission(req, res, 'dip-spend', 'edit')) return;
+      if (!strategyFundId) return res.status(400).json({ error: '抄底成交须明确选择证券账户' });
+    }
     const data = store.read();
     data.trades.push(trade);
     Object.assign(data, applyCashDelta(data, trade));
-    store.write(data);
+    store.write(data, { strategyFundId });
     sendPortfolio(res, req);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -337,6 +352,7 @@ app.put('/api/trades/:id', async (req, res) => {
     const i = data.trades.findIndex((t) => t.id === req.params.id);
     if (i < 0) return res.status(404).json({ error: '未找到' });
     const old = data.trades[i];
+    if (old.dip_fund_account && !requireStockPermission(req, res, 'dip-spend', 'edit')) return;
     data.trades[i] = { ...trade, ...(old.broker_order_key ? { broker: old.broker, broker_order_key: old.broker_order_key, broker_net: old.broker_net, broker_category: old.broker_category, source_trade_date: old.source_trade_date, settlement_date: old.settlement_date, security_received_at: old.security_received_at } : {}), id: req.params.id, created_at: old.created_at || trade.created_at };
     Object.assign(data, applyCashDelta(undoCashDelta(data, old), trade));
     store.write(data);
@@ -351,9 +367,11 @@ app.delete('/api/trades/:id', (req, res) => {
   const i = data.trades.findIndex((t) => t.id === req.params.id);
   if (i < 0) return res.status(404).json({ error: '未找到' });
   const old = data.trades[i];
+  if (old.dip_fund_account && !requireStockPermission(req, res, 'dip-spend', 'edit')) return;
   data.trades.splice(i, 1);
   Object.assign(data, undoCashDelta(data, old));
-  store.write(data);
+  try { store.write(data); }
+  catch (error) { return res.status(400).json({ error: error.message }); }
   sendPortfolio(res, req);
 });
 
@@ -409,7 +427,7 @@ app.post('/api/trades/import', express.raw({
       usdCnyRate: data.usdCnyRate || DEFAULT_USD_CNY_RATE
     });
     Object.assign(data, recalc);
-    store.write(data);
+    store.write(data, { externalSync: true });
     res.json({ ...portfolioForRequest(req), importSummary });
   } catch (e) {
     res.status(400).json({ error: e.message });

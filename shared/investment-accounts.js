@@ -8,6 +8,7 @@ const cents = (n) => {
 };
 const currency = (t) => t.currency ? String(t.currency).toUpperCase() : (/\d{6}/.test(String(t.symbol)) && !/[CP]\d/.test(String(t.symbol)) ? 'CNY' : 'USD');
 const time = (s) => Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(String(s)) ? s : String(s).replace(' ', 'T') + '+08:00');
+export { time as investmentRecordTime };
 const tableExists = (db, name) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
 export const investmentCashDelta = (t) => (t.type === 'buy' ? -Number(t.total_amount || 0) : Number(t.total_amount || 0)) - Number(t.commission || 0);
 

@@ -22,6 +22,14 @@ export function canExecutePlan(encodedPermissions) {
   } catch { return false; }
 }
 
+export function canSpendDipFunds(encodedPermissions) {
+  try {
+    const permissions = JSON.parse(Buffer.from(encodedPermissions || '', 'base64url').toString());
+    return Array.isArray(permissions) && ['*', 'service:stock-manage:edit', 'service:stock-manage:dip-spend:edit']
+      .some((key) => permissions.includes(key));
+  } catch { return false; }
+}
+
 export function captureExecutionPlan(round, preview, now = new Date()) {
   if (!preview?.available || preview.pendingClose || preview.status !== 'confirmed'
     || round.executionPlans?.[preview.tier]) return round;

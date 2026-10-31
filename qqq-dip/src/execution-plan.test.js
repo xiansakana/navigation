@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cnMarketStatus, nextCnSessionEnd, nextCnExecutionBar } from './cn-market-hours.js';
-import { captureExecutionPlan, prepareExecution, canExecutePlan, executionPlanState, commitExecution } from './execution-plan.js';
+import { captureExecutionPlan, prepareExecution, canExecutePlan, canSpendDipFunds, executionPlanState, commitExecution } from './execution-plan.js';
 
 const signalTime = new Date('2026-10-08T21:00:00Z');
 const fillTime = new Date('2026-10-09T02:00:00Z');
@@ -75,6 +75,8 @@ test('replay, crash journal, cancelled plan and stale signal fail safely', () =>
 });
 
 test('execution permissions fail closed, preserving the existing tier-exec permission', () => {
+  assert.equal(canSpendDipFunds(Buffer.from('["service:qqq-dip:tier-exec:edit"]').toString('base64url')), false);
+  assert.equal(canSpendDipFunds(Buffer.from('["service:stock-manage:dip-spend:edit"]').toString('base64url')), true);
   assert.equal(canExecutePlan(''), false);
   assert.equal(canExecutePlan(Buffer.from('[]').toString('base64url')), false);
   assert.equal(canExecutePlan(Buffer.from('["service:qqq-dip:tier-exec:edit"]').toString('base64url')), true);

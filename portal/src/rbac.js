@@ -61,6 +61,8 @@ var STOCK_MANAGE_FEATURES = [
     { feature: 'pnl-toggle', name: '盈亏显隐', action: 'view', permissionPath: ['持仓', '看板'] },
     { feature: 'trades', name: '交易记录', action: 'view', permissionPath: ['持仓', '交易记录'] },
     { feature: 'accounts', name: '查看证券账户', action: 'view', permissionPath: ['持仓', '账户管理'] },
+    { feature: 'dip-funds', name: '划拨/释放抄底专用资金', action: 'edit', permissionPath: ['持仓', '账户管理', '抄底资金池'] },
+    { feature: 'dip-spend', name: '使用抄底专用资金成交', action: 'edit', permissionPath: ['持仓', '账户管理', '抄底资金池'] },
     { feature: 'accounts', name: '管理证券账户及绑定', action: 'edit', permissionPath: ['持仓', '账户管理'] },
     { feature: 'trade-review', name: '交易复盘', action: 'view', permissionPath: ['持仓', '交易记录', '交易复盘'] },
     { feature: 'export', name: '导出交易', action: 'view', permissionPath: ['持仓', '交易记录'] },

@@ -666,6 +666,7 @@ function tradeFormFields(trade = {}) {
       </select></label>
       ${(state.investmentAccounts || []).length ? `<label>证券账户<select name="account_id" required><option value="">请选择实际归属账户</option>${state.investmentAccounts.map((a) => `<option value="${a.id}" ${a.id === (trade.account_id || selectedAccountId) ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></label>` : ''}
       <label class="field-other ${type !== 'other' ? 'hidden' : ''}">其它类别<input name="other_category" value="${trade.other_category || ''}"></label>
+      ${!trade.id && can('dip-spend', 'edit') ? '<label>资金用途<select name="funding"><option value="ordinary">普通可用现金</option><option value="dip">抄底专用资金（卖出则回补资金池）</option></select></label>' : ''}
       <label>代码<input name="symbol" id="trade-symbol" required value="${trade.symbol || ''}"></label>
       <label>名称<input name="name" value="${trade.name || ''}" placeholder="留空自动获取真实名称"></label>
       <label>币种<select name="currency" id="trade-currency">
@@ -705,6 +706,7 @@ function formToTrade(fd, existing = {}) {
   return {
     type,
     ...(fd.get('account_id') ? { account_id: fd.get('account_id') } : {}),
+    funding: fd.get('funding') || 'ordinary',
     symbol: String(fd.get('symbol') || '').trim(),
     name: String(fd.get('name') || '').trim(),
     currency: String(fd.get('currency') || 'USD').toUpperCase(),
