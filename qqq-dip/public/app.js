@@ -326,15 +326,19 @@ function renderAmmo() {
       <div class="hint" id="fx-hint">${escapeHtml(fmtFxHint(c))}</div>
       <button type="button" class="btn link" id="btn-fx">立即刷新汇率</button></div>
     <div class="sm-summary-card"><div class="label">本轮预算 B₀</div><div class="value">${maskMoney(fmtUsd(B))}</div>
+      <div class="hint">${ev?.budgetLocked ? '已触发／已有计划，预算已锁定' : '尚未触发，预算随专用资金更新'}</div>
       <div class="hint">专用可用：${maskMoneyText(fmtUsd(c.strategyCashUsd ?? 0))} / ${maskMoneyText(fmtCny(c.strategyCashCny ?? 0))}；账户管理中划拨，不重复增加资产</div>
       ${(c.strategyFunds || []).some((f) => f.deficit > 0) ? '<div class="hint">存在策略资金缺口：受影响账户暂停执行，请核对外部成交或释放预留。</div>' : ''}
       <div class="hint">${state.settings.variant === 'vBoost' ? 'V 型加强 55/20/25' : '默认 40/30/30'}</div></div>
-    <div class="sm-summary-card"><div class="label">左侧剩余</div><div class="value">${maskMoney(fmtUsd(rem?.left))}</div>
-      <div class="hint">袋 ${maskMoneyText(fmtUsd(bags?.left))}</div></div>
-    <div class="sm-summary-card"><div class="label">危机剩余</div><div class="value">${maskMoney(fmtUsd(rem?.crisis))}</div>
-      <div class="hint">袋 ${maskMoneyText(fmtUsd(bags?.crisis))}</div></div>
-    <div class="sm-summary-card"><div class="label">右侧剩余</div><div class="value">${maskMoney(fmtUsd(rem?.right))}</div>
-      <div class="hint">袋 ${maskMoneyText(fmtUsd(bags?.right))}</div></div>
+    <div class="sm-summary-card"><div class="label">实际专用可用（美元等价）</div><div class="value">${maskMoney(fmtUsd(ev?.availableCash))}</div>
+      <div class="hint">总预算余额 ${maskMoneyText(fmtUsd(ev?.budgetRemaining))} · 资金缺口 ${maskMoneyText(fmtUsd(ev?.fundingGap))}</div>
+      <div class="hint">预算额度不等于现金；各袋不各自占有一份可用余额</div></div>
+    <div class="sm-summary-card"><div class="label">左侧预算余额</div><div class="value">${maskMoney(fmtUsd(rem?.left))}</div>
+      <div class="hint">预算上限 ${maskMoneyText(fmtUsd(bags?.left))}，非独立现金</div></div>
+    <div class="sm-summary-card"><div class="label">危机预算余额</div><div class="value">${maskMoney(fmtUsd(rem?.crisis))}</div>
+      <div class="hint">预算上限 ${maskMoneyText(fmtUsd(bags?.crisis))}，非独立现金</div></div>
+    <div class="sm-summary-card"><div class="label">右侧预算余额</div><div class="value">${maskMoney(fmtUsd(rem?.right))}</div>
+      <div class="hint">预算上限 ${maskMoneyText(fmtUsd(bags?.right))}，非独立现金</div></div>
     <div class="sm-summary-card"><div class="label">VXN</div>
       <div class="value">${state.quotes?.VXN?.stale ? Number(state.quotes.VXN.price).toFixed(2) : ev?.vxn != null ? ev.vxn.toFixed(2) : '—'}</div>
       ${state.quotes?.VXN?.stale ? '<div class="hint">缓存值仅供参考 · 期权门槛暂停判定</div>' : ''}

@@ -45,8 +45,56 @@ function roundInput(overrides = {}) {
     qqq: { price: 88, low: 88, candles: [{ h: 100, c: 88 }] }, ...overrides };
 }
 
+test('legacy pre-trigger round rebases to dedicated cash without resetting reference highs or dates', () => {
+  const round = { ...emptyRound(), startedAt: '2026-10-23T13:36:50Z', budgetBase: 23926.87,
+    referenceHighs: { QQQ: 100 }, firedAlerts: { 'openSummary:2026-10-23': 'sent' } };
+  const ev = evaluate(roundInput({ round, cashUsd: 11000, cashCny: 50000, usdCnyRate: 6.6702,
+    qqq: { price: 96, low: 95, candles: [{ h: 97, c: 96 }] } }));
+  assert.equal(ev.B, 18496.03);
+  assert.equal(ev.budgetLocked, false);
+  assert.equal(ev.fundingGap, 0);
+  assert.equal(ev.bags.left, 7398.41);
+  assert.equal(ev.qqq.H, 100);
+  const next = applyRoundFromEval(round, ev);
+  assert.equal(next.budgetBase, 18496.03);
+  assert.deepEqual(next.referenceHighs, round.referenceHighs);
+  assert.equal(next.startedAt, round.startedAt);
+  assert.deepEqual(next.firedAlerts, round.firedAlerts);
+  assert.equal(round.budgetBase, 23926.87);
+});
+
+test('before confirmation reserve changes including release to zero update all budget amounts', () => {
+  const input = roundInput({ round: { startedAt: '2026-10-01', budgetBase: 10000 },
+    qqq: { price: 95, low: 94, candles: [{ h: 100, c: 95 }] } });
+  assert.equal(evaluate({ ...input, cashUsd: 5000 }).B, 5000);
+  const zero = evaluate({ ...input, cashUsd: 0 });
+  assert.equal(zero.B, 0); assert.equal(zero.remaining.left, 0); assert.equal(zero.budgetLocked, false);
+});
+
+test('an intraday warning alone does not freeze budget or allocation variant', () => {
+  const input = roundInput({ rth: true, cashUsd: 10000,
+    qqq: { price: 88, low: 88, candles: [{ h: 100, c: 95 }] } });
+  const ev = evaluate(input);
+  const round = applyRoundFromEval({}, ev);
+  assert.equal(round.budgetLocked, false);
+  const next = evaluate({ ...input, cashUsd: 5000, variant: 'vBoost', round });
+  assert.equal(next.B, 5000); assert.equal(next.variant, 'vBoost');
+});
+
+test('confirmed signals and saved plans freeze the budget while reporting actual funding shortage', () => {
+  for (const commitment of [{ triggered: { T1: {} } }, { executionPlans: { T1: { cancelled: true } } }]) {
+    const ev = evaluate(roundInput({ cashUsd: 6000, round: { budgetBase: 10000, ...commitment } }));
+    assert.equal(ev.B, 10000); assert.equal(ev.budgetLocked, true); assert.equal(ev.fundingGap, 4000);
+  }
+});
+
+test('strategy executions reduce both remaining budget and funds without falsely shrinking B0', () => {
+  const ev = evaluate(roundInput({ cashUsd: 9400, round: { budgetBase: 10000, executed: { T1: { usd: 600 } } } }));
+  assert.equal(ev.B, 10000); assert.equal(ev.budgetRemaining, 9400); assert.equal(ev.fundingGap, 0);
+});
+
 test('zero budget remains frozen even if new cash arrives mid-round', () => {
-  const ev = evaluate(roundInput({ round: { startedAt: '2026-10-01', budgetBase: 0, referenceHighs: { QQQ: 100 } } }));
+  const ev = evaluate(roundInput({ round: { triggered: { T1: {} }, startedAt: '2026-10-01', budgetBase: 0, referenceHighs: { QQQ: 100 } } }));
   assert.equal(ev.B, 0);
 });
 
@@ -126,7 +174,7 @@ test('standing above SMA20 is not a new post-crisis breakout', () => {
 });
 
 test('insufficient cash does not borrow other bags or shrink the frozen base', () => {
-  const ev = evaluate(roundInput({ cashUsd: 10, round: { budgetBase: 100000, referenceHighs: { QQQ: 100 } } }));
+  const ev = evaluate(roundInput({ cashUsd: 10, round: { budgetLocked: true, budgetBase: 100000, referenceHighs: { QQQ: 100 } } }));
   assert.equal(ev.B, 100000);
   assert.equal(ev.buyPreview.available, false);
   assert.match(ev.buyPreview.reason, /不足/);

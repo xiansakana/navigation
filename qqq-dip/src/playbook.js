@@ -315,6 +315,7 @@ export function emptyRound() {
     variant: 'default',
     startedAt: null,
     budgetBase: null,
+    budgetLocked: false,
     referenceHighs: {},
     executionPlans: {},
     r1SessionDate: null,
@@ -538,15 +539,23 @@ function fakeRightHit(stats, round) {
   return Number.isFinite(low) && low < floor;
 }
 
+export function hasBudgetCommitments(round = {}) {
+  round ||= {};
+  return !!(round.budgetLocked || Object.keys(round.triggered || {}).length
+    || Object.keys(round.executed || {}).length || Object.keys(round.executionPlans || {}).length
+    || round.firstT1At || round.r1At || round.hasSeenMinus22 || round.hasSeenMinus30);
+}
+
 export function evaluate(input) {
-  const selectedVariant = input.round?.startedAt ? input.round.variant : input.variant;
+  const committed = hasBudgetCommitments(input.round);
+  const selectedVariant = committed ? input.round.variant : input.variant;
   const variant = selectedVariant === 'vBoost' ? 'vBoost' : 'default';
   const round = { ...emptyRound(), ...(input.round || {}) };
   const availableCash = computeAmmoB(input.cashUsd, input.cashCny, input.usdCnyRate);
   const spent = Object.values(round.executed || {}).reduce((sum, row) => sum + Math.max(0, Number(row.usd) || 0), 0);
   // Legacy active rounds have no frozen base. Reconstruct once from cash + buys;
   // do not silently shrink all later tiers after each actual cash deduction.
-  const B = round.budgetBase != null && Number.isFinite(Number(round.budgetBase)) && Number(round.budgetBase) >= 0
+  const B = committed && round.budgetBase != null && Number.isFinite(Number(round.budgetBase)) && Number(round.budgetBase) >= 0
     ? Number(round.budgetBase) : availableCash + spent;
   const bags = bagCaps(B, variant);
   round.variant = variant;
@@ -789,6 +798,9 @@ export function evaluate(input) {
   const evalBase = {
     B,
     availableCash,
+    budgetLocked: committed || tiers.some((tier) => tier.status === 'confirmed'),
+    budgetRemaining: roundMoney(remaining.left + remaining.crisis + remaining.right),
+    fundingGap: roundMoney(Math.max(0, B - used.left - used.crisis - used.right - availableCash)),
     cnMarket: cnMarketStatus(input.now || new Date()),
     bags,
     remaining,
@@ -1256,6 +1268,8 @@ export function applyRoundFromEval(prev, ev, { sessionDate } = {}) {
   const next = { ...emptyRound(), ...(prev || {}) };
   if (ev.reset) return resetRound(next, ev.variant);
   next.variant = ev.variant;
+  next.budgetLocked = !!ev.budgetLocked;
+  if (next.budgetLocked) next.budgetBase = ev.B;
   const active = next.startedAt || Object.keys(next.executed || {}).length
     || ev.tiers.some((tier) => tier.status === 'confirmed' || tier.status === 'intraday');
   if (active && ev.B > 0) {
