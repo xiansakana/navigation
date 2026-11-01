@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import Database from 'better-sqlite3';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { createChainStore } from './torn-chain-monitor.js';
 import { DestructionMonitor, createDestructionStore, destructionConfig } from './torn-destruction-monitor.js';
 import { createTornChainService } from './torn-chain.js';
@@ -13,7 +16,7 @@ const page = (search, next = null) => ({ search, _metadata: { links: { next } } 
 function fixture(t, request, extra = {}) {
   const db = new Database(':memory:'), store = createDestructionStore(db);
   store.save('a', { apiKeys: [key] }); const sent = [];
-  const m = new DestructionMonitor({ uid: 'a', store, request, now: () => 1000, schedule: () => 1, cancel: () => {}, notify: async row => { sent.push(row); }, ...extra });
+  const m = new DestructionMonitor({ uid: 'a', store, request, priorityEnabled: false, now: () => 1000, schedule: () => 1, cancel: () => {}, notify: async row => { sent.push(row); }, ...extra });
   t.after(() => { m.stop(); db.close(); }); return { db, store, m, sent };
 }
 test('destruction configuration migrates keys and notification settings without mixing Chain history', t => {
@@ -204,4 +207,119 @@ test('zero notification does not falsely claim destruction and carries both fact
   const messages = [], send = createChainNotifier({ endpoint: 'http://127.0.0.1:8787', token: 'test-token', fetchImpl: async (_url, options) => { messages.push(JSON.parse(options.body).message); return { ok: true, json: async () => ({ ok: true }) }; } });
   await send({ qq: { enabled: false }, slack: { enabled: true }, targets: [] }, { kind: 'respect-zero', id: 5, name: 'Faction', leaderId: 100, previousRespect: 55, respect: 0, detectedAt: 1015, isDestroyed: false });
   assert.match(messages[0], /respect 清零/); assert.match(messages[0], /尚未标记摧毁/); assert.match(messages[0], /ID=5/); assert.match(messages[0], /XID=100/); assert.doesNotMatch(messages[0], /已确认摧毁|chainreport|Bonus #/);
+});
+
+
+test('priority zero sweep notifies before any full-list page, even below the configured minimum', async t => {
+  const calls = [];
+  const f = fixture(t, async path => {
+    const filters = new URL(path, 'https://api.torn.com/v2/').searchParams.get('filters'); calls.push(filters);
+    if (filters === 'notDestroyed,respect:=:0') return page([faction(1, 0), faction(999, 0)]);
+    if (filters === 'id:=:1') return page([faction(1, 0)]);
+    assert.equal(f.sent.length, 1, 'full listing must not delay the zero alert');
+    throw new Error('remaining full listing unavailable');
+  }, { priorityEnabled: true });
+  f.store.save('a', { minRespect: 50 });
+  f.store.observe('a', { id: 1, name: 'Tracked', leaderId: 1001, respect: 100, isDestroyed: false, checkedAt: 999 });
+  f.m.start(); await f.m.promise;
+  assert.equal(calls[0], 'notDestroyed,respect:=:0');
+  assert.equal(f.sent.length, 1); assert.equal(f.sent[0].isDestroyed, false);
+  assert.equal(f.sent[0].previousRespect, 100); assert.equal(f.sent[0].id, 1);
+  assert.equal(f.store.get('a').history.length, 1); assert.equal(f.m.status().partial, true);
+  await f.m.scan(); assert.equal(f.sent.length, 1);
+});
+
+test('priority checks rotate lowest respect IDs and directly verify without range or live filters', async t => {
+  const ids = [];
+  const f = fixture(t, async p => {
+    const filter = new URL(p, 'https://api.torn.com/v2/').searchParams.get('filters');
+    if (filter.startsWith('id:=:')) {
+      const id = Number(filter.split(':').at(-1)); ids.push(id); return page([faction(id, id === 10 ? 0 : 100 - id, id === 10)]);
+    }
+    if (filter === 'notDestroyed,respect:=:0') return page([]);
+    return page(Array.from({length: 10}, (_, i) => faction(i + 1, 100 - i - 1)));
+  }, { priorityEnabled: true });
+  for (let id = 1; id <= 10; id++) f.store.observe('a', { id, name: 'Faction ' + id, leaderId: 1000 + id, respect: 100 - id, isDestroyed: false, checkedAt: 999 });
+  f.m.start(); await f.m.promise;
+  assert.deepEqual(ids, [10, 9, 8, 7, 6]); assert.equal(f.sent.length, 1); assert.equal(f.sent[0].id, 10);
+  ids.length = 0; await f.m.scan();
+  assert.deepEqual(ids, [4, 3, 2, 1, 9]);
+  assert.equal(f.sent.length, 1); assert.equal(f.store.observations('a').find(row => row.id === 10).isDestroyed, true);
+});
+
+test('zero sweep is interleaved after ten pages and cannot be overwritten by earlier list snapshots', async t => {
+  let sweeps = 0, stamp = 1000;
+  const f = fixture(t, async p => {
+    const u = new URL(p, 'https://api.torn.com/v2/'), filter = u.searchParams.get('filters');
+    if (filter === 'notDestroyed,respect:=:0') { sweeps++; stamp++; return page(sweeps > 1 ? [faction(1, 0)] : []); }
+    if (filter === 'id:=:1') return page([faction(1, sweeps > 1 ? 0 : 10)]);
+    const offset = Number(u.searchParams.get('offset'));
+    if (offset === 1000) { assert.equal(f.sent.length, 1); return page([]); }
+    return page(Array.from({ length: 100 }, (_, i) => faction(offset + i + 1, 10)));
+  }, { priorityEnabled: true, now: () => stamp });
+  f.store.observe('a', { id: 1, name: 'Faction 1', leaderId: 1001, respect: 10, isDestroyed: false, checkedAt: 999 });
+  f.m.start(); await f.m.promise;
+  assert.equal(sweeps, 2); assert.equal(f.m.status().pages, 11); assert.equal(f.m.status().partial, false);
+  assert.equal(f.sent.length, 1); assert.equal(f.store.observations('a').find(row => row.id === 1).respect, 0);
+  assert.equal(f.m.status().lastPriorityAt, stamp);
+});
+
+test('priority zero pagination rotates, validates links and isolates unknown zero factions', async t => {
+  const offsets = [];
+  const f = fixture(t, async p => {
+    const u = new URL(p, 'https://api.torn.com/v2/'), filter = u.searchParams.get('filters');
+    if (filter === 'notDestroyed,respect:=:0') {
+      const offset = Number(u.searchParams.get('offset')); offsets.push(offset);
+      return offset === 0 ? page(Array.from({ length: 100 }, (_, i) => faction(i + 100, 0))) : page([faction(1, 0)]);
+    }
+    if (filter.startsWith('id:')) return page([faction(1)]);
+    return page([faction(1)]);
+  }, { priorityEnabled: true });
+  f.store.observe('a', { id: 1, name: 'Tracked', leaderId: 1001, respect: 100, isDestroyed: false, checkedAt: 999 });
+  f.m.start(); await f.m.promise; assert.equal(f.sent.length, 0);
+  await f.m.scan(); assert.deepEqual(offsets, [0, 100]); assert.equal(f.sent.length, 1);
+  assert.throws(() => f.m.nextOffset(page([], 'https://evil.test/v2/faction/search?offset=100'), 0));
+});
+
+test('SQLite lock retries the same atomic write before one notification, with no new API fetch', async t => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'torn-destruction-lock-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const filename = path.join(dir, 'test.db'), db = new Database(filename);
+  db.pragma('journal_mode = WAL'); db.pragma('busy_timeout = 1');
+  const store = createDestructionStore(db); store.save('a', { apiKeys: [key] });
+  store.observe('a', { id: 1, name: 'Tracked', respect: 100, leaderId: 1001, isDestroyed: false, checkedAt: 999 });
+  const other = new Database(filename), waits = [], sent = []; let calls = 0;
+  other.exec('BEGIN IMMEDIATE');
+  const m = new DestructionMonitor({ uid: 'a', store, request: async () => { calls++; return page([faction(1, 0)]); },
+    priorityEnabled: false, now: () => 1000, schedule: () => 1, cancel() {}, notify: async row => sent.push(row),
+    wait: async ms => { waits.push(ms); assert.equal(sent.length, 0); other.exec('COMMIT'); } });
+  try {
+    m.start(); await m.promise;
+    assert.deepEqual(waits, [250]); assert.equal(calls, 1); assert.equal(m.status().databaseRetries, 1);
+    assert.equal(m.status().partial, false); assert.equal(sent.length, 1); assert.equal(store.get('a').history.length, 1);
+  } finally { m.stop(); other.close(); db.close(); }
+});
+
+test('database retry is bounded, abortable and does not retry other failures', async t => {
+  const waits = []; const f = fixture(t, async () => page([]), { wait: async ms => waits.push(ms) });
+  let attempts = 0; const signal = new AbortController().signal;
+  f.m.state.databaseRetries = 0;
+  await assert.rejects(f.m.persist(() => { attempts++; throw Object.assign(new Error('locked'), { code: 'SQLITE_BUSY_SNAPSHOT' }); }, signal, () => {}));
+  assert.equal(attempts, 5); assert.deepEqual(waits, [250, 500, 1000, 2000]);
+  attempts = 0;
+  await assert.rejects(f.m.persist(() => { attempts++; throw Object.assign(new Error('bad'), { code: 'SQLITE_CONSTRAINT' }); }, signal, () => {}));
+  assert.equal(attempts, 1);
+  const controller = new AbortController(); attempts = 0;
+  f.m.wait = async () => controller.abort();
+  await assert.rejects(f.m.persist(() => { attempts++; throw Object.assign(new Error('locked'), { code: 'SQLITE_LOCKED' }); }, controller.signal, () => controller.signal.throwIfAborted()));
+  assert.equal(attempts, 1);
+});
+
+test('baseline batches roll back together and older page snapshots cannot overwrite a priority lookup', t => {
+  const f = fixture(t, async () => page([]));
+  const row = { id: 1, name: 'Tracked', respect: 100, leaderId: 1001, isDestroyed: false, checkedAt: 1000 };
+  assert.throws(() => f.store.observeBatch('a', [row, { ...row, id: null }]));
+  assert.equal(f.store.observations('a').length, 0);
+  f.store.observe('a', row); f.store.observe('a', { ...row, respect: 0, checkedAt: 1002 });
+  f.store.observeBatch('a', [{ ...row, checkedAt: 1001 }]);
+  assert.equal(f.store.observations('a')[0].respect, 0); assert.equal(f.store.get('a').history.length, 1);
 });

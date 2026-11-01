@@ -1,3 +1,4 @@
+import { setImmediate as yieldLoop } from 'node:timers/promises';
 import { ChainMonitor, chainConfig, createChainStore } from './torn-chain-monitor.js';
 
 export const DESTRUCTION_DEFAULTS = { apiKey: '', apiKeys: [], apiIntervalSeconds: 2, minRespect: 0, maxRespect: 10000, intervalSeconds: 15 };
@@ -33,10 +34,10 @@ export function createDestructionStore(db) {
   const get = uid => { ensure(uid); const row = db.prepare('SELECT * FROM torn_destruction_monitors WHERE user_id=?').get(uid); return { config: destructionConfig({}, JSON.parse(row.config_json)), history: JSON.parse(row.history_json) }; };
   const observation = db.prepare('SELECT row_json FROM torn_destruction_observations WHERE user_id=? AND faction_id=?');
   const write = db.prepare('INSERT INTO torn_destruction_observations(user_id,faction_id,row_json) VALUES(?,?,?) ON CONFLICT(user_id,faction_id) DO UPDATE SET row_json=excluded.row_json');
-  const observe = db.transaction((uid, row) => {
+  const observeRow = (uid, row) => {
     const saved = observation.get(uid, row.id), old = saved && JSON.parse(saved.row_json);
     // Destruction is irreversible. A stale live API cache must not revive a dead faction.
-    if (old?.isDestroyed) return null;
+    if (old?.isDestroyed || old?.checkedAt > row.checkedAt) return null;
     let event = null;
     // An observed zero is actionable before Torn marks the faction destroyed.
     // First-seen zeros are baseline-only; existing pre-upgrade live zeros are
@@ -61,8 +62,12 @@ export function createDestructionStore(db) {
       lastPositiveRespect: row.respect > 0 ? row.respect : old?.lastPositiveRespect ?? (old?.respect > 0 ? old.respect : null),
       lastAliveAt: row.isDestroyed ? old?.lastAliveAt || null : row.checkedAt }));
     return event;
-  });
-  return { get, observe,
+  };
+  // Acquire the write lock before reading: deferred read-to-write upgrades in
+  // WAL mode can fail immediately with SQLITE_BUSY_SNAPSHOT.
+  const observe = db.transaction(observeRow).immediate;
+  const observeBatch = db.transaction((uid, rows) => rows.map(row => observeRow(uid, row))).immediate;
+  return { get, observe, observeBatch,
     save(uid, input) { const config = destructionConfig(input, get(uid).config); db.prepare('UPDATE torn_destruction_monitors SET config_json=? WHERE user_id=?').run(JSON.stringify(config), uid); return config; },
     observations(uid) { ensure(uid); return db.prepare('SELECT row_json FROM torn_destruction_observations WHERE user_id=? ORDER BY faction_id').all(uid).map(row => JSON.parse(row.row_json)); },
     clear(uid) { ensure(uid); db.prepare("UPDATE torn_destruction_monitors SET history_json='[]' WHERE user_id=?").run(uid); },
@@ -75,6 +80,8 @@ export function createDestructionStore(db) {
 export class DestructionMonitor extends ChainMonitor {
   constructor(options) {
     super(options);
+    this.priorityEnabled = options.priorityEnabled !== false;
+    this.priorityCursor = 0; this.zeroOffset = 0;
     this.state = { running: false, rounds: 0, pages: 0, tracked: 0, confirmed: 0, destroyed: 0, zeroed: 0, failed: 0, partial: false, error: '', lastScanAt: null, nextScanAt: null, retryAt: null, retryAttempt: 0, retryMessage: '', chains: [], detailsAt: null, detailsStale: false };
   }
   status() {
@@ -90,12 +97,31 @@ export class DestructionMonitor extends ChainMonitor {
     this.running = true; this.controller = new AbortController(); this.promise = this.scan();
   }
   searchPath(filters, offset = 0) { return 'faction/search?limit=100&offset=' + offset + '&filters=' + encodeURIComponent(filters.join(',')); }
+  async persist(operation, signal, check) {
+    for (let attempt = 0; ; attempt++) {
+      check();
+      try { return operation(); }
+      catch (error) {
+        if (!/^SQLITE_(BUSY|LOCKED)(_|$)/.test(error.code || '') || attempt >= 4) throw error;
+        this.state.databaseRetries++;
+        await this.wait(250 * 2 ** attempt, undefined, { signal });
+      }
+    }
+  }
+  nextOffset(data, offset) {
+    const next = data._metadata?.links?.next;
+    if (!next) return data.search.length === 100 ? offset + 100 : null;
+    const url = new URL(next, 'https://api.torn.com/v2/faction/search');
+    const value = url.searchParams.get('offset'), result = Number(value);
+    if (url.origin !== 'https://api.torn.com' || url.pathname !== '/v2/faction/search' || value === null || !Number.isSafeInteger(result) || result <= offset) throw new Error('API 分页地址或 offset 无效，本轮不更新基线');
+    return result;
+  }
   async scan() {
     if (!this.running || this.busy) return;
     this.busy = true; const signal = this.controller.signal;
     const valid = () => this.running && !signal.aborted && this.authorize();
     const check = () => { if (!valid()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true }); };
-    Object.assign(this.state, { pages: 0, confirmed: 0, failed: 0, outsideRange: 0, partial: false, error: '', detailsStale: true, problems: [] });
+    Object.assign(this.state, { pages: 0, confirmed: 0, failed: 0, outsideRange: 0, partial: false, error: '', detailsStale: true, problems: [], priorityChecked: 0, databaseRetries: 0 });
     try {
       check(); await this.prepareKeys(signal); check();
       const observed = new Map(this.store.observations(this.uid).filter(row => !row.isDestroyed && (inRespectRange(row, this.config) || row.respect === 0 && row.zeroHandled)).map(row => [row.id, row]));
@@ -106,6 +132,53 @@ export class DestructionMonitor extends ChainMonitor {
         try { await this.notify(event); }
         catch { this.state.notificationError = '清零/摧毁记录已保存，通知投递失败；请检查通知管理（不自动重发）'; }
       };
+
+      const persist = operation => this.persist(operation, signal, check);
+      const verify = async old => {
+        check();
+        try {
+          const data = await this.api(this.searchPath(['id:=:' + old.id]), signal); check();
+          if (!Array.isArray(data.search) || data.search.length !== 1 || data.search[0].id !== old.id) throw new Error('API 未确认该帮派状态，保留最后存活记录');
+          const row = factionRow(data.search[0], this.now());
+          await deliver(await persist(() => this.store.observe(this.uid, row)));
+          this.state.confirmed++;
+        } catch (error) {
+          if (error.fatal || !valid() || /^SQLITE_(BUSY|LOCKED)/.test(error.code || '')) throw error;
+          this.state.failed++; this.state.error = this.safeError(error); this.state.problems.push({ id: old.id, reason: this.safeError(error) });
+        }
+      };
+      const priority = async () => {
+        if (!this.priorityEnabled || !observed.size) return;
+        // This small, independent query runs before and during the full listing.
+        // Rotate pages if more than 100 live zero-respect factions exist.
+        try {
+          const data = await this.api(this.searchPath(['notDestroyed', 'respect:=:0'], this.zeroOffset), signal); check();
+          if (!Array.isArray(data.search)) throw new Error('API 未返回清零帮派列表');
+          const next = this.nextOffset(data, this.zeroOffset);
+          for (const item of data.search) {
+            const row = factionRow(item, this.now());
+            if (row.respect !== 0 || row.isDestroyed || !observed.has(row.id)) continue;
+            await deliver(await persist(() => this.store.observe(this.uid, row)));
+            this.state.priorityChecked++;
+          }
+          this.zeroOffset = next ?? 0;
+        } catch (error) {
+          if (error.fatal || !valid() || /^SQLITE_(BUSY|LOCKED)/.test(error.code || '')) throw error;
+          this.state.failed++; this.state.error = this.safeError(error);
+        }
+        // Rotate five IDs within the lowest 100 tracked positive factions. ID
+        // lookups have no live/range filters, so they also catch a direct death
+        // or a drop below the configured minimum before the full list finishes.
+        const candidates = [...observed.values()].filter(row => row.respect > 0 && !row.zeroHandled)
+          .sort((a, b) => a.respect - b.respect || a.id - b.id).slice(0, 100);
+        const count = Math.min(5, candidates.length);
+        for (let i = 0; i < count; i++) {
+          const old = candidates[this.priorityCursor++ % candidates.length];
+          await verify(old); this.state.priorityChecked++;
+        }
+        this.state.lastPriorityAt = this.now();
+      };
+      await priority();
 
       const filters = ['notDestroyed', 'respect:>=:' + this.config.minRespect, ...(this.config.maxRespect === null ? [] : ['respect:<=:' + this.config.maxRespect])];
       const current = new Map(), visited = new Set(), rawSeen = new Set(); let offset = 0, path = this.searchPath(filters);
@@ -120,7 +193,7 @@ export class DestructionMonitor extends ChainMonitor {
           if (!rawSeen.has(row.id)) added++; rawSeen.add(row.id);
           // Explicit zero evidence does not depend on a complete listing.
           // Other baseline updates still wait for every page to succeed.
-          if (row.respect === 0 && observed.has(row.id)) await deliver(this.store.observe(this.uid, row));
+          if (row.respect === 0 && observed.has(row.id)) await deliver(await persist(() => this.store.observe(this.uid, row)));
 
           // Listings can shift during pagination; only keep live in-range rows.
           if (row.isDestroyed || !inRespectRange(row, this.config)) { this.state.outsideRange++; continue; }
@@ -128,32 +201,25 @@ export class DestructionMonitor extends ChainMonitor {
         }
         if (data.search.length && !added) throw new Error('API 分页重复，本轮不更新基线');
         this.state.pages++; this.state.confirmed = current.size;
-        const next = data._metadata?.links?.next;
-        if (next) {
-          const url = new URL(next, 'https://api.torn.com/v2/faction/search');
-          const value = url.searchParams.get('offset'), nextOffset = Number(value);
-          if (url.origin !== 'https://api.torn.com' || url.pathname !== '/v2/faction/search' || value === null || !Number.isSafeInteger(nextOffset) || nextOffset <= offset) throw new Error('API 分页地址或 offset 无效，本轮不更新基线');
-          offset = nextOffset;
-          // API next links may lose filters/limit: reconstruct our own request.
-          path = this.searchPath(filters, offset);
-        } else { offset += 100; path = data.search.length === 100 ? this.searchPath(filters, offset) : null; }
+        const next = this.nextOffset(data, offset);
+        offset = next ?? offset;
+        path = next === null ? null : this.searchPath(filters, offset);
+        if (path && this.state.pages % 10 === 0) await priority();
       }
       check();
       const missing = this.store.observations(this.uid).filter(row => !row.isDestroyed && (inRespectRange(row, this.config) || row.respect === 0 && row.zeroHandled) && !current.has(row.id));
-      for (const row of current.values()) this.store.observe(this.uid, row);
+      // The store rejects older snapshots after independent verification.
+      // Bounded immediate transactions avoid thousands of lock upgrades and
+      // let controls/other monitors run between batches.
+      const baseline = [...current.values()];
+      for (let i = 0; i < baseline.length; i += 100) {
+        const batch = baseline.slice(i, i + 100);
+        await persist(() => this.store.observeBatch(this.uid, batch));
+        await yieldLoop(undefined, { signal }); check();
+      }
       this.state.tracked = current.size + missing.length; this.state.detailsStale = false; this.state.detailsAt = this.now();
-      for (const old of missing) {
-        check();
-        try {
-          const data = await this.api(this.searchPath(['id:=:' + old.id]), signal); check();
-          if (!Array.isArray(data.search) || data.search.length !== 1 || data.search[0].id !== old.id) throw new Error('API 未确认该帮派状态，保留最后存活记录');
-          const row = factionRow(data.search[0], this.now()), event = this.store.observe(this.uid, row); this.state.confirmed++;
-          // Persist/dedup before delivery; later destruction confirmation is silent.
-          await deliver(event);
-        } catch (error) {
-          if (error.fatal || !valid()) throw error;
-          this.state.failed++; this.state.error = this.safeError(error); this.state.problems.push({ id: old.id, reason: this.safeError(error) });
-        }
+      for (const old of missing.sort((a, b) => a.respect - b.respect || a.id - b.id)) {
+        await verify(old);
       }
       this.state.rounds++; this.state.lastScanAt = this.now();
     } catch (error) {
