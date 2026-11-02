@@ -17,6 +17,81 @@ function fixture() {
   };
 }
 
+function signalFixture(publish, extraStore = {}) {
+  const actions = [];
+  const store = { ...fixture(), ...extraStore, addAction: (a) => { actions.push(a); return a; } };
+  const monitor = createMonitor({ store, publish, quotes: {
+    getMarketBundle: async () => ({ markets: { QQQ: { price: 90, low: 90,
+      candles: Array.from({ length: 40 }, (_, i) => ({ t: 1700000000 + i * 86400, h: 100, l: 90, c: 90 })) } }, errors: {} }),
+    searchLeapCalls: async () => []
+  } });
+  return { store, monitor, actions };
+}
+
+test('confirmed close signal notifies outside trading hours, once', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T00:00:15Z') });
+  const sent = [];
+  const f = signalFixture(async (_, event) => { sent.push(event); return { sent: ['Slack'], errors: [] }; });
+  await f.monitor.tick();
+  await f.monitor.tick();
+  assert.deepEqual(sent.map((s) => s.eventKey), ['T1']);
+  assert.ok(f.store.getRound().firedAlerts.T1);
+  assert.equal(f.actions.filter((a) => a.type === 'signal').length, 1);
+});
+
+test('silent evaluation does not consume delivery; failure retries after cooldown', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T00:00:15Z') });
+  let calls = 0;
+  const f = signalFixture(async () => {
+    if (++calls === 1) throw new Error('offline');
+    return { sent: ['Slack'], errors: [] };
+  });
+  await f.monitor.tick({ silent: true });
+  assert.equal(calls, 0);
+  assert.equal(f.store.getRound().firedAlerts?.T1, undefined);
+  await f.monitor.tick();
+  await f.monitor.tick();
+  assert.equal(calls, 1);
+  t.mock.timers.tick(300001);
+  await f.monitor.tick();
+  assert.equal(calls, 2);
+  assert.ok(f.store.getRound().firedAlerts.T1);
+  assert.equal(f.actions.filter((a) => a.type === 'signal').length, 1);
+});
+
+test('legacy off-hours signal is recovered without replaying prior delivery attempts', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-02T00:00:15Z') });
+  for (const attempted of [false, true]) {
+    let round = { firedAlerts: { T1: '2026-11-01T00:00:15.758Z' } };
+    let calls = 0;
+    const f = signalFixture(async () => { calls++; return { sent: ['Slack'] }; }, {
+      getRound: () => round, setRound: (r) => { round = r; },
+      listActionRows: ({ offset }) => ({ items: offset ? [] : [
+        { ts: '2026-11-01T00:00:15.757Z', type: 'signal', tier: 'T1', payload: { key: 'T1' } },
+        ...(attempted ? [{ ts: '2026-11-01T00:00:16Z', type: 'notify', tier: 'T1' }] : [])
+      ] })
+    });
+    await f.monitor.tick();
+    await f.monitor.tick();
+    assert.equal(calls, attempted ? 0 : 1);
+    assert.equal(f.actions.filter((a) => a.type === 'signal').length, 0);
+  }
+});
+
+test('disabled events and partial delivery do not resend successful targets', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T00:00:15Z') });
+  for (const result of [{ skipped: true, reason: 'event-disabled' }, { sent: ['Slack'], errors: ['QQ offline'] }]) {
+    let calls = 0;
+    const f = signalFixture(async () => { calls++; return result; });
+    await f.monitor.tick();
+    t.mock.timers.tick(300001);
+    await f.monitor.tick();
+    assert.equal(calls, 1);
+    assert.ok(f.store.getRound().firedAlerts.T1);
+    assert.deepEqual(f.actions.find((a) => a.type === 'notify').payload.errors, result.errors);
+  }
+});
+
 test('monitor persists observed peaks across ticks without manufacturing sales', async () => {
   let lots = [{ id: 'deep', type: 'call', symbol: 'QQQ270115C700', cost: 1, otmClass: 'deep' }];
   let price = 6;
