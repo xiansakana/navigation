@@ -574,10 +574,13 @@ body.sm-doc-open-wide {
 }
 
 .sm-modal.sm-modal--buy {
-    width: min(960px, 100%);
+    width: min(1280px, 100%);
+    min-width: 0;
     max-height: min(90vh, 920px);
     overflow: auto;
 }
+
+.sm-modal--buy .sm-modal-actions { flex-wrap: wrap; }
 
 .sm-buy-table { font-size: 13px; }
 .sm-buy-table th, .sm-buy-table td { white-space: nowrap; }

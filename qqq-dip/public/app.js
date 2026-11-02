@@ -509,7 +509,6 @@ function openBuyPreview() {
   ].filter(Boolean).join(' · ');
 
   openModal(`
-    <div class="sm-modal sm-modal--buy">
       <h3>${escapeHtml(summary)}</h3>
       <p class="hint">${escapeHtml(preview.recommendation || '')}</p>
       ${notes ? `<ul class="sm-buy-notes">${notes}</ul>` : ''}
@@ -531,8 +530,7 @@ function openBuyPreview() {
         ${preview.tier ? `<button type="button" class="btn ghost" data-exec-preview="${escapeHtml(preview.tier)}">查看成交计划</button>` : ''}
         <button type="button" class="btn primary" data-close>关闭</button>
       </div>
-    </div>
-  `);
+  `, 'sm-modal--buy');
 
   $('#btn-copy-buy')?.addEventListener('click', async () => {
     const lines = [
