@@ -5,9 +5,9 @@ const QUOTE_CACHE_MS = 30000;
 const CNY_EQUITY_PROXY_SYMBOL = '159509';
 
 function parseOptionSymbol(symbol) {
-  const m = String(symbol).toUpperCase().match(/^([A-Z]+)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
+  const m = String(symbol).toUpperCase().replace(/^O:/, '').match(/^([A-Z]+)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
   if (!m) return null;
-  return { underlying: m[1], expiration: m[2], type: m[3], strike: m[4] };
+  return { underlying: m[1], expiration: m[2], type: m[3], strike: /^\d{8}$/.test(m[4]) ? String(Number(m[4]) / 1000) : m[4] };
 }
 
 function toPolygonOptionSymbol(symbol) {
@@ -33,6 +33,8 @@ async function fetchText(url, headers = {}, encoding = 'utf-8') {
 function mapQuote(sym, q) {
   return {
     symbol: sym,
+    source: 'finnhub',
+    asOf: q.t > 0 ? new Date(q.t * 1000).toISOString() : null,
     price: q.c,
     change: q.d ?? 0,
     changePercent: q.dp ?? 0,
@@ -78,6 +80,8 @@ export function createQuoteService(config) {
     const prev = r.o ?? price;
     return {
       symbol: sym,
+      source: 'polygon-previous-close',
+      previousCloseOnly: true,
       price,
       close: price,
       change: price - prev,
@@ -348,6 +352,8 @@ export function createQuoteService(config) {
     const prev = day.close || price;
     return {
       symbol: upper,
+      source: 'polygon-option',
+      previousCloseOnly: !(last.midpoint || last.price),
       name: `${parsed.underlying} ${r.details?.expiration_date || parsed.expiration} ${parsed.type} $${parsed.strike}`,
       price,
       change: day.change || 0,
@@ -442,6 +448,7 @@ export function createQuoteService(config) {
       high: Number(parts[33]) || price,
       low: Number(parts[34]) || price,
       source: 'tencent',
+      asOf: /^\d{14}$/.test(parts[30] || '') ? parts[30].replace(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/, '$1-$2-$3T$4:$5:$6+08:00') : null,
       candles: []
     };
   }
@@ -469,6 +476,8 @@ export function createQuoteService(config) {
       high: Number(parts[4]) || price,
       low: Number(parts[5]) || price,
       source: 'sina',
+      asOf: /^\d{4}-\d{2}-\d{2}$/.test(parts[30] || '') && /^\d{2}:\d{2}:\d{2}$/.test(parts[31] || '')
+        ? `${parts[30]}T${parts[31]}+08:00` : null,
       candles: []
     };
   }

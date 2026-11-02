@@ -332,6 +332,11 @@ body:has(.sm-modal-backdrop) {
     width: min(480px, 100%);
 }
 .sm-modal h3 { margin: 0 0 12px; }
+.sm-modal.sm-modal--plan {
+  width: min(760px, 100%);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
 .sm-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 
 .sm-modal.sm-modal--doc {

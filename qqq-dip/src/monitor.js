@@ -4,6 +4,7 @@ import { appendMarketSnapshot } from './notify.js';
 import { publishBusinessEvent } from '../../shared/business-events.js';
 import { withDeadline } from './deadline.js';
 import { captureExecutionPlan } from './execution-plan.js';
+import { alertMarketOpen, marketAlertRoutes, migrateMarketDeliveries } from './market-alerts.js';
 
 const SYMBOLS = ['QQQ', 'TQQQ', 'SOXL', 'SPY'];
 
@@ -136,31 +137,30 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
 
       const nextRound = captureExecutionPlan(
         applyRoundFromEval(round, ev, { sessionDate: lastMarketStatus.ymd }), ev.buyPreview);
-      // Recover recent, still-active legacy signals that were consumed by the
-      // off-hours filter without ever attempting notification. Never replay a
-      // signal with a delivery attempt or change its plan/budget state.
-      if (!nextRound.deliveryVersion) {
-        nextRound.firedAlerts = { ...nextRound.firedAlerts };
+      if (!nextRound.marketDeliveryVersion) {
         const actions = [0, 500].flatMap((offset) => store.listActionRows?.({ limit: 500, offset }).items || []);
-        for (const alert of ev.alerts) {
-          const firedAt = nextRound.firedAlerts?.[alert.key];
-          const signal = actions.find((a) => a.payload?.key === alert.key && a.type === 'signal'
-            && Math.abs(Date.parse(a.ts) - Date.parse(firedAt)) < 10000);
-          if (!signal || Date.now() - Date.parse(firedAt) > 7 * 86400000) continue;
-          const attempted = actions.some((a) => a.type === 'notify' && a.tier === alert.event && a.ts >= signal.ts);
-          if (!attempted) {
-            nextRound.observedAlerts = { ...nextRound.observedAlerts, [alert.key]: firedAt };
-            delete nextRound.firedAlerts[alert.key];
-          }
-        }
-        nextRound.deliveryVersion = 1;
+        migrateMarketDeliveries(nextRound, ev.alerts, actions);
       }
-      const fresh = newAlertKeys(ev, nextRound.firedAlerts || round.firedAlerts);
+      nextRound.pendingRiskAlerts = { ...nextRound.pendingRiskAlerts };
+      for (const alert of ev.alerts.filter((row) => ['reset', 'fakeRight'].includes(row.event))) {
+        nextRound.pendingRiskAlerts[alert.key] ||= { ...alert, observedAt: new Date().toISOString() };
+      }
+      for (const [key, alert] of Object.entries(nextRound.pendingRiskAlerts)) {
+        if (Date.now() - Date.parse(alert.observedAt) > 7 * 86400000
+          || (alert.event === 'fakeRight' && !nextRound.fakeRight)
+          || (alert.event === 'reset' && nextRound.startedAt)) delete nextRound.pendingRiskAlerts[key];
+      }
+      const candidates = [...new Map([...ev.alerts, ...Object.values(nextRound.pendingRiskAlerts)]
+        .map((alert) => [alert.key, alert])).values()];
+      // Signal history uses the original key; delivery uses independent market
+      // keys so an A-share reminder cannot consume the US reminder (or vice versa).
+      const fresh = newAlertKeys({ ...ev, alerts: candidates }, {}).filter((alert) => alert.key !== 'SOXL:drawdown70:v2'
+        || !['US', 'CN'].some((market) => nextRound.marketDeliveries?.[`SOXL:drawdown90:v2:${market}`]));
       const notify = store.getNotify();
       const pushResults = [];
 
       for (const alert of fresh) {
-        if (!nextRound.observedAlerts?.[alert.key]) store.addAction({
+        if (!nextRound.observedAlerts?.[alert.key] && !nextRound.firedAlerts?.[alert.key]) store.addAction({
           type: alert.event === 'takeProfit' ? 'alert' : 'signal',
           source: 'auto',
           tier: alert.event,
@@ -168,31 +168,36 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
           payload: { key: alert.key, event: alert.event }
         });
         nextRound.observedAlerts = { ...nextRound.observedAlerts, [alert.key]: nextRound.observedAlerts?.[alert.key] || new Date().toISOString() };
-        if (!opts.silent && !(Date.now() < (nextRound.retryAlerts?.[alert.key] || 0))) {
+        nextRound.firedAlerts = { ...nextRound.firedAlerts, [alert.key]: nextRound.firedAlerts?.[alert.key] || new Date().toISOString() };
+        for (const route of marketAlertRoutes(ev, nextRound, alert)) {
+          const deliveryKey = `${alert.key}:${route.market}`;
+          if (opts.silent || nextRound.marketDeliveries?.[deliveryKey] || !alertMarketOpen(route.market)
+            || Date.now() < (nextRound.retryAlerts?.[deliveryKey] || 0)) continue;
           const market = alertMarket(ev, alert);
-          const qqText = appendMarketSnapshot(alert.message, market.stats, market.symbol);
+          const label = route.market === 'CN' ? 'A股交易时段' : '美股交易时段';
+          const qqText = appendMarketSnapshot(`【${label}】${route.symbols.join('、') || '仓位检查'}\n${alert.message}\n仅处理本市场交易腿；其他市场等待其开盘。仍须复核最新报价与实际成交。`, market.stats, market.symbol);
           let qq;
           try {
             qq = await stage('notify', () => publish(notify, { source: 'stock', eventKey: alert.event, message: qqText }));
           } catch (error) {
             qq = { sent: [], errors: [error.message] };
           }
-          pushResults.push({ key: alert.key, qq });
+          pushResults.push({ key: deliveryKey, qq });
           store.addAction({
             type: 'notify',
             source: 'auto',
             tier: alert.event,
-            message: qq.skipped
+            message: `${label}：` + (qq.skipped
               ? `QQ 跳过：${qq.reason || alert.event}`
-              : `通知${qq.sent?.length ? '已发送' : '失败，5分钟后重试'}：${(qq.sent || []).join('，') || '无成功目标'}${(qq.errors || []).length ? `；失败 ${(qq.errors || []).join('；')}` : ''}`,
-            payload: { key: alert.key, ...qq }
+              : `通知${qq.sent?.length ? '已发送' : '失败，交易时段内5分钟后重试'}：${(qq.sent || []).join('，') || '无成功目标'}${(qq.errors || []).length ? `；失败 ${(qq.errors || []).join('；')}` : ''}`),
+            payload: { key: alert.key, deliveryKey, market: route.market, ...qq }
           });
           // A disabled event is an intentional suppression. Partial success is
           // recorded without resending to targets which already received it.
           if (qq.sent?.length || qq.reason === 'event-disabled') {
-            nextRound.firedAlerts = { ...(nextRound.firedAlerts || {}), [alert.key]: new Date().toISOString() };
+            nextRound.marketDeliveries = { ...nextRound.marketDeliveries, [deliveryKey]: new Date().toISOString() };
           } else {
-            nextRound.retryAlerts = { ...nextRound.retryAlerts, [alert.key]: Date.now() + 300000 };
+            nextRound.retryAlerts = { ...nextRound.retryAlerts, [deliveryKey]: Date.now() + 300000 };
           }
           store.setRound(nextRound);
         }
@@ -242,7 +247,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
 
   function intervalMs() {
     const sec = Number(store.getSettings().intervalSeconds) || 30;
-    if (!isRth()) return Math.max(sec, 120) * 1000;
+    if (!isRth() && !alertMarketOpen('CN')) return Math.max(sec, 120) * 1000;
     return Math.max(10, sec) * 1000;
   }
 

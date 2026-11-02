@@ -579,24 +579,60 @@ function openPlanFillModal(tierId) {
     <h3>${escapeHtml(tierId)} 分腿实际成交登记</h3>
     <p class="hint">${escapeHtml(state.evaluation?.cnMarket?.label || '等待A股交易时段')}。这里只补记券商实际成交，不自动下单。未填写数量的交易腿保持待执行。</p>
     <p class="hint">有效期至 ${escapeHtml(plan.expiresAt || '日历待维护，暂停执行')}；取消不撤销已成交持仓。</p>
+    <p class="hint" id="fill-quote-status">正在获取各腿最新报价并估算数量；预填值不是实际成交，请核对后手动修改。本次仅登记所选资金池同币种的交易腿。</p>
     <label class="field">实际成交时间（本机时区）<input id="fill-time" type="datetime-local"></label>
     <label class="field">本次成交所属抄底资金池<select id="fill-account"><option value="">请选择同币种证券账户</option>${(state.cash?.strategyFunds || []).map((f) => `<option value="${escapeHtml(f.accountId)}">${escapeHtml(f.name)} · ${f.currency} · 策略可用 ${maskMoneyText(String(f.strategyAvailable))} · 缺口 ${maskMoneyText(String(f.deficit))}</option>`).join('')}</select></label>
-    ${plan.legs.map((leg) => `<fieldset data-fill-leg="${leg.id}" ${leg.complete || plan.cancelled ? 'disabled' : ''}>
+    ${plan.legs.map((leg) => `<fieldset data-fill-leg="${leg.id}" data-currency="${escapeHtml(leg.currency)}" ${leg.complete || plan.cancelled ? 'disabled' : ''}>
       <legend>${escapeHtml(leg.occSymbol || leg.symbol)} · ${leg.complete ? '已完成' : leg.spent > 0 ? '部分成交' : '待执行'} · ${escapeHtml(leg.currency)} 已用 ${maskMoneyText(String(leg.spent))} · 截止 ${escapeHtml(leg.expiresAt || '日历待维护')}</legend>
       <label class="field">本次实际数量（期权填张数）<input data-qty type="number" min="0" step="${leg.symbol === '159509' ? '100' : '1'}"></label>
       <label class="field">实际成交单价<input data-price type="number" min="0" step="0.001"></label>
       <label class="field">本次费用<input data-fee type="number" min="0" step="0.01" value="0"></label>
+      <p class="hint" data-quote-info></p>
       <label><input data-complete type="checkbox">此腿已全部完成（不再补单）</label>
     </fieldset>`).join('')}
     <label><input id="fill-review" type="checkbox">已复核当前信号、159509 最新报价/停牌/溢价及真实成交；不使用昨夜估价</label>
     <div class="sm-modal-actions"><button class="btn ghost" data-close>关闭</button>
       <button class="btn ghost" id="plan-cancel">取消剩余计划</button>
-      <button class="btn primary" id="fill-save" ${canStock('dip-spend', 'edit') ? '' : 'hidden'}>登记本次成交</button></div>`);
+      <button class="btn primary" id="fill-save" ${canStock('dip-spend', 'edit') ? '' : 'hidden'}>登记本次成交</button></div>`, 'sm-modal--plan');
+  const modal = $('#fill-quote-status').closest('.sm-modal') || $('#fill-quote-status').parentElement;
+  const rows = [...modal.querySelectorAll('[data-fill-leg]')];
+  const recalcQuantity = (row) => {
+    const leg = plan.legs.find((item) => item.id === row.dataset.fillLeg);
+    const qty = row.querySelector('[data-qty]');
+    if (qty.dataset.dirty) return;
+    const price = Number(row.querySelector('[data-price]').value);
+    const fee = Number(row.querySelector('[data-fee]').value || 0);
+    const budget = Math.max(0, Number(leg.currency === 'CNY' ? leg.cny : leg.usd) - Number(leg.spent || 0) - fee);
+    const lot = leg.symbol === '159509' ? 100 : 1;
+    const multiplier = leg.kind === 'call' ? 100 : 1;
+    qty.value = price > 0 ? Math.max(0, Math.floor(budget / (price * multiplier * lot) + 1e-10) * lot) : '';
+  };
+  for (const row of rows) {
+    row.querySelector('[data-qty]').addEventListener('input', (event) => { event.target.dataset.dirty = '1'; });
+    row.querySelector('[data-price]').addEventListener('input', (event) => { event.target.dataset.dirty = '1'; recalcQuantity(row); });
+    row.querySelector('[data-fee]').addEventListener('input', () => recalcQuantity(row));
+  }
+  void api(`/execution-plans/${encodeURIComponent(tierId)}/defaults`).then((data) => {
+    if (!modal.isConnected || data.planId !== plan.id) return;
+    for (const quote of data.legs || []) {
+      const row = rows.find((item) => item.dataset.fillLeg === quote.legId);
+      if (!row || row.disabled) continue;
+      row.querySelector('[data-quote-info]').textContent = quote.error || `来源 ${quote.source}；报价时间 ${quote.asOf || '接口未提供'}；获取时间 ${quote.fetchedAt}。休市或延迟报价仅供估算；数量按剩余预算计算，不含后续费用。`;
+      const price = row.querySelector('[data-price]');
+      if (!quote.error && !price.dataset.dirty) price.value = quote.price;
+      if (!quote.error) recalcQuantity(row);
+    }
+    modal.querySelector('#fill-quote-status').textContent = '报价加载完成，预填仅供估算，可手动修改。登记前须复核真实成交；本次只提交所选资金池同币种交易腿。';
+  }).catch((error) => {
+    if (modal.isConnected) modal.querySelector('#fill-quote-status').textContent = `报价预填失败：${error.message}。可手动填写。`;
+  });
   $('#fill-save').addEventListener('click', async () => {
     const button = $('#fill-save');
     button.disabled = true;
     try {
-      const fills = [...document.querySelectorAll('[data-fill-leg]')].filter((row) => !row.disabled && Number(row.querySelector('[data-qty]').value) > 0)
+      const fund = (state.cash?.strategyFunds || []).find((item) => item.accountId === $('#fill-account').value);
+      if (!fund) throw new Error('请选择本次成交所属抄底资金池');
+      const fills = rows.filter((row) => !row.disabled && row.dataset.currency === fund.currency && Number(row.querySelector('[data-qty]').value) > 0)
         .map((row) => ({ legId: row.dataset.fillLeg, shares: Number(row.querySelector('[data-qty]').value),
           price: Number(row.querySelector('[data-price]').value), commission: Number(row.querySelector('[data-fee]').value),
           complete: row.querySelector('[data-complete]').checked }));
@@ -865,9 +901,9 @@ function render() {
   applyPermissions();
 }
 
-function openModal(html) {
+function openModal(html, extraClass = '') {
   const root = $('#modal-root');
-  root.innerHTML = `<div class="sm-modal-backdrop"><div class="sm-modal">${html}</div></div>`;
+  root.innerHTML = `<div class="sm-modal-backdrop"><div class="sm-modal ${escapeHtml(extraClass)}">${html}</div></div>`;
   root.querySelector('[data-close]')?.addEventListener('click', () => { root.innerHTML = ''; });
   root.querySelector('.sm-modal-backdrop')?.addEventListener('click', (e) => {
     if (e.target.classList.contains('sm-modal-backdrop')) root.innerHTML = '';

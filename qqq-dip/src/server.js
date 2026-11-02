@@ -17,6 +17,7 @@ import { evaluate, resetRound } from './playbook.js';
 import { createDocService } from './docs.js';
 import { watchCash } from './cash-sync.js';
 import { prepareExecution, canExecutePlan, canSpendDipFunds, commitExecution } from './execution-plan.js';
+import { createExecutionDefaultsHandler } from './execution-defaults.js';
 import {
   legsToTradeInputs,
   getPortfolioStore,
@@ -256,6 +257,8 @@ app.get('/api/actions', (req, res) => {
     source: String(req.query.source || 'all')
   }));
 });
+
+app.get('/api/execution-plans/:tier/defaults', createExecutionDefaultsHandler({ store, quotes }));
 
 app.post('/api/actions', (req, res) => {
   const body = req.body || {};

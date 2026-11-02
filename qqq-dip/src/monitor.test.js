@@ -20,7 +20,8 @@ function fixture() {
 function signalFixture(publish, extraStore = {}) {
   const actions = [];
   const store = { ...fixture(), ...extraStore, addAction: (a) => { actions.push(a); return a; } };
-  const monitor = createMonitor({ store, publish, quotes: {
+  const monitor = createMonitor({ store, publish: (config, event) => event.eventKey === 'openSummary'
+    ? Promise.resolve({ skipped: true, reason: 'event-disabled' }) : publish(config, event), quotes: {
     getMarketBundle: async () => ({ markets: { QQQ: { price: 90, low: 90,
       candles: Array.from({ length: 40 }, (_, i) => ({ t: 1700000000 + i * 86400, h: 100, l: 90, c: 90 })) } }, errors: {} }),
     searchLeapCalls: async () => []
@@ -28,19 +29,23 @@ function signalFixture(publish, extraStore = {}) {
   return { store, monitor, actions };
 }
 
-test('confirmed close signal notifies outside trading hours, once', async (t) => {
+test('confirmed close waits through weekend and sends once after US opening', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T00:00:15Z') });
   const sent = [];
   const f = signalFixture(async (_, event) => { sent.push(event); return { sent: ['Slack'], errors: [] }; });
   await f.monitor.tick();
+  assert.equal(sent.length, 0);
+  assert.equal(f.store.getRound().marketDeliveries?.['T1:US'], undefined);
+  t.mock.timers.setTime(Date.parse('2026-11-02T15:00:00Z'));
+  await f.monitor.tick();
   await f.monitor.tick();
   assert.deepEqual(sent.map((s) => s.eventKey), ['T1']);
-  assert.ok(f.store.getRound().firedAlerts.T1);
+  assert.ok(f.store.getRound().marketDeliveries['T1:US']);
   assert.equal(f.actions.filter((a) => a.type === 'signal').length, 1);
 });
 
 test('silent evaluation does not consume delivery; failure retries after cooldown', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T00:00:15Z') });
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-02T15:00:00Z') });
   let calls = 0;
   const f = signalFixture(async () => {
     if (++calls === 1) throw new Error('offline');
@@ -48,7 +53,7 @@ test('silent evaluation does not consume delivery; failure retries after cooldow
   });
   await f.monitor.tick({ silent: true });
   assert.equal(calls, 0);
-  assert.equal(f.store.getRound().firedAlerts?.T1, undefined);
+  assert.equal(f.store.getRound().marketDeliveries?.['T1:US'], undefined);
   await f.monitor.tick();
   await f.monitor.tick();
   assert.equal(calls, 1);
@@ -59,8 +64,8 @@ test('silent evaluation does not consume delivery; failure retries after cooldow
   assert.equal(f.actions.filter((a) => a.type === 'signal').length, 1);
 });
 
-test('legacy off-hours signal is recovered without replaying prior delivery attempts', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-02T00:00:15Z') });
+test('legacy off-hours signal and off-hours deliveries do not consume market reminder', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-02T15:00:00Z') });
   for (const attempted of [false, true]) {
     let round = { firedAlerts: { T1: '2026-11-01T00:00:15.758Z' } };
     let calls = 0;
@@ -68,18 +73,18 @@ test('legacy off-hours signal is recovered without replaying prior delivery atte
       getRound: () => round, setRound: (r) => { round = r; },
       listActionRows: ({ offset }) => ({ items: offset ? [] : [
         { ts: '2026-11-01T00:00:15.757Z', type: 'signal', tier: 'T1', payload: { key: 'T1' } },
-        ...(attempted ? [{ ts: '2026-11-01T00:00:16Z', type: 'notify', tier: 'T1' }] : [])
+        ...(attempted ? [{ ts: '2026-11-01T00:00:16Z', type: 'notify', tier: 'T1', payload: { sent: ['Slack'] } }] : [])
       ] })
     });
     await f.monitor.tick();
     await f.monitor.tick();
-    assert.equal(calls, attempted ? 0 : 1);
+    assert.equal(calls, 1);
     assert.equal(f.actions.filter((a) => a.type === 'signal').length, 0);
   }
 });
 
 test('disabled events and partial delivery do not resend successful targets', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T00:00:15Z') });
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-02T15:00:00Z') });
   for (const result of [{ skipped: true, reason: 'event-disabled' }, { sent: ['Slack'], errors: ['QQ offline'] }]) {
     let calls = 0;
     const f = signalFixture(async () => { calls++; return result; });
@@ -90,6 +95,33 @@ test('disabled events and partial delivery do not resend successful targets', as
     assert.ok(f.store.getRound().firedAlerts.T1);
     assert.deepEqual(f.actions.find((a) => a.type === 'notify').payload.errors, result.errors);
   }
+});
+
+test('mixed plan sends CN and US at their respective openings, persisting independent dedupe', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-01T00:00:15Z') });
+  let round = { executionPlans: { T1: { legs: [
+    { symbol: '159509', currency: 'CNY', cny: 200, expiresAt: '2026-11-02T07:00:00Z' },
+    { symbol: 'QQQ', currency: 'USD', usd: 40, expiresAt: '2026-11-02T21:00:00Z' }
+  ] } } };
+  const sent = [];
+  const f = signalFixture(async (_, event) => { sent.push(event.message); return { sent: ['Slack'] }; }, {
+    getRound: () => round, setRound: (r) => { round = JSON.parse(JSON.stringify(r)); }
+  });
+  await f.monitor.tick();
+  assert.equal(sent.length, 0);
+  t.mock.timers.setTime(Date.parse('2026-11-02T01:30:00Z'));
+  await f.monitor.tick();
+  await f.monitor.tick();
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /A股交易时段.*159509/s);
+  assert.ok(round.marketDeliveries['T1:CN']);
+  assert.equal(round.marketDeliveries['T1:US'], undefined);
+  t.mock.timers.setTime(Date.parse('2026-11-02T14:30:00Z'));
+  await f.monitor.tick();
+  await f.monitor.tick();
+  assert.equal(sent.length, 2);
+  assert.match(sent[1], /美股交易时段.*QQQ/s);
+  assert.ok(round.marketDeliveries['T1:US']);
 });
 
 test('monitor persists observed peaks across ticks without manufacturing sales', async () => {
