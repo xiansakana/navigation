@@ -1,7 +1,8 @@
 (function () {
   if (window.portalNavbarDropdown) return;
   window.portalNavbarDropdown = true;
-  var style = document.createElement('link'); style.rel = 'stylesheet'; style.href = '/navbar-dropdown.css?v=1'; document.head.append(style);
+  var style = document.createElement('link'); style.rel = 'stylesheet'; style.href = '/navbar-dropdown.css?v=2'; document.head.append(style);
+  function touchMenu() { return matchMedia('(hover: none), (pointer: coarse), (max-width: 640px)').matches; }
   async function boot() {
     var navbar = document.querySelector('.navbar');
     if (!navbar) return;
@@ -38,7 +39,9 @@
           clearTimeout(timer);
           if (active?.button === button) return;
           close();
-          var items = entries(); if (!items.length) return;
+          var items = entries().slice(); if (!items.length) return;
+          var destination = element.getAttribute('href');
+          if (touchMenu() && destination && !items.some(function (item) { return item.href === destination; })) items.unshift({ title: '进入' + name, href: destination });
           var panel = document.createElement('nav'); panel.className = 'portal-nav-menu'; panel.setAttribute('aria-label', name + '子模块');
           items.forEach(function (item) {
             var link = document.createElement(item.action ? 'button' : 'a'); link.textContent = item.title;
@@ -57,10 +60,12 @@
           button.setAttribute('aria-expanded', 'true');
           panel.addEventListener('pointerenter', function () { clearTimeout(timer); }); panel.addEventListener('pointerleave', deferClose);
         }
-        function deferClose() { timer = setTimeout(close, 180); }
-        wrap.addEventListener('pointerenter', function (event) { if (event.pointerType !== 'touch') open(); });
+        function deferClose(event) { if (event.pointerType !== 'mouse' || touchMenu()) return; timer = setTimeout(close, 180); }
+        wrap.addEventListener('pointerenter', function (event) { if (event.pointerType === 'mouse' && !touchMenu()) open(); });
         wrap.addEventListener('pointerleave', deferClose);
-        button.addEventListener('click', function () { if (active?.button === button && active.clicked) close(); else { open(); if (active?.button === button) active.clicked = true; } });
+        function toggle() { if (active?.button === button && active.clicked) close(); else { open(); if (active?.button === button) active.clicked = true; } }
+        button.addEventListener('click', toggle);
+        element.addEventListener('click', function (event) { if (touchMenu() && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) { event.preventDefault(); toggle(); } });
         button.addEventListener('keydown', function (event) { if (event.key === 'ArrowDown') { event.preventDefault(); open(); active?.panel.querySelector('a,button')?.focus(); } });
       }
       attach(navbar.querySelector('.navbar-brand'), '服务导航', function () { return home; });
