@@ -23,10 +23,12 @@ test('both manuals render current execution guidance and internal document links
   const docs = createDocService(fileURLToPath(new URL('../public', import.meta.url)));
   for (const id of ['manual', 'cheatsheet']) {
     const doc = docs.getDoc(id);
-    assert.match(doc.version, /^2026-10-31/);
+    assert.match(doc.version, /^2026-11-02/);
     assert.match(doc.html, /B₀/);
     assert.match(doc.html, /本轮右侧冻结/);
     assert.match(doc.html, /doc:/);
+    assert.match(doc.html, /预填/);
+    assert.match(doc.html, /独立去重|分别去重/);
   }
 });
 
