@@ -71,6 +71,9 @@ test('overlapping exports are idempotent, updates retain IDs and unassigned/ambi
   const first=mergeEastmoneyTrades([],parsed,'a',opts);
   assert.equal(first.trades[0].cash_effective_at,opts.baselineAt);assert.equal(first.trades[0].trade_date,'2026-10-29T07:00:00.000Z');
   assert.equal(mergeEastmoneyTrades(first.trades,parsed,'a',opts).summary.skipped,1);
+  assert.equal(mergeEastmoneyTrades(first.trades,parsed,'a',{...opts,baselineExcluded:false}).summary.skipped,1);
+  const withHistory=[...parsed,...parseImportBuffer(buffer([row]))];
+  assert.equal(mergeEastmoneyTrades([],withHistory,'a',opts).preview.length,1);
   assert.equal(mergeEastmoneyTrades([],parsed,'a',{repoInterestStart:'2026-10-30'}).trades.length,0);
   assert.equal(parseImportBuffer(buffer([returned])).length,0);
   assert.throws(()=>parseImportBuffer(buffer([paid,{...returned,发生金额:62000}])),/本息/);

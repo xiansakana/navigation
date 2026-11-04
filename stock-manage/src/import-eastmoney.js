@@ -121,7 +121,10 @@ export function mergeEastmoneyTrades(existing, incoming, accountId, options = {}
   if (start && (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !Number.isFinite(Date.parse(start)))) throw new Error('回购利息起始日期无效');
   const historical = start ? incoming.filter(t => t.settlement_date < start) : [];
   incoming = incoming.filter(t => !historical.includes(t)).map(t => {
-    if (t.repo_principal != null) t = { ...t, cash_effective_at: null };
+    if (t.repo_principal != null) {
+      const previous = existing.find(x => x.account_id === accountId && x.broker_order_key === t.broker_order_key);
+      t = { ...t, cash_effective_at: previous?.cash_effective_at || null };
+    }
     if (t.repo_principal != null && options.baselineExcluded && t.settlement_date === start && Date.parse(t.trade_date) < Date.parse(options.baselineAt)) {
       return { ...t, cash_effective_at: options.baselineAt };
     }
