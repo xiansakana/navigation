@@ -38,6 +38,22 @@ try {
 }
 
 const store = createStore(config);
+// Repair the legacy use of a strategy instruction as the security name. Only
+// metadata changes; preserve IDs, fills, cash and all user-authored trade names.
+{
+  const portfolio = getPortfolioStore();
+  const data = portfolio.read();
+  let changed = false;
+  for (const trade of data.trades || []) {
+    if (trade.source === 'qqq-dip' && trade.symbol === '159509'
+      && /^(T[1-7]|R[12])\b/.test(trade.name || '')) {
+      trade.note = [trade.note, trade.name].filter(Boolean).join('；');
+      trade.name = '纳指科技ETF景顺';
+      changed = true;
+    }
+  }
+  if (changed) portfolio.write(data);
+}
 const quotes = createQuoteService(config);
 const docs = createDocService(PUBLIC);
 const sseClients = new Set();

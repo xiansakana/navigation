@@ -753,7 +753,8 @@ export function evaluate(input) {
   const lots = (input.lots || []).map((lot) => {
     const isCall = lot.type === 'call';
     const under = (lot.symbol || 'QQQ').replace(/\d.*/, '') || 'QQQ';
-    const eq = under === 'TQQQ' ? tqqq : under === 'SOXL' ? soxl : under === 'SPY' ? spy : qqq;
+    const eq = lot.symbol === CNY_EQUITY_PROXY ? statsFromMarket(input.cnyProxy || {})
+      : under === 'TQQQ' ? tqqq : under === 'SOXL' ? soxl : under === 'SPY' ? spy : qqq;
     return evaluateLot(lot, {
       now: input.now || new Date(),
       spot: eq.price,

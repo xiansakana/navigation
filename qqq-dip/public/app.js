@@ -761,8 +761,8 @@ function renderLots() {
     <tr>
       <td>${escapeHtml(lot.symbol || '')}</td>
       <td>${lot.type === 'call' ? 'Call' : '正股'}</td>
-      <td>${maskMoney('$' + fmtPrice(lot.cost))}</td>
-      <td>${lot.mark != null ? maskMoney('$' + fmtPrice(lot.mark)) : '—'}</td>
+      <td>${maskMoney((lot.currency === 'CNY' ? '¥' : '$') + fmtPrice(lot.cost))}</td>
+      <td>${lot.mark != null ? maskMoney((lot.currency === 'CNY' ? '¥' : '$') + fmtPrice(lot.mark)) : '—'}</td>
       <td>${lot.multiple != null ? lot.multiple.toFixed(2) + '×' : '—'}</td>
       <td>${(lot.alerts || []).map((a) => a.action).join('；') || '—'}</td>
       <td>${can('lots-edit', 'edit') ? `<button class="btn link danger" data-del-lot="${lot.id}">删除</button>` : ''}</td>

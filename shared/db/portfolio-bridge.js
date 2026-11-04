@@ -157,7 +157,7 @@ export function legsToTradeInputs(legs = [], extras = {}) {
       out.push({
         type: side,
         symbol,
-        name: leg.note || `${leg.symbol || 'QQQ'} Call`,
+        name: leg.name || `${leg.symbol || 'QQQ'} Call`,
         currency: 'USD',
         shares,
         price,
@@ -165,7 +165,7 @@ export function legsToTradeInputs(legs = [], extras = {}) {
         trade_date: ts,
         source: 'qqq-dip',
         tier,
-        note
+        note: [note, leg.note].filter(Boolean).join('；')
       });
       continue;
     }
@@ -182,7 +182,7 @@ export function legsToTradeInputs(legs = [], extras = {}) {
     out.push({
       type: side,
       symbol,
-      name: leg.note || symbol,
+      name: leg.name || (symbol === '159509' ? '纳指科技ETF景顺' : symbol),
       currency,
       shares,
       price,
@@ -190,7 +190,7 @@ export function legsToTradeInputs(legs = [], extras = {}) {
       trade_date: ts,
       source: 'qqq-dip',
       tier,
-      note
+      note: [note, leg.note].filter(Boolean).join('；')
     });
   }
   return out;

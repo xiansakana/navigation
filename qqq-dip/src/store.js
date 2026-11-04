@@ -3,10 +3,12 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { resolveRoot } from './config.js';
 import { DEFAULT_EVENTS, emptyRound } from './playbook.js';
+import { portfolioDipLots } from './portfolio-lots.js';
 import {
   getPortfolioCash,
   setPortfolioCash,
-  migrateDipCashOnce
+  migrateDipCashOnce,
+  getPortfolioStore
 } from '../../shared/db/portfolio-bridge.js';
 
 function parseJson(text, fallback) {
@@ -236,6 +238,16 @@ export function createStore(config) {
   }
 
   function getLots() {
+    const manual = data.lots.filter((lot) => lot.source !== 'portfolio-trade');
+    const fillMetadata = data.actions.flatMap((action) => (action.payload?.syncedTradeIds || []).map((id, index) => ({
+      id: `portfolio:${id}`, otmClass: action.payload?.legs?.[index]?.otmClass
+    })));
+    const synced = portfolioDipLots(getPortfolioStore().read().trades, [...fillMetadata, ...data.lots], data.hiddenTradeLots || []);
+    const next = [...manual, ...synced];
+    if (JSON.stringify(next) !== JSON.stringify(data.lots)) {
+      data.lots = next;
+      persist();
+    }
     return data.lots.slice();
   }
 
@@ -250,6 +262,9 @@ export function createStore(config) {
   }
 
   function removeLot(id) {
+    if (data.lots.some((lot) => lot.id === id && lot.source === 'portfolio-trade')) {
+      data.hiddenTradeLots = [...new Set([...(data.hiddenTradeLots || []), id])];
+    }
     data.lots = data.lots.filter((l) => l.id !== id);
     persist();
   }
