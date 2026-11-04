@@ -119,7 +119,7 @@ export function mergeEastmoneyTrades(existing, incoming, accountId, options = {}
   const info = incoming.importInfo;
   const start = options.repoInterestStart;
   if (start && (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !Number.isFinite(Date.parse(start)))) throw new Error('回购利息起始日期无效');
-  const historical = start ? incoming.filter(t => t.repo_principal != null && t.settlement_date < start) : [];
+  const historical = start ? incoming.filter(t => t.settlement_date < start) : [];
   incoming = incoming.filter(t => !historical.includes(t)).map(t => {
     if (t.repo_principal != null) t = { ...t, cash_effective_at: null };
     if (t.repo_principal != null && options.baselineExcluded && t.settlement_date === start && Date.parse(t.trade_date) < Date.parse(options.baselineAt)) {
@@ -127,7 +127,7 @@ export function mergeEastmoneyTrades(existing, incoming, accountId, options = {}
     }
     return t;
   });
-  incoming.importInfo = { ...info, warnings: [...(info?.warnings || []), ...(start ? [`回购利息从 ${start} 起导入，跳过此前 ${historical.length} 笔；本金不计收支。`] : [])] };
+  incoming.importInfo = { ...info, warnings: [...(info?.warnings || []), ...(start ? [`交割单从 ${start} 起导入，跳过此前 ${historical.length} 笔交易或利息；本金不计收支。`] : [])] };
 
   for (const t of incoming.filter(x => x.broker_category === '配售缴款')) {
     if (existing.some(x => !x.broker_order_key && x.symbol === t.symbol && x.type === 'buy' &&

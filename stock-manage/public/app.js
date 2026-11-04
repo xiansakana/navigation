@@ -858,7 +858,7 @@ function openImportModal() {
         <option value="merge">合并到现有记录</option>
         <option value="replace">替换全部记录</option>
       </select></label>
-      <label>回购利息起始日<input type="date" id="import-repo-start" value="${new Date(Date.parse((state.investmentAccounts || []).find(a => a.id === importState.accountId || a.currency === 'CNY')?.baselineAt || new Date().toISOString()) + 8 * 3600000).toISOString().slice(0,10)}"></label>
+      <label>交割单导入起始日（含利息）<input type="date" id="import-repo-start" value="${new Date(Date.parse((state.investmentAccounts || []).find(a => a.id === importState.accountId || a.currency === 'CNY')?.baselineAt || new Date().toISOString()) + 8 * 3600000).toISOString().slice(0,10)}"></label>
       <label><input type="checkbox" id="import-repo-baseline"> 起始日利息尚未包含在核对的现金基准中（仅东方财富回购利息）</label>
       <label>选择文件<input type="file" id="import-file" class="sm-file-input" accept=".xlsx,.xls"></label>
       <label><input type="checkbox" id="import-allow-updates"> 已核对预览，允许用券商数据更新匹配记录的数量、价格、费用和成交时间</label>
