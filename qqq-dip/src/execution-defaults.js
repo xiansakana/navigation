@@ -12,8 +12,8 @@ export function suggestedQuantity(leg, price, fee = 0) {
 export async function executionDefaults(plan, quotes, now = new Date()) {
   const legs = await Promise.all((plan.legs || []).map(async (leg) => {
     const base = { legId: leg.id, currency: leg.currency };
-    if (plan.cancelled || plan.inFlight || leg.complete || !leg.expiresAt || Date.parse(leg.expiresAt) <= now.getTime()) {
-      return { ...base, error: '此腿已完成、取消、过期或写入待核对，不自动填充' };
+    if (plan.cancelled || plan.inFlight || leg.complete) {
+      return { ...base, error: '此腿已完成、取消或写入待核对，不自动填充' };
     }
     try {
       const quote = await withDeadline(() => leg.kind === 'call'

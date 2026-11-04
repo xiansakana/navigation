@@ -22,7 +22,6 @@ export function marketAlertRoutes(ev, round, alert, now = new Date()) {
     if (plan?.cancelled || plan?.inFlight) return [];
     const preview = plan || buildBuyPreview({ ...ev, primary: { ...ev.primary, tier: tierId } }, ev.suggestedContracts);
     const legs = (preview.legs || []).filter((leg) => !leg.complete
-      && (!plan || (leg.expiresAt && Date.parse(leg.expiresAt) > now.getTime()))
       && (leg.kind !== 'call' || !tier.vxnGate?.blocked)
       && Number(leg.currency === 'CNY' ? leg.cny : leg.usd) > Number(leg.spent || 0));
     return ['CN', 'US'].flatMap((market) => {

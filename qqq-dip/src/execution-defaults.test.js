@@ -45,8 +45,8 @@ test('closed plans skip quote fetching', async () => {
     const result = await executionDefaults(p, {}, now);
     assert.ok(result.legs.every((leg) => leg.error));
   }
-  const result = await executionDefaults(plan(), {}, new Date('2026-11-04T00:00:00Z'));
-  assert.ok(result.legs.every((leg) => leg.error));
+  const result = await executionDefaults({ legs: [plan().legs[0]] }, { getCnyProxyQuote: async () => ({ price: 3 }) }, new Date('2026-11-04T00:00:00Z'));
+  assert.equal(result.legs[0].shares, 300);
 });
 
 test('defaults endpoint rejects missing permissions before fetching or reading a plan', async () => {

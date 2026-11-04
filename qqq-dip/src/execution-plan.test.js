@@ -42,8 +42,21 @@ test('signals create one immutable plan without executions or cash deduction', (
   assert.equal(round.executionPlans.T2.legs[0].spent, 0);
   assert.equal(captureExecutionPlan(round, preview, fillTime), round);
   assert.deepEqual(captureExecutionPlan({}, { ...preview, pendingClose: true }), {});
-  assert.equal(round.executionPlans.T2.legs[0].expiresAt, '2026-10-09T07:00:00.000Z');
-  assert.equal(round.executionPlans.T2.legs[1].expiresAt, '2026-10-09T20:00:00.000Z');
+  assert.equal(round.executionPlans.T2.legs[0].expiresAt, null);
+  assert.equal(round.executionPlans.T2.legs[1].expiresAt, null);
+});
+
+test('later sessions accept legacy expired plans while current signal and budgets remain valid', () => {
+  const { plan, body } = fixture();
+  plan.expiresAt = '2026-10-09T20:00:00Z';
+  plan.legs[0].expiresAt = '2026-10-09T07:00:00Z';
+  const later = new Date('2026-11-04T02:00:00Z');
+  const input = { ...body, filledAt: later.toISOString() };
+  assert.equal(prepareExecution(plan, input, evaluation, cash, later).cashCny, 201);
+  assert.equal(executionPlanState(plan, later), '待执行');
+  assert.throws(() => prepareExecution(plan, input, { ...evaluation, tiers: [{ ...evaluation.tiers[0], status: 'idle' }] }, cash, later), /不再确认/);
+  assert.throws(() => prepareExecution(plan, { ...input, filledAt: '2026-11-04T04:00:00Z' }, evaluation, cash, new Date('2026-11-04T05:00:00Z')), /交易时段/);
+  assert.throws(() => prepareExecution(plan, { ...input, filledAt: '2026-11-05T02:00:00Z' }, evaluation, cash, later), /成交时间/);
 });
 
 test('one filled leg leaves the other pending, with exact native currency spend', () => {

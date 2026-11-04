@@ -1,18 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { cnMarketStatus, nextCnSessionEnd } from './cn-market-hours.js';
-import { isRth, isSessionDay, nyParts } from './market-hours.js';
-
-function nextUsSessionEnd(now) {
-  for (let i = 0; i <= 14; i++) {
-    const parts = nyParts(new Date(now.getTime() + i * 86400000));
-    if (!isSessionDay(parts)) continue;
-    for (const hour of [20, 21]) {
-      const end = new Date(`${parts.ymd}T${hour}:00:00Z`);
-      if (nyParts(end).hour === 16 && end > now) return end.toISOString();
-    }
-  }
-  return null;
-}
+import { cnMarketStatus } from './cn-market-hours.js';
+import { isRth } from './market-hours.js';
 
 export function canExecutePlan(encodedPermissions) {
   try {
@@ -33,8 +21,7 @@ export function canSpendDipFunds(encodedPermissions) {
 export function captureExecutionPlan(round, preview, now = new Date()) {
   if (!preview?.available || preview.pendingClose || preview.status !== 'confirmed'
     || round.executionPlans?.[preview.tier]) return round;
-  const legs = preview.legs.map((leg, index) => ({ ...leg, id: String(index), spent: 0, complete: false,
-    expiresAt: leg.currency === 'CNY' ? nextCnSessionEnd(now) : nextUsSessionEnd(now) }));
+  const legs = preview.legs.map((leg, index) => ({ ...leg, id: String(index), spent: 0, complete: false, expiresAt: null }));
   const plan = { id: randomUUID(), tier: preview.tier, createdAt: now.toISOString(),
     expiresAt: legs.every((leg) => leg.expiresAt) ? legs.map((leg) => leg.expiresAt).sort().at(-1) : null,
     receipts: {}, totalUsd: preview.totalUsd, legs };
@@ -44,7 +31,6 @@ export function captureExecutionPlan(round, preview, now = new Date()) {
 export function executionPlanState(plan, now = new Date()) {
   if (plan.cancelled) return '已取消';
   if (plan.legs.every((leg) => leg.complete)) return '已完成';
-  if (plan.expiresAt && Date.parse(plan.expiresAt) < now.getTime()) return '已过期，待重新评估';
   if (plan.legs.some((leg) => leg.spent > 0)) return '部分成交';
   return '待执行';
 }
@@ -75,8 +61,7 @@ export function prepareExecution(plan, body, evaluation, cash, now = new Date())
   if (!body.reviewed) throw new Error('请确认已复核最新信号、报价、溢价与实际成交');
   const time = new Date(body.filledAt);
   if (!(Number(cash.usdCnyRate) > 0) || !Number.isFinite(Number(cash.usdCnyRate))) throw new Error('汇率无效');
-  if (!Number.isFinite(time.getTime()) || time > now || time < new Date(plan.createdAt)
-    || !plan.expiresAt || time > new Date(plan.expiresAt)) throw new Error('成交时间不在计划有效期内或日历待维护');
+  if (!Number.isFinite(time.getTime()) || time > now || time < new Date(plan.createdAt)) throw new Error('成交时间无效、晚于当前时间或早于计划创建');
   if (evaluation.reset || (plan.tier.startsWith('R') && evaluation.round?.r2Frozen)) throw new Error('信号已失效，请人工核对，不可继续登记此计划');
   const tier = evaluation.tiers?.find((row) => row.id === plan.tier);
   if (!tier || !['confirmed', 'executed'].includes(tier.status)) throw new Error('信号不再确认，请重新评估');
@@ -90,7 +75,6 @@ export function prepareExecution(plan, body, evaluation, cash, now = new Date())
     const leg = next.legs.find((row) => row.id === fill.legId);
     if (!leg || leg.complete || seen.has(leg.id)) throw new Error('交易腿已完成或重复提交');
     seen.add(leg.id);
-    if (!leg.expiresAt || time > new Date(leg.expiresAt)) throw new Error('该交易腿已过期或日历待维护');
     const shares = Number(fill.shares);
     const price = Number(fill.price);
     const commission = Number(fill.commission || 0);

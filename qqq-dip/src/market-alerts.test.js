@@ -31,7 +31,7 @@ test('plan legs route independently, excluding fills, cancellation, expiry and l
   assert.deepEqual(marketAlertRoutes(ev, round, alert, now).map((r) => r.market), ['US']);
   round.executionPlans.T1.cancelled = true;
   assert.deepEqual(marketAlertRoutes(ev, round, alert, now), []);
-  assert.deepEqual(marketAlertRoutes(ev, plan(), alert, new Date('2026-11-03T02:00:00Z')), []);
+  assert.deepEqual(marketAlertRoutes(ev, plan(), alert, new Date('2026-11-03T02:00:00Z')).map((r) => r.market), ['CN', 'US']);
   assert.deepEqual(marketAlertRoutes({ ...ev, reset: true }, plan(), alert, now), []);
   assert.deepEqual(marketAlertRoutes({ ...ev, sameDaySkip: ['T1'] }, plan(), alert, now), []);
   assert.deepEqual(marketAlertRoutes({ tiers: [{ id: 'T1', status: 'executed' }] }, plan(), alert, now), []);
