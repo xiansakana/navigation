@@ -793,13 +793,14 @@ function renderImportPreviewSection() {
 function bindImportModal(layer) {
   $('#import-mode', layer)?.addEventListener('change', (e) => { importState.mode = e.target.value; });
   let revision = 0;
+  const repoQuery = () => '&repoInterestStart=' + encodeURIComponent($('#import-repo-start', layer).value) + ($('#import-repo-baseline', layer).checked ? '&repoInterestBaselineExcluded=1' : '');
   const previewFile = async () => {
     if (!importState.buffer) return;
     const current = ++revision;
     $('#import-allow-updates', layer).checked = false;
     $('#import-confirm', layer).disabled = true;
     try {
-      const res = await fetch('./api/trades/import/preview' + (importState.accountId ? '?accountId=' + encodeURIComponent(importState.accountId) : ''), {
+      const res = await fetch('./api/trades/import/preview' + (importState.accountId ? '?accountId=' + encodeURIComponent(importState.accountId) + repoQuery() : ''), {
         method: 'POST',
         headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
         body: importState.buffer
@@ -830,6 +831,8 @@ function bindImportModal(layer) {
       btn.textContent = importState.count > 0 ? `导入 (${importState.count} 条)` : '导入';
     }
   };
+  $('#import-repo-start', layer).addEventListener('change', previewFile);
+  $('#import-repo-baseline', layer).addEventListener('change', previewFile);
   $('#import-account', layer)?.addEventListener('change', async e => { importState.accountId = e.target.value; await previewFile(); });
   $('#import-file', layer)?.addEventListener('change', async e => {
     const file = e.target.files?.[0];
@@ -855,6 +858,8 @@ function openImportModal() {
         <option value="merge">合并到现有记录</option>
         <option value="replace">替换全部记录</option>
       </select></label>
+      <label>回购利息起始日<input type="date" id="import-repo-start" value="${new Date(Date.parse((state.investmentAccounts || []).find(a => a.id === importState.accountId || a.currency === 'CNY')?.baselineAt || new Date().toISOString()) + 8 * 3600000).toISOString().slice(0,10)}"></label>
+      <label><input type="checkbox" id="import-repo-baseline"> 起始日利息尚未包含在核对的现金基准中（仅东方财富回购利息）</label>
       <label>选择文件<input type="file" id="import-file" class="sm-file-input" accept=".xlsx,.xls"></label>
       <label><input type="checkbox" id="import-allow-updates"> 已核对预览，允许用券商数据更新匹配记录的数量、价格、费用和成交时间</label>
     </form>
@@ -869,7 +874,7 @@ function openImportModal() {
     if (layer.dataset.busy === '1') return;
     setModalBusy(layer, true, '导入中…');
     try {
-      const res = await fetch('./api/trades/import?mode=' + encodeURIComponent(importState.mode) + (importState.accountId ? '&accountId=' + encodeURIComponent(importState.accountId) : '') + ($('#import-allow-updates', layer)?.checked ? '&allowUpdates=1' : ''), {
+      const res = await fetch('./api/trades/import?mode=' + encodeURIComponent(importState.mode) + (importState.accountId ? '&accountId=' + encodeURIComponent(importState.accountId) : '') + '&repoInterestStart=' + encodeURIComponent($('#import-repo-start', layer).value) + ($('#import-repo-baseline', layer).checked ? '&repoInterestBaselineExcluded=1' : '') + ($('#import-allow-updates', layer)?.checked ? '&allowUpdates=1' : ''), {
         method: 'POST',
         headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
         body: importState.buffer

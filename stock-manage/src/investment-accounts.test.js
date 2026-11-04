@@ -135,3 +135,15 @@ test('cash reconciliation anchors existing records and does not replay them on r
     assert.equal(trend.period, undefined);
   } finally { db.close(); }
 });
+
+test('confirmed baseline-excluded repo income credits cash once and later reconciliation captures it', () => {
+ const {db,stock}=setup();
+ try {
+  const a=saveInvestmentAccount(db,'u',{name:'东方财富',currency:'CNY',baselineCash:63120.78});
+  db.prepare('UPDATE investment_accounts SET baseline_at=? WHERE id=?').run('2026-10-29T13:07:42.032Z',a);
+  const t={id:'repo-interest',account_id:a,symbol:'OTHER',name:'回购利息',currency:'CNY',type:'other',other_category:'回购利息',total_amount:1.38,commission:0,shares:1,price:0,trade_date:'2026-10-29T07:00:00Z',cash_effective_at:'2026-10-29T13:07:42.032Z'};
+  stock.write({trades:[t]});assert.equal(stock.read().cashCny,63122.16);
+  stock.write(stock.read());assert.equal(stock.read().cashCny,63122.16);
+  saveInvestmentAccount(db,'u',{baselineCash:63122.16},a);assert.equal(stock.read().cashCny,63122.16);
+ } finally {db.close();}
+});

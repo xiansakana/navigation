@@ -27,7 +27,7 @@ test('Eastmoney keeps exact cash, fees, Chinese names, leading zero IDs and sett
 test('dividends and interest are income, principal and transfers remain explicitly excluded', () => {
   const dividend = {...row,交易类别:'红利入账',成交数量:1000,成交均价:0.012,成交金额:12,发生金额:12,佣金:0,其他费用:0};
   const interest = {...dividend,交易类别:'利息归本',证券代码:'--',证券名称:'--',发生金额:0.14};
-  const ignored = ['天天宝申购','天天宝赎回','银行转证券','证券转银行','报价融券回购','报价融券购回','台账间现金划转存','台账间现金划转取','未知业务'].map(交易类别=>({...row,交易类别}));
+  const ignored = ['天天宝申购','天天宝赎回','银行转证券','证券转银行','报价融券回购','报价融券购回','台账间现金划转存','台账间现金划转取','未知业务'].map((交易类别,i)=>({...row,交易类别,流水号:'ignored'+i}));
   const parsed = parseEastmoneyBuffer(buffer([dividend,interest,...ignored]));
   assert.equal(parsed.length,2); assert.equal(parsed.importInfo.sourceCount,11);
   assert.equal(parsed.importInfo.excluded.length,9); assert.deepEqual(deriveHoldings(parsed),[]);
@@ -60,3 +60,18 @@ test('overlapping exports are idempotent, updates retain IDs and unassigned/ambi
   assert.equal(mergeEastmoneyTrades([manual],incoming,'a').summary.unassigned,1);
   assert.throws(()=>parseEastmoneyBuffer(buffer([row,row])),/重复/);
 });
+
+ test('repo pairs produce only net interest, cutoff and baseline exclusion preserve date and are idempotent', () => {
+  const paid={...row,交易类别:'报价融券回购',证券代码:'132038001001',证券名称:'报价回购1天期',交收日期:'2026-10-28',成交数量:630,成交金额:63000,发生金额:-63000,佣金:0,其他费用:0};
+  const returned={...paid,交易类别:'报价融券购回',交收日期:'2026-10-29',发生时间:'15:00:00',成交金额:63001.38,发生金额:63001.38};
+  const parsed=parseImportBuffer(buffer([paid,returned]));
+  assert.equal(parsed.length,1);assert.equal(parsed[0].total_amount,1.38);assert.equal(cashDelta(parsed[0]),1.38);
+  assert.equal(parsed[0].other_category,'回购利息');assert.deepEqual(deriveHoldings(parsed),[]);
+  const opts={repoInterestStart:'2026-10-29',baselineAt:'2026-10-29T13:07:42.032Z',baselineExcluded:true};
+  const first=mergeEastmoneyTrades([],parsed,'a',opts);
+  assert.equal(first.trades[0].cash_effective_at,opts.baselineAt);assert.equal(first.trades[0].trade_date,'2026-10-29T07:00:00.000Z');
+  assert.equal(mergeEastmoneyTrades(first.trades,parsed,'a',opts).summary.skipped,1);
+  assert.equal(mergeEastmoneyTrades([],parsed,'a',{repoInterestStart:'2026-10-30'}).trades.length,0);
+  assert.equal(parseImportBuffer(buffer([returned])).length,0);
+  assert.throws(()=>parseImportBuffer(buffer([paid,{...returned,发生金额:62000}])),/本息/);
+ });

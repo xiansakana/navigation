@@ -54,7 +54,7 @@ export function mergeBbaeTrades(existing, incoming, accountId) {
   if (!accountId || accountId === 'unassigned') throw new Error('导入券商文件前请选择实际所属证券账户');
   const next = [...existing], preview = [], used = new Set();
   const summary = { added: 0, updated: 0, skipped: 0 };
-  const financial = t => JSON.stringify([t.symbol, t.type, Number(t.shares), Number(t.price), Number(t.total_amount), Number(t.commission), t.trade_date, t.other_category || '']);
+  const financial = t => JSON.stringify([t.symbol, t.type, Number(t.shares), Number(t.price), Number(t.total_amount), Number(t.commission), t.trade_date, t.other_category || '', t.cash_effective_at || '']);
   for (const t of incoming) {
     const owned = next.filter(x => x.account_id === accountId);
     let matches = owned.filter(x => x.broker_order_key === t.broker_order_key);

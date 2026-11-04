@@ -49,12 +49,21 @@ export function parseEastmoneyBuffer(buffer) {
   const receipts = source.filter(r => r['交易类别'] === '新股入账');
   for (const r of source) {
     const cat = r['交易类别'];
+    let repoPrincipal = null;
+    if (cat === '报价融券回购') { skip(r, '本金流转，不计入盈亏'); continue; }
+    if (cat === '报价融券购回') {
+      const matches = source.filter(x => x['交易类别'] === '报价融券回购' && x['股东账号'] === r['股东账号'] && x['证券代码'] === r['证券代码'] && present(r['成交编号']) && x['成交编号'] === r['成交编号'] && present(r['流水号']) && x['流水号'] === r['流水号']);
+      if (matches.length !== 1) { skip(r, '缺少唯一回购本金记录，请提供完整交割单'); continue; }
+      const paid = matches[0];
+      repoPrincipal = -number(paid['发生金额']);
+      if (!(repoPrincipal > 0) || number(paid['成交数量']) !== number(r['成交数量']) || date(paid['交收日期'], paid['发生时间']) >= date(r['交收日期'], r['发生时间'])) throw new Error(`东方财富第${r.row}行：回购本金、数量或交收顺序矛盾`);
+    }
     if (cat === '新股入账') {
       const linked = source.filter(x => x['交易类别'] === '配售缴款' && link(r) && link(x) === link(r)).length === 1;
       skip(r, linked ? '与配售缴款关联合并为一笔买入，不重复增加持仓' : '缺少唯一缴款记录，无法确定成本');
       continue;
     }
-    if (!['证券买入','证券卖出','红利入账','利息归本','配售缴款'].includes(cat)) { skip(r); continue; }
+    if (repoPrincipal == null && !['证券买入','证券卖出','红利入账','利息归本','配售缴款'].includes(cat)) { skip(r); continue; }
     try {
       if (r['币种'] !== '人民币') throw new Error('仅支持人民币交割单');
       const net = roundMoney(number(r['发生金额']));
@@ -63,7 +72,12 @@ export function parseEastmoneyBuffer(buffer) {
       if (fees.some(x => x < 0)) throw new Error('费用不能为负');
       const fee = roundMoney(fees.reduce((s,n) => s + n, 0));
       const type = cat === '证券卖出' ? 'sell' : ['证券买入','配售缴款'].includes(cat) ? 'buy' : 'other';
-      let symbol = r['证券代码'], name = r['证券名称'], shares = 1, price = 0, amount = net;
+      let symbol = r['证券代码'], name = r['证券名称'], shares = 1, price = 0, amount = repoPrincipal == null ? net : roundMoney(net - repoPrincipal);
+      if (repoPrincipal != null) {
+        if (amount < 0 || fee !== 0) throw new Error('回购本息或费用异常，请人工核对');
+        if (!amount) { skip(r, '本息相等，无利息'); continue; }
+        symbol = 'OTHER'; name = r['证券名称'] + '利息';
+      }
       if (type !== 'other') {
         shares = number(r['成交数量']); price = number(r['成交均价']); amount = roundMoney(number(r['成交金额']));
         if (cat === '配售缴款') {
@@ -85,10 +99,10 @@ export function parseEastmoneyBuffer(buffer) {
       if (keys.has(key)) throw new Error('记录标识重复，无法安全区分');
       keys.add(key);
       trades.push({ id: `eastmoney-${key}`, broker: 'eastmoney', broker_order_key: key, broker_net: net,
-        broker_category: cat, source_trade_date: r['发生日期'], settlement_date: r['交收日期'],
+        broker_category: cat, ...(repoPrincipal == null ? {} : { repo_principal: repoPrincipal }), source_trade_date: r['发生日期'], settlement_date: r['交收日期'],
         ...(cat === '配售缴款' ? { security_received_at: receipts.find(x => link(x) === link(r))['交收日期'] } : {}),
         symbol, name, shares, price, type, total_amount: amount, commission: fee, currency: 'CNY',
-        ...(type === 'other' ? { other_category: cat === '红利入账' ? '股息' : '利息' } : {}),
+        ...(type === 'other' ? { other_category: repoPrincipal != null ? '回购利息' : cat === '红利入账' ? '股息' : '利息' } : {}),
         trade_date: tradeDate, created_at: new Date().toISOString() });
     } catch (e) { throw new Error(`东方财富第${r.row}行：${e.message}`); }
   }
@@ -101,7 +115,20 @@ export function parseEastmoneyBuffer(buffer) {
   return trades;
 }
 
-export function mergeEastmoneyTrades(existing, incoming, accountId) {
+export function mergeEastmoneyTrades(existing, incoming, accountId, options = {}) {
+  const info = incoming.importInfo;
+  const start = options.repoInterestStart;
+  if (start && (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !Number.isFinite(Date.parse(start)))) throw new Error('回购利息起始日期无效');
+  const historical = start ? incoming.filter(t => t.repo_principal != null && t.settlement_date < start) : [];
+  incoming = incoming.filter(t => !historical.includes(t)).map(t => {
+    if (t.repo_principal != null) t = { ...t, cash_effective_at: null };
+    if (t.repo_principal != null && options.baselineExcluded && t.settlement_date === start && Date.parse(t.trade_date) < Date.parse(options.baselineAt)) {
+      return { ...t, cash_effective_at: options.baselineAt };
+    }
+    return t;
+  });
+  incoming.importInfo = { ...info, warnings: [...(info?.warnings || []), ...(start ? [`回购利息从 ${start} 起导入，跳过此前 ${historical.length} 笔；本金不计收支。`] : [])] };
+
   for (const t of incoming.filter(x => x.broker_category === '配售缴款')) {
     if (existing.some(x => !x.broker_order_key && x.symbol === t.symbol && x.type === 'buy' &&
       (!x.account_id || x.account_id === accountId) && Math.abs(Date.parse(x.trade_date) - Date.parse(t.trade_date)) > 60000 &&

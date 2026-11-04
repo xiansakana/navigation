@@ -52,7 +52,7 @@ export function projectInvestments(db, userId, input) {
     const baselineTradeIds = new Set(JSON.parse(account.baseline_trade_ids || '[]'));
     let cash = account.baseline_cash / 100;
     const movements = [];
-    for (const t of trades) if (!baselineTradeIds.has(t.id) && time(t.trade_date) >= Math.floor(baseline / 1000) * 1000) {
+    for (const t of trades) if (!baselineTradeIds.has(t.id) && time(t.cash_effective_at || t.trade_date) >= Math.floor(baseline / 1000) * 1000) {
       const delta = investmentCashDelta(t); cash += delta;
       movements.push({ id: t.id, date: t.trade_date, kind: 'stock', type: t.type, symbol: t.symbol, name: t.name, delta: round(delta) });
     }
