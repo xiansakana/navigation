@@ -77,7 +77,7 @@ test('chain snapshots preserve ask, timestamp, multiplier and later pages for se
       expiration_date: expiry, shares_per_contract: 100 },
     last_quote: { ask: c.ask, midpoint: 1, last_updated: now * 1e6 } }],
     ...(calls === 1 ? { next_url: 'https://api.polygon.io/v3/snapshot/options/QQQ?cursor=next' } : {}) };
-    return { ok: true, arrayBuffer: async () => Buffer.from(JSON.stringify(payload)) };
+    return { ok: true, json: async () => payload };
   };
   const rows = await createQuoteService({ polygonApiKey: 'test-key' }).searchLeapCalls('QQQ', 875, 980, expiry, expiry);
   assert.equal(calls, 2);
