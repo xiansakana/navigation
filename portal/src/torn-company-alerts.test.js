@@ -44,9 +44,19 @@ test('API hides keys, checks each tab and rejects guest, unauthorized writes and
  const db=new Database(':memory:'),store=createCompanyAlertsStore(db),svc=createCompanyAlertsService({store,roster:()=>[{id:'w',label:'Director',apiKey:key}],authorize:()=>true,notify:async()=>({sent:1})});
  const call=async(path,method='GET',body,permissions=['*'],isGuest=false,origin)=>{const req=Readable.from(body?[Buffer.from(JSON.stringify(body))]:[]);req.method=method;req.headers={host:'test',...(origin?{origin}:{})};let result;await svc.handle(req,{setHeader(){}},new URL('http://test/api/torn-company-alerts/'+path),{userId:'a',permissions,isGuest},(_,status,data)=>result={status,data});return result;};
  try{assert.equal((await call('config','POST',{watcherIds:['w'],rules:{training:{enabled:true}}})).status,200);const d=await call('state');assert.equal(d.status,200);assert.ok(!JSON.stringify(d).includes(key));assert.equal(d.data.config.rules.training.enabled,true);
+ assert.equal((await call('salary/notifications','PUT',{watcherId:'unknown',settings:{qq:{enabled:false},slack:{enabled:false},targets:[]}})).status,400);
  assert.equal((await call('config','POST',{},['*'],true)).status,403);
  assert.equal((await call('training/notifications','PUT',{},['torn-company-alerts:view','torn-company-alerts:training:view'])).status,403);
  assert.equal((await call('config','POST',{rules:{stock:{enabled:true}}},['torn-company-alerts:view','torn-company-alerts:config:edit'])).status,403);
  assert.equal((await call('config','POST',{},['*'],false,'https://evil.test')).status,403);
+ }finally{db.close();}
+});
+
+test('notification destinations are isolated by user, event and watcher while legacy defaults survive',()=>{
+ const db=new Database(':memory:'),store=createCompanyAlertsStore(db);
+ const setting=id=>({qq:{enabled:true},slack:{enabled:false},targets:[{type:'private',userId:id}]});
+ try{store.saveNotify('a','salary',setting('123456'));store.saveNotify('a','salary',setting('222222'),'w1');store.saveNotify('a','salary',setting('333333'),'w2');
+ assert.equal(store.getNotify('a','salary','w1').targets[0].userId,'222222');assert.equal(store.getNotify('a','salary','w2').targets[0].userId,'333333');assert.equal(store.getNotify('a','salary','new').targets[0].userId,'123456');assert.equal(store.getNotify('b','salary','w1').qq.enabled,false);assert.equal(store.getNotify('a','stock','w1').qq.enabled,false);
+ store.saveNotify('a','salary',setting('444444'));assert.equal(store.getNotify('a','salary','w1').targets[0].userId,'222222');assert.equal(createCompanyAlertsStore(db).getNotify('a','salary','w2').targets[0].userId,'333333');
  }finally{db.close();}
 });

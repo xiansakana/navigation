@@ -29,3 +29,11 @@ for (const kind of ['salary','training','stock']) test('notification management 
     assert.equal(host.querySelector('[data-action="company-'+kind+'-test"]').disabled, true);
   } finally { w.close(); }
 });
+
+for(const kind of ['salary','training','stock']) test('company '+kind+' account selector saves and tests only the selected watcher',async()=>{
+ const dom=new JSDOM(['salary','training','stock'].map(k=>'<div id="company-'+k+'-notifications"></div>').join('')+'<button id="business-refresh"></button>',{runScripts:'outside-only',url:'https://test/notifications/'}),w=dom.window,calls=[];
+ const config=()=>({ok:true,settings:settings(),watchers:[{id:'a',label:'Director A',settings:settings()},{id:'b',label:'Director B',settings:{...settings(),targets:[{type:'private',userId:'654321',groupId:'',atUserId:''}]}}],permissions:{save:true,test:true}});
+ w.toast=()=>{};w.fetch=async(url,options)=>{calls.push({url,...options});return{ok:true,json:async()=>config()};};
+ const until=async f=>{const end=Date.now()+1000;while(!f()&&Date.now()<end)await new Promise(r=>setTimeout(r,5));assert.ok(f());};
+ try{w.eval(fs.readFileSync(new URL('../../qq-bot/public/qq-targets.js',import.meta.url),'utf8'));w.eval(fs.readFileSync(new URL('../../qq-bot/public/company-alerts-notifications.js',import.meta.url),'utf8'));const h=w.document.getElementById('company-'+kind+'-notifications');await until(()=>h.querySelector('[data-account]')?.options.length===2);const select=h.querySelector('[data-account]');select.value='b';select.dispatchEvent(new w.Event('change',{bubbles:true}));assert.equal(h.querySelector('[data-field="userId"]').value,'654321');h.querySelector('[data-action="company-'+kind+'-save"]').click();await until(()=>calls.some(c=>c.method==='PUT'));const body=JSON.parse(calls.find(c=>c.method==='PUT').body);assert.equal(body.watcherId,'b');assert.equal(body.settings.targets[0].userId,'654321');await until(()=>!h.querySelector('[data-action="company-'+kind+'-save"]').disabled);h.querySelector('[data-action="company-'+kind+'-test"]').click();await until(()=>calls.some(c=>c.method==='POST'));assert.equal(JSON.parse(calls.find(c=>c.method==='POST').body).watcherId,'b');}finally{w.close();}
+});

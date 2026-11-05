@@ -15,3 +15,7 @@
 SQLite 表 `torn_company_alerts` 按 Portal user_id 隔离；模块权限 `torn-company-alerts:*` 在权限管理注册，三个 Tab 各自有查看、编辑、通知查看/保存/测试权限；选择已有账号还要求原 `service:torn-company:edit`。只读数据范围不可编辑，未授权不能通过直接调用 API 修改。配置/控制/数据范围由 Portal 与 worker 两端检查。
 
 参考：[官方 API schema](https://www.torn.com/swagger/openapi.json)，[官方 Company Wiki](https://wiki.torn.com/wiki/Company)。Wiki 说明训练按星级每日获得、上限 20，结算约 18:00 TCT，实际更新可延后。
+
+## 按监听账号通知
+
+三个经营提醒卡片分别提供账号选择，每个账号独立保存 QQ/Slack 开关、目标及 @。保存和测试仅作用于当前所选账号；实际事件按 watcherId 路由到对应设置，不使用其他账号的目标。原先类别级配置作为尚未独立配置账号的兼容默认值保留，首次为账号单独保存后不再受默认值影响；其他用户与其他提醒类别完全隔离。不重放历史事件。账号列表由现有已启用申请账号和当前用户已保存经营监听账号合并，API 拒绝未知账号，测试使用已保存配置。

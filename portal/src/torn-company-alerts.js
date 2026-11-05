@@ -12,7 +12,7 @@ const names = { salary: '扣工资', training: '员工训练', stock: '库存' }
 export function canCompanyAlerts(s, action = 'view') { return !!s?.userId && (!s.isGuest || action.endsWith('view')) && hasPermission(s.dataAccess?.permissions || s.permissions || [], 'torn-company-alerts:' + action); }
 export function createCompanyAlertsService({ store, request = portalTornRequest, roster, authorize, notify }) {
   const monitors = new Map();
-  const monitor = uid => { if (!monitors.has(uid)) monitors.set(uid, new CompanyAlertsMonitor({ uid, store, request, authorize: () => authorize(uid, 'control:edit'), authorizeKind: kind => authorize(uid, kind + ':view'), notify: row => authorize(uid, row.kind + ':view') && authorize(uid, row.kind + ':notify:edit') ? notify(store.getNotify(uid, row.kind), row) : { skipped: true } })); return monitors.get(uid); };
+  const monitor = uid => { if (!monitors.has(uid)) monitors.set(uid, new CompanyAlertsMonitor({ uid, store, request, authorize: () => authorize(uid, 'control:edit'), authorizeKind: kind => authorize(uid, kind + ':view'), notify: row => authorize(uid, row.kind + ':view') && authorize(uid, row.kind + ':notify:edit') ? notify(store.getNotify(uid, row.kind, row.watcherId), row) : { skipped: true } })); return monitors.get(uid); };
   return { monitors, async handle(req, res, url, s, json) {
     res.setHeader('Cache-Control', 'no-store'); const uid = s.userId;
     if (!canCompanyAlerts(s)) return json(res, 403, { ok: false, error: '无权访问公司提醒' });
@@ -22,10 +22,24 @@ export function createCompanyAlertsService({ store, request = portalTornRequest,
     try {
       if (kind && !canCompanyAlerts(s, kind + ':view')) return deny();
       if (action.startsWith('notifications')) {
+        const known = [...new Map([...store.get(uid).config.watchers, ...roster()].map(w => [w.id, w])).values()];
+        const output = () => ({ ok: true, settings: store.getNotify(uid, kind), watchers: known.map(w => ({ id: w.id, label: w.label, settings: store.getNotify(uid, kind, w.id) })), permissions: { save: canCompanyAlerts(s, kind + ':notify:edit'), test: canCompanyAlerts(s, kind + ':notify:test:edit') } });
+
         if (!kind || !canCompanyAlerts(s, kind + ':notify:view')) return deny();
-        if (req.method === 'GET' && action === 'notifications') return json(res, 200, { ok: true, settings: store.getNotify(uid, kind), permissions: { save: canCompanyAlerts(s, kind + ':notify:edit'), test: canCompanyAlerts(s, kind + ':notify:test:edit') } });
-        if (req.method === 'PUT' && action === 'notifications') { if (!canCompanyAlerts(s, kind + ':notify:edit')) return deny(); store.saveNotify(uid, kind, await readJson(req, 16384)); return json(res, 200, { ok: true, settings: store.getNotify(uid, kind) }); }
-        if (req.method === 'POST' && action === 'notifications/test') { if (!canCompanyAlerts(s, kind + ':notify:test:edit')) return deny(); const row = { kind, message: '测试通知 · 配置正常', companyName: names[kind], link: 'https://www.torn.com/companies.php' }; const result = await notify(store.getNotify(uid, kind), row); if (!result?.sent) throw new Error('未启用可用通知渠道'); return json(res, 200, { ok: true, result }); }
+        if (req.method === 'GET' && action === 'notifications') return json(res, 200, output());
+        if (req.method === 'PUT' && action === 'notifications') {
+          if (!canCompanyAlerts(s, kind + ':notify:edit')) return deny();
+          const body = await readJson(req, 16384), id = body.watcherId;
+          if (id !== undefined && (typeof id !== 'string' || !known.some(w => w.id === id))) throw new Error('监听账号不存在');
+          store.saveNotify(uid, kind, id === undefined ? body : body.settings, id); return json(res, 200, output());
+        }
+        if (req.method === 'POST' && action === 'notifications/test') {
+          if (!canCompanyAlerts(s, kind + ':notify:test:edit')) return deny();
+          const body = await readJson(req, 16384), id = body.watcherId;
+          if (id !== undefined && (typeof id !== 'string' || !known.some(w => w.id === id))) throw new Error('监听账号不存在');
+          const row = { kind, watcherId: id, watcherLabel: known.find(w => w.id === id)?.label, message: '测试通知 · 配置正常', companyName: names[kind], link: 'https://www.torn.com/companies.php' };
+          const result = await notify(store.getNotify(uid, kind, id), row); if (!result?.sent) throw new Error('未启用可用通知渠道'); return json(res, 200, { ok: true, result });
+        }
         return deny();
       }
       if (action === 'state' && req.method === 'GET') {

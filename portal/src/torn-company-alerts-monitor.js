@@ -53,8 +53,16 @@ export function createCompanyAlertsStore(db) {
   };
   return { get,
     save(uid, config) { get(uid); db.prepare('UPDATE torn_company_alerts SET config=? WHERE user_id=?').run(JSON.stringify(config), uid); },
-    getNotify(uid, kind) { return get(uid).notify[kind] || structuredClone(DEFAULT_CHAIN_NOTIFY); },
-    saveNotify(uid, kind, value) { const n = get(uid).notify; n[kind] = chainNotifySettings(value); db.prepare('UPDATE torn_company_alerts SET notify=? WHERE user_id=?').run(JSON.stringify(n), uid); },
+    getNotify(uid, kind, watcherId) {
+      const saved = get(uid).notify[kind] || structuredClone(DEFAULT_CHAIN_NOTIFY);
+      const selected = watcherId && Object.hasOwn(saved.watchers || {}, watcherId) ? saved.watchers[watcherId] : saved;
+      return { qq: selected.qq, slack: selected.slack, targets: selected.targets };
+    },
+    saveNotify(uid, kind, value, watcherId) {
+      const n = get(uid).notify, settings = chainNotifySettings(value), old = n[kind] || structuredClone(DEFAULT_CHAIN_NOTIFY);
+      n[kind] = watcherId ? { ...old, watchers: { ...old.watchers, [watcherId]: settings } } : { ...settings, watchers: old.watchers || {} };
+      db.prepare('UPDATE torn_company_alerts SET notify=? WHERE user_id=?').run(JSON.stringify(n), uid);
+    },
     commit: db.transaction((uid, slot, signals, kind, watcher, now) => {
       const saved = get(uid), old = new Set(saved.runtime[slot] || []);
       const fresh = signals.filter(r => !old.has(r.key)).map(r => ({ ...r, kind, watcherId: watcher.id, watcherLabel: watcher.label, detectedAt: now }));
