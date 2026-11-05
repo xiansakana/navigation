@@ -1,8 +1,7 @@
 // Recompute masonry spans from actual card heights, not viewport breakpoints.
 // ResizeObserver also fires for browser zoom, font changes and dynamic forms.
 (function () {
-  const host = document.querySelector('.business-panels');
-  if (!host) return;
+  document.querySelectorAll('.business-panels').forEach(function(host) {
   let frame = 0;
   const observed = new Set();
   function schedule() { if (!frame) frame = requestAnimationFrame(layout); }
@@ -26,4 +25,5 @@
   window.addEventListener('resize', schedule);
   document.fonts?.ready.then(schedule);
   schedule();
+  });
 }());

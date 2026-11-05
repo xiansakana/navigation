@@ -6,6 +6,19 @@ import { JSDOM } from 'jsdom';
 const read = name => fs.readFileSync(new URL('../../qq-bot/public/' + name, import.meta.url), 'utf8');
 const until = async check => { for (let i = 0; i < 100 && !check(); i++) await new Promise(resolve => setTimeout(resolve, 5)); assert.ok(check()); };
 
+test('business categories follow module hierarchy and legacy rendering preserves other notification hosts', () => {
+  const dom=new JSDOM(read('index.html'),{runScripts:'outside-only',url:'https://test/notifications/'}),w=dom.window,d=w.document;
+  try {
+    w.byId=id=>d.getElementById(id);w.bizEscape=String;w.access={canBusinessSave:false,canBusinessTest:false};w.loadAccess=()=>new Promise(()=>{});
+    w.eval(read('integrations.js'));
+    const other=d.createElement('input');d.getElementById('shopping-notifications').append(other);
+    w.bizRender();w.bizRender();
+    for(const [id,label] of [['business-stock','抄底监控'],['business-undercut','压价助手'],['business-company','公司监听'],['chain-notifications','监控'],['users-notifications','监控'],['company-salary-notifications','公司监听']]) assert.equal(d.getElementById(id).closest('.notification-subcategory').querySelector('h4').textContent,label);
+    const ids=[...d.querySelectorAll('[id]')].map(e=>e.id);assert.equal(new Set(ids).size,ids.length);
+    assert.equal(other.disabled,false);assert.equal(d.querySelectorAll('.business-card[data-source="company"]').length,1);
+  } finally {w.close();}
+});
+
 test('notification channel status loads and saves when Chain controls arrive before channel config', async () => {
   const dom = new JSDOM(read('index.html'), { runScripts: 'outside-only', url: 'https://test/notifications/' });
   const w = dom.window, d = w.document; let releaseConfig; const writes = [];

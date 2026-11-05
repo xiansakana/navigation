@@ -61,10 +61,12 @@ function bizReadCard(card) {
 }
 
 function bizRender() {
-    byId('business-grid').innerHTML = ['stock', 'undercut', 'company'].map(function(id) { return bizCard(businessState[id] || { id: id, ok: false, error: '尚未加载' }); }).join('');
-    byId('business-grid').querySelectorAll('input,select').forEach(function(el) { el.disabled = !access.canBusinessSave; });
-    byId('business-grid').querySelectorAll('button[data-action]').forEach(function(el) {
+    ['stock', 'undercut', 'company'].forEach(function(id) { byId('biz-slot-' + id).innerHTML = bizCard(businessState[id] || { id: id, ok: false, error: '尚未加载' }); });
+    ['stock','undercut','company'].forEach(function(id) {
+    byId('biz-slot-' + id).querySelectorAll('input,select').forEach(function(el) { el.disabled = !access.canBusinessSave; });
+    byId('biz-slot-' + id).querySelectorAll('button[data-action]').forEach(function(el) {
         el.disabled = (el.dataset.action === 'test-stock' || el.dataset.action === 'test-watcher') ? !access.canBusinessTest : !access.canBusinessSave;
+    });
     });
 }
 
@@ -74,12 +76,13 @@ async function bizLoad() {
         var data = await api('api/integrations');
         data.integrations.forEach(function(item) { businessState[item.id] = item; bizUpdateGroupSuggestions(item); });
         bizRender();
-    } catch (err) { byId('business-grid').textContent = '业务提醒读取失败：' + err.message; }
+    } catch (err) { const error=document.createElement('p');error.className='biz-error';error.textContent='业务提醒读取失败：'+err.message;byId('biz-slot-stock').replaceChildren(error); }
     finally { byId('business-refresh').disabled = false; }
 }
 
 byId('business-refresh').addEventListener('click', bizLoad);
 byId('business-grid').addEventListener('change', function(event) {
+    if (!['stock','undercut','company'].includes(event.target.closest('.business-card')?.dataset.source)) return;
     if (event.target.dataset.field !== 'type') return;
     var row = event.target.closest('.biz-target');
     var group = event.target.value === 'group';
@@ -90,6 +93,7 @@ byId('business-grid').addEventListener('click', async function(event) {
     var button = event.target.closest('[data-action]');
     if (!button) return;
     var card = button.closest('.business-card');
+    if (!['stock','undercut','company'].includes(card?.dataset.source)) return;
     var action = button.dataset.action;
     if ((action === 'test-stock' || action === 'test-watcher') ? !access.canBusinessTest : !access.canBusinessSave) return;
     var item = bizReadCard(card);
@@ -121,4 +125,4 @@ byId('business-grid').addEventListener('click', async function(event) {
     finally { button.disabled = false; }
 });
 
-loadAccess().then(bizLoad).catch(function(err) { byId('business-grid').textContent = '权限读取失败：' + err.message; }).finally(function() { window.navigationSkeleton?.finish('business'); });
+loadAccess().then(bizLoad).catch(function(err) { const error=document.createElement('p');error.className='biz-error';error.textContent='权限读取失败：'+err.message;byId('biz-slot-stock').replaceChildren(error); }).finally(function() { window.navigationSkeleton?.finish('business'); });

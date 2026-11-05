@@ -58,7 +58,7 @@
 
 /* One content-height flow for all asynchronously loaded business modules.
    Keep their hosts for event delegation and permissions; never reveal hidden hosts. */
-.business-panels { columns:auto; display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr)); gap:18px; align-items:start; }
+.business-panels { columns:auto; display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,420px),1fr)); gap:18px; align-items:start; }
 .business-panels.masonry-ready { grid-auto-rows:1px; grid-auto-flow:dense; }
 .business-panels > .business-grid:not([hidden]) { display:contents; }
 .business-panels > .business-grid[hidden] { display:none; }
@@ -67,3 +67,9 @@
 .business-panels .business-loading { break-inside:avoid; }
 @container(max-width:480px) { .biz-target { grid-template-columns:80px minmax(0,1fr) 32px; }.biz-target input[data-field="atUserId"],.biz-target input[data-field="userId"] { grid-column:2; }.biz-target button { grid-column:3;grid-row:1; }.business-card-head,.biz-watcher-head { flex-wrap:wrap; } }
 @media(max-width:800px) { .biz-target { grid-template-columns:80px minmax(0,1fr) 32px; } }
+.notification-category { margin:24px 0; border-top:1px solid var(--line); padding-top:20px; }
+.notification-category > h3 { margin:0 0 18px; font-size:22px; color:var(--text); }
+.notification-subcategory { margin:0 0 22px; }
+.notification-subcategory > h4 { margin:0 0 12px; padding-left:10px; border-left:3px solid var(--accent); font-size:16px; color:var(--label); }
+.notification-subcategory:not(:has(.business-grid:not([hidden]) :is(.business-card,.business-loading,.biz-error))),
+.notification-category:not(:has(.business-grid:not([hidden]) :is(.business-card,.business-loading,.biz-error))) { display:none; }
