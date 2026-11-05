@@ -84,6 +84,7 @@ function maskMoneyText(text) {
 }
 
 function fmtPct(n, digits = 2) {
+  if (n == null || n === '') return '—';
   if (!Number.isFinite(Number(n))) return '—';
   const v = Number(n);
   const sign = v > 0 ? '+' : '';
@@ -664,7 +665,7 @@ function sleeveBySymbol(symbol) {
 
 function nextLevelHint(label, stats) {
   if (label === '159509') {
-    return '人民币 QQQ 代理，非独立梯子';
+    return `${stats?.H ? `自身 H ${stats.H.toFixed(3)}（近60根日线）` : '自身 H — · 历史行情不可用'} · 梯度按 QQQ 触发`;
   }
   if (!stats?.H) return '—';
   const H = stats.H;

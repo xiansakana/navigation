@@ -259,6 +259,7 @@ export function statsFromMarket(mkt, referenceHigh = null) {
   return {
     symbol: mkt?.symbol || '',
     H,
+    historyError: mkt?.historyError || null,
     triggers: triggerPrices(H),
     lastClose,
     price,

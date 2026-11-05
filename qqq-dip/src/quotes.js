@@ -1,4 +1,5 @@
 import { fetchQuoteResource } from '../../shared/quote-network.js';
+import { createCnyHistoryLoader } from './cny-history.js';
 const CANDLE_CACHE = new Map();
 const QUOTE_CACHE = new Map();
 const QUOTE_CACHE_MS = 30000;
@@ -47,6 +48,7 @@ function mapQuote(sym, q) {
 }
 
 export function createQuoteService(config) {
+  const getCnyHistory = createCnyHistoryLoader(fetchJson);
   const finnhubKey = config.finnhubApiKey;
   const polygonKey = config.polygonApiKey;
 
@@ -537,6 +539,12 @@ export function createQuoteService(config) {
     }
     try {
       out[CNY_EQUITY_PROXY_SYMBOL] = await getCnyProxyQuote();
+      try {
+        out[CNY_EQUITY_PROXY_SYMBOL].candles = await getCnyHistory();
+      } catch (e) {
+        out[CNY_EQUITY_PROXY_SYMBOL].historyError = '历史行情不可用';
+        errors[CNY_EQUITY_PROXY_SYMBOL] = `历史行情不可用（${e.message}）`;
+      }
     } catch (e) {
       errors[CNY_EQUITY_PROXY_SYMBOL] = e.message;
     }
