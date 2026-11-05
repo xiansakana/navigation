@@ -14,33 +14,36 @@ function apiErrorMessage(data) {
     return typeof data.error === 'object' ? (data.error.error || 'API 返回错误') : String(data.error);
 }
 
-export async function fetchJsonWithRetry(url, onWait) {
+export async function fetchJsonWithRetry(url, onWait, options = {}) {
+    const signal = workerSignal && options.signal ? AbortSignal.any([workerSignal, options.signal]) : options.signal || workerSignal;
     if (workerRequest) {
         const parsed = new URL(url), key = parsed.searchParams.get('key');
         parsed.searchParams.delete('key');
         for (let attempt = 0; ; attempt++) {
-            try { return await workerRequest(parsed.href, key, workerSignal, { scope: 'legacy-toolbox', spacingMs: 2000 }); }
+            try { return await workerRequest(parsed.href, key, signal, { scope: 'legacy-toolbox', spacingMs: 2000 }); }
             catch (error) {
-                if (workerSignal?.aborted) throw error;
+                if (signal?.aborted) throw error;
                 const limited = error.apiCode === 5 || error.rateLimited;
                 if (attempt >= 3 || (!limited && !error.transient)) throw error;
                 const ms = limited ? Math.max(65000 * 2 ** attempt, error.retryAfterMs || 0) : 10000 * 2 ** attempt;
                 onWait?.(ms, attempt + 1);
                 const { setTimeout } = await import('node:timers/promises');
-                await setTimeout(ms, undefined, { signal: workerSignal });
+                await setTimeout(ms, undefined, { signal });
             }
         }
     }
     var attempt = 0;
     while (true) {
-        var resp = await fetch(url);
+        signal?.throwIfAborted();
+        var resp = await fetch(url, { signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(15000)]) });
         var data = await resp.json();
         if (isRateLimitError(data)) {
             attempt++;
             if (attempt > RATE_LIMIT_RETRIES) throw new Error(apiErrorMessage(data));
             var waitMs = 5000 * attempt;
             if (onWait) onWait(waitMs, attempt);
-            await sleep(waitMs);
+            const { setTimeout } = await import('node:timers/promises');
+            await setTimeout(waitMs, undefined, { signal });
             continue;
         }
         if (data.error) throw new Error(apiErrorMessage(data));
@@ -55,20 +58,26 @@ export async function fetchItems(apiKey) {
     return data.items || {};
 }
 
-export async function fetchUserBazaar(apiKey) {
+export async function fetchUserBazaar(apiKey, options = {}) {
     var data = await fetchJsonWithRetry(
-        'https://api.torn.com/v2/user/bazaar?key=' + encodeURIComponent(apiKey)
+        'https://api.torn.com/v2/user/bazaar?key=' + encodeURIComponent(apiKey), undefined, options
     );
     return data.bazaar || [];
 }
 
-export async function fetchUserItemMarket(apiKey) {
+export async function fetchUserItemMarket(apiKey, options = {}) {
     var all = [], offset = 0, limit = 100;
+    const pages = new Set();
     while (true) {
         var url = 'https://api.torn.com/v2/user/itemmarket?key=' + encodeURIComponent(apiKey)
             + '&limit=' + limit + '&offset=' + offset;
-        var data = await fetchJsonWithRetry(url);
+        var data = await fetchJsonWithRetry(url, undefined, options);
         var rows = data.itemmarket || [];
+        if (!Array.isArray(rows)) throw new Error('个人市场挂单数据无效');
+        const signature = JSON.stringify(rows.map(row => row.id));
+        if (rows.length && pages.has(signature)) throw new Error('个人市场分页重复，已中止本轮扫描');
+        pages.add(signature);
+        if (pages.size > 100) throw new Error('个人市场分页超过安全上限');
         all = all.concat(rows);
         if (rows.length < limit) break;
         offset += limit;
@@ -77,10 +86,10 @@ export async function fetchUserItemMarket(apiKey) {
     return all;
 }
 
-export async function fetchMyPlayerId(apiKey, cache) {
+export async function fetchMyPlayerId(apiKey, cache, options = {}) {
     if (cache.playerId) return cache.playerId;
     var data = await fetchJsonWithRetry(
-        'https://api.torn.com/v2/user/basic?key=' + encodeURIComponent(apiKey)
+        'https://api.torn.com/v2/user/basic?key=' + encodeURIComponent(apiKey), undefined, options
     );
     var id = toNumber(data.player_id || (data.profile && data.profile.id));
     if (!id) throw new Error('无法获取玩家 ID');
@@ -88,13 +97,13 @@ export async function fetchMyPlayerId(apiKey, cache) {
     return id;
 }
 
-export async function fetchWeav3rBazaarLowest(itemId, myPlayerId, cache) {
+export async function fetchWeav3rBazaarLowest(itemId, myPlayerId, cache, options = {}) {
     if (cache[itemId] !== undefined) return cache[itemId];
     var resp = workerBazaar ? null : await fetch(WEAV3R_MARKETPLACE_URL + itemId + '?limit=100', {
-        headers: { Accept: 'application/json' }
+        headers: { Accept: 'application/json' }, signal: AbortSignal.any([options.signal || new AbortController().signal, AbortSignal.timeout(15000)])
     });
     if (resp && !resp.ok) throw new Error('Weav3r 巴扎 API 请求失败 (' + resp.status + ')');
-    var data = workerBazaar ? { listings: await workerBazaar(itemId, workerSignal) } : await resp.json();
+    var data = workerBazaar ? { listings: await workerBazaar(itemId, options.signal && workerSignal ? AbortSignal.any([options.signal, workerSignal]) : options.signal || workerSignal) } : await resp.json();
     var listings = data.listings || [];
     var best = null;
     listings.forEach(function(row) {
@@ -153,10 +162,10 @@ export function marketLowestCompetitor(rows, ownRows = [], metadata = {}) {
     }
     return best && { ...best, coveredOwnListings, cacheTimestamp: Number.isSafeInteger(metadata.cache_timestamp) ? metadata.cache_timestamp : null, cacheDelay: Number(metadata.cache_delay) || 0 };
 }
-export async function fetchMarketLowestListing(apiKey, itemId, cache, ownRows = []) {
+export async function fetchMarketLowestListing(apiKey, itemId, cache, ownRows = [], options = {}) {
     if (cache[itemId] !== undefined) return cache[itemId];
     var data = await fetchJsonWithRetry(
-        'https://api.torn.com/v2/market/' + itemId + '/itemmarket?key=' + encodeURIComponent(apiKey) + '&limit=100&sort=ASC'
+        'https://api.torn.com/v2/market/' + itemId + '/itemmarket?key=' + encodeURIComponent(apiKey) + '&limit=100&sort=ASC', undefined, options
     );
     if (!Array.isArray(data.itemmarket?.listings)) throw new Error('市场挂单数据无效');
     const lowest = marketLowestCompetitor(data.itemmarket.listings, ownRows, data.itemmarket);

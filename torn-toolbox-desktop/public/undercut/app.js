@@ -65,7 +65,7 @@ function updateUndercutState(state) {
     var running = state.running;
     $('uc-start').hidden = running;
     $('uc-stop').hidden = !running;
-    $('uc-status-text').textContent = running ? '● 监听中' : '已停止';
+    $('uc-status-text').textContent = running ? state.checking ? '● 扫描中' : state.lastScanError ? '● 等待重试' : '● 监听中' : '已停止';
     $('uc-status').classList.toggle('stopped', !running);
     $('uc-checks').textContent = state.checks || 0;
     $('uc-alerts').textContent = state.alerts || 0;

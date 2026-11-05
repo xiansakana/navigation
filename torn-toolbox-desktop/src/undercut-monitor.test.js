@@ -1,6 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { UndercutMonitor } from './undercut-monitor.js';
+import { fetchUserItemMarket } from './torn-api.js';
+
+test('a hung scan times out, releases its lock and recovers without accepting late results', async t => {
+  let release, saves = 0;
+  t.mock.method(globalThis, 'fetch', () => new Promise(resolve => { release = resolve; }));
+  const config = { undercut: { intervalSeconds:30, watchers:[{id:'w',label:'Account',apiKey:'test',watchBazaar:false,watchItemMarket:true}] } };
+  const monitor = new UndercutMonitor(() => config, { scanTimeoutMs:30, store:{load:()=>null,save:()=>{saves++;}} });
+  monitor.running = true;
+  const job = monitor.runOnce();
+  assert.equal(monitor.getState().nextScanAt,null);
+  await assert.rejects(job,/扫描超时/);
+  assert.equal(monitor.checking,false);assert.ok(monitor.nextScanAt>Date.now());
+  assert.match(monitor.getState().lastScanError,/超时/);
+  release({ok:true,json:async()=>({itemmarket:[]})});
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(saves,0);
+  t.mock.method(globalThis,'fetch',async()=>({ok:true,json:async()=>({itemmarket:[]})}));
+  await monitor.runOnce();assert.equal(monitor.checks,2);assert.equal(monitor.lastScanError,'');assert.equal(saves,1);monitor.stop();
+});
+
+test('repeated full market pages fail explicitly instead of scanning forever', async t => {
+  const rows=Array.from({length:100},(_,i)=>({id:i+1}));let calls=0;
+  t.mock.method(globalThis,'fetch',async()=>{calls++;return {ok:true,json:async()=>({itemmarket:rows})};});
+  await assert.rejects(fetchUserItemMarket('test'),/分页重复/);assert.equal(calls,2);
+});
 
 test('competitor listing quantities reach alerts and notifications and refresh without duplicate notifications', async function(t) {
   var bazaarQuantity = 1200;
