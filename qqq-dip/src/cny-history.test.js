@@ -10,6 +10,24 @@ const rows = Array.from({ length: 65 }, (_, i) => [
 ]);
 const tencent = { data: { sz159509: { qfqday: rows } } };
 
+test('Tencent qfq endpoint may return day instead of qfqday; prefer qfqday when both exist', async () => {
+  let calls = 0;
+  const load = createCnyHistoryLoader(async () => {
+    calls++;
+    return { code: 0, data: { sz159509: { day: rows, qt: {}, prec: 3 } } };
+  });
+  const candles = await load();
+  assert.equal(calls, 1, 'valid primary response must not need the failing fallback');
+  assert.equal(candles.length, 65);
+  assert.equal(statsFromMarket({ price: 3, candles }).drawdownLive, -25);
+  await load();
+  assert.equal(calls, 1);
+  const adjusted = rows.map((row) => [row[0], '1.5', '1.5', '2', '1', row[5]]);
+  const preferred = parseCnyHistory({ data: { sz159509: { day: rows, qfqday: adjusted } } }, 'tencent');
+  assert.equal(statsFromMarket({ price: 1.5, candles: preferred }).H, 2);
+  assert.throws(() => parseCnyHistory({ data: { sz159509: { day: rows, qfqday: [] } } }, 'tencent'), /不足60/);
+});
+
 test('159509 uses its own sorted adjusted history and 60-bar high', () => {
   const candles = parseCnyHistory({ data: { klines: rows.slice().reverse().map((r) => r.join(',')) } }, 'eastmoney');
   candles[0].h = 100; // Outside the 60-bar lookback.

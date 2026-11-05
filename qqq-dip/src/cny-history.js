@@ -1,6 +1,9 @@
 // Forward-adjusted prices share the latest quote's price basis.
 export function parseCnyHistory(data, source) {
-  const rows = source === 'tencent' ? data?.data?.sz159509?.qfqday : data?.data?.klines;
+  // The qfq endpoint can return `day` when no adjustment is needed, rather
+  // than `qfqday`. Prefer the adjusted series whenever it is present.
+  const series = data?.data?.sz159509;
+  const rows = source === 'tencent' ? (series?.qfqday ?? series?.day) : data?.data?.klines;
   if (!Array.isArray(rows)) throw new Error('无前复权历史日线');
   const candles = rows.map((row) => {
     const p = Array.isArray(row) ? row : String(row).split(',');
