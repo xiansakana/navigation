@@ -164,6 +164,10 @@ function buildNotificationPermissions() {
 }
 
 var SYSTEM_PERMISSIONS = [
+    ...['view', 'config:edit', 'control:edit', ...['salary', 'training', 'stock'].flatMap(k => [k + ':view', k + ':edit', k + ':notify:view', k + ':notify:edit', k + ':notify:test:edit'])].map(id => {
+        const names = { salary: '扣工资', training: '员工训练', stock: '库存' }, kind = id.split(':')[0], notification = id.includes(':notify:');
+        return { id: 'torn-company-alerts:' + id, name: (names[kind] || '公司经营提醒') + ' · ' + id, group: notification ? '通知管理' : 'Torn 工具箱', serviceId: notification ? 'notifications' : 'torn-company', action: id.endsWith('edit') ? 'edit' : 'view', permissionPath: notification ? ['首页','通知管理','业务提醒','公司监听',names[kind],id] : ['首页','Torn 工具箱','公司监听',names[kind] || '监控配置',id] };
+    }),
     ...[
         ['view', '查看自己的帮派筛选列表与结果', [], 'view'],
         ['config:edit', '配置自己的 Leader networth 筛选', ['保存配置'], 'edit'],

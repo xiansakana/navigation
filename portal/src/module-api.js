@@ -12,7 +12,9 @@ import { handleCodexCliApi } from './codex-cli.js';
 
 import { handleTornShoppingApi } from './torn-shopping.js';
 import { handleTornUsersApi } from './torn-users.js';
+import { handleCompanyAlertsApi } from './torn-company-alerts.js';
 const handlers = {
+  'torn-company-alerts': (req,res,url,session,deps) => handleCompanyAlertsApi(req,res,url,session,deps.json,deps.config),
   'torn-users': (req,res,url,session,deps) => handleTornUsersApi(req,res,url,session,deps.json,deps.config),
   'torn-shopping': (req,res,url,session,deps) => handleTornShoppingApi(req,res,url,session,deps.json,deps.config),
   'torn-factions': (req, res, url, session, deps) => handleFactionApi(req, res, url, session, deps.json, deps.config),

@@ -10,16 +10,16 @@
   <script defer src="/ui/back-to-top.js?v=1"></script>
 </head>
 <body>
-    <div class="app" data-skeleton="dashboard" data-skeleton-key="page">
+    <div class="app" data-layout-container data-skeleton="dashboard" data-skeleton-key="page">
         <header class="header">
             <div>
                 <h1>公司监听</h1>
-                <p class="subtitle">公司申请提醒 · 支持多账号</p>
+                <p class="subtitle">申请、扣工资、员工训练与库存提醒 · 支持多账号</p>
             </div>
             <div class="header-status" id="global-status">就绪</div>
         </header>
 
-        <p class="hint">提醒规则、通知目标与测试请前往 <a href="/notifications/#business-company">通知管理 · Torn 公司申请</a>。此处仅配置监控。</p>
+        <p class="hint">提醒规则、通知目标与测试请前往 <a href="/notifications/#business-company">通知管理 · 公司提醒</a>。此处仅配置监控。</p>
 
         <section class="card notification-legacy" hidden>
             <h2>全局设置</h2>
@@ -37,7 +37,8 @@
             </div>
         </section>
 
-        <section class="card">
+        <nav id="company-tabs" class="btn-row" aria-label="公司监听"><button class="btn" data-company-tab="application">申请</button><button class="btn" data-company-tab="salary" hidden>扣工资</button><button class="btn" data-company-tab="training" hidden>员工训练</button><button class="btn" data-company-tab="stock" hidden>库存</button></nav>
+        <section class="card" id="company-application">
             <div class="section-head">
                 <h2 style="margin:0">监听账号</h2>
                 <button type="button" class="btn small" id="co-add-watcher">+ 添加账号</button>
@@ -63,9 +64,21 @@
             </div>
             <div class="list" id="co-list"></div>
         </section>
+        <section class="card" id="company-operations" hidden>
+          <h2 id="ops-title"></h2><p class="hint" id="ops-explanation"></p>
+          <p class="hint">独立保存当前用户的经营提醒，沿用申请 Tab 中已启用的公司账号。仅提醒，请自行操作游戏。</p>
+          <form id="ops-form"><div class="field"><label>监控公司账号（可多选）</label><div id="ops-watchers" class="checks"></div></div>
+          <div class="checks"><label><input id="ops-enabled" type="checkbox">启用本项监控</label></div>
+          <div id="ops-thresholds" class="watcher-grid"></div>
+          <div class="field"><label for="ops-interval">经营提醒扫描间隔（秒）</label><input id="ops-interval" type="number" min="30" max="3600" value="60"></div>
+          <div class="btn-row"><button id="ops-save" class="btn primary">保存本项配置（保存后需启动）</button><button id="ops-start" type="button" class="btn green">启动经营提醒</button><button id="ops-stop" type="button" class="btn red">停止经营提醒</button></div></form>
+          <p id="ops-status" role="status"></p><div id="ops-rows"></div><p><a id="ops-notification-link" href="/notifications/">通知管理 → 业务提醒</a></p>
+          <h3>本项提醒记录</h3><div id="ops-history"></div>
+        </section>
     </div>
     <script src="/skeleton/skeleton.js?v=1"></script>
     <script src="shared/watcher-ui.js"></script>
     <script src="app.js?v=skeleton-20261004"></script>
+<script src="operations.js?v=1"></script>
 </body>
 </html>

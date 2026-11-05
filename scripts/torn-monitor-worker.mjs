@@ -8,6 +8,7 @@ import { verifyWorkerMessage, tornWorkerPort } from '../portal/src/torn-worker-t
 import { createTornRunStore } from '../portal/src/torn-worker-runs.js';
 import { createTornWorkerRuntime, tickTornWorker } from '../portal/src/torn-worker-runtime.js';
 import { userJobs } from '../portal/src/torn-users.js';
+import { companyAlertJobs } from '../portal/src/torn-company-alerts.js';
 import { shoppingJobs } from '../portal/src/torn-shopping.js';
 import { destructionJobs } from '../portal/src/torn-chain.js';
 import { factionJobs } from '../portal/src/torn-factions.js';
@@ -21,7 +22,7 @@ const startedAt = Date.now(), seen = new Map();
 let stopping = false, ready = false;
 installWorkerApi(portalTornRequest, bazaarListings, controller.signal);
 const runtime = createTornWorkerRuntime({ runs: createTornRunStore(db), config,
-  jobs: () => ({ 'torn-shopping': shoppingJobs(), 'torn-chain': destructionJobs(), 'torn-factions': factionJobs(), 'torn-users': userJobs() }),
+  jobs: () => ({ 'torn-company-alerts': companyAlertJobs(), 'torn-shopping': shoppingJobs(), 'torn-chain': destructionJobs(), 'torn-factions': factionJobs(), 'torn-users': userJobs() }),
   sessionFor: uid => { const current = resolveSessionUser({ userId: uid }, config); return current && { userId: current.user.id, permissions: current.permissions, isGuest: current.user.username === (config.auth?.guestUsername || 'guest') }; },
   dispatch: (req, res, url, session, deps) => moduleApiHandler(url.pathname)(req, res, url, session, deps)
 });
