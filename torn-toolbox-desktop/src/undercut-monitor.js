@@ -341,7 +341,7 @@ export class UndercutMonitor extends EventEmitter {
         this.emit('state', this.getState());
 
         var totalUndercuts = 0;
-        var totalNew = 0, totalPending = 0;
+        var totalNew = 0, totalPending = 0, errors = [];
 
         for (var i = 0; i < watchers.length; i++) {
             var watcher = watchers[i];
@@ -355,11 +355,13 @@ export class UndercutMonitor extends EventEmitter {
             } catch (err) {
                 this.ensureWatcherState(watcher.id).lastError = err.message;
                 if (signal?.aborted) throw err;
+                errors.push(watcher.label + '：' + err.message);
                 this.emit('error', watcher.label + ': ' + err.message);
             }
         }
 
-        this.statusMessage = totalNew
+        this.lastScanError = errors.join('；');
+        this.statusMessage = errors.length ? '扫描未完整完成，将自动重试：' + this.lastScanError : totalNew
             ? '发现 ' + totalNew + ' 个新压价提醒'
             : (totalUndercuts
                 ? '共 ' + totalUndercuts + ' 个货物被压价'
