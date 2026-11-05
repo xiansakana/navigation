@@ -78,7 +78,8 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
     if (!band || !expiries.length) return [];
     const first = expiries[0];
     const last = expiries[expiries.length - 1];
-    return quotes.searchLeapCalls('QQQ', band.low, band.high, first.expiry, last.expiry);
+    return quotes.searchLeapCalls('QQQ', evalResult.leaps?.shallow?.low || band.low,
+      evalResult.leaps?.deep?.high || band.high, first.expiry, last.expiry);
   }
 
   async function tick(opts = {}) {

@@ -474,14 +474,15 @@ function legRow(leg) {
       <td>${escapeHtml(leg.note || '')}</td>
     </tr>`;
   }
+  if (leg.skipped) return `<tr><td>Call·USD</td><td>暂不推荐</td><td>跳过</td><td>${leg.pct}%</td><td>${fmtUsd(leg.usd)}（保留）</td><td>0 张</td><td>${leg.minimumCost != null ? `最低一张 ${fmtUsd(leg.minimumCost)}` : '报价不可用'}</td><td>${escapeHtml(leg.reason)}</td></tr>`;
   return `<tr>
     <td>Call·USD</td>
     <td>${escapeHtml(leg.occSymbol || leg.symbol)}</td>
     <td>买入</td>
     <td>${leg.pct}%</td>
     <td>${fmtUsd(leg.usd)}</td>
-    <td>${fmtPrice(leg.strike)} / ${escapeHtml(leg.expiry || '—')}</td>
-    <td>${leg.otmPct != null ? leg.otmPct.toFixed(1) + '% 虚值' : '—'}</td>
+    <td>${leg.shares ?? 0} 张 · ${fmtPrice(leg.strike)} / ${escapeHtml(leg.expiry || '—')}</td>
+    <td>${leg.otmPct != null ? leg.otmPct.toFixed(1) + '% 虚值' : '—'} · 卖价 ${fmtPrice(leg.price)} × 100 = ${fmtUsd(leg.oneContractCost)} / 张（手续费另计）</td>
     <td>${escapeHtml(leg.note || '')}</td>
   </tr>`;
 }
@@ -544,7 +545,8 @@ function openBuyPreview() {
           }
           return `${leg.symbol} 正股·USD 买入 ${leg.shares}股 预算${fmtUsd(leg.usd)} @${leg.price?.toFixed(3)}`;
         }
-        return `${leg.occSymbol || leg.symbol} Call·USD 买入 预算${fmtUsd(leg.usd)} K${fmtPrice(leg.strike)} 到期${leg.expiry}`;
+        if (leg.skipped) return `Call 跳过：${leg.reason}；保留预算${fmtUsd(leg.usd)}`;
+        return `${leg.occSymbol || leg.symbol} Call·USD 买入 ${leg.shares}张 卖价${fmtPrice(leg.price)} 一张${fmtUsd(leg.oneContractCost)}（手续费另计） 预算${fmtUsd(leg.usd)} K${fmtPrice(leg.strike)} 到期${leg.expiry}`;
       }),
       '',
       '核对:',
@@ -616,7 +618,7 @@ function openPlanFillModal(tierId) {
     for (const quote of data.legs || []) {
       const row = rows.find((item) => item.dataset.fillLeg === quote.legId);
       if (!row || row.disabled) continue;
-      row.querySelector('[data-quote-info]').textContent = quote.error || `来源 ${quote.source}；报价时间 ${quote.asOf || '接口未提供'}；获取时间 ${quote.fetchedAt}。休市或延迟报价仅供估算；数量按剩余预算计算，不含后续费用。`;
+      row.querySelector('[data-quote-info]').textContent = quote.error || `${quote.warning || ''}${quote.oneContractCost != null ? ` 一张成本 ${fmtUsd(quote.oneContractCost)}（报价 × 100，手续费另计）。` : ''}来源 ${quote.source}；报价时间 ${quote.asOf || '接口未提供'}；获取时间 ${quote.fetchedAt}。休市或延迟报价仅供估算；数量按剩余预算计算，不含后续费用。`;
       const price = row.querySelector('[data-price]');
       if (!quote.error && !price.dataset.dirty) price.value = quote.price;
       if (!quote.error) recalcQuantity(row);

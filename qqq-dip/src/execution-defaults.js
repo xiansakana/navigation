@@ -25,7 +25,12 @@ export async function executionDefaults(plan, quotes, now = new Date()) {
         || (Number.isFinite(quoteTime) && (now.getTime() - quoteTime > 86400000 || quoteTime > now.getTime() + 300000))) {
         throw new Error('缺少有效最新报价（不使用历史收盘价），请手动填写');
       }
-      return { ...base, price, shares: suggestedQuantity(leg, price), source: quote.source || '行情接口',
+      const shares = suggestedQuantity(leg, price);
+      const oneContractCost = leg.kind === 'call' ? Math.round(price * 10000) / 100 : null;
+      return { ...base, price, shares, oneContractCost,
+        warning: leg.kind === 'call' && shares === 0
+          ? `剩余预算不足一张（约 $${oneContractCost.toFixed(2)}，手续费另计）；本腿不买，保留预算，不挪用其他档位资金` : null,
+        source: quote.source || '行情接口',
         asOf: quote.asOf || null, fetchedAt: new Date().toISOString() };
     } catch (error) {
       return { ...base, error: error.message };

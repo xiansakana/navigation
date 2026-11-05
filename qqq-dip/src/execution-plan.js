@@ -21,7 +21,8 @@ export function canSpendDipFunds(encodedPermissions) {
 export function captureExecutionPlan(round, preview, now = new Date()) {
   if (!preview?.available || preview.pendingClose || preview.status !== 'confirmed'
     || round.executionPlans?.[preview.tier]) return round;
-  const legs = preview.legs.map((leg, index) => ({ ...leg, id: String(index), spent: 0, complete: false, expiresAt: null }));
+  const legs = preview.legs.filter((leg) => !leg.skipped).map((leg, index) => ({ ...leg, id: String(index), spent: 0, complete: false, expiresAt: null }));
+  if (!legs.length) return round;
   const plan = { id: randomUUID(), tier: preview.tier, createdAt: now.toISOString(),
     expiresAt: legs.every((leg) => leg.expiresAt) ? legs.map((leg) => leg.expiresAt).sort().at(-1) : null,
     receipts: {}, totalUsd: preview.totalUsd, legs };

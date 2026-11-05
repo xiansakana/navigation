@@ -1,5 +1,6 @@
 /** QQQ dip-playbook rules. Pure functions, no I/O. */
 import { cnMarketStatus } from './cn-market-hours.js';
+import { selectAffordableCall } from './option-selection.js';
 
 export const TIER_ORDER = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'R1', 'R2'];
 export const LEFT_TIERS = ['T1', 'T2', 'T3', 'T4'];
@@ -850,7 +851,7 @@ export function formatOccSymbol(underlying, expiry, strike, type = 'C') {
 function pickSuggestedContract(suggestedContracts, band) {
   if (!Array.isArray(suggestedContracts) || !suggestedContracts.length || !band) return null;
   const inBand = suggestedContracts.filter((c) => c.strike >= band.low && c.strike <= band.high);
-  const list = inBand.length ? inBand : suggestedContracts;
+  const list = inBand;
   const mid = (band.low + band.high) / 2;
   return list.reduce((best, c) => {
     if (!best) return c;
@@ -982,6 +983,7 @@ function summarizeCashPlan(legs, startWallet) {
   let useUsd = 0;
   let useCny = 0;
   for (const leg of legs) {
+    if (leg.skipped) continue;
     if (leg.kind === 'call' || (leg.kind === 'equity' && leg.currency !== 'CNY')) {
       useUsd = roundMoney(useUsd + (Number(leg.usd) || 0));
     }
@@ -1216,6 +1218,27 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
     notes.push('禁止一次性打完 30% 右侧袋。');
   }
 
+  let optionCash = startWallet.usd;
+  for (const leg of legs.filter((row) => row.kind === 'call')) {
+    const band = leg.otmClass === 'deep' ? deep
+      : ['shallow', 'shallow-medium'].includes(leg.otmClass) ? shallow : medium;
+    const selection = selectAffordableCall(suggestedContracts, {
+      band, expiries: (leaps.expiries || []).map((e) => e.expiry), budget: Math.min(leg.usd, optionCash)
+    });
+    Object.assign(leg, selection);
+    if (selection.contract) {
+      const c = selection.contract;
+      Object.assign(leg, { occSymbol: c.ticker, expiry: c.expiry, strike: c.strike,
+        otmPct: otmPct(c.strike, spot), price: c.ask, quoteAsOf: c.asOf,
+        estUsd: roundMoney(selection.shares * selection.oneContractCost),
+        contractsHint: `${selection.shares}张（未含手续费）` });
+      optionCash -= leg.usd;
+    } else {
+      leg.occSymbol = '';
+      leg.contractsHint = selection.reason;
+      notes.push(`${selection.reason}；本腿预算 $${leg.usd.toFixed(2)}${selection.minimumCost != null ? `，最低一张约 $${selection.minimumCost.toFixed(2)}` : ''}。不挪用其他预算，不放宽期限或虚值范围。`);
+    }
+  }
   const cashPlan = summarizeCashPlan(legs, startWallet);
   const checklist = [
     `H = ${ev.qqq?.H != null ? ev.qqq.H.toFixed(3) : '—'}，${id} 触发价 ${tier.triggerPrice != null ? tier.triggerPrice.toFixed(3) : '—'}${tier.intradayPrice ? ` / 盘中 ${tier.intradayPrice.toFixed(3)}` : ''}`,
@@ -1223,7 +1246,7 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
     `币种：拟用 USD $${cashPlan.useUsd.toFixed(2)} / CNY ¥${cashPlan.useCny.toFixed(2)}（汇率 ${cashPlan.rate || '—'}）`,
     `袋内剩余：左 $${ev.remaining?.left ?? 0} / 危机 $${ev.remaining?.crisis ?? 0} / 右 $${ev.remaining?.right ?? 0}`,
     medium ? `T2 行权价区间参考：$${medium.low}–$${medium.high}` : null,
-    ...legs.filter((l) => l.kind === 'call').map((l) => (
+    ...legs.filter((l) => l.kind === 'call' && !l.skipped).map((l) => (
       `${l.occSymbol || 'Call'}：下单前记下成本、3×/5×目标价、6 个月清仓日、到期 ${l.expiry || '—'}`
     ))
   ].filter(Boolean);

@@ -350,12 +350,12 @@ export function createQuoteService(config) {
     if (!r) throw new Error('期权无快照');
     const day = r.day || {};
     const last = r.last_quote || r.last_trade || {};
-    const price = last.midpoint || last.price || day.close || 0;
+    const price = last.ask || last.midpoint || last.price || day.close || 0;
     const prev = day.close || price;
     return {
       symbol: upper,
       source: 'polygon-option',
-      previousCloseOnly: !(last.midpoint || last.price),
+      previousCloseOnly: !(last.ask || last.midpoint || last.price),
       name: `${parsed.underlying} ${r.details?.expiration_date || parsed.expiration} ${parsed.type} $${parsed.strike}`,
       price,
       change: day.change || 0,
@@ -372,10 +372,8 @@ export function createQuoteService(config) {
     if (!polygonKey) return [];
     const u = String(underlying).toUpperCase();
     const params = new URLSearchParams({
-      underlying_ticker: u,
       contract_type: 'call',
-      expired: 'false',
-      limit: '50',
+      limit: '250',
       sort: 'strike_price',
       order: 'asc',
       'strike_price.gte': String(strikeLow),
@@ -384,15 +382,27 @@ export function createQuoteService(config) {
       'expiration_date.lte': expiryLte,
       apiKey: polygonKey
     });
-    const url = `https://api.polygon.io/v3/reference/options/contracts?${params}`;
+    const url = `https://api.polygon.io/v3/snapshot/options/${encodeURIComponent(u)}?${params}`;
     try {
-      const data = await fetchJson(url);
-      return (data.results || []).slice(0, 12).map((c) => ({
-        ticker: c.ticker,
-        strike: c.strike_price,
-        expiry: c.expiration_date,
-        underlying: c.underlying_ticker
-      }));
+      const rows = [];
+      let next = url;
+      for (let page = 0; next && page < 3; page++) {
+        const data = await fetchJson(next);
+        rows.push(...(data.results || []));
+        if (!data.next_url) break;
+        const more = new URL(data.next_url);
+        if (more.origin !== 'https://api.polygon.io') throw new Error('期权链分页地址无效');
+        more.searchParams.set('apiKey', polygonKey);
+        next = more.href;
+      }
+      return rows.map((r) => {
+        const c = r.details || {};
+        const timestamp = Number(r.last_quote?.last_updated);
+        return { ticker: c.ticker, strike: c.strike_price, expiry: c.expiration_date,
+          underlying: u, sharesPerContract: c.shares_per_contract,
+          ask: Number(r.last_quote?.ask),
+          asOf: timestamp > 0 && Number.isFinite(timestamp) ? new Date(timestamp / 1e6).toISOString() : null };
+      });
     } catch {
       return [];
     }
