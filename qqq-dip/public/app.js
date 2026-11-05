@@ -583,12 +583,12 @@ function openPlanFillModal(tierId) {
     <p class="hint" id="fill-quote-status">正在获取各腿最新报价并估算数量；预填值不是实际成交，请核对后手动修改。本次仅登记所选资金池同币种的交易腿。</p>
     <label class="field">实际成交时间（本机时区）<input id="fill-time" type="datetime-local"></label>
     <label class="field">本次成交所属抄底资金池<select id="fill-account"><option value="">请选择同币种证券账户</option>${(state.cash?.strategyFunds || []).map((f) => `<option value="${escapeHtml(f.accountId)}">${escapeHtml(f.name)} · ${f.currency} · 策略可用 ${maskMoneyText(String(f.strategyAvailable))} · 缺口 ${maskMoneyText(String(f.deficit))}</option>`).join('')}</select></label>
-    ${plan.legs.map((leg) => `<fieldset data-fill-leg="${leg.id}" data-currency="${escapeHtml(leg.currency)}" ${leg.complete || plan.cancelled ? 'disabled' : ''}>
+    ${plan.legs.map((leg) => `<fieldset data-fill-leg="${leg.id}" data-currency="${escapeHtml(leg.currency)}" ${leg.complete || leg.pendingOption || plan.cancelled ? 'disabled' : ''}>
       <legend>${escapeHtml(leg.occSymbol || leg.symbol)} · ${leg.complete ? '已完成' : leg.spent > 0 ? '部分成交' : '待执行'} · ${escapeHtml(leg.currency)} 已用 ${maskMoneyText(String(leg.spent))} · 按当前策略条件复核</legend>
       <label class="field">本次实际数量（期权填张数）<input data-qty type="number" min="0" step="${leg.symbol === '159509' ? '100' : '1'}"></label>
       <label class="field">实际成交单价<input data-price type="number" min="0" step="0.001"></label>
       <label class="field">本次费用<input data-fee type="number" min="0" step="0.01" value="0"></label>
-      <p class="hint" data-quote-info></p>
+      <p class="hint" data-quote-info>${leg.pendingOption ? `本档期权待用预算 ${fmtUsd(leg.usd)}：尚无可执行合约；满足原档信号、波动率、期限、虚值范围和整数张数条件后提示补买，本轮结束释放。` : ''}</p>
       <label><input data-complete type="checkbox">此腿已全部完成（不再补单）</label>
     </fieldset>`).join('')}
     <label><input id="fill-review" type="checkbox">已复核当前信号、159509 最新报价/停牌/溢价及真实成交；不使用昨夜估价</label>

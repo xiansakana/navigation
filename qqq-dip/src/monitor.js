@@ -4,6 +4,7 @@ import { appendMarketSnapshot } from './notify.js';
 import { publishBusinessEvent } from '../../shared/business-events.js';
 import { withDeadline } from './deadline.js';
 import { captureExecutionPlan } from './execution-plan.js';
+import { activatePendingOptions } from './pending-options.js';
 import { alertMarketOpen, marketAlertRoutes, migrateMarketDeliveries } from './market-alerts.js';
 
 const SYMBOLS = ['QQQ', 'TQQQ', 'SOXL', 'SPY'];
@@ -136,8 +137,11 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
         }
       }
 
-      const nextRound = captureExecutionPlan(
+      let nextRound = captureExecutionPlan(
         applyRoundFromEval(round, ev, { sessionDate: lastMarketStatus.ymd }), ev.buyPreview);
+      const pendingOptions = activatePendingOptions(nextRound, ev);
+      nextRound = pendingOptions.round;
+      ev.alerts.push(...pendingOptions.alerts);
       if (!nextRound.marketDeliveryVersion) {
         const actions = [0, 500].flatMap((offset) => store.listActionRows?.({ limit: 500, offset }).items || []);
         migrateMarketDeliveries(nextRound, ev.alerts, actions);

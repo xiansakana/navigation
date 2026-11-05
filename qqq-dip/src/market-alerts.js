@@ -21,10 +21,10 @@ export function marketAlertRoutes(ev, round, alert, now = new Date()) {
     const plan = round.executionPlans?.[tierId];
     if (plan?.cancelled || plan?.inFlight) return [];
     const preview = plan || buildBuyPreview({ ...ev, primary: { ...ev.primary, tier: tierId } }, ev.suggestedContracts);
-    const legs = (preview.legs || []).filter((leg) => !leg.complete
+    const legs = (preview.legs || []).filter((leg) => !leg.complete && !leg.pendingOption && !leg.skipped
       && (leg.kind !== 'call' || !tier.vxnGate?.blocked)
       && Number(leg.currency === 'CNY' ? leg.cny : leg.usd) > Number(leg.spent || 0));
-    return ['CN', 'US'].flatMap((market) => {
+    return (alert.optionReady ? ['US'] : ['CN', 'US']).flatMap((market) => {
       const matched = legs.filter((leg) => (leg.currency === 'CNY' ? 'CN' : 'US') === market);
       return matched.length ? [{ market, symbols: [...new Set(matched.map((leg) => leg.symbol))] }] : [];
     });

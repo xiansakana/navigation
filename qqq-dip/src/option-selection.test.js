@@ -25,7 +25,7 @@ test('T2 16.51 premium needs $1651; a $400 budget must skip instead of sizing fr
   assert.equal(preview.cashPlan.useUsd, 1200);
   assert.equal(preview.cashPlan.remainUsd, 18800);
   const plan = captureExecutionPlan({}, preview).executionPlans.T2;
-  assert(plan.legs.every((l) => l.kind === 'equity'));
+  assert.equal(plan.legs.find((l) => l.kind === 'call').pendingOption, true);
   assert.equal(plan.totalUsd, 1600);
 });
 
@@ -75,13 +75,13 @@ test('chain snapshots preserve ask, timestamp, multiplier and later pages for se
     const c = option(calls === 1 ? 925 : 950, calls === 1 ? 16.51 : 3.5);
     const payload = { results: [{ details: { ticker: c.ticker, strike_price: c.strike,
       expiration_date: expiry, shares_per_contract: 100 },
-    last_quote: { ask: c.ask, midpoint: 1, last_updated: now * 1e6 } }],
+    last_quote: { ask: c.ask, midpoint: 1, last_updated: Math.floor(now / 1000) * 1e9 } }],
     ...(calls === 1 ? { next_url: 'https://api.polygon.io/v3/snapshot/options/QQQ?cursor=next' } : {}) };
     return { ok: true, json: async () => payload };
   };
   const rows = await createQuoteService({ polygonApiKey: 'test-key' }).searchLeapCalls('QQQ', 875, 980, expiry, expiry);
   assert.equal(calls, 2);
   assert.equal(rows[0].ask, 16.51);
-  assert.equal(rows[0].asOf, new Date(now).toISOString());
+  assert.equal(rows[0].asOf, new Date(Math.floor(now / 1000) * 1000).toISOString());
   assert.equal(selectAffordableCall(rows, config).contract.strike, 950);
 });

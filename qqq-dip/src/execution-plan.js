@@ -21,7 +21,8 @@ export function canSpendDipFunds(encodedPermissions) {
 export function captureExecutionPlan(round, preview, now = new Date()) {
   if (!preview?.available || preview.pendingClose || preview.status !== 'confirmed'
     || round.executionPlans?.[preview.tier]) return round;
-  const legs = preview.legs.filter((leg) => !leg.skipped).map((leg, index) => ({ ...leg, id: String(index), spent: 0, complete: false, expiresAt: null }));
+  const legs = preview.legs.map((leg, index) => ({ ...leg, pendingOption: leg.kind === 'call' && !!leg.skipped,
+    id: String(index), spent: 0, complete: false, expiresAt: null }));
   if (!legs.length) return round;
   const plan = { id: randomUUID(), tier: preview.tier, createdAt: now.toISOString(),
     expiresAt: legs.every((leg) => leg.expiresAt) ? legs.map((leg) => leg.expiresAt).sort().at(-1) : null,
@@ -75,6 +76,7 @@ export function prepareExecution(plan, body, evaluation, cash, now = new Date())
   for (const fill of body.fills) {
     const leg = next.legs.find((row) => row.id === fill.legId);
     if (!leg || leg.complete || seen.has(leg.id)) throw new Error('交易腿已完成或重复提交');
+    if (leg.pendingOption) throw new Error('期权预算待用，尚无可执行合约，禁止登记成交');
     seen.add(leg.id);
     const shares = Number(fill.shares);
     const price = Number(fill.price);

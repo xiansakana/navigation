@@ -12,6 +12,7 @@ export function suggestedQuantity(leg, price, fee = 0) {
 export async function executionDefaults(plan, quotes, now = new Date()) {
   const legs = await Promise.all((plan.legs || []).map(async (leg) => {
     const base = { legId: leg.id, currency: leg.currency };
+    if (leg.pendingOption) return { ...base, error: '本档期权预算待用，等待信号、有效卖价及整数张数条件满足；预算未扣除' };
     if (plan.cancelled || plan.inFlight || leg.complete) {
       return { ...base, error: '此腿已完成、取消或写入待核对，不自动填充' };
     }
