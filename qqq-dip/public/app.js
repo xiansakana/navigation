@@ -933,7 +933,8 @@ function openModal(html, extraClass = '') {
 
 async function openDocPreview(id) {
   const root = $('#modal-root');
-  const wideStored = sessionStorage.getItem('qqq-dip-doc-wide') === '1';
+  const widthPreference = 'qqq-dip-doc-wide-v2';
+  const wideStored = sessionStorage.getItem(widthPreference) !== '0';
   root.innerHTML = `
     <div class="sm-modal-backdrop ${wideStored ? 'sm-modal-backdrop--wide' : ''}">
       <div class="sm-modal sm-modal--doc ${wideStored ? 'sm-modal--doc-wide' : ''}" role="dialog" aria-modal="true">
@@ -942,7 +943,7 @@ async function openDocPreview(id) {
           <div class="sm-doc-toolbar-actions">
             <button type="button" class="btn ghost sm-btn-sm" data-doc-switch="cheatsheet">速查</button>
             <button type="button" class="btn ghost sm-btn-sm" data-doc-switch="manual">完整手册</button>
-            <button type="button" class="btn ghost sm-btn-sm" id="btn-doc-wide">${wideStored ? '退出宽屏' : '宽屏'}</button>
+            <button type="button" class="btn ghost sm-btn-sm" id="btn-doc-wide" aria-pressed="${wideStored}">${wideStored ? '退出宽屏' : '宽屏'}</button>
             <button type="button" class="btn ghost sm-btn-sm" data-close>关闭</button>
           </div>
         </div>
@@ -972,11 +973,12 @@ async function openDocPreview(id) {
     root.innerHTML = '';
   });
 
-  $('#btn-doc-wide')?.addEventListener('click', () => {
-    const wide = !modal.classList.toggle('sm-modal--doc-wide');
+  $('#btn-doc-wide')?.addEventListener('click', (event) => {
+    const wide = modal.classList.toggle('sm-modal--doc-wide');
     backdrop?.classList.toggle('sm-modal-backdrop--wide', wide);
-    sessionStorage.setItem('qqq-dip-doc-wide', wide ? '1' : '0');
-    $('#btn-doc-wide').textContent = wide ? '退出宽屏' : '宽屏';
+    sessionStorage.setItem(widthPreference, wide ? '1' : '0');
+    event.currentTarget.textContent = wide ? '退出宽屏' : '宽屏';
+    event.currentTarget.setAttribute('aria-pressed', String(wide));
     document.body.classList.toggle('sm-doc-open-wide', wide);
   });
 
