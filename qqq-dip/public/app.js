@@ -7,6 +7,14 @@ const EVENT_LABELS = {
   sleeveTqqq: 'TQQQ 袖仓', sleeveSoxl: 'SOXL 袖仓'
 };
 
+const SENTIMENT_LABELS = {
+  'extreme fear': '极度恐惧', fear: '恐惧', neutral: '中性', greed: '贪婪', 'extreme greed': '极度贪婪'
+};
+
+function sentimentReading(value) {
+  return `${Number(value.score).toFixed(1)} / 100 · ${SENTIMENT_LABELS[value.rating] || '—'}`;
+}
+
 let state = {
   cash: { cashUsd: 0, cashCny: 0, usdCnyRate: 7.2 },
   settings: {},
@@ -312,6 +320,7 @@ function renderAmmo() {
   const rem = ev?.remaining;
   const vxnQuote = ev?.vxnQuote;
   const vxnSource = { cboe: 'Cboe', fred: 'FRED', yahoo: 'Yahoo' }[vxnQuote?.source];
+  const sentiment = ev?.sentiment;
   const showMoney = canViewLotMoney();
   const cashUsdField = showMoney
     ? `<input type="number" readonly id="cash-usd" value="${c.strategyCashUsd ?? 0}" aria-label="抄底美元现金">`
@@ -346,6 +355,10 @@ function renderAmmo() {
       <div class="value">${ev?.vxnStale && Number(vxnQuote?.price) > 0 ? Number(vxnQuote.price).toFixed(2) : ev?.vxn != null ? ev.vxn.toFixed(2) : '—'}</div>
       ${ev?.vxnStale ? '<div class="hint">最新收盘值待更新 · 旧值仅供参考</div>' : ''}
       <div class="hint">${ev?.vxn == null ? '期权门槛暂停判定' : `T2≥25 ${ev.vxnGates?.t2?.ok ? '过' : '未过'} · T3≥32 ${ev.vxnGates?.t3?.ok ? '过' : '未过'}`}${vxnQuote?.asOf ? ` · ${escapeHtml(vxnSource || '')} 收盘 ${escapeHtml(vxnQuote.asOf)}` : ''}</div></div>
+    <div class="sm-summary-card" id="market-sentiment-card"><div class="label">恐惧与贪婪指数</div>
+      <div class="value">${sentiment ? escapeHtml(sentimentReading(sentiment)) : '—'}</div>
+      <div class="hint">${sentiment ? `${escapeHtml(sentiment.asOf)} · CNN 公开归档${sentiment.stale ? ' · 数据待更新' : ''}` : '暂无可用数据'}</div>
+      <div class="hint">${Number.isFinite(sentiment?.change5) ? `较 5 期前 ${sentiment.change5 > 0 ? '+' : ''}${sentiment.change5.toFixed(1)} 点 · ` : ''}仅供观察</div></div>
     <div class="sm-summary-card"><div class="label">规则</div>
       <label class="hint"><input type="checkbox" id="opt-vboost" ${state.settings.variant === 'vBoost' ? 'checked' : ''}> V 型加强 55/20/25</label>
       <label class="hint"><input type="checkbox" id="opt-soxl" ${state.settings.soxlEnabled ? 'checked' : ''}> 启用 SOXL 芯片观点（−70%／−90%）</label>
@@ -802,6 +815,7 @@ function renderActions() {
     <div class="sm-action">
       <div class="meta">${escapeHtml(a.ts)} · ${escapeHtml(a.source)} · ${escapeHtml(a.type)}${a.tier ? ' · ' + escapeHtml(a.tier) : ''}</div>
       <div>${escapeHtml(a.message)}</div>
+      ${a.payload?.sentiment ? `<div class="hint">触发时情绪 ${escapeHtml(sentimentReading(a.payload.sentiment))} · ${escapeHtml(a.payload.sentiment.asOf)} · CNN 公开归档${a.payload.sentiment.stale ? ' · 当时为旧值' : ''}</div>` : ''}
     </div>
   `).join('') : '<p class="hint">暂无操作记录</p>';
   $('#action-page-info').textContent = `第 ${actionPage} / ${pageCount} 页 · 共 ${total} 条`;

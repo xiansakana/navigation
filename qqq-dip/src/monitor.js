@@ -1,4 +1,4 @@
-import { evaluate, applyRoundFromEval, newAlertKeys } from './playbook.js';
+import { evaluate, applyRoundFromEval, newAlertKeys, TIER_ORDER } from './playbook.js';
 import { marketStatus, isOpenSummaryTime, isRth, latestCompletedSession } from './market-hours.js';
 import { appendMarketSnapshot } from './notify.js';
 import { publishBusinessEvent } from '../../shared/business-events.js';
@@ -119,6 +119,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
           soxl: markets.SOXL,
           spy: markets.SPY,
           vxn: markets.VXN,
+          sentiment: markets.sentiment,
           cnyProxy: markets['159509'],
           lots, suggestedContracts
         });
@@ -185,7 +186,9 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
           source: 'auto',
           tier: alert.event,
           message: alert.message,
-          payload: { key: alert.key, event: alert.event }
+          payload: { key: alert.key, event: alert.event,
+            ...(!alert.optionReady && (TIER_ORDER.includes(alert.event) || alert.event === 'T4_intraday')
+              ? { sentiment: ev.sentiment } : {}) }
         });
         nextRound.observedAlerts = { ...nextRound.observedAlerts, [alert.key]: nextRound.observedAlerts?.[alert.key] || new Date().toISOString() };
         nextRound.firedAlerts = { ...nextRound.firedAlerts, [alert.key]: nextRound.firedAlerts?.[alert.key] || new Date().toISOString() };

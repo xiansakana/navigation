@@ -24,7 +24,8 @@ function signalFixture(publish, extraStore = {}) {
   const monitor = createMonitor({ store, publish: (config, event) => event.eventKey === 'openSummary'
     ? Promise.resolve({ skipped: true, reason: 'event-disabled' }) : publish(config, event), quotes: {
     getMarketBundle: async () => ({ markets: { QQQ: { price: 90, low: 90,
-      candles: [{ t: Date.parse(`${latestCompletedSession()}T05:00:00Z`) / 1000, h: 100, l: 90, c: 90 }] } }, errors: {} }),
+      candles: [{ t: Date.parse(`${latestCompletedSession()}T05:00:00Z`) / 1000, h: 100, l: 90, c: 90 }] },
+      sentiment: { score: 19.88, rating: 'extreme fear', asOf: latestCompletedSession(), source: 'cnn-public-archive' } }, errors: {} }),
     searchLeapCalls: async () => []
   } });
   return { store, monitor, actions };
@@ -43,6 +44,8 @@ test('confirmed close waits through weekend and sends once after US opening', as
   assert.deepEqual(sent.map((s) => s.eventKey), ['T1']);
   assert.ok(f.store.getRound().marketDeliveries['T1:US']);
   assert.equal(f.actions.filter((a) => a.type === 'signal').length, 1);
+  assert.equal(f.actions.find((a) => a.type === 'signal').payload.sentiment.score, 19.88);
+  assert.equal(f.actions.find((a) => a.type === 'signal').payload.sentiment.asOf, '2026-10-30');
 });
 
 test('silent evaluation does not consume delivery; failure retries after cooldown', async (t) => {

@@ -136,6 +136,7 @@ function liveEval() {
     soxl: markets.SOXL,
     spy: markets.SPY,
     vxn: markets.VXN,
+    sentiment: markets.sentiment,
     cnyProxy: markets['159509'],
     lots: store.getLots(),
     suggestedContracts: prev.suggestedContracts || []

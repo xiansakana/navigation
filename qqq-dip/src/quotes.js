@@ -2,6 +2,7 @@ import { fetchQuoteResource } from '../../shared/quote-network.js';
 import { createCnyHistoryLoader } from './cny-history.js';
 import { latestCompletedSession, nyParts } from './market-hours.js';
 import { expectedVxnSession, parseVxnClose } from './vxn-session.js';
+import { createSentimentLoader } from './market-sentiment.js';
 const CANDLE_CACHE = new Map();
 const QUOTE_CACHE = new Map();
 const QUOTE_CACHE_MS = 30000;
@@ -50,6 +51,7 @@ function mapQuote(sym, q) {
 }
 
 export function createQuoteService(config) {
+  const getSentiment = createSentimentLoader();
   const getCnyHistory = createCnyHistoryLoader(fetchJson);
   const finnhubKey = config.finnhubApiKey;
   const polygonKey = config.polygonApiKey;
@@ -543,6 +545,7 @@ export function createQuoteService(config) {
   async function getMarketBundle(symbols, { previousVxn = null, previousMarkets = {} } = {}) {
     const out = {};
     const errors = {};
+    const sentiment = getSentiment(previousMarkets.sentiment);
     for (const symbol of symbols) {
       try {
         const quote = await getStock(symbol);
@@ -572,6 +575,7 @@ export function createQuoteService(config) {
     } catch (e) {
       errors[CNY_EQUITY_PROXY_SYMBOL] = e.message;
     }
+    out.sentiment = await sentiment;
     return { markets: out, errors };
   }
 

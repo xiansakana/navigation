@@ -3,6 +3,7 @@ import { cnMarketStatus } from './cn-market-hours.js';
 import { selectAffordableCall } from './option-selection.js';
 import { equityTouchMarket } from './equity-touch.js';
 import { expectedVxnSession } from './vxn-session.js';
+import { sentimentStatus } from './market-sentiment.js';
 
 export const TIER_ORDER = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'R1', 'R2'];
 export const LEFT_TIERS = ['T1', 'T2', 'T3', 'T4'];
@@ -830,6 +831,7 @@ export function evaluate(input) {
     vxn,
     vxnStale,
     vxnQuote: input.vxn ? { price: input.vxn.price, source: input.vxn.source, asOf: input.vxn.asOf } : null,
+    sentiment: sentimentStatus(input.sentiment, now),
     cashUsd,
     cashCny,
     usdCnyRate,
