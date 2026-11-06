@@ -12,11 +12,11 @@ import { createQuoteService } from './quotes.js';
 import { createMonitor } from './monitor.js';
 import { maskNotifyForClient } from './notify.js';
 import { createInternalNotificationSettingsHandler } from './notification-settings.js';
-import { marketStatus } from './market-hours.js';
-import { evaluate, resetRound } from './playbook.js';
+import { marketStatus, latestCompletedSession } from './market-hours.js';
+import { evaluate, resetRound, buildBuyPreview, applyRoundFromEval } from './playbook.js';
 import { createDocService } from './docs.js';
 import { watchCash } from './cash-sync.js';
-import { prepareExecution, canExecutePlan, canSpendDipFunds, commitExecution } from './execution-plan.js';
+import { prepareExecution, canExecutePlan, canSpendDipFunds, commitExecution, captureExecutionPlan } from './execution-plan.js';
 import { createExecutionDefaultsHandler } from './execution-defaults.js';
 import {
   legsToTradeInputs,
@@ -114,6 +114,8 @@ app.use((req, res, next) => {
 app.use(express.static(PUBLIC));
 
 function liveEval() {
+  const now = new Date();
+  const market = marketStatus(now);
   const cash = store.getCash();
   const settings = store.getSettings();
   const markets = store.getQuotes();
@@ -125,8 +127,10 @@ function liveEval() {
     variant: settings.variant,
     soxlEnabled: settings.soxlEnabled,
     round: store.getRound(),
-    rth: marketStatus().rth,
-    sessionDate: marketStatus().ymd,
+    now,
+    rth: market.rth,
+    sessionDate: market.ymd,
+    expectedCloseDate: latestCompletedSession(now),
     qqq: markets.QQQ,
     tqqq: markets.TQQQ,
     soxl: markets.SOXL,
@@ -293,6 +297,21 @@ app.post('/api/actions', (req, res) => {
     return res.json({ ok: true, evaluation: refreshEvaluation() });
   }
 
+  if (body.type === 'execute' && body.operation === 'create') {
+    if (!canSpendDipFunds(req.headers['x-portal-permissions'])) return res.status(403).json({ error: '无抄底专用资金成交权限' });
+    if (!/^T[1-7]$/.test(body.tier || '')) return res.status(400).json({ error: '仅支持为 T1–T7 建立盘中正股计划' });
+    const ev = liveEval();
+    const round = store.getRound();
+    if (round.executionPlans?.[body.tier]) return res.json({ ok: true, evaluation: ev });
+    if (ev.sameDaySkip.includes(body.tier)) return res.status(409).json({ error: '本档已被同日更深档覆盖' });
+    const preview = buildBuyPreview({ ...ev, primary: { ...ev.primary, tier: body.tier } }, ev.suggestedContracts);
+    if (!preview.pendingClose || !preview.equityMarket) return res.status(409).json({ error: '当前未满足盘中正股计划条件' });
+    const next = captureExecutionPlan(round, preview, new Date(), { manual: true });
+    if (next === round) return res.status(409).json({ error: '当前无可执行的正股计划，请核对最新报价、市场时段及预算' });
+    store.setRound(applyRoundFromEval(next, { ...ev, budgetLocked: true }, { sessionDate: marketStatus().ymd }));
+    return res.json({ ok: true, evaluation: refreshEvaluation() });
+  }
+
   if (body.type === 'execute' && body.tier) {
     if (!canSpendDipFunds(req.headers['x-portal-permissions'])) return res.status(403).json({ error: '无抄底专用资金成交权限' });
     let prepared;
@@ -309,7 +328,7 @@ app.post('/api/actions', (req, res) => {
     const { cashUsd, cashCny, legs } = prepared;
     const tradeInputs = legsToTradeInputs(legs, {
       tier: body.tier,
-      note: body.note || '',
+      note: [prepared.intradayEquity ? '盘中触价正股成交' : '', body.note].filter(Boolean).join(' · '),
       trade_date: prepared.filledAt
     });
     const buyInputs = tradeInputs.filter((t) => t.type !== 'sell');

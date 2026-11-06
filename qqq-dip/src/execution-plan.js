@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { cnMarketStatus } from './cn-market-hours.js';
-import { isRth } from './market-hours.js';
+import { isRth, nyParts } from './market-hours.js';
 
 export function canExecutePlan(encodedPermissions) {
   try {
@@ -18,13 +18,17 @@ export function canSpendDipFunds(encodedPermissions) {
   } catch { return false; }
 }
 
-export function captureExecutionPlan(round, preview, now = new Date()) {
-  if (!preview?.available || preview.pendingClose || preview.status !== 'confirmed'
-    || round.executionPlans?.[preview.tier]) return round;
-  const legs = preview.legs.map((leg, index) => ({ ...leg, pendingOption: leg.kind === 'call' && !!leg.skipped,
+export function captureExecutionPlan(round, preview, now = new Date(), { manual = false } = {}) {
+  if (!preview?.available || round.executionPlans?.[preview.tier]) return round;
+  const touch = manual && preview.pendingClose && /^[T][1-7]$/.test(preview.tier) && preview.equityMarket;
+  if (!touch && (preview.pendingClose || preview.status !== 'confirmed')) return round;
+  if (touch && !preview.legs.some((leg) => leg.kind === 'equity'
+    && (leg.currency === 'CNY' ? 'CN' : 'US') === touch && leg.shares > 0)) return round;
+  const legs = preview.legs.map((leg, index) => ({ ...leg, pendingOption: leg.kind === 'call' && !!(leg.skipped || touch),
     id: String(index), spent: 0, complete: false, expiresAt: null }));
   if (!legs.length) return round;
   const plan = { id: randomUUID(), tier: preview.tier, createdAt: now.toISOString(),
+    intradayEquity: !!touch,
     expiresAt: legs.every((leg) => leg.expiresAt) ? legs.map((leg) => leg.expiresAt).sort().at(-1) : null,
     receipts: {}, totalUsd: preview.totalUsd, legs };
   return { ...round, executionPlans: { ...round.executionPlans, [preview.tier]: plan } };
@@ -66,7 +70,10 @@ export function prepareExecution(plan, body, evaluation, cash, now = new Date())
   if (!Number.isFinite(time.getTime()) || time > now || time < new Date(plan.createdAt)) throw new Error('成交时间无效、晚于当前时间或早于计划创建');
   if (evaluation.reset || (plan.tier.startsWith('R') && evaluation.round?.r2Frozen)) throw new Error('信号已失效，请人工核对，不可继续登记此计划');
   const tier = evaluation.tiers?.find((row) => row.id === plan.tier);
-  if (!tier || !['confirmed', 'executed'].includes(tier.status)) throw new Error('信号不再确认，请重新评估');
+  const touch = tier?.pendingClose && !evaluation.sameDaySkip?.includes(plan.tier) ? tier.equityMarket : null;
+  if (!tier || (!touch && (!['confirmed', 'executed'].includes(tier.status) || tier.pendingClose))) {
+    throw new Error('信号不再确认，或当前报价未满足盘中正股执行条件');
+  }
   if (!Array.isArray(body.fills) || !body.fills.length) throw new Error('请填写至少一笔实际成交');
   const next = structuredClone(plan);
   const seen = new Set();
@@ -83,12 +90,23 @@ export function prepareExecution(plan, body, evaluation, cash, now = new Date())
     const commission = Number(fill.commission || 0);
     if (!(shares > 0) || !Number.isInteger(shares) || !(price > 0) || !Number.isFinite(price)
       || !Number.isFinite(commission) || commission < 0) throw new Error('实际数量、价格或费用无效');
+    if (touch) {
+      if (leg.kind !== 'equity') throw new Error('期权必须等待收盘确认');
+      const market = leg.currency === 'CNY' ? 'CN' : 'US';
+      const sameSession = market === 'CN' ? cnMarketStatus(time).date === cnMarketStatus(now).date
+        : nyParts(time).ymd === nyParts(now).ymd;
+      if (market !== touch || !sameSession) {
+        throw new Error('盘中正股须在对应市场开盘且现价仍达标时登记；较早的真实成交请在持仓页记账');
+      }
+      if (leg.symbol === 'QQQ' && price > tier.triggerPrice) throw new Error('QQQ 实际成交价高于盘中触发价');
+    }
     if (leg.symbol === '159509') {
       if (!cnMarketStatus(time).open) throw new Error('159509 成交时间须在已维护的A股常规交易时段');
       if (shares % 100) throw new Error('159509 买入数量须为100份整数倍');
     }
     if (leg.currency === 'USD' && !isRth(time)) throw new Error('美元腿成交时间须在美股常规交易时段（暂不支持盘前盘后）');
-    if (leg.kind === 'call' && tier.vxnGate?.blocked) throw new Error('期权门槛当前未通过，暂停该交易腿');
+    if (leg.kind === 'call' && (tier.closeConfirmed === false || tier.vxnGate?.blocked
+      || (leg.activatedAt && time < new Date(leg.activatedAt)))) throw new Error('期权尚未满足收盘确认、波动率或合约启用条件');
     const amount = Math.round((shares * price * (leg.kind === 'call' ? 100 : 1) + commission) * 100) / 100;
     const budget = leg.currency === 'CNY' ? leg.cny : leg.usd;
     if (!Number.isFinite(amount) || !(budget > 0) || leg.spent + amount > budget + 0.01) throw new Error('实际成交超过该交易腿预算（含费用），请先核对');
@@ -99,7 +117,10 @@ export function prepareExecution(plan, body, evaluation, cash, now = new Date())
   }
   if (cashUsd > Number(cash.cashUsd) + 0.01 || cashCny > Number(cash.cashCny) + 0.01) throw new Error('对应币种现金不足');
   const usd = Math.round((cashUsd + cashCny / cash.usdCnyRate) * 100) / 100;
+  if (Number.isFinite(plan.totalUsd) && Number(evaluation.round?.executed?.[plan.tier]?.usd || 0) + usd > plan.totalUsd + 0.01) {
+    throw new Error('累计成交超过本档总预算（含费用）');
+  }
   if (evaluation.remaining?.[tier.bag] != null && usd > evaluation.remaining[tier.bag] + 0.01) throw new Error('对应袋内预算不足');
-  return { plan: next, legs, cashUsd, cashCny, filledAt: time.toISOString(),
+  return { plan: next, legs, cashUsd, cashCny, intradayEquity: !!touch, filledAt: time.toISOString(),
     usd };
 }

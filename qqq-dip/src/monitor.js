@@ -1,5 +1,5 @@
-import { evaluate, applyRoundFromEval, newAlertKeys, buildBuyPreview } from './playbook.js';
-import { marketStatus, isOpenSummaryTime, isRth } from './market-hours.js';
+import { evaluate, applyRoundFromEval, newAlertKeys } from './playbook.js';
+import { marketStatus, isOpenSummaryTime, isRth, latestCompletedSession } from './market-hours.js';
 import { appendMarketSnapshot } from './notify.js';
 import { publishBusinessEvent } from '../../shared/business-events.js';
 import { withDeadline } from './deadline.js';
@@ -89,43 +89,48 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
     tickStartedAt = new Date().toISOString();
     tickDeadlineAt = Date.now() + tickTimeoutMs;
     lastMarketStatus = marketStatus();
-    const rth = isRth();
     try {
       if (refreshFx) await stage('refreshFx', refreshFx);
       const settings = store.getSettings();
-      const cash = store.getCash();
-      const round = store.getRound();
       const bundle = await stage('marketQuotes', () => quotes.getMarketBundle(
         settings.showSpy === false ? ['QQQ', 'TQQQ', 'SOXL'] : SYMBOLS,
-        { previousVxn: store.getQuotes().VXN }
+        { previousVxn: store.getQuotes().VXN, previousMarkets: store.getQuotes() }
       ));
       const markets = bundle.markets;
       store.setQuotes(markets);
       const lots = await stage('positionQuotes', () => enrichLots(store.getLots()));
-      const ev = evaluate({
-        cashUsd: cash.strategyCashUsd ?? cash.cashUsd,
-        cashCny: cash.strategyCashCny ?? cash.cashCny,
-        usdCnyRate: cash.usdCnyRate,
-        variant: settings.variant,
-        soxlEnabled: settings.soxlEnabled,
-        round,
-        rth,
-        sessionDate: lastMarketStatus.ymd,
-        qqq: markets.QQQ,
-        tqqq: markets.TQQQ,
-        soxl: markets.SOXL,
-        spy: markets.SPY,
-        vxn: markets.VXN,
-        cnyProxy: markets['159509'],
-        lots
-      });
-      ev.quoteErrors = bundle.errors;
+      const evaluateLatest = (round, suggestedContracts) => {
+        const cash = store.getCash();
+        const now = new Date();
+        lastMarketStatus = marketStatus(now);
+        return evaluate({
+          cashUsd: cash.strategyCashUsd ?? cash.cashUsd,
+          cashCny: cash.strategyCashCny ?? cash.cashCny,
+          usdCnyRate: cash.usdCnyRate,
+          variant: settings.variant,
+          soxlEnabled: settings.soxlEnabled,
+          round,
+          now,
+          rth: lastMarketStatus.rth,
+          sessionDate: lastMarketStatus.ymd,
+          expectedCloseDate: latestCompletedSession(now),
+          qqq: markets.QQQ,
+          tqqq: markets.TQQQ,
+          soxl: markets.SOXL,
+          spy: markets.SPY,
+          vxn: markets.VXN,
+          cnyProxy: markets['159509'],
+          lots, suggestedContracts
+        });
+      };
+      let suggestedContracts = [];
       try {
-        ev.suggestedContracts = await stage('suggestLeaps', () => suggestLeaps(ev));
-      } catch {
-        ev.suggestedContracts = [];
-      }
-      ev.buyPreview = buildBuyPreview(ev, ev.suggestedContracts);
+        suggestedContracts = await stage('suggestLeaps', () => suggestLeaps(evaluateLatest(store.getRound())));
+      } catch { /* Equity evaluation is independent of the option chain. */ }
+      const round = store.getRound();
+      const ev = evaluateLatest(round, suggestedContracts);
+      ev.suggestedContracts = suggestedContracts;
+      ev.quoteErrors = bundle.errors;
       // Persist observed peaks only, never pretend a suggested sale was filled.
       for (const lot of ev.lots || []) {
         const previous = lots.find((row) => row.id === lot.id);
@@ -141,6 +146,16 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
         applyRoundFromEval(round, ev, { sessionDate: lastMarketStatus.ymd }), ev.buyPreview);
       const pendingOptions = activatePendingOptions(nextRound, ev);
       nextRound = pendingOptions.round;
+      store.setRound(nextRound);
+      // Notification I/O can overlap plan creation and fill registration.
+      const persistDeliveryState = () => {
+        const current = store.getRound();
+        if (current.lastResetAt !== nextRound.lastResetAt) return current;
+        for (const key of ['marketDeliveryVersion', 'marketDeliveries', 'pendingRiskAlerts', 'observedAlerts', 'firedAlerts', 'retryAlerts']) {
+          current[key] = nextRound[key];
+        }
+        return store.setRound(current);
+      };
       ev.alerts.push(...pendingOptions.alerts);
       if (!nextRound.marketDeliveryVersion) {
         const actions = [0, 500].flatMap((offset) => store.listActionRows?.({ limit: 500, offset }).items || []);
@@ -204,7 +219,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
           } else {
             nextRound.retryAlerts = { ...nextRound.retryAlerts, [deliveryKey]: Date.now() + 300000 };
           }
-          store.setRound(nextRound);
+          persistDeliveryState();
         }
       }
 
@@ -228,8 +243,8 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
         pushResults.push({ key: openKey, qq });
       }
 
-      store.setRound(nextRound);
-      ev.round = nextRound;
+      persistDeliveryState();
+      ev.round = store.getRound();
       lastEval = ev;
       lastError = Object.keys(bundle.errors || {}).length ? bundle.errors : null;
       lastPush = pushResults.length ? { at: new Date().toISOString(), items: pushResults } : lastPush;

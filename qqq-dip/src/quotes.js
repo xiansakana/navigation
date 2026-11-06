@@ -1,5 +1,6 @@
 import { fetchQuoteResource } from '../../shared/quote-network.js';
 import { createCnyHistoryLoader } from './cny-history.js';
+import { latestCompletedSession } from './market-hours.js';
 const CANDLE_CACHE = new Map();
 const QUOTE_CACHE = new Map();
 const QUOTE_CACHE_MS = 30000;
@@ -175,10 +176,10 @@ export function createQuoteService(config) {
 
   async function getCandles(symbol, days = 90) {
     const sym = String(symbol).toUpperCase();
-    const today = new Date().toISOString().slice(0, 10);
+    const session = latestCompletedSession();
     const cacheKey = `${sym}:${days}`;
     const cached = CANDLE_CACHE.get(cacheKey);
-    if (cached?.date === today) return cached.candles;
+    if (cached?.session === session && (cached.complete || Date.now() - cached.at < 120000)) return cached.candles;
 
     let candles;
     if (polygonKey) {
@@ -186,7 +187,8 @@ export function createQuoteService(config) {
     } else {
       candles = await getCandlesFromFinnhub(sym, days);
     }
-    CANDLE_CACHE.set(cacheKey, { date: today, candles });
+    const lastDate = candles.length ? new Date(candles.at(-1).t * 1000).toISOString().slice(0, 10) : null;
+    CANDLE_CACHE.set(cacheKey, { session, at: Date.now(), complete: lastDate === session, candles });
     return candles;
   }
 
@@ -528,14 +530,16 @@ export function createQuoteService(config) {
     }
   }
 
-  async function getMarketBundle(symbols, { previousVxn = null } = {}) {
+  async function getMarketBundle(symbols, { previousVxn = null, previousMarkets = {} } = {}) {
     const out = {};
     const errors = {};
     for (const symbol of symbols) {
       try {
         const quote = await getStock(symbol);
-        const candles = await getCandles(symbol, 90);
-        out[symbol] = { ...quote, candles };
+        out[symbol] = { ...quote, candles: previousMarkets[symbol]?.candles || [] };
+        try {
+          out[symbol].candles = await getCandles(symbol, 90);
+        } catch (e) { errors[symbol] = e.message; }
       } catch (e) {
         errors[symbol] = e.message;
       }

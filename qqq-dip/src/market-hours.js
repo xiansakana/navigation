@@ -107,6 +107,14 @@ function weekdayOf(ymd) {
   return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(Date.UTC(y, m - 1, d, 17, 0, 0)).getUTCDay()];
 }
 
+export function latestCompletedSession(date = new Date()) {
+  const parts = nyParts(date);
+  let ymd = parts.ymd;
+  if (isSessionDay(parts) && parts.minutes >= 16 * 60) return ymd;
+  do { ymd = addNyDays(ymd, -1); } while (!isSessionDay({ ymd, weekday: weekdayOf(ymd) }));
+  return ymd;
+}
+
 function nyDateMs(ymd, hour, minute) {
   const [y, m, d] = ymd.split('-').map(Number);
   const guess = Date.UTC(y, m - 1, d, hour + 4, minute, 0);

@@ -507,7 +507,7 @@ function openBuyPreview() {
     `预算 ${fmtUsd(preview.totalUsd)}`,
     `USD ${fmtUsd(preview.cashPlan?.useUsd ?? 0)} / CNY ${fmtCny(preview.cashPlan?.useCny || 0)}`,
     `QQQ ${preview.spot?.toFixed(3) ?? '—'}`,
-    preview.pendingClose ? '待收盘确认' : null
+    preview.pendingClose ? (preview.equityMarket ? '正股已触价 · 期权待收盘确认' : '等待收盘数据或有效现价') : null
   ].filter(Boolean).join(' · ');
 
   openModal(`
@@ -529,7 +529,8 @@ function openBuyPreview() {
       <p class="hint">期权张数需按实际买卖价重算；有 Polygon 链上合约时会填入 OCC 代码。标记已执行会按填写金额扣减美元/人民币现金。</p>
       <div class="sm-modal-actions">
         <button type="button" class="btn ghost" id="btn-copy-buy">复制清单</button>
-        ${preview.tier ? `<button type="button" class="btn ghost" data-exec-preview="${escapeHtml(preview.tier)}">查看成交计划</button>` : ''}
+        ${can('tier-exec', 'edit') && (state.evaluation?.round?.executionPlans?.[preview.tier] || (preview.pendingClose && preview.equityMarket && canStock('dip-spend', 'edit')))
+          ? `<button type="button" class="btn ghost" data-exec-preview="${escapeHtml(preview.tier)}">${state.evaluation?.round?.executionPlans?.[preview.tier] ? '查看成交计划' : '建立正股计划'}</button>` : ''}
         <button type="button" class="btn primary" data-close>关闭</button>
       </div>
   `, 'sm-modal--buy');
@@ -564,26 +565,37 @@ function openBuyPreview() {
   execBtn?.addEventListener('click', () => {
     const tierId = execBtn.getAttribute('data-exec-preview');
     $('#modal-root').innerHTML = '';
-    openExecModal(tierId, preview);
+    void openExecModal(tierId);
   });
 }
 
-function openExecModal(tierId, preview) {
-  return openPlanFillModal(tierId);
+async function openExecModal(tierId) {
+  if (!guardEdit('tier-exec')) return;
+  if (!state.evaluation?.round?.executionPlans?.[tierId]) {
+    try {
+      const data = await api('/actions', { method: 'POST', body: { type: 'execute', operation: 'create', tier: tierId } });
+      applyState(data);
+    } catch (error) { toast('error', error.message); return; }
+  }
+  openPlanFillModal(tierId);
 }
 
 function openPlanFillModal(tierId) {
   const plan = state.evaluation?.round?.executionPlans?.[tierId];
-  if (!plan) { toast('error', '请先刷新行情或开启监控，待收盘确认后生成计划'); return; }
+  if (!plan) { toast('error', '当前没有成交计划，请核对最新行情和市场状态'); return; }
+  const tier = state.evaluation?.tiers?.find((row) => row.id === tierId);
+  const waitingClose = tier?.pendingClose || state.evaluation?.closeDataPending;
   const requestId = crypto.randomUUID();
   openModal(`
-    <h3>${escapeHtml(tierId)} 分腿实际成交登记</h3>
+    <h3>${escapeHtml(tierId)} ${plan.intradayEquity ? '盘中正股计划与' : '分腿'}实际成交登记</h3>
     <p class="hint">${escapeHtml(state.evaluation?.cnMarket?.label || '等待A股交易时段')}。这里只补记券商实际成交，不自动下单。未填写数量的交易腿保持待执行。</p>
     <p class="hint">不设固定截止时间；当前策略条件仍满足时可继续分批成交。仍须在对应市场交易时段登记真实成交；取消不撤销已成交持仓。</p>
+    ${waitingClose ? '<p class="hint">期权待收盘确认。盘中正股须在对应市场开盘、现价仍达标时登记；159509 须复核当前价格、溢价和停牌状态。已成交但超出策略条件的交易可在持仓页如实补记。</p>' : ''}
     <p class="hint" id="fill-quote-status">正在获取各腿最新报价并估算数量；预填值不是实际成交，请核对后手动修改。本次仅登记所选资金池同币种的交易腿。</p>
-    <label class="field">实际成交时间（本机时区）<input id="fill-time" type="datetime-local"></label>
+    <label class="field">实际成交时间（本机时区）<input id="fill-time" type="datetime-local" step="1"></label>
     <label class="field">本次成交所属抄底资金池<select id="fill-account"><option value="">请选择同币种证券账户</option>${(state.cash?.strategyFunds || []).map((f) => `<option value="${escapeHtml(f.accountId)}">${escapeHtml(f.name)} · ${f.currency} · 策略可用 ${maskMoneyText(String(f.strategyAvailable))} · 缺口 ${maskMoneyText(String(f.deficit))}</option>`).join('')}</select></label>
-    ${plan.legs.map((leg) => `<fieldset data-fill-leg="${leg.id}" data-currency="${escapeHtml(leg.currency)}" ${leg.complete || leg.pendingOption || plan.cancelled ? 'disabled' : ''}>
+    ${plan.legs.map((leg) => `<fieldset data-fill-leg="${leg.id}" data-currency="${escapeHtml(leg.currency)}" ${leg.complete || leg.pendingOption || plan.cancelled
+      || (waitingClose && (leg.kind === 'call' || tier?.equityMarket !== (leg.currency === 'CNY' ? 'CN' : 'US'))) ? 'disabled' : ''}>
       <legend>${escapeHtml(leg.occSymbol || leg.symbol)} · ${leg.complete ? '已完成' : leg.spent > 0 ? '部分成交' : '待执行'} · ${escapeHtml(leg.currency)} 已用 ${maskMoneyText(String(leg.spent))} · 按当前策略条件复核</legend>
       <label class="field">本次实际数量（期权填张数）<input data-qty type="number" min="0" step="${leg.symbol === '159509' ? '100' : '1'}"></label>
       <label class="field">实际成交单价<input data-price type="number" min="0" step="0.001"></label>
@@ -749,11 +761,12 @@ function renderTiers() {
       <td>${fmtPrice(t.triggerPrice)}${t.intradayPrice ? ` / 盘中 ${fmtPrice(t.intradayPrice)}` : ''}</td>
       <td>${fmtPctB(t.pctB)}%</td>
       <td>${maskMoney(fmtUsd(t.usd))}</td>
-      <td class="st-${t.status}">${statusLabel(t.status)}${state.evaluation?.round?.executionPlans?.[t.id]
+      <td class="st-${t.status}">${t.pendingClose ? (t.equityMarket ? '正股已触价 · 期权待确认' : '触价 · 等待收盘数据或有效现价') : statusLabel(t.status)}${state.evaluation?.round?.executionPlans?.[t.id]
         ? `<div class="hint">${escapeHtml(planLabel(state.evaluation.round.executionPlans[t.id]))}</div>` : ''}</td>
       <td class="tier-action" title="${escapeHtml(action)}">${escapeHtml(action)}</td>
-      <td>${state.evaluation?.round?.executionPlans?.[t.id]
-        ? (can('tier-exec', 'edit') ? `<button class="btn link" data-exec="${t.id}">成交/计划</button>` : '') : ''}</td>
+      <td>${can('tier-exec', 'edit') && (state.evaluation?.round?.executionPlans?.[t.id]
+        || (t.pendingClose && t.equityMarket && !state.evaluation?.sameDaySkip?.includes(t.id) && canStock('dip-spend', 'edit')))
+        ? `<button class="btn link" data-exec="${t.id}">${state.evaluation?.round?.executionPlans?.[t.id] ? '成交/计划' : '建立正股计划'}</button>` : ''}</td>
     </tr>`;
   }).join('');
 }
@@ -1134,10 +1147,7 @@ function bind() {
     const id = e.target.dataset.exec;
     if (!id) return;
     if (!guardEdit('tier-exec')) return;
-    const preview = state.evaluation?.buyPreview?.tier === id
-      ? state.evaluation.buyPreview
-      : null;
-    openExecModal(id, preview);
+    await openExecModal(id);
   });
   $('#btn-add-note').addEventListener('click', () => {
     if (!guardEdit('actions-note')) return;

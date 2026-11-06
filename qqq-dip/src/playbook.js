@@ -1,6 +1,7 @@
 /** QQQ dip-playbook rules. Pure functions, no I/O. */
 import { cnMarketStatus } from './cn-market-hours.js';
 import { selectAffordableCall } from './option-selection.js';
+import { equityTouchMarket } from './equity-touch.js';
 
 export const TIER_ORDER = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'R1', 'R2'];
 export const LEFT_TIERS = ['T1', 'T2', 'T3', 'T4'];
@@ -564,11 +565,18 @@ export function evaluate(input) {
   round.variant = variant;
   const rth = !!input.rth;
   const qqqMarket = { ...(input.qqq || {}) };
-  if (rth && input.sessionDate && Array.isArray(qqqMarket.candles)) {
-    qqqMarket.candles = qqqMarket.candles.filter((c) => !Number.isFinite(c.t)
-      || new Date(c.t * 1000).toISOString().slice(0, 10) < input.sessionDate);
+  if (Array.isArray(qqqMarket.candles)) {
+    qqqMarket.candles = qqqMarket.candles.filter((c) => {
+      if (!Number.isFinite(c.t)) return !input.expectedCloseDate;
+      const date = new Date(c.t * 1000).toISOString().slice(0, 10);
+      if (input.expectedCloseDate) return date <= input.expectedCloseDate;
+      return !rth || !input.sessionDate || date < input.sessionDate;
+    });
   }
   const qqq = statsFromMarket(qqqMarket, round.referenceHighs?.QQQ);
+  const now = input.now || new Date();
+  const closeDataPending = !!input.expectedCloseDate && qqq.sessionDates.at(-1) !== input.expectedCloseDate;
+  const touchMarket = equityTouchMarket(qqqMarket, input.cnyProxy, input.expectedCloseDate, now);
   const tqqq = statsFromMarket(input.tqqq || {}, round.referenceHighs?.TQQQ);
   const soxl = statsFromMarket(input.soxl || {}, round.referenceHighs?.SOXL);
   const spy = statsFromMarket(input.spy || {});
@@ -578,7 +586,7 @@ export function evaluate(input) {
   const vxnPrice = input.vxn?.stale ? NaN : Number(input.vxn?.price);
   const vxn = Number.isFinite(vxnPrice) ? vxnPrice : null;
 
-  const recovered = shouldReset(qqq);
+  const recovered = shouldReset(closeDataPending ? { ...qqq, lastClose: null } : qqq);
   const hadRound = !!(round.startedAt || round.hasSeenMinus22 || Object.keys(round.triggered || {}).length || spent);
   const reset = recovered && hadRound;
   const alerts = [];
@@ -591,9 +599,9 @@ export function evaluate(input) {
     });
   }
 
-  const closeMinus22 = hitClose(qqq.lastClose, qqq.H, 0.78);
+  const closeMinus22 = !closeDataPending && hitClose(qqq.lastClose, qqq.H, 0.78);
   const intraT4 = hitLive(qqq.low, qqq.H, 0.75) || hitLive(qqq.price, qqq.H, 0.75);
-  const closeMinus30 = hitClose(qqq.lastClose, qqq.H, 0.7);
+  const closeMinus30 = !closeDataPending && hitClose(qqq.lastClose, qqq.H, 0.7);
   if (closeMinus22 || intraT4) round.hasSeenMinus22 = true;
   if (closeMinus30 || hitLive(qqq.price, qqq.H, 0.7)) round.hasSeenMinus30 = true;
 
@@ -625,6 +633,10 @@ export function evaluate(input) {
     const vxnGate = vxnPass(vxn, def.vxnMin);
     let status = 'idle';
     let pendingClose = false;
+    const closeConfirmed = id.startsWith('T')
+      ? !closeDataPending && hitClose(qqq.lastClose, qqq.H, def.closeMult) : undefined;
+    const liveHit = id.startsWith('T') && hitLive(qqqMarket.price, qqq.H, def.closeMult);
+    const equityMarket = liveHit && (!CRISIS_TIERS.includes(id) || round.hasSeenMinus22) ? touchMarket : null;
 
     if (reset && !executed[id]) {
       status = 'void';
@@ -634,30 +646,29 @@ export function evaluate(input) {
       if (closeMinus22) status = 'confirmed';
       else if (intraT4) {
         status = 'confirmed';
+        pendingClose = true;
         alerts.push({
           key: 'T4_intraday',
           event: 'T4_intraday',
           symbol: 'QQQ',
           message: `T4 盘中触及 0.75H 限价 ${qqq.triggers?.T4_intraday}（现价/低点 ${qqq.price}/${qqq.low}）。`
         });
-      } else if (rth && hitLive(qqq.price, qqq.H, 0.78)) {
+      } else if ((rth || closeDataPending || equityMarket) && liveHit) {
         status = 'intraday';
         pendingClose = true;
       }
     } else if (id === 'R1') {
-      if (r1Confirmed(qqq, round)) status = 'confirmed';
+      if (!closeDataPending && r1Confirmed(qqq, round)) status = 'confirmed';
       else if (!round.hasSeenMinus22) status = 'locked';
       else if (round.r2Frozen && round.fakeRight) status = 'frozen';
     } else if (id === 'R2') {
       if (round.r2Frozen) status = 'frozen';
       else if (!round.hasSeenMinus22) status = 'locked';
-      else if (r2Confirmed(qqq, round, rth)) status = 'confirmed';
+      else if (!closeDataPending && r2Confirmed(qqq, round, rth)) status = 'confirmed';
       else if (!round.triggered?.R1 && !round.r1At) status = 'locked';
     } else {
-      const closeHit = hitClose(qqq.lastClose, qqq.H, def.closeMult);
-      const liveHit = hitLive(qqq.price, qqq.H, def.closeMult);
-      if (closeHit) status = 'confirmed';
-      else if (rth && liveHit) {
+      if (closeConfirmed) status = 'confirmed';
+      else if ((rth || closeDataPending || equityMarket) && liveHit) {
         status = 'intraday';
         pendingClose = true;
       }
@@ -688,6 +699,8 @@ export function evaluate(input) {
       triggerCondition: tierTriggerText(id),
       status,
       pendingClose,
+      closeConfirmed,
+      equityMarket,
       vxnGate,
       recommendation: rec,
       executedUsd: Number(executed[id]?.usd) || 0
@@ -724,7 +737,7 @@ export function evaluate(input) {
     const actionable = tiers.filter((t) => (t.status === 'confirmed' || t.status === 'intraday') && !sameDaySkip.has(t.id));
     const pick = actionable.find((t) => t.status === 'confirmed') || actionable[0];
     if (pick) {
-      const wait = pick.pendingClose ? '盘中触及，待收盘确认。' : '';
+      const wait = pick.pendingClose ? (pick.equityMarket ? '正股已触价，期权待收盘确认。' : '最新报价已达阈值，等待收盘数据或对应市场开盘。') : '';
       const skipNote = sameDaySkip.size
         ? `同一天连跳多档：只执行最深左侧 ${deepestLeft.id}，T4 留到收盘或 0.75H 限价。`
         : '';
@@ -818,6 +831,7 @@ export function evaluate(input) {
     cnyProxy,
     vxnGates: { t2: vxnPass(vxn, 25), t3: vxnPass(vxn, 32) },
     qqq,
+    closeDataPending,
     tqqq,
     soxl,
     spy,
@@ -1047,13 +1061,15 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
 
   const legs = [];
   const notes = [];
-  if (tier.pendingClose) notes.push('盘中触及，待收盘确认后再下单。');
+  if (tier.pendingClose) notes.push(tier.equityMarket
+    ? '正股已触价，可登记对应市场的真实成交。期权预算保留至收盘确认。'
+    : '最新报价已达阈值，等待有效现价及对应市场开盘，或等待收盘确认。');
   if ((ev.sameDaySkip || []).length) {
     notes.push(`同一天只执行最深档 ${primary.tier}，其余已触发档跳过。`);
   }
   notes.push(`正股：人民币优先买 ${CNY_EQUITY_PROXY}，再用美元买 QQQ；期权只用美元。`);
 
-  const blocked = tier.vxnGate?.blocked;
+  const blocked = tier.vxnGate?.blocked && !tier.pendingClose;
   const id = tier.id;
   const startWallet = makeCashWallet(ev);
   const wallet = { ...startWallet };
@@ -1222,7 +1238,7 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
   for (const leg of legs.filter((row) => row.kind === 'call')) {
     const band = leg.otmClass === 'deep' ? deep
       : ['shallow', 'shallow-medium'].includes(leg.otmClass) ? shallow : medium;
-    const selection = selectAffordableCall(suggestedContracts, {
+    const selection = tier.pendingClose ? { skipped: true, shares: 0, reason: '期权待收盘确认，保留预算' } : selectAffordableCall(suggestedContracts, {
       band, expiries: (leaps.expiries || []).map((e) => e.expiry), budget: Math.min(leg.usd, optionCash)
     });
     Object.assign(leg, selection);
@@ -1261,6 +1277,7 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
     proxyPrice: Number.isFinite(proxyPrice) ? proxyPrice : null,
     proxySymbol: CNY_EQUITY_PROXY,
     pendingClose: !!tier.pendingClose,
+    equityMarket: tier.equityMarket,
     legs,
     cashPlan,
     checklist,

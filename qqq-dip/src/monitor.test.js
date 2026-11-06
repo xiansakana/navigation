@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMonitor } from './monitor.js';
+import { latestCompletedSession } from './market-hours.js';
 
 function fixture() {
   let round = {};
@@ -23,7 +24,7 @@ function signalFixture(publish, extraStore = {}) {
   const monitor = createMonitor({ store, publish: (config, event) => event.eventKey === 'openSummary'
     ? Promise.resolve({ skipped: true, reason: 'event-disabled' }) : publish(config, event), quotes: {
     getMarketBundle: async () => ({ markets: { QQQ: { price: 90, low: 90,
-      candles: Array.from({ length: 40 }, (_, i) => ({ t: 1700000000 + i * 86400, h: 100, l: 90, c: 90 })) } }, errors: {} }),
+      candles: [{ t: Date.parse(`${latestCompletedSession()}T05:00:00Z`) / 1000, h: 100, l: 90, c: 90 }] } }, errors: {} }),
     searchLeapCalls: async () => []
   } });
   return { store, monitor, actions };
@@ -62,6 +63,21 @@ test('silent evaluation does not consume delivery; failure retries after cooldow
   assert.equal(calls, 2);
   assert.ok(f.store.getRound().firedAlerts.T1);
   assert.equal(f.actions.filter((a) => a.type === 'signal').length, 1);
+});
+
+test('a fill recorded during asynchronous notification is not overwritten by monitor persistence', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-02T15:00:00Z') });
+  const f = signalFixture(async () => {
+    const current = structuredClone(f.store.getRound());
+    current.executed.T1 = { usd: 12, complete: false };
+    current.executionPlans.T1.legs[0].spent = 12;
+    f.store.setRound(current);
+    return { sent: ['Slack'] };
+  });
+  await f.monitor.tick();
+  assert.equal(f.store.getRound().executed.T1.usd, 12);
+  assert.equal(f.store.getRound().executionPlans.T1.legs[0].spent, 12);
+  assert.ok(f.store.getRound().marketDeliveries['T1:US']);
 });
 
 test('legacy off-hours signal and off-hours deliveries do not consume market reminder', async (t) => {
