@@ -108,7 +108,9 @@ export function prepareExecution(plan, body, evaluation, cash, now = new Date())
     if (leg.kind === 'call' && (tier.closeConfirmed === false || tier.vxnGate?.blocked
       || (leg.activatedAt && time < new Date(leg.activatedAt)))) throw new Error('期权尚未满足收盘确认、波动率或合约启用条件');
     const amount = Math.round((shares * price * (leg.kind === 'call' ? 100 : 1) + commission) * 100) / 100;
-    const budget = leg.currency === 'CNY' ? leg.cny : leg.usd;
+    const futureCarry = (leg.budgetCarryIns || []).reduce((sum, entry) =>
+      time < new Date(entry.at) ? sum + entry.usd : sum, 0);
+    const budget = leg.currency === 'CNY' ? leg.cny : leg.usd - futureCarry;
     if (!Number.isFinite(amount) || !(budget > 0) || leg.spent + amount > budget + 0.01) throw new Error('实际成交超过该交易腿预算（含费用），请先核对');
     leg.spent += amount;
     leg.complete = fill.complete === true;

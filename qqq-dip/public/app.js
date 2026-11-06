@@ -590,6 +590,7 @@ function openPlanFillModal(tierId) {
   const requestId = crypto.randomUUID();
   openModal(`
     <h3>${escapeHtml(tierId)} ${plan.intradayEquity ? '盘中正股计划与' : '分腿'}实际成交登记</h3>
+    <p class="hint">当前计划预算 ${maskMoney(fmtUsd(plan.totalUsd))}（含期权预算顺延调整）。</p>
     <p class="hint">${escapeHtml(state.evaluation?.cnMarket?.label || '等待A股交易时段')}。这里只补记券商实际成交，不自动下单。未填写数量的交易腿保持待执行。</p>
     <p class="hint">不设固定截止时间；当前策略条件仍满足时可继续分批成交。仍须在对应市场交易时段登记真实成交；取消不撤销已成交持仓。</p>
     ${waitingClose ? '<p class="hint">期权待收盘确认。盘中正股须在对应市场开盘、现价仍达标时登记；159509 须复核当前价格、溢价和停牌状态。已成交但超出策略条件的交易可在持仓页如实补记。</p>' : ''}
@@ -598,11 +599,13 @@ function openPlanFillModal(tierId) {
     <label class="field">本次成交所属抄底资金池<select id="fill-account"><option value="">请选择同币种证券账户</option>${(state.cash?.strategyFunds || []).map((f) => `<option value="${escapeHtml(f.accountId)}">${escapeHtml(f.name)} · ${f.currency} · 策略可用 ${maskMoneyText(String(f.strategyAvailable))} · 缺口 ${maskMoneyText(String(f.deficit))}</option>`).join('')}</select></label>
     ${plan.legs.map((leg) => `<fieldset data-fill-leg="${leg.id}" data-currency="${escapeHtml(leg.currency)}" ${leg.complete || leg.pendingOption || plan.cancelled
       || (waitingClose && (leg.kind === 'call' || tier?.equityMarket !== (leg.currency === 'CNY' ? 'CN' : 'US'))) ? 'disabled' : ''}>
-      <legend>${escapeHtml(leg.occSymbol || leg.symbol)} · ${leg.complete ? '已完成' : leg.spent > 0 ? '部分成交' : '待执行'} · ${escapeHtml(leg.currency)} 已用 ${maskMoneyText(String(leg.spent))} · 按当前策略条件复核</legend>
+      <legend>${escapeHtml(leg.occSymbol || leg.symbol)} · ${leg.budgetCarryOut ? '已顺延' : leg.complete ? '已完成' : leg.spent > 0 ? '部分成交' : '待执行'} · ${escapeHtml(leg.currency)} 已用 ${maskMoneyText(String(leg.spent))} · 按当前策略条件复核</legend>
+      ${leg.budgetCarryOut ? `<p class="hint">已将 ${maskMoney(fmtUsd(leg.budgetCarryOut.usd))} 顺延到 ${escapeHtml(leg.budgetCarryOut.tier)} 的同类期权。</p>` : ''}
+      ${leg.budgetCarryIns?.length ? `<p class="hint">合并后期权预算 ${maskMoney(fmtUsd(leg.usd))}，含 ${leg.budgetCarryIns.map((entry) => `${escapeHtml(entry.tier)} 顺延 ${maskMoney(fmtUsd(entry.usd))}`).join('、')}。</p>` : ''}
       <label class="field">本次实际数量（期权填张数）<input data-qty type="number" min="0" step="${leg.symbol === '159509' ? '100' : '1'}"></label>
       <label class="field">实际成交单价<input data-price type="number" min="0" step="0.001"></label>
       <label class="field">本次费用<input data-fee type="number" min="0" step="0.01" value="0"></label>
-      <p class="hint" data-quote-info>${leg.pendingOption ? `本档期权待用预算 ${fmtUsd(leg.usd)}：尚无可执行合约；满足原档信号、波动率、期限、虚值范围和整数张数条件后提示补买，本轮结束释放。` : ''}</p>
+      <p class="hint" data-quote-info>${leg.pendingOption ? `期权待用预算 ${maskMoney(fmtUsd(leg.usd))}。有有效报价且不足一张时，可顺延到同袋后续符合条件的同类期权。` : ''}</p>
       <label><input data-complete type="checkbox">此腿已全部完成（不再补单）</label>
     </fieldset>`).join('')}
     <label><input id="fill-review" type="checkbox">已复核当前信号、159509 最新报价/停牌/溢价及真实成交；不使用昨夜估价</label>
@@ -755,6 +758,8 @@ function renderTiers() {
   $('#tier-table tbody').innerHTML = tiers.map((t) => {
     const action = t.recommendation || '—';
     const cond = t.triggerCondition || '—';
+    const plan = state.evaluation?.round?.executionPlans?.[t.id];
+    const adjusted = plan?.legs?.some((leg) => leg.budgetCarryOut || leg.budgetCarryIns?.length);
     return `
     <tr class="tier-row st-row-${escapeHtml(t.status || '')}">
       <td><strong>${escapeHtml(t.id)}</strong></td>
@@ -762,7 +767,7 @@ function renderTiers() {
       <td class="tier-cond" title="${escapeHtml(cond)}">${escapeHtml(cond)}</td>
       <td>${fmtPrice(t.triggerPrice)}${t.intradayPrice ? ` / 盘中 ${fmtPrice(t.intradayPrice)}` : ''}</td>
       <td>${fmtPctB(t.pctB)}%</td>
-      <td>${maskMoney(fmtUsd(t.usd))}</td>
+      <td>${maskMoney(fmtUsd(t.usd))}${adjusted ? `<div class="hint">顺延后 ${maskMoney(fmtUsd(plan.totalUsd))}</div>` : ''}</td>
       <td class="st-${t.status}">${t.pendingClose ? (t.equityMarket ? '正股已触价 · 期权待确认' : '触价 · 等待收盘数据或有效现价') : statusLabel(t.status)}${state.evaluation?.round?.executionPlans?.[t.id]
         ? `<div class="hint">${escapeHtml(planLabel(state.evaluation.round.executionPlans[t.id]))}</div>` : ''}</td>
       <td class="tier-action" title="${escapeHtml(action)}">${escapeHtml(action)}</td>
