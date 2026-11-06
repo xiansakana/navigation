@@ -444,8 +444,12 @@ function pnlCellClass(key, h) {
 function renderHoldingsRowCells(h, group, i) {
   return visibleHoldingsColumns().map((c) => {
     if (c.key === 'weight') {
-      if (i !== 0) return '';
-      return `<td data-label="${c.label}" rowspan="${group.items.length}" class="sm-weight-cell">${holdingsCellContent(h, 'weight', {})}</td>`;
+      if (group.items.length === 1) {
+        return `<td data-label="${c.label}" class="sm-weight-cell">${holdingsCellContent(h, 'weight', {})}</td>`;
+      }
+      const individual = h.groupMarketValue === 0 ? h.weight : h.weight * h.marketValue / h.groupMarketValue;
+      const total = i === 0 ? `<div class="sm-lots-hint">合计 ${fmtPct(h.weight)}</div>` : '';
+      return `<td data-label="${c.label}" class="sm-weight-cell">${maskCol('weight', `<div>单项 ${fmtPct(individual)}${total}</div>`)}</td>`;
     }
     const tdCls = [pnlCellClass(c.key, h), c.key === 'name' ? 'sm-holding-name' : ''].filter(Boolean).join(' ');
     const opt = h.optionInfo;
