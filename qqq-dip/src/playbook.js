@@ -829,6 +829,7 @@ export function evaluate(input) {
     rth,
     vxn,
     vxnStale,
+    vxnQuote: input.vxn ? { price: input.vxn.price, source: input.vxn.source, asOf: input.vxn.asOf } : null,
     cashUsd,
     cashCny,
     usdCnyRate,

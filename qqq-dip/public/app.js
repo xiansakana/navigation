@@ -310,7 +310,7 @@ function renderAmmo() {
   const B = ev?.B ?? 0;
   const bags = ev?.bags;
   const rem = ev?.remaining;
-  const vxnQuote = state.quotes?.VXN;
+  const vxnQuote = ev?.vxnQuote;
   const vxnSource = { cboe: 'Cboe', fred: 'FRED', yahoo: 'Yahoo' }[vxnQuote?.source];
   const showMoney = canViewLotMoney();
   const cashUsdField = showMoney
