@@ -254,12 +254,19 @@ export function createQuoteService(config) {
     const latestReference = () => candidates.filter((q) => Number(q.price) > 0
       && Date.parse(q.asOf) <= now && now - Date.parse(q.asOf) <= 7 * 86400000)
       .sort((a, b) => Date.parse(b.asOf) - Date.parse(a.asOf))[0];
-    if (vxnCache?.quote.asOf === expected && !vxnCache.quote.stale && now - vxnCache.at < 3600000) return vxnCache.quote;
-    if (now < vxnRetryAt) {
+    const recoverClose = () => {
+      const verified = candidates.find((q) => q.asOf === expected && Number.isFinite(q.price) && q.price > 0
+        && ['cboe', 'fred', 'yahoo'].includes(q.source) && Date.parse(q.fetchedAt) <= now);
+      if (verified) {
+        const { warning, ...value } = verified;
+        return { ...value, stale: false };
+      }
       const fallback = latestReference();
       if (fallback) return { ...fallback, stale: true, warning: vxnFailure };
       throw new Error(vxnFailure);
-    }
+    };
+    if (vxnCache?.quote.asOf === expected && !vxnCache.quote.stale && now - vxnCache.at < 3600000) return vxnCache.quote;
+    if (now < vxnRetryAt) return recoverClose();
     const errors = [];
     const providers = [
       ['Cboe', async () => parseVxnClose(await fetchQuoteResource('https://cdn.cboe.com/api/global/delayed_quotes/quotes/_VXN.json', {
@@ -287,9 +294,7 @@ export function createQuoteService(config) {
     }
     vxnFailure = `VXN ${expected} 收盘不可用（${errors.join('; ')}）`;
     vxnRetryAt = Date.now() + 60000;
-    const fallback = latestReference();
-    if (!fallback) throw new Error(vxnFailure);
-    const value = { ...fallback, stale: true, warning: vxnFailure };
+    const value = recoverClose();
     vxnCache = { at: Date.now(), quote: value };
     return value;
   }

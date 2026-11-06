@@ -2,8 +2,36 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createQuoteService } from './quotes.js';
 import { evaluate } from './playbook.js';
+import { parseVxnClose } from './vxn-session.js';
 
 const now = new Date('2026-11-06T02:25:00Z');
+
+test('Cboe midnight rollover retains the finished session only when the close fields agree', () => {
+  const afterRollover = new Date('2026-11-06T06:38:54Z');
+  const row = { index: 'VXN', close: 38.26, prev_day_close: 38.26, current_price: 38.26,
+    last_trade_time: '2026-11-05T00:00:00-06:00' };
+  assert.equal(parseVxnClose({ data: row }, afterRollover).asOf, '2026-11-05');
+  assert.equal(parseVxnClose({ data: row }, afterRollover).price, 38.26);
+  assert.throws(() => parseVxnClose({ data: { ...row, current_price: 36 } }, afterRollover), /未取得/);
+  assert.throws(() => parseVxnClose({ data: row }, now), /未取得/);
+});
+
+test('failed refresh preserves a verified close until the next session is due, including after restart', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  globalThis.fetch = async () => ({ ok: false, status: 403 });
+  const previous = { price: 38.26, asOf: '2026-11-05', source: 'cboe',
+    fetchedAt: '2026-11-06T02:00:00Z', stale: true, warning: 'previous refresh failed' };
+  const service = createQuoteService({});
+  const value = await service.getVxn(previous);
+  assert.equal(value.price, 38.26);
+  assert.equal(value.stale, false);
+  assert.equal(value.fetchedAt, previous.fetchedAt);
+  assert.equal(value.warning, undefined);
+  t.mock.timers.setTime(Date.parse('2026-11-06T21:16:00Z'));
+  assert.equal((await service.getVxn()).stale, true);
+});
 
 test('Cboe latest closing observation supersedes a stale FRED value', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now });
