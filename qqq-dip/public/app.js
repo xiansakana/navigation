@@ -310,6 +310,8 @@ function renderAmmo() {
   const B = ev?.B ?? 0;
   const bags = ev?.bags;
   const rem = ev?.remaining;
+  const vxnQuote = state.quotes?.VXN;
+  const vxnSource = { cboe: 'Cboe', fred: 'FRED', yahoo: 'Yahoo' }[vxnQuote?.source];
   const showMoney = canViewLotMoney();
   const cashUsdField = showMoney
     ? `<input type="number" readonly id="cash-usd" value="${c.strategyCashUsd ?? 0}" aria-label="抄底美元现金">`
@@ -341,9 +343,9 @@ function renderAmmo() {
     <div class="sm-summary-card"><div class="label">右侧预算余额</div><div class="value">${maskMoney(fmtUsd(rem?.right))}</div>
       <div class="hint">预算上限 ${maskMoneyText(fmtUsd(bags?.right))}，非独立现金</div></div>
     <div class="sm-summary-card"><div class="label">VXN</div>
-      <div class="value">${state.quotes?.VXN?.stale ? Number(state.quotes.VXN.price).toFixed(2) : ev?.vxn != null ? ev.vxn.toFixed(2) : '—'}</div>
-      ${state.quotes?.VXN?.stale ? '<div class="hint">缓存值仅供参考 · 期权门槛暂停判定</div>' : ''}
-      <div class="hint">T2≥25 ${ev?.vxnGates?.t2?.ok ? '过' : '未过'} · T3≥32 ${ev?.vxnGates?.t3?.ok ? '过' : '未过'}${state.quotes?.VXN?.asOf ? ` · 收盘 ${state.quotes.VXN.asOf}` : ''}</div></div>
+      <div class="value">${ev?.vxnStale && Number(vxnQuote?.price) > 0 ? Number(vxnQuote.price).toFixed(2) : ev?.vxn != null ? ev.vxn.toFixed(2) : '—'}</div>
+      ${ev?.vxnStale ? '<div class="hint">最新收盘值待更新 · 旧值仅供参考</div>' : ''}
+      <div class="hint">${ev?.vxn == null ? '期权门槛暂停判定' : `T2≥25 ${ev.vxnGates?.t2?.ok ? '过' : '未过'} · T3≥32 ${ev.vxnGates?.t3?.ok ? '过' : '未过'}`}${vxnQuote?.asOf ? ` · ${escapeHtml(vxnSource || '')} 收盘 ${escapeHtml(vxnQuote.asOf)}` : ''}</div></div>
     <div class="sm-summary-card"><div class="label">规则</div>
       <label class="hint"><input type="checkbox" id="opt-vboost" ${state.settings.variant === 'vBoost' ? 'checked' : ''}> V 型加强 55/20/25</label>
       <label class="hint"><input type="checkbox" id="opt-soxl" ${state.settings.soxlEnabled ? 'checked' : ''}> 启用 SOXL 芯片观点（−70%／−90%）</label>

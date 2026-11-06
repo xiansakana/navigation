@@ -5,13 +5,14 @@ import { captureExecutionPlan, prepareExecution } from './execution-plan.js';
 import { activatePendingOptions } from './pending-options.js';
 import { latestCompletedSession, marketStatus } from './market-hours.js';
 import { createQuoteService } from './quotes.js';
+import { expectedVxnSession } from './vxn-session.js';
 
 const cash = { cashUsd: 20000, cashCny: 0, usdCnyRate: 7 };
 const candle = (date, close) => ({ t: Date.parse(`${date}T05:00:00Z`) / 1000, h: 100, l: close, c: close });
 const yesterday = candle('2026-11-04', 90);
 function evaluateAt(now, extra = {}) {
   return evaluate({ ...cash, now, rth: marketStatus(now).rth, sessionDate: marketStatus(now).ymd,
-    expectedCloseDate: latestCompletedSession(now), vxn: { price: 27 },
+    expectedCloseDate: latestCompletedSession(now), vxn: { price: 27, asOf: expectedVxnSession(now) },
     qqq: { price: 87, asOf: now.toISOString(), candles: [yesterday] }, ...extra });
 }
 
@@ -36,7 +37,7 @@ test('fresh US touch manually opens equity only, then activates the original opt
   assert.throws(() => prepareExecution(plan, fill, evaluateAt(now, { qqq: { price: 89, asOf: now.toISOString(), candles: [yesterday] } }), cash, now), /信号/);
   round.executionPlans.T2 = prepared.plan;
   round.executed = { T2: { usd: 261, complete: false } };
-  const after = new Date('2026-11-05T21:02:00Z');
+  const after = new Date('2026-11-05T21:16:00Z');
   t.mock.timers.setTime(after.getTime());
   const confirmed = evaluateAt(after, { round, qqq: { price: 87, candles: [yesterday, candle('2026-11-05', 87)] } });
   confirmed.suggestedContracts = [{ ticker: 'O:QQQ280121C00115000', expiry: '2028-01-21', strike: 115, ask: 1, asOf: after.toISOString() }];

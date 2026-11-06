@@ -2,6 +2,7 @@
 import { cnMarketStatus } from './cn-market-hours.js';
 import { selectAffordableCall } from './option-selection.js';
 import { equityTouchMarket } from './equity-touch.js';
+import { expectedVxnSession } from './vxn-session.js';
 
 export const TIER_ORDER = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'R1', 'R2'];
 export const LEFT_TIERS = ['T1', 'T2', 'T3', 'T4'];
@@ -308,7 +309,7 @@ export function shouldReset(stats) {
 function vxnPass(vxn, min) {
   if (min == null) return { ok: true, blocked: false };
   const v = Number(vxn);
-  if (!Number.isFinite(v)) return { ok: false, blocked: true, missing: true };
+  if (vxn == null || !Number.isFinite(v)) return { ok: false, blocked: true, missing: true, min };
   return { ok: v >= min, blocked: v < min, value: v, min };
 }
 
@@ -355,13 +356,13 @@ function allocationText(tier, vxnGate, spot, B, usd, pctB, variant = 'default') 
     T1: `只买正股（${cnyFirst}最多 20% 可换成 SPY）。禁止任何期权、TQQQ、SOXL。`,
     T2: vxnGate.blocked
       ? `全部改买正股（${cnyFirst}）。`
-      : `约 70–80% 正股 + 20–30% 中虚值 Call（12–21 个月、虚值 25–40%，行权价约 ${bandM.low}–${bandM.high}，到期 ${leapHint}）。${cnyFirst}禁止 50%+ 虚值、剩余不足 9 个月。`,
+      : `约 70–80% 正股 + 20–30% 中虚值 Call（12–21 个月、虚值 25–40%，行权价约 ${bandM?.low ?? '—'}–${bandM?.high ?? '—'}，到期 ${leapHint}）。${cnyFirst}禁止 50%+ 虚值、剩余不足 9 个月。`,
     T3: vxnGate.blocked
       ? `全部改买正股（${cnyFirst}）。`
-      : `约 50–60% 正股 + 30–40% 中虚值（${bandM.low}–${bandM.high}）+ 约 10% 深虚值（${bandD.low}–${bandD.high}，累计深虚值 ≤8%B）。${cnyFirst}禁止 All-in SOXL。`,
+      : `约 50–60% 正股 + 30–40% 中虚值（${bandM?.low ?? '—'}–${bandM?.high ?? '—'}）+ 约 10% 深虚值（${bandD?.low ?? '—'}–${bandD?.high ?? '—'}，累计深虚值 ≤8%B）。${cnyFirst}禁止 All-in SOXL。`,
     T4: `补左侧：仍以正股和中虚值为主，停止再加同一张深虚值。深虚值累计不超过 8%B。不是打满全部 B。${cnyFirst}禁止 75%+ 虚值、TQQQ Call。`,
     T5: `只加正股（${cnyFirst}）。禁止加旧的 65% 虚值。`,
-    T6: `约 70% 正股 + 30% 按新现货的浅/中虚值（约 ${bandS.low}–${bandM.high}）。${cnyFirst}禁止摊薄同一张已废彩票。`,
+    T6: `约 70% 正股 + 30% 按新现货的浅/中虚值（约 ${bandS?.low ?? '—'}–${bandM?.high ?? '—'}）。${cnyFirst}禁止摊薄同一张已废彩票。`,
     T7: `同 T6。3x 正股仅当 TQQQ 自己也到 −50%。杠杆不超过 10%B。`,
     R1: vxnGate.blocked || !vxnGate.ok
       ? `只用右侧袋的约 1/3：正股（${cnyFirst}）。禁止一次性打完 ${rightPct}% 右侧。`
@@ -583,7 +584,9 @@ export function evaluate(input) {
   const r1Date = round.r1SessionDate || round.triggered?.R1?.sessionDate;
   if (r1Date) round.r1Sessions = qqq.sessionDates.filter((date) => date > r1Date
     && (!input.sessionDate || date < input.sessionDate || (!rth && date === input.sessionDate))).length;
-  const vxnPrice = input.vxn?.stale ? NaN : Number(input.vxn?.price);
+  const vxnStale = !!input.vxn && (input.vxn.stale
+    || (!!input.expectedCloseDate && input.vxn.asOf !== expectedVxnSession(now)));
+  const vxnPrice = vxnStale ? NaN : Number(input.vxn?.price);
   const vxn = Number.isFinite(vxnPrice) ? vxnPrice : null;
 
   const recovered = shouldReset(closeDataPending ? { ...qqq, lastClose: null } : qqq);
@@ -825,6 +828,7 @@ export function evaluate(input) {
     variant,
     rth,
     vxn,
+    vxnStale,
     cashUsd,
     cashCny,
     usdCnyRate,

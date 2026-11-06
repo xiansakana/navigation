@@ -1,6 +1,7 @@
 import { fetchQuoteResource } from '../../shared/quote-network.js';
 import { createCnyHistoryLoader } from './cny-history.js';
-import { latestCompletedSession } from './market-hours.js';
+import { latestCompletedSession, nyParts } from './market-hours.js';
+import { expectedVxnSession, parseVxnClose } from './vxn-session.js';
 const CANDLE_CACHE = new Map();
 const QUOTE_CACHE = new Map();
 const QUOTE_CACHE_MS = 30000;
@@ -204,6 +205,7 @@ export function createQuoteService(config) {
     const prev = meta.chartPreviousClose || last;
     return {
       symbol: yahooSymbol,
+      asOf: Number(meta.regularMarketTime) > 0 ? new Date(meta.regularMarketTime * 1000).toISOString() : null,
       price,
       close: price,
       prevClose: prev,
@@ -245,41 +247,49 @@ export function createQuoteService(config) {
 
   async function getVxn(previous = null) {
     const now = Date.now();
-    const fallback = vxnCache?.quote || previous;
-    const fallbackDate = Date.parse(fallback?.asOf || fallback?.fetchedAt || '');
-    const usableFallback = Number(fallback?.price) > 0 && Number.isFinite(fallbackDate)
-      && fallbackDate <= now && now - fallbackDate <= 7 * 86400000;
-    if (vxnCache && now - vxnCache.at < 60 * 60 * 1000) return vxnCache.quote;
-    if (usableFallback && now < vxnRetryAt) {
-      return { ...fallback, stale: true, warning: vxnFailure };
-    }
-    const remember = (quote) => {
-      const observedAt = Date.parse(quote.asOf || new Date().toISOString());
-      if (!Number.isFinite(observedAt) || observedAt > Date.now() || Date.now() - observedAt > 7 * 86400000) {
-        throw new Error('VXN 数据日期无效或已超过 7 天');
-      }
-      const value = { ...quote, fetchedAt: new Date().toISOString(), stale: false };
-      vxnCache = { at: Date.now(), quote: value };
-      vxnRetryAt = 0;
-      vxnFailure = '';
-      return value;
-    };
-    const errors = [];
-    try {
-      return remember(await getVxnFromFred());
-    } catch (e) {
-      errors.push(`FRED: ${e.message}`);
-    }
-    try {
-      const q = await getYahooQuote('^VXN');
-      return remember({ ...q, symbol: 'VXN', source: 'yahoo' });
-    } catch (e) {
-      errors.push(`Yahoo: ${e.message}`);
-      vxnFailure = `VXN 不可用（${errors.join('; ')}）`;
-      vxnRetryAt = Date.now() + 60000;
-      if (usableFallback) return { ...fallback, stale: true, warning: vxnFailure };
+    const expected = expectedVxnSession(new Date(now));
+    const candidates = [vxnCache?.quote, previous].filter(Boolean);
+    const latestReference = () => candidates.filter((q) => Number(q.price) > 0
+      && Date.parse(q.asOf) <= now && now - Date.parse(q.asOf) <= 7 * 86400000)
+      .sort((a, b) => Date.parse(b.asOf) - Date.parse(a.asOf))[0];
+    if (vxnCache?.quote.asOf === expected && !vxnCache.quote.stale && now - vxnCache.at < 3600000) return vxnCache.quote;
+    if (now < vxnRetryAt) {
+      const fallback = latestReference();
+      if (fallback) return { ...fallback, stale: true, warning: vxnFailure };
       throw new Error(vxnFailure);
     }
+    const errors = [];
+    const providers = [
+      ['Cboe', async () => parseVxnClose(await fetchQuoteResource('https://cdn.cboe.com/api/global/delayed_quotes/quotes/_VXN.json', {
+        headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://www.cboe.com/' }, retries: 1, timeoutMs: 8000
+      }), new Date(now))],
+      ['FRED', getVxnFromFred],
+      ['Yahoo', async () => {
+        const q = await getYahooQuote('^VXN');
+        const at = Date.parse(q.asOf);
+        if (!Number.isFinite(at) || at > now || nyParts(new Date(at)).minutes < 975) throw new Error('未取得带时间的收盘报价');
+        return { ...q, symbol: 'VXN', source: 'yahoo', asOf: nyParts(new Date(at)).ymd, quoteAt: q.asOf };
+      }]
+    ];
+    for (const [label, fetchClose] of providers) {
+      try {
+        const quote = await fetchClose();
+        candidates.push(quote);
+        if (quote.asOf !== expected) throw new Error(`返回 ${quote.asOf}，等待 ${expected} 收盘`);
+        const value = { ...quote, fetchedAt: new Date().toISOString(), stale: false };
+        vxnCache = { at: Date.now(), quote: value };
+        vxnRetryAt = 0;
+        vxnFailure = '';
+        return value;
+      } catch (e) { errors.push(`${label}: ${e.message}`); }
+    }
+    vxnFailure = `VXN ${expected} 收盘不可用（${errors.join('; ')}）`;
+    vxnRetryAt = Date.now() + 60000;
+    const fallback = latestReference();
+    if (!fallback) throw new Error(vxnFailure);
+    const value = { ...fallback, stale: true, warning: vxnFailure };
+    vxnCache = { at: Date.now(), quote: value };
+    return value;
   }
 
   async function getUsdCnyFromFred() {
