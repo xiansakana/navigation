@@ -20,6 +20,29 @@ const entries = [
 ];
 const rates = {CNY:1,USD:7};
 
+test('legacy exclusions use late contributions when the ledger reconciles from zero',()=>{
+  const db=new Database(':memory:');
+  try {
+    const store=createAssetHistory(db);
+    const fund={id:'fund',group:'社保公积金等',currency:'CNY',balance:80,included:true};
+    const bills=[
+      {id:'income',date:'2026-10-03T12:00:00',type:'收入',amount:100,currency:'CNY',accountId:'fund'},
+      {id:'transfer',date:'2026-10-04T12:00:00',type:'转账',amount:20,currency:'CNY',accountId:'fund',toAccountId:'cash'},
+    ];
+    const frozen=JSON.stringify({points:[{date:'2026-10-01',balance:1000},{date:'2026-10-14',balance:1080}]});
+    db.prepare('INSERT INTO bookkeeping_asset_baselines VALUES (?,?,?)').run('a','2026-10-15',frozen);
+    db.prepare('INSERT INTO bookkeeping_asset_snapshots VALUES (?,?,?,?,?)').run('a','2026-10-15',new Date(now).toISOString(),1080,JSON.stringify([{...fund,rate:1}]));
+    db.exec("CREATE TABLE bookkeeping_entries(id TEXT,user_id TEXT,created_at TEXT); INSERT INTO bookkeeping_entries VALUES ('income','a','2026-10-16'),('transfer','a','2026-10-16')");
+    const scope={accounts:[fund],entries:bills,rates,excludedAccountIds:['fund']};
+    const filter={start:'2026-10-02',end:'2026-10-14'};
+    const result=store.read('a',filter,'2026-10-15',null,scope);
+    assert.equal(result.period.opening,1000);
+    assert.equal(result.period.closing,1000);
+    assert.equal(store.read('a',filter,'2026-10-15',null,{...scope,entries:[bills[0]]}).period.opening,920);
+    assert.equal(db.prepare('SELECT history FROM bookkeeping_asset_baselines').get().history,frozen);
+  } finally {db.close();}
+});
+
 test('hybrid history preserves the complete ledger curve and uses actual valuation observations after cutover',()=>{
   const db=new Database(':memory:');
   try {

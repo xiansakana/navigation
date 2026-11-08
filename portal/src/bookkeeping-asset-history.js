@@ -83,8 +83,16 @@ export function createAssetHistory(db) {
         const anchorDate=first?.date||today;
         const anchorRates={...scope.rates,...Object.fromEntries(details.map(a=>[a.currency,a.rate])),CNY:1};
         const anchorAccounts=scope.accounts.map(a=>({...a,included:a.id===id,balance:a.id===id?(observed?.balance??a.ledgerBalance??a.balance):a.balance,balanceSource:'ledger'}));
-        const bills=(scope.entries||[]).filter(e=>(e.accountId===id||e.toAccountId===id)&&e.date.slice(0,10)<=anchorDate&&(!knownEntries||knownEntries.has(e.id)));
-        const curve=assetTrends(anchorAccounts,bills,anchorDate,anchorRates);
+        const bills=(scope.entries||[]).filter(e=>(e.accountId===id||e.toAccountId===id)&&e.date.slice(0,10)<=anchorDate);
+        const snapshotBills=knownEntries?bills.filter(e=>knownEntries.has(e.id)):bills;
+        let curve=assetTrends(anchorAccounts,snapshotBills,anchorDate,anchorRates);
+        // A late backfill can restore a complete zero-opening contribution ledger.
+        // Keep the conservative snapshot reconstruction for incomplete ledgers.
+        if(observed && account.group===SOCIAL_ACCOUNT_GROUP && account.currency==='CNY' &&
+          snapshotBills.length<bills.length && bills.every(e=>e.currency==='CNY')) {
+          const rebuilt=assetTrends(anchorAccounts,bills,anchorDate,anchorRates);
+          if(rebuilt.points.length>1 && rebuilt.points[0].balance===0 && rebuilt.points.every(p=>p.balance>=0))curve=rebuilt;
+        }
         missingCurrencies.push(...curve.missingCurrencies);missingValuations.push(...(curve.missingValuations||[]));
         return curve.points;
       });
