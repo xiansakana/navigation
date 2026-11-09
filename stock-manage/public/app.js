@@ -392,8 +392,14 @@ function holdingsCellContent(h, key, ctx) {
       return maskCol('account', escapeHtml(h.accountName || '待归属'));
     case 'symbol':
       return maskCol('symbol', symInner);
-    case 'name':
-      return maskCol('name', escapeHtml(h.name || '—'));
+    case 'name': {
+      const rate = h.etfPremiumPct;
+      const timestamp = h.etfPremiumAsOf ? ` · ${formatLocalDateTime(h.etfPremiumAsOf)}` : '';
+      const premium = h.type === 'ashare' && Number.isFinite(rate)
+        ? ` <small class="sm-etf-premium" title="${escapeHtml(`东方财富 ·（成交价 ÷ IOPV − 1）× 100%${timestamp}`)}">溢价 ${rate > 0 ? '+' : ''}${fmtPct(rate)}</small>`
+        : '';
+      return maskCol('name', escapeHtml(h.name || '—') + premium);
+    }
     case 'shares':
       return maskCol('shares', h.shares);
     case 'cost':

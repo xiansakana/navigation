@@ -1281,6 +1281,7 @@ select:focus {
   vertical-align: middle;
 }
 #holdings-table .sm-holding-name { line-height: 1.5; }
+.sm-etf-premium { color: var(--muted); font-size: 11px; white-space: nowrap; }
 #holdings-table .sm-symbol-drag { max-width: 100%; flex-wrap: wrap; justify-content: center; }
 #holdings-table .sm-symbol-drag strong { min-width: 0; }
 #holdings-table .sm-cell-select { width: 100%; min-width: 0; padding: 4px 2px; }

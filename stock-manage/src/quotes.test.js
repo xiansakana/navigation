@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { adjustCandlesForSplits, createQuoteService } from './quotes.js';
+import { adjustCandlesForSplits, createQuoteService, getEtfPremiums } from './quotes.js';
 
 test('USD/CNY uses the shared Finnhub/FRED fallback and caches observation metadata', async context => {
   const original = global.fetch; context.after(() => { global.fetch = original; });
@@ -418,4 +418,20 @@ test('instrument name uses Yahoo company metadata without a Finnhub key', async 
   } }] } });
   const service = createQuoteService({ finnhubApiKey: '', polygonApiKey: '' });
   assert.equal(await service.getInstrumentName('AAPL'), 'Apple Inc.');
+});
+
+
+test('ETF premiums use signed price versus IOPV and omit missing estimates and stocks', async context => {
+  const original = global.fetch;
+  context.after(() => { global.fetch = original; });
+  global.fetch = async () => Response.json({ data: { diff: [
+    { f12:'159509', f14:'纳指科技ETF', f2:1.1, f441:1, f124:1794209673 },
+    { f12:'513500', f14:'标普500ETF', f2:0.95, f441:1 },
+    { f12:'518600', f14:'金ETF', f2:1, f441:'-' },
+    { f12:'600519', f14:'贵州茅台', f2:1, f441:1 }
+  ] } });
+  const result = await getEtfPremiums(['159509','513500','518600','600519','QQQ']);
+  assert.deepEqual(Object.keys(result), ['159509','513500']);
+  assert.ok(Math.abs(result['159509'].etfPremiumPct - 10) < 1e-9);
+  assert.ok(Math.abs(result['513500'].etfPremiumPct + 5) < 1e-9);
 });
