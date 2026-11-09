@@ -396,7 +396,7 @@ function holdingsCellContent(h, key, ctx) {
       const rate = h.etfPremiumPct;
       const timestamp = h.etfPremiumAsOf ? ` · ${formatLocalDateTime(h.etfPremiumAsOf)}` : '';
       const premium = h.type === 'ashare' && Number.isFinite(rate)
-        ? ` <small class="sm-etf-premium" title="${escapeHtml(`腾讯行情 ·（成交价 ÷ IOPV − 1）× 100%${timestamp}`)}">溢价 ${rate > 0 ? '+' : ''}${fmtPct(rate)}</small>`
+        ? ` <small class="sm-etf-premium" title="${escapeHtml(`腾讯行情 ·（成交价 ÷ ${h.fundPremiumBasis || 'IOPV'} − 1）× 100%${timestamp}`)}">溢价 ${rate > 0 ? '+' : ''}${fmtPct(rate)}</small>`
         : '';
       return maskCol('name', escapeHtml(h.name || '—') + premium);
     }

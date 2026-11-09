@@ -377,8 +377,8 @@ export function createQuoteService(config) {
     const price = Number(parts[3]);
     const prev = Number(parts[4]) || price;
     if (!Number.isFinite(price) || price <= 0) throw new Error('腾讯无有效价');
-    const iopv = Number(parts[78]);
-    const isEtf = parts[61] === 'ETF';
+    const fundType = parts[61];
+    const reference = Number(parts[fundType === 'LOF' ? 81 : 78]);
     const stamp = parts[30]?.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/);
     const time = stamp ? Date.parse(`${stamp[1]}-${stamp[2]}-${stamp[3]}T${stamp[4]}:${stamp[5]}:${stamp[6]}+08:00`) : NaN;
     return {
@@ -390,8 +390,9 @@ export function createQuoteService(config) {
       prevClose: prev,
       currency: 'CNY',
       source: 'tencent',
-      ...(isEtf && Number.isFinite(iopv) && iopv > 0 ? {
-        etfPremiumPct: (price / iopv - 1) * 100,
+      ...(['ETF', 'LOF'].includes(fundType) && Number.isFinite(reference) && reference > 0 ? {
+        etfPremiumPct: (price / reference - 1) * 100,
+        fundPremiumBasis: fundType === 'LOF' ? '单位净值' : 'IOPV',
         etfPremiumAsOf: Number.isFinite(time) ? new Date(time).toISOString() : null
       } : {})
     };

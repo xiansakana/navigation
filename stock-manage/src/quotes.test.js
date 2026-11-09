@@ -425,13 +425,14 @@ test('Tencent ETF premiums use valid IOPV and preserve the quote timestamp', asy
   const original = global.fetch;
   context.after(() => { global.fetch = original; });
   global.fetch = async url => {
-    const parts = Array(79).fill('');
+    const parts = Array(82).fill('');
     const code = String(url).slice(-6);
     parts[1] = 'Fund';
     parts[3] = code === '513500' ? '0.95' : '1.1';
     parts[30] = '20261109161433';
     parts[61] = code === '600519' ? 'GP' : 'ETF';
     parts[78] = code === '518600' ? '-' : '1';
+    if (code === '161125') { parts[61] = 'LOF'; parts[78] = ''; parts[81] = '1'; }
     return new Response(`v="${parts.join('~')}";`);
   };
   const service = createQuoteService({});
@@ -441,4 +442,7 @@ test('Tencent ETF premiums use valid IOPV and preserve the quote timestamp', asy
   assert.ok(Math.abs((await service.getAShareQuote('513500')).etfPremiumPct + 5) < 1e-9);
   assert.equal((await service.getAShareQuote('518600')).etfPremiumPct, undefined);
   assert.equal((await service.getAShareQuote('600519')).etfPremiumPct, undefined);
+  const lof = await service.getAShareQuote('161125');
+  assert.ok(Math.abs(lof.etfPremiumPct - 10) < 1e-9);
+  assert.equal(lof.fundPremiumBasis, '单位净值');
 });
