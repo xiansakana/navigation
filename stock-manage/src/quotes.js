@@ -38,31 +38,6 @@ function ymdDaysAgo(days, endTimestamp = Date.now()) {
   return ymdUTC(endTimestamp - days * 86400000);
 }
 
-export async function getEtfPremiums(symbols) {
-  const codes = [...new Set(symbols.map(ashareCode).filter(Boolean))];
-  if (!codes.length) return {};
-  const secids = codes.map(code => `${ashareExchange(code) === 'sh' ? 1 : 0}.${code}`).join(',');
-  const url = `https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&secids=${secids}&fields=f12,f14,f2,f441,f124`;
-  const response = await fetchQuoteResource(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://quote.eastmoney.com/' },
-    retries: 0,
-    timeoutMs: 4000
-  });
-  const premiums = {};
-  for (const row of Object.values(response?.data?.diff || {})) {
-    if (!codes.includes(row.f12) || !/ETF/i.test(row.f14 || '')) continue;
-    const price = Number(row.f2);
-    const iopv = Number(row.f441);
-    if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(iopv) || iopv <= 0) continue;
-    const time = new Date(Number(row.f124) * 1000);
-    premiums[row.f12] = {
-      etfPremiumPct: (price / iopv - 1) * 100,
-      etfPremiumAsOf: Number(row.f124) > 0 && Number.isFinite(time.getTime()) ? time.toISOString() : null
-    };
-  }
-  return premiums;
-}
-
 const COMMON_SPLIT_RATIOS = [1.5, 2, 3, 4, 5, 7, 8, 10, 20, 25, 50, 100];
 
 function splitPriceFactor(priceRatio) {
@@ -402,6 +377,10 @@ export function createQuoteService(config) {
     const price = Number(parts[3]);
     const prev = Number(parts[4]) || price;
     if (!Number.isFinite(price) || price <= 0) throw new Error('腾讯无有效价');
+    const iopv = Number(parts[78]);
+    const isEtf = parts[61] === 'ETF';
+    const stamp = parts[30]?.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/);
+    const time = stamp ? Date.parse(`${stamp[1]}-${stamp[2]}-${stamp[3]}T${stamp[4]}:${stamp[5]}:${stamp[6]}+08:00`) : NaN;
     return {
       symbol: code,
       name: parts[1] || code,
@@ -410,7 +389,11 @@ export function createQuoteService(config) {
       changePercent: prev ? ((price - prev) / prev) * 100 : 0,
       prevClose: prev,
       currency: 'CNY',
-      source: 'tencent'
+      source: 'tencent',
+      ...(isEtf && Number.isFinite(iopv) && iopv > 0 ? {
+        etfPremiumPct: (price / iopv - 1) * 100,
+        etfPremiumAsOf: Number.isFinite(time) ? new Date(time).toISOString() : null
+      } : {})
     };
   }
 

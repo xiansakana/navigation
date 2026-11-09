@@ -17,7 +17,7 @@ import { createQuantBacktestStore } from './quant-backtest-store.js';
 import { createYoloStore } from './yolo-store.js';
 import { createYoloBacktestJobs } from './yolo-backtest-jobs.js';
 import { createYoloCollector, isUsOptionMarketOpen } from './yolo-collector.js';
-import { createQuoteService, getEtfPremiums } from './quotes.js';
+import { createQuoteService } from './quotes.js';
 import { parseImportBuffer } from './import-moomoo.js';
 import { mergeEastmoneyTrades } from './import-eastmoney.js';
 import { mergeBbaeTrades } from './import-bbae.js';
@@ -996,7 +996,6 @@ app.post('/api/quotes/refresh', async (req, res) => {
     return res.status(400).json({ error: '暂无持仓可刷新' });
   }
   const updated = { ...data.quotes };
-  const premiums = getEtfPremiums(symbols).catch(() => ({}));
   const errors = [];
   let ok = 0;
   for (const sym of symbols) {
@@ -1013,9 +1012,6 @@ app.post('/api/quotes/refresh', async (req, res) => {
     if (fx?.rate > 0) data.usdCnyRate = fx.rate;
   } catch (e) {
     errors.push({ symbol: 'USDCNY', error: e.message || '汇率失败' });
-  }
-  for (const [code, premium] of Object.entries(await premiums)) {
-    if (updated[code]) updated[code] = { ...updated[code], ...premium };
   }
   data.quotes = updated;
   data.cash = cashUsdEquivalent(data.cashUsd, data.cashCny, data.usdCnyRate);

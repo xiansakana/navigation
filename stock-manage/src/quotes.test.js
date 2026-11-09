@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { adjustCandlesForSplits, createQuoteService, getEtfPremiums } from './quotes.js';
+import { adjustCandlesForSplits, createQuoteService } from './quotes.js';
 
 test('USD/CNY uses the shared Finnhub/FRED fallback and caches observation metadata', async context => {
   const original = global.fetch; context.after(() => { global.fetch = original; });
@@ -421,17 +421,24 @@ test('instrument name uses Yahoo company metadata without a Finnhub key', async 
 });
 
 
-test('ETF premiums use signed price versus IOPV and omit missing estimates and stocks', async context => {
+test('Tencent ETF premiums use valid IOPV and preserve the quote timestamp', async context => {
   const original = global.fetch;
   context.after(() => { global.fetch = original; });
-  global.fetch = async () => Response.json({ data: { diff: [
-    { f12:'159509', f14:'纳指科技ETF', f2:1.1, f441:1, f124:1794209673 },
-    { f12:'513500', f14:'标普500ETF', f2:0.95, f441:1 },
-    { f12:'518600', f14:'金ETF', f2:1, f441:'-' },
-    { f12:'600519', f14:'贵州茅台', f2:1, f441:1 }
-  ] } });
-  const result = await getEtfPremiums(['159509','513500','518600','600519','QQQ']);
-  assert.deepEqual(Object.keys(result), ['159509','513500']);
-  assert.ok(Math.abs(result['159509'].etfPremiumPct - 10) < 1e-9);
-  assert.ok(Math.abs(result['513500'].etfPremiumPct + 5) < 1e-9);
+  global.fetch = async url => {
+    const parts = Array(79).fill('');
+    const code = String(url).slice(-6);
+    parts[1] = 'Fund';
+    parts[3] = code === '513500' ? '0.95' : '1.1';
+    parts[30] = '20261109161433';
+    parts[61] = code === '600519' ? 'GP' : 'ETF';
+    parts[78] = code === '518600' ? '-' : '1';
+    return new Response(`v="${parts.join('~')}";`);
+  };
+  const service = createQuoteService({});
+  const up = await service.getAShareQuote('159509');
+  assert.ok(Math.abs(up.etfPremiumPct - 10) < 1e-9);
+  assert.equal(up.etfPremiumAsOf, '2026-11-09T08:14:33.000Z');
+  assert.ok(Math.abs((await service.getAShareQuote('513500')).etfPremiumPct + 5) < 1e-9);
+  assert.equal((await service.getAShareQuote('518600')).etfPremiumPct, undefined);
+  assert.equal((await service.getAShareQuote('600519')).etfPremiumPct, undefined);
 });
