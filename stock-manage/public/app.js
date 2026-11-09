@@ -454,8 +454,9 @@ function renderHoldingsRowCells(h, group, i) {
         return `<td data-label="${c.label}" class="sm-weight-cell">${holdingsCellContent(h, 'weight', {})}</td>`;
       }
       const individual = h.groupMarketValue === 0 ? h.weight : h.weight * h.marketValue / h.groupMarketValue;
-      const total = i === 0 ? `<div class="sm-lots-hint">合计 ${fmtPct(h.weight)}</div>` : '';
-      return `<td data-label="${c.label}" class="sm-weight-cell">${maskCol('weight', `<div>单项 ${fmtPct(individual)}${total}</div>`)}</td>`;
+      const total = i === 0 ? `<div>合计 ${fmtPct(h.weight)}</div>` : '';
+      const item = `<div class="sm-lots-hint">单项 ${fmtPct(individual)}</div>`;
+      return `<td data-label="${c.label}" class="sm-weight-cell">${maskCol('weight', `<div>${total}${item}</div>`)}</td>`;
     }
     const tdCls = [pnlCellClass(c.key, h), c.key === 'name' ? 'sm-holding-name' : ''].filter(Boolean).join(' ');
     const opt = h.optionInfo;
