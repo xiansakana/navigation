@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { DeleteObjectCommand, ListObjectVersionsCommand, AbortMultipartUploadCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, ListObjectVersionsCommand, AbortMultipartUploadCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { readPiclistConfig } from './piclist-admin.js';
 import { makeThumbnail, withMediaProcessor, uploadDirectory, removeUploadFiles, compressVideo } from './blog-media-process.js';
@@ -48,6 +48,32 @@ export function normalizeMediaPosition(value) {
     if (value == null) return null;
     if (!Number.isSafeInteger(value) || value < 0) throw new Error('媒体顺序参数无效');
     return value;
+}
+
+export async function withBlogMediaResponse(media, range, consume) {
+    let storage;
+    try {
+        if (media.mimeType.startsWith('image/') && media.storageKey) {
+            let object;
+            try {
+                const setting = profile();
+                const prefix = new URL(setting.urlPrefix.replace(/\/$/, '') + '/').href;
+                if (media.url.startsWith(prefix) && decodeURIComponent(media.url.slice(prefix.length)) === media.storageKey) {
+                    storage = acquireStorageConnection(setting);
+                    object = await storage.client.send(new GetObjectCommand({ Bucket: setting.bucketName, Key: media.storageKey, Range: range }),
+                        { abortSignal: AbortSignal.timeout(10000) });
+                }
+            } catch { /* Older objects can still be served through their stored URL. */ }
+            if (object?.Body) {
+                const headers = new Headers();
+                if (object.ContentLength != null) headers.set('content-length', String(object.ContentLength));
+                if (object.ContentRange) headers.set('content-range', object.ContentRange);
+                if (object.AcceptRanges) headers.set('accept-ranges', object.AcceptRanges);
+                return await consume(new Response(object.Body.transformToWebStream(), { status: object.ContentRange ? 206 : 200, headers }));
+            }
+        }
+        return await consume(await fetch(media.url, { headers: range ? { Range: range } : {}, signal: AbortSignal.timeout(120000), redirect: 'error' }));
+    } finally { storage?.release(); }
 }
 
 export function videoStorage(mimeType, existingKey) {

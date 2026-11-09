@@ -7,7 +7,7 @@ import { imageCacheHeaders, respondImageNotModified } from './blog-image-cache.j
 import { normalizeVisibility, visibilityFilter, canViewPost } from './blog-visibility.js';
 import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission, loadRbac, findUserById, resolveUserPermissions } from './rbac.js';
-import { uploadImage, uploadVideo, normalizeMediaPosition } from './blog-media-storage.js';
+import { uploadImage, uploadVideo, normalizeMediaPosition, withBlogMediaResponse } from './blog-media-storage.js';
 import { normalizeContent, normalizeTags, normalizeLocation, renderMarkdown, contentSearchText, normalizeSearch } from './blog-content.js';
 import { parseCoordinates, resolveAddress } from './blog-address.js';
 import { commentAccess, listComments, createComment, deleteComment } from './blog-comments.js';
@@ -93,7 +93,7 @@ export function listVisibleTags(db, session, now) {
 
 export function getVisibleMedia(db, id, session, now, thumbnail = false) {
     const filter = visibilityFilter(session, 'p', now);
-    return db.prepare(`SELECT m.url, m.mime_type AS mimeType ${thumbnail ? ', m.thumbnail_data AS thumbnailData' : ''} FROM blog_media m JOIN blog_posts p ON p.id = m.post_id
+    return db.prepare(`SELECT m.url, m.storage_key AS storageKey, m.mime_type AS mimeType ${thumbnail ? ', m.thumbnail_data AS thumbnailData' : ''} FROM blog_media m JOIN blog_posts p ON p.id = m.post_id
         WHERE m.id = ? AND ${filter.sql}`).get(id, ...filter.params);
 }
 
@@ -302,8 +302,7 @@ export async function handleBlogApi(req, res, url, session, json, config) {
         const cache = media.mimeType.startsWith('image/') ? imageCacheHeaders(url.pathname + '\n' + media.url) : { 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' };
         if (cache.ETag && respondImageNotModified(req, res, cache)) return;
         try {
-            const headers = req.headers.range ? { Range: req.headers.range } : {};
-            const upstream = await fetch(media.url, { headers, signal: AbortSignal.timeout(120000), redirect: 'error' });
+            await withBlogMediaResponse(media, req.headers.range, async upstream => {
             if (![200, 206, 416].includes(upstream.status)) throw new Error('媒体读取失败');
             const output = { 'Content-Type': media.mimeType, ...cache };
             for (const key of ['content-length', 'content-range', 'accept-ranges']) {
@@ -312,6 +311,7 @@ export async function handleBlogApi(req, res, url, session, json, config) {
             res.writeHead(upstream.status, output);
             if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), res);
             else res.end();
+            });
         } catch {
             if (res.headersSent) res.destroy();
             else json(res, 502, { ok: false, error: '媒体读取失败，请稍后重试' });
