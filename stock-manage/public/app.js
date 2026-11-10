@@ -1,5 +1,5 @@
 import { TRADE_ASSET_TYPES, tradeAssetType } from './js/trade-asset-type.js';
-import { openInvestmentAccounts } from './js/investment-accounts.js';
+import { openInvestmentAccounts } from './js/investment-accounts.js?v=datetime-20261110';
 import { isDividendTax, normalizeOtherAmount } from './js/dividend-tax.js';
 import { renderTradeReview } from './js/trade-review.js';
 import { formatPrice, priceInputValue } from './js/price-format.js';

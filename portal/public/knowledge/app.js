@@ -1,15 +1,15 @@
 import { uploadParts } from './upload.js?v=1';
-import { createDevicePanel } from './devices.js?v=4';
+import { createDevicePanel } from './devices.js?v=datetime-20261110';
 import { createSourcePlayer } from './source.js?v=1';
 import { bindVideoDrop } from './drop.js?v=2';
 import { sendLocalInput } from './local-input.js?v=1';
 import { bindLinkImport } from './link-import.js?v=5';
 import { createUploadQueuePanel, parseBatchLinks } from './queue.js?v=1';
 import { createFileQueue } from './file-queue.js?v=1';
-import { createBilibiliPanel } from './bilibili-account.js?v=2';
+import { createBilibiliPanel } from './bilibili-account.js?v=datetime-20261110';
 import { createNotePager } from './pagination.js?v=1';
 import { failureMessage } from './failure.js?v=1';
-import { createReanalysisPanel } from './reanalysis.js?v=2';
+import { createReanalysisPanel } from './reanalysis.js?v=datetime-20261110';
 const $ = id => document.getElementById(id);
 const state = { permissions: [], documents: [], statusCounts: {}, selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, asrDirty: false, concurrencyDirty: false, resume: null, uploading: false, offset: 0, total: 0 };
 const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
