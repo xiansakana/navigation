@@ -97,7 +97,7 @@ function renderMonitor(status) {
     badge.textContent = status?.lastError ? '异常' : enabled ? '监听中' : '已停用';
     if (!status) return byId('monitor-detail').textContent = enabled ? '监听器尚未启动' : '启用后将从最新推文开始监听';
     var parts = [];
-    if (status.lastCheckedAt) parts.push('上次检查：' + new Date(status.lastCheckedAt).toLocaleString('zh-CN'));
+    if (status.lastCheckedAt) parts.push('上次检查：' + new Date(status.lastCheckedAt).toLocaleString('sv-SE'));
     if (status.lastSignal?.decision?.label) parts.push('最近信号：' + status.lastSignal.decision.label);
     if (status.lastError) parts.push('错误：' + status.lastError);
     byId('monitor-detail').textContent = parts.join(' · ') || '首次检查会建立基线，不补发历史推文';
@@ -113,7 +113,7 @@ async function loadQqHealth() {
         var data = await api('api/monitors/qq-login'), status = data.status;
         var connection = data.bookkeeping?.connected ? '已连接 NapCat（不代表 QQ 在线）' : '未连接 NapCat';
         var login = !status ? '自动检测未启用' : status.online === true ? 'QQ 账号在线' : status.online === false ? 'QQ 账号离线／登录失效' : 'QQ 登录状态待检测';
-        byId('qq-login-status').textContent = login + ' · 消息接收：' + connection + (status?.lastCheckedAt ? ' · 检查于 ' + new Date(status.lastCheckedAt).toLocaleString('zh-CN') : '');
+        byId('qq-login-status').textContent = login + ' · 消息接收：' + connection + (status?.lastCheckedAt ? ' · 检查于 ' + new Date(status.lastCheckedAt).toLocaleString('sv-SE') : '');
         var channels = (status?.alertChannels || []).map(function(c) { return (c.id === 'email' ? '邮件' : 'Slack') + (c.ready ? '已接入' : '未启用或配置不完整'); });
         byId('qq-alert-status').textContent = '独立掉线告警：' + (channels.join('；') || '未启用') + '。确认掉线后告警并尝试自动恢复，恢复失败及重新在线各通知一次。' + (status?.alertError || '');
     } catch (err) { byId('qq-login-status').textContent = 'QQ 登录状态读取失败：' + err.message; }

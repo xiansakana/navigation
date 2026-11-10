@@ -1,7 +1,7 @@
 (() => {
   const $ = id => document.getElementById(id), fields = ['leadMinutes', 'intervalSeconds', 'apiIntervalSeconds'];
   let dirty = false, loading = false, loaded = false, offset = 0, records = [], serverOffset = 0;
-  const time = value => Number.isFinite(value) ? new Date(value * 1000).toLocaleString() : '—';
+  const time = value => Number.isFinite(value) ? new Date(value * 1000).toLocaleString('sv-SE') : '—';
   const text = (parent, tag, value) => { const e = document.createElement(tag); e.textContent = value; parent.append(e); return e; };
   function link(parent, row) { const a = text(parent, 'a', (row.name || '用户') + ' [' + row.id + ']'); a.href = 'https://www.torn.com/profiles.php?XID=' + row.id; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
   function select() {

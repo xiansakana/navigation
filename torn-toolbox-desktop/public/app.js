@@ -10,7 +10,7 @@ function formatMoney(n) {
 }
 
 function formatTime(ts) {
-    return new Date(ts * 1000).toLocaleString('zh-CN');
+    return new Date(ts * 1000).toLocaleString('sv-SE');
 }
 
 function formatNext(ts) {
@@ -77,7 +77,7 @@ function renderCompanyApps(apps) {
             + '<p>申请人：' + app.name + ' (ID ' + app.userId + ') · Lv ' + (app.level || '?') + '</p>'
             + '<p>属性：' + formatApplicationStats(app.stats) + '</p>'
             + '<p>状态：' + (app.status || '未知') + '</p>'
-            + '<p>过期：' + new Date(app.expires * 1000).toLocaleString('zh-CN') + '</p>'
+            + '<p>过期：' + new Date(app.expires * 1000).toLocaleString('sv-SE') + '</p>'
             + '<p>消息：' + (app.message || '无消息') + '</p>';
         list.appendChild(div);
     });

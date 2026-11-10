@@ -14,7 +14,7 @@ export function createDevicePanel({ can, api, send, onError }) {
     for (const device of devices) {
       const row = document.createElement('div'); row.className = 'kb-section-heading'; row.dataset.deviceId = device.id;
       const text = document.createElement('p'); text.className = 'kb-hint';
-      text.textContent = `${device.label} · ${device.revokedAt ? '已停用' : device.online ? '在线' : '离线'}${device.capabilities.media?.ready ? device.capabilities.media.detail === 'cuda' ? ' · GPU' : ' · CPU' : ''}${device.lastSeen ? ' · 最近连接 ' + new Date(device.lastSeen).toLocaleString('zh-CN') : ' · 等待首次连接'}`;
+      text.textContent = `${device.label} · ${device.revokedAt ? '已停用' : device.online ? '在线' : '离线'}${device.capabilities.media?.ready ? device.capabilities.media.detail === 'cuda' ? ' · GPU' : ' · CPU' : ''}${device.lastSeen ? ' · 最近连接 ' + new Date(device.lastSeen).toLocaleString('sv-SE') : ' · 等待首次连接'}`;
       row.append(text);
       if (!device.revokedAt && can('devices:edit')) {
         const button = document.createElement('button'); button.type = 'button'; button.className = 'btn ghost'; button.textContent = '停用';

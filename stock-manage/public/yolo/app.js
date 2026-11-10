@@ -17,7 +17,7 @@ async function api(path, options = {}) {
 
 function dateTime(value) {
   if (!value) return '—';
-  return new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+  return new Date(value).toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' });
 }
 function money(value) { return Number.isFinite(Number(value)) ? `$${Number(value).toFixed(2)}` : '—'; }
 function percent(value) { return Number.isFinite(Number(value)) ? `${Number(value) >= 0 ? '+' : ''}${(Number(value) * 100).toFixed(2)}%` : '—'; }

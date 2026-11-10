@@ -58,7 +58,7 @@ export function createReanalysisPanel({ element: $, can, state, api, send, onErr
     const result = await api('/documents/' + id + '/versions');
     if (state.current?.id !== id || ticket !== historySequence) return;
     versions = result.versions; $('history-select').replaceChildren();
-    for (const v of versions) { const option = document.createElement('option'); option.value = v.id; option.textContent = new Date(v.createdAt).toLocaleString('zh-CN') + ' · ' + v.title; $('history-select').append(option); }
+    for (const v of versions) { const option = document.createElement('option'); option.value = v.id; option.textContent = new Date(v.createdAt).toLocaleString('sv-SE') + ' · ' + v.title; $('history-select').append(option); }
     if (versions.some(v => v.id === selected)) $('history-select').value = selected;
     renderVersion();
   }

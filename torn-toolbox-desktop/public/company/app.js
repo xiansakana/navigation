@@ -4,7 +4,7 @@ var companyWatchers = [];
 function $(id) { return document.getElementById(id); }
 
 function formatTime(ts) {
-    return new Date(ts * 1000).toLocaleString('zh-CN');
+    return new Date(ts * 1000).toLocaleString('sv-SE');
 }
 
 function formatNext(ts) {
@@ -47,7 +47,7 @@ function renderCompanyApps(apps) {
             + '<p>申请人：' + WUI.escapeHtml(app.name) + ' (ID ' + app.userId + ') · Lv ' + (app.level || '?') + '</p>'
             + '<p>属性：' + formatApplicationStats(app.stats) + '</p>'
             + '<p>状态：' + (app.status || '未知') + '</p>'
-            + '<p>过期：' + new Date(app.expires * 1000).toLocaleString('zh-CN') + '</p>'
+            + '<p>过期：' + new Date(app.expires * 1000).toLocaleString('sv-SE') + '</p>'
             + '<p>消息：' + WUI.escapeHtml(app.message || '无消息') + '</p>';
         list.appendChild(div);
     });

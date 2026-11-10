@@ -10,7 +10,7 @@ function formatMoney(n) {
 }
 
 function formatTime(ts) {
-    return new Date(ts * 1000).toLocaleString('zh-CN');
+    return new Date(ts * 1000).toLocaleString('sv-SE');
 }
 
 function formatNext(ts) {

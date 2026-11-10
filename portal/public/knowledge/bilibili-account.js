@@ -2,7 +2,7 @@ export function createBilibiliPanel({ element: $, can, api, send, onError, onDef
   let timer = null, generation = 0;
   const show = (id, visible) => { $(id).hidden = !visible; };
   function render(a) {
-    $('bilibili-status').textContent = a.state === 'connected' ? `已绑定：${a.nickname || 'B站账号'} · 上次检查 ${new Date(a.lastChecked).toLocaleString('zh-CN')}` : a.state === 'expired' ? 'B站登录已失效，请重新扫码绑定。' : '尚未绑定B站；公开接口可能只提供较低清晰度。';
+    $('bilibili-status').textContent = a.state === 'connected' ? `已绑定：${a.nickname || 'B站账号'} · 上次检查 ${new Date(a.lastChecked).toLocaleString('sv-SE')}` : a.state === 'expired' ? 'B站登录已失效，请重新扫码绑定。' : '尚未绑定B站；公开接口可能只提供较低清晰度。';
     $('bilibili-default-quality').value = String(a.quality); $('bilibili-default-mode').value = a.strict ? 'strict' : 'auto';
     show('bilibili-unlink', can('bilibili:edit') && a.bound); show('bilibili-check', can('bilibili:view') && a.bound);
     onDefaults(a);

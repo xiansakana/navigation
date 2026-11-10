@@ -2,7 +2,7 @@
   const $=id=>document.getElementById(id),labels={pending:'等待执行',waiting_quota:'等待额度',paused:'已暂停',queued:'排队中',running:'执行中',succeeded:'已完成',failed:'需检查',cancelled:'已取消'};
   let state=null,catalog=null,editing='',formRequest='',loading=null,mutating=false,lastRender='';
   const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;};
-  const time=value=>value?new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'等待下次检查';
+  const time=value=>value?new Date(value).toLocaleString('sv-SE', { timeZone:'Asia/Shanghai' }):'等待下次检查';
   const notice=(text,error=false)=>{$('todo-notice').textContent=text;$('todo-notice').classList.toggle('error',error);};
   async function api(path='',method='GET',body){
     const response=await fetch('/api/codex-cli/todos'+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});

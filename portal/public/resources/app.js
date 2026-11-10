@@ -81,7 +81,7 @@
     chart('usage-chart', data.history, ['cpuPercent', 'memoryPercent'], 100);
     chart('network-chart', data.history, ['rx', 'tx']);
     $('warnings').textContent = data.warnings.join('；'); $('warnings').classList.toggle('hidden', !data.warnings.length);
-    $('updated-at').textContent = `采样时间 ${new Date(data.collectedAt).toLocaleString('zh-CN')}`;
+    $('updated-at').textContent = `采样时间 ${new Date(data.collectedAt).toLocaleString('sv-SE')}`;
   }
 
   async function refresh() {

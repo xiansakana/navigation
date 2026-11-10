@@ -121,13 +121,13 @@
         var time = document.createElement('time');
         time.dateTime = post.createdAt;
         time.className = 'blog-published-time';
-        time.textContent = '发布于 ' + new Date(post.createdAt).toLocaleString('zh-CN');
+        time.textContent = '发布于 ' + new Date(post.createdAt).toLocaleString('sv-SE');
         meta.append(author, time);
         if (new Date(post.updatedAt).getTime() > new Date(post.createdAt).getTime()) {
             var editedTime = document.createElement('time');
             editedTime.className = 'blog-edited-time';
             editedTime.dateTime = post.updatedAt;
-            editedTime.textContent = '最后编辑于 ' + new Date(post.updatedAt).toLocaleString('zh-CN');
+            editedTime.textContent = '最后编辑于 ' + new Date(post.updatedAt).toLocaleString('sv-SE');
             meta.appendChild(editedTime);
         }
         var body = document.createElement('div');
@@ -137,8 +137,8 @@
         var visibility = post.visibility || { audience: 'public' };
         var scope = document.createElement('span'); scope.className = 'blog-visibility-badge';
         scope.textContent = { public: '公开动态', members: '仅登录用户', self: '仅自己（管理员可见）' }[visibility.audience];
-        if (visibility.startsAt) scope.textContent += ' · ' + new Date(visibility.startsAt).toLocaleString('zh-CN') + ' 起可见';
-        if (visibility.endsAt) scope.textContent += ' · ' + new Date(visibility.endsAt).toLocaleString('zh-CN') + ' 到期';
+        if (visibility.startsAt) scope.textContent += ' · ' + new Date(visibility.startsAt).toLocaleString('sv-SE') + ' 起可见';
+        if (visibility.endsAt) scope.textContent += ' · ' + new Date(visibility.endsAt).toLocaleString('sv-SE') + ' 到期';
         if (visibility.startsAt && new Date(visibility.startsAt) > new Date()) scope.textContent += '（尚未开放）';
         if (visibility.endsAt && new Date(visibility.endsAt) <= new Date()) scope.textContent += '（已到期）';
         meta.appendChild(scope);
@@ -394,7 +394,7 @@
                 var row = document.createElement('div'); row.className = 'blog-comment'; row.dataset.commentId = comment.id;
                 var meta = document.createElement('div'); meta.className = 'blog-comment-meta';
                 var author = document.createElement('strong'); author.textContent = comment.authorName;
-                var time = document.createElement('time'); time.dateTime = comment.createdAt; time.textContent = new Date(comment.createdAt).toLocaleString('zh-CN');
+                var time = document.createElement('time'); time.dateTime = comment.createdAt; time.textContent = new Date(comment.createdAt).toLocaleString('sv-SE');
                 meta.append(author, time);
                 if (comment.canDelete) {
                     var remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '删除评论'; remove.className = 'blog-action';

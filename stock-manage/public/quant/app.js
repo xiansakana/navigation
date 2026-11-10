@@ -52,7 +52,8 @@ function formatPercent(value, ratio = false) { return hasNumber(value) ? `${Numb
 function formatDate(value, includeTime = false) {
   const number = Number(value);
   if (!Number.isFinite(number) || number <= 0) return '—';
-  return new Date(number).toLocaleString('zh-CN', includeTime ? { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } : { year: 'numeric', month: '2-digit', day: '2-digit' });
+  const date = new Date(number);
+  return includeTime ? date.toLocaleString('sv-SE') : date.toLocaleDateString('sv-SE');
 }
 function sourceLabel(source) { return source === 'polygon' ? 'Polygon' : source === 'yahoo' ? 'Yahoo' : source === 'sina' ? '新浪财经' : source === 'finnhub' ? 'Finnhub' : '行情接口'; }
 function periodLabel(period) { return ({ '3m': '近 3 个月', '6m': '近 6 个月', '1y': '近 1 年', '2y': '近 2 年', '5y': '近 5 年' })[period] || period || '—'; }

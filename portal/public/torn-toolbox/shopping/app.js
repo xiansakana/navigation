@@ -4,7 +4,7 @@ let historyRows=[],historyPage=1,historyPageSize=20;
 function renderHistory(){
   const total=historyRows.length,pages=Math.max(1,Math.ceil(total/historyPageSize));
   historyPage=Math.min(historyPage,pages);
-  $('history').replaceChildren(...historyRows.slice((historyPage-1)*historyPageSize,historyPage*historyPageSize).map(r=>{const p=document.createElement('p'),a=document.createElement('a');a.href=r.link;a.target='_blank';a.rel='noopener noreferrer';a.textContent=`${r.name} · ${r.source==='market'?'市场':'巴扎'} $${r.price} × ${r.quantity} · ${new Date(r.detectedAt*1000).toLocaleString()} ↗`;p.append(a);return p;}));
+  $('history').replaceChildren(...historyRows.slice((historyPage-1)*historyPageSize,historyPage*historyPageSize).map(r=>{const p=document.createElement('p'),a=document.createElement('a');a.href=r.link;a.target='_blank';a.rel='noopener noreferrer';a.textContent=`${r.name} · ${r.source==='market'?'市场':'巴扎'} $${r.price} × ${r.quantity} · ${new Date(r.detectedAt*1000).toLocaleString('sv-SE')} ↗`;p.append(a);return p;}));
   $('history-page-info').textContent=`共 ${total} 条 · 第 ${historyPage}/${pages} 页`;
   $('history-prev').disabled=historyPage<=1;$('history-next').disabled=historyPage>=pages;
 }

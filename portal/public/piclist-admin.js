@@ -56,7 +56,7 @@
     containerEl.textContent = container.health || container.status || '未知';
     statusClass(containerEl, containerOk);
     document.getElementById('container-detail').textContent = container.startedAt
-      ? '启动于 ' + new Date(container.startedAt).toLocaleString('zh-CN')
+      ? '启动于 ' + new Date(container.startedAt).toLocaleString('sv-SE')
       : (container.error || '未获取到容器信息');
 
     document.getElementById('uploader-status').textContent = config?.uploader || '未配置';
@@ -72,7 +72,7 @@
         + ' · Server Key ' + (config.serverKeyConfigured ? '✓' : '✗')
       : '—';
     document.getElementById('checked-at').textContent = status.checkedAt
-      ? '检查于 ' + new Date(status.checkedAt).toLocaleString('zh-CN') : '';
+      ? '检查于 ' + new Date(status.checkedAt).toLocaleString('sv-SE') : '';
 
     setForm(config);
     Array.from(form.elements).forEach(function (element) {

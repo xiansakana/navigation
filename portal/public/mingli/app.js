@@ -87,7 +87,7 @@ function renderChart() {
   selectedYear = now;
   renderCycles();
   $('case-editor').hidden = !can('cases:edit') && !current;
-  $('saved-at').textContent = current ? '已保存 · ' + new Date(current.updatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '尚未保存';
+  $('saved-at').textContent = current ? '已保存 · ' + new Date(current.updatedAt).toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }) : '尚未保存';
   $('source-record').hidden = !current?.source;
   if (current?.source) {
     const s = current.source, o = s.original;
@@ -145,7 +145,7 @@ async function loadCases(append = false) {
   for (const item of result.cases) {
     const entry = document.createElement('div'); entry.className = 'ml-case-entry';
     const button = document.createElement('button'); button.className = 'ml-case-card'; button.type = 'button'; button.dataset.case = item.id;
-    button.innerHTML = `<strong>${escape(item.name)}</strong><span class="ml-category-badge">${escape(item.categoryName || '未分类')}</span><p class="ml-case-pillars">${item.pillars.map(escape).join(' · ')}</p><p>${item.birth.calendar === 'lunar' ? '农历' : '公历'} ${item.birth.year}-${item.birth.leapMonth ? '闰' : ''}${item.birth.month}-${item.birth.day} · ${item.birth.gender === 1 ? '男' : '女'}</p><p class="ml-muted">标签：${escape(item.tags.join(' / ')) || '无'}</p><p class="ml-muted">${escape(item.notePreview)}</p><small>更新于 ${escape(new Date(item.updatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }))}</small>`;
+    button.innerHTML = `<strong>${escape(item.name)}</strong><span class="ml-category-badge">${escape(item.categoryName || '未分类')}</span><p class="ml-case-pillars">${item.pillars.map(escape).join(' · ')}</p><p>${item.birth.calendar === 'lunar' ? '农历' : '公历'} ${item.birth.year}-${item.birth.leapMonth ? '闰' : ''}${item.birth.month}-${item.birth.day} · ${item.birth.gender === 1 ? '男' : '女'}</p><p class="ml-muted">标签：${escape(item.tags.join(' / ')) || '无'}</p><p class="ml-muted">${escape(item.notePreview)}</p><small>更新于 ${escape(new Date(item.updatedAt).toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }))}</small>`;
     entry.append(button);
     if (can('cases:classify') && can('categories:view')) {
       const check = document.createElement('input'); check.type = 'checkbox'; check.dataset.selectCase = item.id;

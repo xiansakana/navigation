@@ -1,5 +1,5 @@
 (() => {
-  const $ = id => document.getElementById(id), date = value => value ? new Date(value * 1000).toLocaleString() : '—';
+  const $ = id => document.getElementById(id), date = value => value ? new Date(value * 1000).toLocaleString('sv-SE') : '—';
   let dirty = false, loading = false, queued = false, latest, offset = 0;
   async function api(path, method = 'GET', body) {
     const response = await fetch('/api/torn-chain/' + path, { method, credentials: 'same-origin', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });

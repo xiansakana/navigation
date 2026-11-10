@@ -92,7 +92,7 @@
     const used = new Set([...state.accounts.map(a => a.currency), ...Object.keys(state.summary.totals)]);
     const html = currencies.filter(c => c !== 'CNY' && (used.has(c) || quotes[c])).map(c => {
       const q = quotes[c];
-      return '<div class="bk-fx-rate"><strong>' + c + ' → CNY</strong><span>' + (q ? '1 ' + c + ' = ' + Number(q.rate.toFixed(6)) + ' CNY' : '暂无可用汇率') + '</span><small>' + (q ? esc(sources[q.source] || q.source) + (q.stale ? ' · 历史缓存' : '') + (q.asOf ? ' · 数据日 ' + esc(q.asOf) : '') + (q.fetchedAt ? ' · 获取于 ' + esc(new Date(q.fetchedAt).toLocaleString('zh-CN',{hour12:false})) : '') : '可更新汇率或填写手动备用值') + '</small></div>';
+      return '<div class="bk-fx-rate"><strong>' + c + ' → CNY</strong><span>' + (q ? '1 ' + c + ' = ' + Number(q.rate.toFixed(6)) + ' CNY' : '暂无可用汇率') + '</span><small>' + (q ? esc(sources[q.source] || q.source) + (q.stale ? ' · 历史缓存' : '') + (q.asOf ? ' · 数据日 ' + esc(q.asOf) : '') + (q.fetchedAt ? ' · 获取于 ' + esc(new Date(q.fetchedAt).toLocaleString('sv-SE')) : '') : '可更新汇率或填写手动备用值') + '</small></div>';
     }).join('');
     for (const id of ['fx-rates','asset-fx-rates']) $(id).innerHTML = html || '<p class="bk-muted">正在获取参考汇率…</p>';
   }

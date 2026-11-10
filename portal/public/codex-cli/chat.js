@@ -67,7 +67,7 @@
       }
       if(job.result)agent.append(markdown(job.result));
       else if(['queued','running'].includes(job.state))agent.append(node('p',job.cancel?'正在停止，保留已有修改…':job.state==='queued'?'已加入队列，等待当前任务完成…':'正在处理，可展开执行记录查看进度。','working-indicator'));
-      const runtime=job.runtime || {},meta=[labels[job.state],runtime.model,runtime.effort,job.commit_sha?'Git '+job.commit_sha.slice(0,12):'',new Date(job.created_at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})].filter(Boolean).join(' · ');
+      const runtime=job.runtime || {},meta=[labels[job.state],runtime.model,runtime.effort,job.commit_sha?'Git '+job.commit_sha.slice(0,12):'',new Date(job.created_at).toLocaleString('sv-SE', { timeZone:'Asia/Shanghai' })].filter(Boolean).join(' · ');
       agent.append(node('p',meta,'message-meta'));rows.push(agent);
     }
     if(!rows.length){const empty=node('div',undefined,'chat-empty');empty.append(node('span','⌘','empty-icon'),node('h3','准备就绪'),node('p','发送问题、讨论方案，或描述你希望 Codex 完成的项目任务。'));rows.push(empty);}

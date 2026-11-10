@@ -25,7 +25,7 @@
     $('ops-start').disabled=state.state.running||state.state.busy;$('ops-stop').disabled=!state.state.running;
     const s=state.state;$('ops-status').textContent=(s.running?'运行中':'已停止')+' · 完成 '+s.rounds+' 轮'+(s.error?' · '+s.error:'')+(s.notificationError?' · '+s.notificationError:'');
     $('ops-rows').replaceChildren();for(const r of s.rows.filter(r=>r.kind===tab))text('p',(r.label||r.watcherId)+' · '+(r.error||r.companyName+' · 命中 '+r.matches+' 项'+(tab==='training'?' · '+r.rating+'★ · Trains: '+r.trains+' / 20':'')),$('ops-rows'));
-    $('ops-history').replaceChildren();for(const r of state.history.filter(r=>r.kind===tab)){const e=text('article',new Date(r.detectedAt*1000).toLocaleString()+' · '+r.watcherLabel+' · '+r.message,$('ops-history'));e.style.whiteSpace='pre-wrap';const a=text('a','查看公司',e);a.href=r.link;a.target='_blank';a.rel='noopener noreferrer';}if(!$('ops-history').childNodes.length)text('p','暂无提醒记录',$('ops-history'));
+    $('ops-history').replaceChildren();for(const r of state.history.filter(r=>r.kind===tab)){const e=text('article',new Date(r.detectedAt*1000).toLocaleString('sv-SE')+' · '+r.watcherLabel+' · '+r.message,$('ops-history'));e.style.whiteSpace='pre-wrap';const a=text('a','查看公司',e);a.href=r.link;a.target='_blank';a.rel='noopener noreferrer';}if(!$('ops-history').childNodes.length)text('p','暂无提醒记录',$('ops-history'));
   }
   async function load(){if(loading)return;loading=true;try{state=await api('state');render();}catch(e){$('ops-status').textContent=e.message;}finally{loading=false;}}
   $('company-tabs').addEventListener('click',e=>{const b=e.target.closest('[data-company-tab]');if(b){location.hash=b.dataset.companyTab;select(b.dataset.companyTab);}});

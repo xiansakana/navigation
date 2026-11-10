@@ -46,7 +46,7 @@
       const runtimeOk=!state.permissions.viewRuntime || await runtime();
       $('usage-panel').hidden=!state.permissions.viewUsage;
       if(state.permissions.viewUsage){try{$('usage').textContent=(await api('usage')).text;}catch(error){$('usage').textContent=error.message;}}
-      $('updated').textContent='最近更新 · '+new Date().toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})+'（北京时间）';
+      $('updated').textContent='最近更新 · '+new Date().toLocaleString('sv-SE', { timeZone:'Asia/Shanghai' })+'（北京时间）';
       if(runtimeOk)message('已连接服务器。模型与强度选项来自当前账号。');
     }catch(error){message(error.message,'error');}
     finally{loading=false;$('refresh').disabled=false;}
