@@ -118,3 +118,11 @@
 .bk-asset-chart-tabs button:focus-visible { outline:2px solid var(--bk-gold); outline-offset:3px; }
 .bk-return-summary { grid-template-columns:repeat(4,minmax(0,1fr)); }
 @media(max-width:760px) { .bk-return-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }.bk-asset-chart-tabs button { padding:10px 12px; } }
+
+.bk-entry-swipe { position:relative; overflow:hidden; touch-action:pan-y; }
+.bk-entry-swipe .bk-entry { position:relative; transition:transform .16s ease; }
+.bk-copy-action { position:absolute; inset-inline-start:0; top:50%; width:76px; transform:translateY(-50%); visibility:hidden; }
+.bk-copy-revealed .bk-copy-action { visibility:visible; }
+.bk-copy-revealed .bk-entry { transform:translateX(84px); }
+@media (prefers-reduced-motion:reduce) { .bk-entry-swipe .bk-entry { transition:none; } }
+.bk-entry-swipe:not(:last-child) { border-bottom:1px solid var(--border); }
