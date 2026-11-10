@@ -66,7 +66,8 @@
       const balance=can('accounts:view') && $('account').value && e.balanceCurrency?'<small class="bk-ledger-balance">本笔后余额 '+(e.balanceAfter==null?'待核对':(e.balanceEstimated?'≈ ':'')+m(e.balanceAfter,e.balanceCurrency))+'</small>':'';
       const copyable = can('entries:edit') && e.type !== '余额调整';
       const copyAction = copyable ? '<button type="button" class="btn ghost bk-copy-action" data-copy-entry="'+esc(e.id)+'">复制</button>' : '';
-      return heading + '<div class="bk-entry-swipe">' + copyAction + '<button class="bk-entry" data-entry="' + e.id + '"><span class="bk-badge">' + (icons[e.type] || state.categoryTree?.find(c=>c.kind===(e.type==='收入'?'income':'expense') && c.name===(e.subcategory||e.category) && (e.subcategory?state.categoryTree.some(p=>p.id===c.parentId && p.name===e.category):!c.parentId))?.icon || icons[e.category] || '◈') + '</span><span class="bk-entry-main"><strong>' + esc(title) + '</strong><p>' + esc(subtitle) + '</p>' + (e.location ? '<p>⌖ ' + esc(e.location) + '</p>' : '') + '</span><span class="bk-entry-amount ' + (expense?'bk-expense':transfer?'bk-transfer':'bk-income') + '">' + m(expense?-e.amount:e.amount,e.currency) + (e.currency!=='CNY'?'<small>'+ (e.fxMissing?'CNY 等效待获取': '≈ '+m(expense?-e.cnyAmount:e.cnyAmount,'CNY')+' · 汇率日 '+esc(e.rateDate))+'</small>':'') + '<small>' + esc(e.type) + (e.historical?' · 历史':'') + '</small>' + balance + '</span></button></div>';
+      const editActions = can('entries:edit') ? '<div class="bk-swipe-edit-actions"><button type="button" class="btn ghost" data-swipe-action="edit">编辑</button><button type="button" class="btn ghost bk-detail-delete" data-swipe-action="delete">删除</button></div>' : '';
+      return heading + '<div class="bk-entry-swipe">' + copyAction + editActions + '<button class="bk-entry" data-entry="' + e.id + '"><span class="bk-badge">' + (icons[e.type] || state.categoryTree?.find(c=>c.kind===(e.type==='收入'?'income':'expense') && c.name===(e.subcategory||e.category) && (e.subcategory?state.categoryTree.some(p=>p.id===c.parentId && p.name===e.category):!c.parentId))?.icon || icons[e.category] || '◈') + '</span><span class="bk-entry-main"><strong>' + esc(title) + '</strong><p>' + esc(subtitle) + '</p>' + (e.location ? '<p>⌖ ' + esc(e.location) + '</p>' : '') + '</span><span class="bk-entry-amount ' + (expense?'bk-expense':transfer?'bk-transfer':'bk-income') + '">' + m(expense?-e.amount:e.amount,e.currency) + (e.currency!=='CNY'?'<small>'+ (e.fxMissing?'CNY 等效待获取': '≈ '+m(expense?-e.cnyAmount:e.cnyAmount,'CNY')+' · 汇率日 '+esc(e.rateDate))+'</small>':'') + '<small>' + esc(e.type) + (e.historical?' · 历史':'') + '</small>' + balance + '</span></button></div>';
     }).join('') || '<div class="bk-empty">还没有符合条件的账单<br>记下第一笔，或从 iCost 导入历史记录。</div>');
     $('more').classList.toggle('hidden', state.entries.length >= state.count);
     $('mini-categories').innerHTML = categoriesHtml(state.equivalentSummary?.categories || state.summary.categories,6,!!state.equivalentSummary); $('categories').innerHTML = categoriesHtml(statistics.categories,1000,true);
@@ -137,10 +138,12 @@
   }
   const analysis = window.createBookkeepingAnalysis({ $, esc, m, money, can, load, tab, getState:()=>state, periods });
   const management = window.createBookkeepingManagement({ $, esc, can, api, write, load, field, select, options, getState:()=>state, openEditor });
-  const details = window.createBookkeepingDetails({ $, esc, m, can, api, getState:()=>state, tab, openEditor, copyEntry, remove:async item=>{
+  const details = window.createBookkeepingDetails({ $, esc, m, can, api, getState:()=>state, tab, openEditor, copyEntry, remove:removeEntry });
+  async function removeEntry(item) {
+    if(!item || !can('entries:edit'))return false;
     if(!window.confirm('删除这条账单？新账单会撤销对账户余额的影响。'))return false;
     await api('/entries/'+item.id,{method:'DELETE'});await load();return true;
-  } });
+  }
   async function load(append = false) {
     const seq = ++loadSequence; $('error').classList.add('hidden');
     try {
@@ -175,7 +178,7 @@
   };
   function copyEntry(entry) {
     if (!entry || !can('entries:edit') || entry.type==='余额调整') return;
-    const fields=['type','amount','currency','category','subcategory','accountId','toAccountId','toAmount','fee','book','tags','location','refund','discount','note'];
+    const fields=['type','amount','currency','category','subcategory','accountId','toAccountId','toAmount','fee','book','tags','refund','discount','note'];
     const draft=Object.fromEntries(fields.map(key=>[key,entry[key]]));
     openEditor('entry',draft,null,true);
   }
@@ -207,7 +210,7 @@
     if (mode==='entry') {
       const form = $('editor-form'), t = form.elements.type; form.elements.amount.inputMode='decimal';
       locationCapture=window.createBookkeepingLocation({input:form.elements.location,status:$('location-status'),retry:$('location-retry'),active:()=>editing?.mode==='entry' && $('editor').open && form.elements.location===$('editor-form').elements.location,enabled:!readonly && can('location:edit')});
-      if(!item.id && !isCopy)void locationCapture.start();
+      if(!item.id)void locationCapture.start();
       management.bindCategoryPicker(form,item);
       const update = () => { const transfer = transferTypes.includes(t.value); ['toAccountId','toAmount'].forEach(n=>form.elements[n].closest('label').classList.toggle('hidden',!transfer)); if (!transfer) { form.elements.toAccountId.value=''; form.elements.toAmount.value=''; } applyDetailScope(); };
       function applyDetailScope(){
@@ -252,15 +255,15 @@
   document.querySelector('.bk-tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)tab(b.dataset.tab);});
   const entryList=$('entry-list');
   let swipeStart=null, revealedRow=null, suppressSwipeClickUntil=0;
-  function revealCopy(row) {
-    revealedRow?.classList.remove('bk-copy-revealed');
+  function revealSwipe(row, direction) {
+    revealedRow?.classList.remove('bk-copy-revealed','bk-edit-revealed');
     revealedRow=row;
-    row?.classList.add('bk-copy-revealed');
+    row?.classList.add(direction==='copy'?'bk-copy-revealed':'bk-edit-revealed');
   }
   entryList.addEventListener('pointerdown',event=>{
     swipeStart=null;
     const row=event.target.closest('.bk-entry-swipe');
-    if(event.pointerType!=='touch' || !row?.querySelector('[data-copy-entry]') || !event.target.closest('[data-entry]'))return;
+    if(event.pointerType!=='touch' || !row?.querySelector('[data-swipe-action]') || !event.target.closest('[data-entry]'))return;
     swipeStart={row,x:event.clientX,y:event.clientY,id:event.pointerId};
   });
   entryList.addEventListener('pointercancel',()=>{swipeStart=null;});
@@ -270,15 +273,30 @@
     swipeStart=null;
     const dx=event.clientX-x;
     if(Math.abs(dx)<45 || Math.abs(dx)<Math.abs(event.clientY-y)*1.5)return;
-    revealCopy(dx>0?row:null);
+    revealSwipe(dx<0 || row.querySelector('[data-copy-entry]')?row:null,dx>0?'copy':'edit');
     suppressSwipeClickUntil=performance.now()+350;
   });
-  entryList.addEventListener('click',event=>{
+  entryList.addEventListener('click',async event=>{
+    const action=event.target.closest('[data-swipe-action]');
+    if(action){
+      const id=action.closest('.bk-entry-swipe').querySelector('[data-entry]').dataset.entry;
+      const item=state.entries.find(e=>e.id===id);
+      revealSwipe(null);
+      if(!item || !can('entries:edit'))return;
+      if(action.dataset.swipeAction==='edit')openEditor('entry',item);
+      else {
+        try {await removeEntry(item);} catch(error) {
+          $('error').textContent=error.message;
+          $('error').classList.remove('hidden');
+        }
+      }
+      return;
+    }
     const copy=event.target.closest('[data-copy-entry]');
-    if(copy){revealCopy(null);copyEntry(state.entries.find(e=>e.id===copy.dataset.copyEntry));return;}
+    if(copy){revealSwipe(null);copyEntry(state.entries.find(e=>e.id===copy.dataset.copyEntry));return;}
     const button=event.target.closest('[data-entry]');
     if(!button || performance.now()<suppressSwipeClickUntil)return;
-    if(revealedRow?.isConnected){revealCopy(null);return;}
+    if(revealedRow?.isConnected){revealSwipe(null);return;}
     details.open(state.entries.find(e=>e.id===button.dataset.entry));
   });
   $('account-groups').addEventListener('click',e=>{
