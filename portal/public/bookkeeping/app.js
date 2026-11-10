@@ -51,6 +51,8 @@
     $('count').textContent = state.count + ' 笔';
     let lastDay = '';
     const ledgerNote=can('accounts:view') && $('account').value && state.entries.some(e=>e.balanceEstimated)?(state.accounts.find(a=>a.id===$('account').value)?.investment?'<p class="bk-muted bk-ledger-note">本页展示记账流水；证券账户总资产包含持仓估值，不由这些流水反推历史余额。现金和持仓详情请打开资产页的证券明细。</p>':'<p class="bk-muted bk-ledger-note">历史余额按当前余额、账单及余额调整反推；截图核对的调整余额按原币显示，其他反推或跨币种估算值标注 ≈。</p>'):'';
+    const openEntryId=revealedRow?.querySelector('[data-entry]')?.dataset.entry;
+    const openDirection=revealedRow?.classList.contains('bk-copy-revealed')?'copy':'edit';
     $('entry-list').innerHTML = ledgerNote + (state.entries.map(e => {
       const day = e.date.slice(0,10), title = [e.category,e.subcategory].filter(Boolean).join(' · ');
       let heading = '';
@@ -69,6 +71,8 @@
       const editActions = can('entries:edit') ? '<div class="bk-swipe-edit-actions"><button type="button" class="btn ghost" data-swipe-action="edit">编辑</button><button type="button" class="btn ghost bk-detail-delete" data-swipe-action="delete">删除</button></div>' : '';
       return heading + '<div class="bk-entry-swipe">' + copyAction + editActions + '<button class="bk-entry" data-entry="' + e.id + '"><span class="bk-badge">' + (icons[e.type] || state.categoryTree?.find(c=>c.kind===(e.type==='收入'?'income':'expense') && c.name===(e.subcategory||e.category) && (e.subcategory?state.categoryTree.some(p=>p.id===c.parentId && p.name===e.category):!c.parentId))?.icon || icons[e.category] || '◈') + '</span><span class="bk-entry-main"><strong>' + esc(title) + '</strong><p>' + esc(subtitle) + '</p>' + (e.location ? '<p>⌖ ' + esc(e.location) + '</p>' : '') + '</span><span class="bk-entry-amount ' + (expense?'bk-expense':transfer?'bk-transfer':'bk-income') + '">' + m(expense?-e.amount:e.amount,e.currency) + (e.currency!=='CNY'?'<small>'+ (e.fxMissing?'CNY 等效待获取': '≈ '+m(expense?-e.cnyAmount:e.cnyAmount,'CNY')+' · 汇率日 '+esc(e.rateDate))+'</small>':'') + '<small>' + esc(e.type) + (e.historical?' · 历史':'') + '</small>' + balance + '</span></button></div>';
     }).join('') || '<div class="bk-empty">还没有符合条件的账单<br>记下第一笔，或从 iCost 导入历史记录。</div>');
+    const openEntry=openEntryId && [...$('entry-list').querySelectorAll('[data-entry]')].find(button=>button.dataset.entry===openEntryId);
+    revealSwipe(openEntry ? openEntry.closest('.bk-entry-swipe') : null,openDirection);
     $('more').classList.toggle('hidden', state.entries.length >= state.count);
     $('mini-categories').innerHTML = categoriesHtml(state.equivalentSummary?.categories || state.summary.categories,6,!!state.equivalentSummary); $('categories').innerHTML = categoriesHtml(statistics.categories,1000,true);
     $('income-categories').innerHTML=state.analysis?.billing.missingCurrencies.length?'<p class="bk-empty">缺少历史汇率，分类收入待折算。</p>':categoriesHtml(statistics.incomeCategories || [],1000,true,'income');

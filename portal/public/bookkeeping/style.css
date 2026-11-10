@@ -131,3 +131,5 @@
 .bk-swipe-edit-actions .btn { width:64px; padding-inline:4px; }
 .bk-edit-revealed .bk-swipe-edit-actions { visibility:visible; }
 .bk-edit-revealed .bk-entry { transform:translateX(-144px); }
+
+.bk-copy-revealed .bk-copy-action, .bk-edit-revealed .bk-swipe-edit-actions { z-index:1; }
