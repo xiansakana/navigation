@@ -56,6 +56,12 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;');
 }
 
+function formatDateTime(value, fallback = '—') {
+  if (value == null || value === '') return fallback;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleString('sv-SE') : fallback;
+}
+
 function fmtCny(n) {
   if (!Number.isFinite(Number(n))) return '—';
   return `¥${Number(n).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`;
@@ -648,7 +654,7 @@ function openPlanFillModal(tierId) {
     for (const quote of data.legs || []) {
       const row = rows.find((item) => item.dataset.fillLeg === quote.legId);
       if (!row || row.disabled) continue;
-      row.querySelector('[data-quote-info]').textContent = quote.error || `${quote.warning || ''}${quote.oneContractCost != null ? ` 一张成本 ${fmtUsd(quote.oneContractCost)}（报价 × 100，手续费另计）。` : ''}来源 ${quote.source}；报价时间 ${quote.asOf || '接口未提供'}；获取时间 ${quote.fetchedAt}。休市或延迟报价仅供估算；数量按剩余预算计算，不含后续费用。`;
+      row.querySelector('[data-quote-info]').textContent = quote.error || `${quote.warning || ''}${quote.oneContractCost != null ? ` 一张成本 ${fmtUsd(quote.oneContractCost)}（报价 × 100，手续费另计）。` : ''}来源 ${quote.source}；报价时间 ${formatDateTime(quote.asOf, '接口未提供')}；获取时间 ${formatDateTime(quote.fetchedAt)}。休市或延迟报价仅供估算；数量按剩余预算计算，不含后续费用。`;
       const price = row.querySelector('[data-price]');
       if (!quote.error && !price.dataset.dirty) price.value = quote.price;
       if (!quote.error) recalcQuantity(row);
@@ -793,17 +799,29 @@ function renderTiers() {
 
 function renderLots() {
   const lots = state.evaluation?.lots || state.lots || [];
-  $('#lot-table tbody').innerHTML = lots.length ? lots.map((lot) => `
+  $('#lot-table tbody').innerHTML = lots.length ? lots.map((lot) => {
+    const qty = Number(lot.qty);
+    const cost = Number(lot.cost);
+    const mark = Number(lot.mark);
+    const hasQty = Number.isFinite(qty) && qty > 0;
+    const hasPnl = hasQty && Number.isFinite(cost) && cost > 0 && lot.mark != null && Number.isFinite(mark) && mark > 0;
+    const pnl = (mark - cost) * qty * (lot.type === 'call' ? 100 : 1);
+    const pnlText = `${pnl > 0 ? '+' : ''}${lot.currency === 'CNY' ? fmtCny(pnl) : fmtUsd(pnl)} (${fmtPct((mark / cost - 1) * 100)})`;
+    const unit = lot.type === 'call' ? '张' : /^\d{6}$/.test(lot.symbol || '') ? '份' : '股';
+    return `
     <tr>
       <td>${escapeHtml(lot.symbol || '')}</td>
       <td>${lot.type === 'call' ? 'Call' : '正股'}</td>
+      <td>${hasQty ? maskMoney(`${qty.toLocaleString('zh-CN', { maximumFractionDigits: 8 })} ${unit}`) : '—'}</td>
       <td>${maskMoney((lot.currency === 'CNY' ? '¥' : '$') + fmtPrice(lot.cost))}</td>
       <td>${lot.mark != null ? maskMoney((lot.currency === 'CNY' ? '¥' : '$') + fmtPrice(lot.mark)) : '—'}</td>
+      <td class="${hasPnl && canViewLotMoney() ? pctClass(pnl) : ''}">${hasPnl ? maskMoney(pnlText) : '—'}</td>
       <td>${lot.multiple != null ? lot.multiple.toFixed(2) + '×' : '—'}</td>
       <td>${(lot.alerts || []).map((a) => a.action).join('；') || '—'}</td>
       <td>${can('lots-edit', 'edit') ? `<button class="btn link danger" data-del-lot="${lot.id}">删除</button>` : ''}</td>
     </tr>
-  `).join('') : '<tr><td colspan="7" class="hint">还没有登记抄底仓位</td></tr>';
+  `;
+  }).join('') : '<tr><td colspan="9" class="hint">还没有登记抄底仓位</td></tr>';
 }
 
 function renderActions() {
@@ -813,7 +831,7 @@ function renderActions() {
   if (actionPage > pageCount) actionPage = pageCount;
   $('#action-list').innerHTML = items.length ? items.map((a) => `
     <div class="sm-action">
-      <div class="meta">${escapeHtml(a.ts)} · ${escapeHtml(a.source)} · ${escapeHtml(a.type)}${a.tier ? ' · ' + escapeHtml(a.tier) : ''}</div>
+      <div class="meta">${escapeHtml(formatDateTime(a.ts))} · ${escapeHtml(a.source)} · ${escapeHtml(a.type)}${a.tier ? ' · ' + escapeHtml(a.tier) : ''}</div>
       <div>${escapeHtml(a.message)}</div>
       ${a.payload?.sentiment ? `<div class="hint">触发时情绪 ${escapeHtml(sentimentReading(a.payload.sentiment))} · ${escapeHtml(a.payload.sentiment.asOf)} · CNN 公开归档${a.payload.sentiment.stale ? ' · 当时为旧值' : ''}</div>` : ''}
     </div>
