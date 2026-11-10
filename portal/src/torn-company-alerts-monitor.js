@@ -18,6 +18,48 @@ export function companyRules(input = {}, previous = COMPANY_RULES) {
   }
   return result;
 }
+function knownWage(employee) {
+  return Number.isSafeInteger(employee.wage) && employee.wage >= 0 ? employee.wage : null;
+}
+
+function trackSalaryReturns(saved, slot, fresh, data, now) {
+  const pendingKey = slot + ':pending-wages';
+  const pending = saved.runtime[pendingKey] || {};
+  const employees = new Map(data.employees.map(employee => [employee.id, employee]));
+  const returned = [];
+  for (const [id, baseline] of Object.entries(pending)) {
+    const employee = employees.get(Number(id));
+    if (!employee || baseline.companyId !== data.profile.id ||
+        (baseline.joinedAt != null && employee.joined_at != null && baseline.joinedAt !== employee.joined_at)) {
+      delete pending[id];
+      continue;
+    }
+    const activeAt = employee.last_action?.timestamp;
+    if (!Number.isSafeInteger(activeAt) || activeAt <= baseline.lastActionAt ||
+        activeAt < baseline.detectedAt || activeAt > now) continue;
+
+    delete pending[id];
+    const wage = knownWage(employee);
+    if (wage === null || wage === baseline.wage) continue;
+    returned.push({
+      companyId: baseline.companyId, companyName: data.profile.name || baseline.companyName,
+      employeeId: employee.id, name: employee.name, link: baseline.link,
+      kind: baseline.kind, watcherId: baseline.watcherId, watcherLabel: baseline.watcherLabel,
+      key: baseline.key + ':returned',
+      detectedAt: now,
+      lastActionAt: activeAt,
+      previousWage: baseline.wage,
+      wage,
+      message: `员工 ${employee.name} [${id}] 已恢复活动，工资从 $${baseline.wage.toLocaleString('en-US')} 变为 $${wage.toLocaleString('en-US')}，请核对是否需要恢复原工资。\nhttps://www.torn.com/profiles.php?XID=${id}`
+    });
+  }
+  for (const row of fresh) {
+    if (row.wage !== null) pending[row.employeeId] = row;
+  }
+  saved.runtime[pendingKey] = pending;
+  return returned;
+}
+
 export function companySignals(kind, rule, data, now) {
   const p = data.profile;
   if (!Number.isSafeInteger(p?.id) || p.id <= 0) throw new Error('API 未返回有效公司资料');
@@ -27,7 +69,7 @@ export function companySignals(kind, rule, data, now) {
     return data.employees.flatMap(e => {
       const ts = e.last_action?.timestamp;
       if (!Number.isSafeInteger(e.id) || !Number.isSafeInteger(ts) || ts <= 0 || ts > now) return [];
-      return now - ts > rule.days * 86400 ? [{ ...base, key: 'salary:' + p.id + ':' + e.id + ':' + ts, employeeId: e.id, name: e.name, lastActionAt: ts, offlineDays: (now - ts) / 86400, message: `员工 ${e.name} [${e.id}] 已离线 ${((now-ts)/86400).toFixed(1)} 天（阈值 ${rule.days} 天），请检查工资。\nhttps://www.torn.com/profiles.php?XID=${e.id}` }] : [];
+      return now - ts > rule.days * 86400 ? [{ ...base, key: 'salary:' + p.id + ':' + e.id + ':' + ts, employeeId: e.id, name: e.name, wage: knownWage(e), joinedAt: e.joined_at, lastActionAt: ts, offlineDays: (now - ts) / 86400, message: `员工 ${e.name} [${e.id}] 已离线 ${((now-ts)/86400).toFixed(1)} 天（阈值 ${rule.days} 天），请检查工资。\nhttps://www.torn.com/profiles.php?XID=${e.id}` }] : [];
     });
   }
   if (kind === 'training') {
@@ -63,11 +105,12 @@ export function createCompanyAlertsStore(db) {
       n[kind] = watcherId ? { ...old, watchers: { ...old.watchers, [watcherId]: settings } } : { ...settings, watchers: old.watchers || {} };
       db.prepare('UPDATE torn_company_alerts SET notify=? WHERE user_id=?').run(JSON.stringify(n), uid);
     },
-    commit: db.transaction((uid, slot, signals, kind, watcher, now) => {
+    commit: db.transaction((uid, slot, signals, kind, watcher, now, data) => {
       const saved = get(uid), old = new Set(saved.runtime[slot] || []);
       const fresh = signals.filter(r => !old.has(r.key)).map(r => ({ ...r, kind, watcherId: watcher.id, watcherLabel: watcher.label, detectedAt: now }));
       // Training and salary keys persist across temporary recovery, restarts and setting changes.
       saved.runtime[slot] = kind === 'stock' ? signals.map(r => r.key) : [...new Set([...old, ...signals.map(r => r.key)])].slice(-10000);
+      if (kind === 'salary' && data) fresh.unshift(...trackSalaryReturns(saved, slot, fresh, data, now));
       saved.history.push(...fresh); db.prepare('UPDATE torn_company_alerts SET runtime=?,history=? WHERE user_id=?').run(JSON.stringify(saved.runtime), JSON.stringify(saved.history.slice(-200)), uid);
       return fresh;
     }).immediate
@@ -105,7 +148,7 @@ export class CompanyAlertsMonitor extends ChainMonitor {
             if (kind === 'salary') data.employees = (await request('company/employees')).employees;
             if (kind === 'stock') data.stock = (await request('company/stock')).stock;
             check(); const signals = companySignals(kind, rule, data, this.now());
-            const fresh = this.store.commit(this.uid, watcher.id + ':' + kind, signals, kind, watcher, this.now());
+            const fresh = this.store.commit(this.uid, watcher.id + ':' + kind, signals, kind, watcher, this.now(), data);
             for (const row of fresh) { check(); try { await this.notify(row); } catch { this.state.notificationError = '提醒已记录，投递失败；请检查通知管理（不自动重发）'; } }
             this.state.rows.push({ kind, watcherId: watcher.id, label: watcher.label, companyName: profile.name, matches: signals.length, checkedAt: this.now(), ...(kind === 'training' ? { trains: profile.trains, rating: profile.rating } : {}) });
           } catch (e) { if (signal.aborted) throw e; this.state.rows.push({ kind, watcherId: watcher.id, error: this.safeError(e) }); }

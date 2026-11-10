@@ -60,3 +60,33 @@ test('notification destinations are isolated by user, event and watcher while le
  store.saveNotify('a','salary',setting('444444'));assert.equal(store.getNotify('a','salary','w1').targets[0].userId,'222222');assert.equal(createCompanyAlertsStore(db).getNotify('a','salary','w2').targets[0].userId,'333333');
  }finally{db.close();}
 });
+
+test('salary recovery uses the persisted offline wage and only reminds once when activity resumes at a changed wage', () => {
+  const db = new Database(':memory:');
+  const watcher = { id: 'w', label: 'Director' };
+  const oldAction = now - 4 * 86400;
+  let store = createCompanyAlertsStore(db);
+  const scan = (at, employees, company = profile) => {
+    const data = { profile: company, employees };
+    return store.commit('a', 'w:salary', companySignals('salary', { days: 3 }, data, at), 'salary', watcher, at, data);
+  };
+  const employee = (id, wage, timestamp = oldAction, joined_at = oldAction - 1) =>
+    ({ id, name: 'Employee ' + id, wage, last_action: { timestamp }, joined_at });
+  try {
+    assert.equal(scan(now, [employee(1, 100), employee(2, 100), employee(3, undefined), employee(4, 100), employee(5, 100)]).length, 5);
+    const reduced = [employee(1, 0), employee(2, 100), employee(3, 0), employee(4, 200), employee(5, 0)];
+    assert.deepEqual(scan(now + 60, reduced), []);
+    store = createCompanyAlertsStore(db);
+    const active = reduced.map(e => employee(e.id, e.wage, now + 90, e.id === 5 ? now + 90 : e.joined_at));
+    const rows = scan(now + 120, active);
+    assert.deepEqual(rows.map(row => row.employeeId), [1, 4]);
+    assert.equal(rows[1].wage, 200);
+    assert.equal(rows[0].previousWage, 100);
+    assert.equal(rows[0].wage, 0);
+    assert.equal(rows[0].watcherId, 'w');
+    assert.match(rows[0].message, /恢复原工资/);
+    assert.deepEqual(scan(now + 180, active), []);
+  } finally {
+    db.close();
+  }
+});
