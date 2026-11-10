@@ -94,7 +94,7 @@ export function createCodexStore(db, { formatReply = message => [String(message)
         if (!job) return null;
         db.prepare("UPDATE qq_codex_jobs SET state='running',heartbeat=? WHERE id=? AND state='queued'").run(Date.now(), job.id);
         return job;
-      })();
+      }).immediate();
     },
     active(uid, group = '') { return db.prepare("SELECT id,project,state,created_at,commit_sha,runtime_json FROM qq_codex_jobs WHERE user_id=? AND group_id=? AND origin='qq' ORDER BY state IN ('queued','running') DESC,created_at DESC,rowid DESC LIMIT 5").all(uid, group); },
     latestResult(uid, group = '') { return db.prepare("SELECT result FROM qq_codex_jobs WHERE user_id=? AND group_id=? AND origin='qq' AND result<>'' ORDER BY created_at DESC,rowid DESC LIMIT 1").get(uid, group)?.result; },

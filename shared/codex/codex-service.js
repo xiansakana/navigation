@@ -7,6 +7,16 @@ import { isUsageQuery } from './codex-usage.js';
 import { readCodexCatalog, resolveRuntime, validateRuntime } from './codex-control.js';
 import { attachmentSegments, validateAttachments, mergeAttachments, prepareCodexMedia, sendCodexArtifact } from './codex-media.js';
 
+const databaseBusy = error => /^SQLITE_BUSY(?:_|$)/.test(error?.code || '');
+async function persistResult(store,job,result) {
+  const deadline=Date.now()+30000;
+  for(;;){
+    try{return store.finish(job,result);}
+    catch(error){if(!databaseBusy(error)||Date.now()>=deadline)throw error;}
+    await new Promise(resolve=>setTimeout(resolve,250));
+  }
+}
+
 export function codexEvent(event) {
   if (event?.post_type === 'notice' && event.notice_type === 'group_upload' && /^\d{5,20}$/.test(String(event.group_id || '')) && /^\d{5,20}$/.test(String(event.user_id || '')) && event.file?.id && String(event.user_id) !== String(event.self_id)) {
     return {qqId:String(event.user_id),groupId:String(event.group_id),text:'',requiresArm:true,sentAt:typeof event.time==='number'?event.time*1000:0,attachments:attachmentSegments([{type:'file',data:{...event.file,file_id:event.file.id}}]),key:[event.self_id,'group-upload',event.group_id,event.user_id,String(event.file.id).slice(0,8192)].join(':')};
@@ -180,7 +190,7 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
   async function tick() {
     if (!executeJobs || busy || stopped || !settings().enabled) return;
     busy = true;
-    let job, session = '', heartbeat;
+    let job, session = '', heartbeat, heartbeatFailure='', busySince=0;
     try {
       const s = storage(); job = s.claim({includeQQ:!!getConfig().channels?.qq?.enabled});
       if(!job){
@@ -192,18 +202,36 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
       if (!user || user.userId !== job.user_id || !user.projects?.includes(job.project) || job.group_id && !s.settings(job.user_id).groups.includes(job.group_id)) throw Object.assign(new Error('账号或项目授权已撤销'),{code:'CODEX_AUTH_REVOKED'});
       controller = new AbortController();
       heartbeat = setInterval(() => {
+        if(controller.signal.aborted)return;
         try {
           const u = jobUser(job);
-          if (!s.touch(job.id) || s.cancelled(job.id) || !settings().enabled || !u || u.userId !== job.user_id || !u.projects?.includes(job.project) || job.group_id && !s.settings(job.user_id).groups.includes(job.group_id)) controller?.abort();
-        } catch { controller?.abort(); }
+          if(s.cancelled(job.id)){log.info?.('[codex] '+job.id+' 主动停止');controller.abort();return;}
+          if(!settings().enabled||!u||u.userId!==job.user_id||!u.projects?.includes(job.project)||job.group_id&&!s.settings(job.user_id).groups.includes(job.group_id)){
+            heartbeatFailure='执行授权已撤销或服务已停用';controller.abort();return;
+          }
+          if(!s.touch(job.id)){heartbeatFailure='任务已失去执行权';controller.abort();return;}
+          busySince=0;
+        } catch(error) {
+          if(databaseBusy(error)){
+            if(!busySince){busySince=Date.now();log.warn?.('[codex] '+job.id+' 心跳数据库繁忙，继续重试');}
+            if(Date.now()-busySince<30000)return;
+            heartbeatFailure='数据库持续繁忙，任务已中断，已有修改保留';
+          }else heartbeatFailure='任务状态检查失败，已有修改保留';
+          controller.abort();
+        }
       }, 1000);
       const media = job.origin==='web' || ['__usage__','__sync__'].includes(job.prompt) ? undefined : await prepareMedia(settings(),job,getConfig().napcat,{signal:controller.signal});
       const sessionId=job.origin==='web' ? s.conversations.get(job.user_id,job.conversation_id)?.session_id : s.session(job.user_id, job.project, job.group_id || '');
       const result = await execute(settings(), job, sessionId, { signal: controller.signal, media, onProgress: event => s.conversations.progress(job,event), onRuntime: value => s.recordRuntime(job,value), onSession: value => { session = value; s.captureSession(job, value); } });
-      s.finish(job, { state: 'succeeded', ...result });
+      clearInterval(heartbeat);
+      await persistResult(s,job,{ state: 'succeeded', ...result });
     } catch (e) {
-      if (job) storage().finish(job, { state: controller?.signal.aborted ? 'cancelled' : 'failed', result: e.message, sessionId: e.sessionId || session, failureKind:e.code==='CODEX_QUOTA_EXHAUSTED'&&e.quotaCanResume?'quota':e.code==='CODEX_AUTH_REVOKED'?'authorization':'' });
-      else log.error('[codex] 队列读取失败');
+      clearInterval(heartbeat);
+      if (job) {
+        if(heartbeatFailure)log.error('[codex] '+job.id+' '+heartbeatFailure);
+        try{await persistResult(storage(),job,{state:controller?.signal.aborted&&!heartbeatFailure?'cancelled':'failed',result:heartbeatFailure||e.message,sessionId:e.sessionId||session,failureKind:e.code==='CODEX_QUOTA_EXHAUSTED'&&e.quotaCanResume?'quota':e.code==='CODEX_AUTH_REVOKED'||heartbeatFailure.startsWith('执行授权')?'authorization':''});}
+        catch{log.error('[codex] '+job.id+' 结果写入失败，任务不会自动重跑');}
+      }else log.error('[codex] 队列读取失败'+(databaseBusy(e)?'：SQLITE_BUSY':''));
     } finally { clearInterval(heartbeat); controller = null; busy = false; }
   }
   function start() {

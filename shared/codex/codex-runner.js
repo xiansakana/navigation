@@ -100,12 +100,12 @@ export async function executeCodex(config, job, sessionId, { signal, media, onSe
     cliStarted = true;
     await command(config.binary || 'codex', args, { cwd: p.directory, input: prompt + replyFormat + mediaPrompt, signal, env,
       timeout: Math.max(60000, Math.min(4 * 3600000, Number(config.timeoutMs) || 2 * 3600000)), onEvent(event) {
-        onProgress(event);
         if(['error','turn.failed'].includes(event.type)&&quotaError(JSON.stringify(event.error || event.message || '')))quotaFailure=true;
         if(['item.started','item.updated','item.completed'].includes(event.type)&&['command_execution','file_change','mcp_tool_call'].includes(event.item?.type))toolStarted=true;
         if (event.type === 'thread.started' && /^[\w-]{1,100}$/.test(event.thread_id || '')) { session = event.thread_id; onSession(session); }
         if (event.type === 'item.completed' && event.item?.type === 'agent_message') result = String(event.item.text || '').slice(-20000);
         if (event.type === 'turn.completed') turnCompleted = true;
+        onProgress(event);
       } });
     if (!turnCompleted || !result) throw new Error('Codex没有返回完整结果，已有修改保留');
     const git = args => runCommand('git', args, { cwd: p.directory, signal });

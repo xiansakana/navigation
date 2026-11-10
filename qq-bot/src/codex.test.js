@@ -173,6 +173,26 @@ test('stop aborts active execution and cancels queued jobs without replaying cha
   } finally {f.close();}
 });
 
+test('temporary SQLite contention during heartbeat and result persistence does not cancel or rerun a task',async()=>{
+  let recovered, runs=0, touches=0, writes=0;
+  const heartbeatRecovered=new Promise(resolve=>{recovered=resolve;});
+  const locked=()=>Object.assign(new Error('database is locked'),{code:'SQLITE_BUSY'});
+  const f=fixture(async(c,j,s,{signal})=>{
+    runs++;
+    await Promise.race([heartbeatRecovered,new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('unexpected cancellation')),{once:true}))]);
+    return {result:'done'};
+  },{log:{warn(){},error(){}}});
+  const touch=f.store.touch.bind(f.store),finish=f.store.finish.bind(f.store);
+  f.store.touch=id=>{if(++touches===1)throw locked();const ok=touch(id);recovered();return ok;};
+  f.store.finish=(job,result)=>{if(++writes===1)throw locked();return finish(job,result);};
+  try{
+    await f.service.receive(event('codex task'));f.service.start();
+    const deadline=setTimeout(recovered,4000);
+    try{await f.service.tick();}finally{clearTimeout(deadline);}
+    assert.equal(f.store.active('u1')[0].state,'succeeded');assert.equal(runs,1);assert.equal(touches,2);assert.equal(writes,2);
+  }finally{f.close();}
+});
+
 test('failed replies remain pending and authorization revocation drops delivery',async()=>{
   const f=fixture();try {
     await f.service.receive(event('codex 帮助'));f.revoke();await f.service.deliver();assert.equal(f.sent.length,0);assert.equal(f.store.pendingReply(),undefined);
