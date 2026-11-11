@@ -90,7 +90,7 @@ test('asset return tab is accessible, retains selection across reloads, masks am
   } finally {f.dom.window.close();}
 });
 
-test('historical trading curves leave missing prices as real gaps and keep zero profits visible',()=>{
+test('historical trading curves connect across missing dates without inventing observations',()=>{
   const f=fixture();
   try{
     f.state.analysis.investmentReturns={note:'snapshot',points:[],period:null,trading:{note:'historical',issues:[],missingSymbols:['AAPL'],pending:1,points:[
@@ -100,7 +100,12 @@ test('historical trading curves leave missing prices as real gaps and keep zero 
       {date:'2026-10-28',currency:'CNY',realized:2,unrealized:null,total:null}
     ]}};
     f.controller.render();f.$('accounts-view').classList.remove('hidden');f.$('asset-tab-returns').click();
-    assert.equal(f.$('asset-overview-charts').querySelector('[data-chart-series=total]').querySelectorAll('polyline').length,2);
+    const total=f.$('asset-overview-charts').querySelector('[data-chart-series=total]');
+    assert.equal(total.querySelectorAll('polyline').length,1);
+    const markers=[...total.querySelectorAll('circle')];
+    assert.deepEqual(markers.map(marker=>marker.querySelector('title').textContent.slice(0,10)),['2026-10-25','2026-10-27']);
+    assert.equal(total.querySelector('polyline').getAttribute('points'),markers.map(marker=>marker.getAttribute('cx')+','+marker.getAttribute('cy')).join(' '));
+    assert.match(f.$('asset-overview-charts').querySelector('[data-trading-series=total]').textContent,/待补齐/);
     assert.match(f.$('asset-overview-charts').textContent,/后台正在补齐/);
     assert.doesNotMatch(f.$('asset-overview-charts').innerHTML,/NaN|Infinity/);
     assert.equal(f.controller.query().investmentHistory,'1');
@@ -132,7 +137,7 @@ test('securities legends toggle independently, retain choices on data reload and
     button('unrealized').click();assert.match(host.querySelector('.bk-trading-history').textContent,/所有折线已隐藏/);
     assert.equal(host.querySelectorAll('.bk-trading-history polyline').length,0);
     button('total').click();assert.equal(host.querySelectorAll('.bk-trading-history [data-chart-series]').length,1);
-    assert.equal(host.querySelector('[data-chart-series=total]').querySelectorAll('polyline').length,2);
+    assert.equal(host.querySelector('[data-chart-series=total]').querySelectorAll('polyline').length,1);
     assert.equal(host.querySelector('.bk-trading-history .bk-chart-legend').textContent,totals);
     assert.equal(f.$('billing-charts').innerHTML,billing);assert.equal(host.querySelector('[data-chart-series=profit]'),null);
     f.state.analysis.investmentReturns.trading.points=[];f.controller.render();

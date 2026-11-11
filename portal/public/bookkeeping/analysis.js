@@ -74,7 +74,11 @@
       if(boundary>=0)svg+='<g data-valuation-boundary><line x1="'+x(boundary)+'" x2="'+x(boundary)+'" y1="'+top+'" y2="'+(height-bottom)+'" stroke="var(--muted)" stroke-dasharray="5 4"/><text x="'+Math.max(left+65,Math.min(width-right-65,x(boundary)))+'" y="'+(top+12)+'" text-anchor="middle">首份快照基准</text></g>';
       for(const line of visibleLines) {
         const segments=[];let segment=[];
-        points.forEach((p,i)=>{if(Number.isFinite(p[line.key]))segment.push(x(i)+','+y(p[line.key]));else if(segment.length){segments.push(segment);segment=[];}});if(segment.length)segments.push(segment);
+        points.forEach((point,index)=>{
+          if(Number.isFinite(point[line.key]))segment.push(x(index)+','+y(point[line.key]));
+          else if(toggle!=='trading' && segment.length){segments.push(segment);segment=[];}
+        });
+        if(segment.length)segments.push(segment);
         svg+='<g data-chart-series="'+line.key+'">'+segments.map(s=>'<polyline points="'+s.join(' ')+'" fill="none" stroke="'+line.color+'" stroke-width="2.5"/>').join('');
         svg+=points.map((p,i)=>{
           if(!Number.isFinite(p[line.key]))return '';
@@ -120,7 +124,7 @@
         if(assetChart==='returns') {
           const trading=analysis.investmentReturns.trading;
           $('asset-overview-note').textContent=trading?(trading.mode==='hybrid'?'证券收益按所选范围期初归零；首份快照之前总收益按已实现净收益统计，未计历史浮盈；之后加入相对首份快照的浮盈变化。':'证券收益以所选范围期初为基准，展示范围内已实现净收益、浮盈变化及总收益；范围前交易仅用于还原成本，缺少期初或当日估值处留空。'):'证券收益按所选日期与账户范围展示。';
-          const history=trading?'<section class="bk-trading-history"><h3>证券收益 · 分段统计</h3>'+ (trading.mode==='hybrid'?'<p class="bk-muted">'+esc(trading.valuationCutover?'浮盈起算基准：'+trading.valuationCutover+' · 此前总收益与净收益重合（未含历史浮盈）':'尚无估值快照 · 总收益与净收益重合（未含历史浮盈）')+'</p>':'')+'<details><summary>计算口径与覆盖范围</summary><p class="bk-muted">'+esc(trading.note)+'</p></details>'+(trading.pending?'<p role="status" class="bk-muted">后台正在补齐 '+trading.pending+' 个证券的历史行情；缺失处留空。</p>':'')+(trading.issues?.length?'<p class="bk-error">'+esc(trading.issues.slice(0,10).join('；'))+(trading.issues.length>10?' 等 '+trading.issues.length+' 项':'')+'</p>':'')+(trading.missingSymbols?.length?'<details><summary>缺失行情、汇率或历史持仓成本：'+trading.missingSymbols.length+' 个证券</summary><p class="bk-muted">'+esc(trading.missingSymbols.join('、'))+'</p></details>':'')+tradingChart(trading.points)+'</section>':'';
+          const history=trading?'<section class="bk-trading-history"><h3>证券收益 · 分段统计</h3>'+ (trading.mode==='hybrid'?'<p class="bk-muted">'+esc(trading.valuationCutover?'浮盈起算基准：'+trading.valuationCutover+' · 此前总收益与净收益重合（未含历史浮盈）':'尚无估值快照 · 总收益与净收益重合（未含历史浮盈）')+'</p>':'')+'<details><summary>计算口径与覆盖范围</summary><p class="bk-muted">'+esc(trading.note)+'</p></details>'+(trading.pending?'<p role="status" class="bk-muted">后台正在补齐 '+trading.pending+' 个证券的历史行情。折线连接已有数据点。</p>':'')+(trading.issues?.length?'<p class="bk-error">'+esc(trading.issues.slice(0,10).join('；'))+(trading.issues.length>10?' 等 '+trading.issues.length+' 项':'')+'</p>':'')+(trading.missingSymbols?.length?'<details><summary>缺失行情、汇率或历史持仓成本：'+trading.missingSymbols.length+' 个证券</summary><p class="bk-muted">'+esc(trading.missingSymbols.join('、'))+'</p></details>':'')+tradingChart(trading.points)+'</section>':'';
           $('asset-overview-charts').innerHTML=history || '<p class="bk-empty">暂无证券收益数据。</p>';
           return;
         }
