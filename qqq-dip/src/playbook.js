@@ -752,12 +752,23 @@ export function evaluate(input) {
         prohibitions: globalProhibitions(pick.id, round)
       };
     } else if (!round.hasSeenMinus22) {
-      const next = qqq.triggers?.T1;
+      const left = tiers.filter((tier) => LEFT_TIERS.includes(tier.id));
+      const completed = left.filter((tier) => tier.status === 'executed').map((tier) => tier.id);
+      const next = left.find((tier) => tier.status !== 'executed');
+      const t1 = left[0];
+      let detail = '等待行情与 60 日高点。';
+      if (completed.length) {
+        detail = `${completed.join('、')} 已执行。${next?.triggerPrice != null
+          ? `等待 ${next.id} 执行条件，触发价 ${next.triggerPrice.toFixed(3)}。` : '等待下一信号。'}`;
+      } else if (t1.triggerPrice != null) {
+        const reached = hitLive(qqqMarket.price, qqq.H, TIER_DEFS.T1.closeMult);
+        const state = reached ? '当前报价已到 T1，等待执行条件。'
+          : round.triggered?.T1 || round.executionPlans?.T1 ? 'T1 曾触发，等待当前价格重新达标。' : '尚未到 T1。';
+        detail = `${state} QQQ H=${qqq.H.toFixed(3)}，T1 触发价 ${t1.triggerPrice.toFixed(3)}（−8%）。`;
+      }
       primary = {
         title: '观察区',
-        body: next
-          ? `尚未到 T1。QQQ H=${qqq.H?.toFixed(3)}，T1 触发价 ${next?.toFixed(3)}（−8%）。右侧袋锁定。`
-          : '等待行情与 60 日高点。',
+        body: `${detail} 右侧袋锁定。`,
         prohibitions: globalProhibitions(null, round)
       };
     } else {

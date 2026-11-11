@@ -47,6 +47,14 @@ function roundInput(overrides = {}) {
     qqq: { price: 88, low: 88, candles: [{ h: 100, c: 88 }] }, ...overrides };
 }
 
+test('observation after T1 execution shows the next tier instead of an unreached T1', () => {
+  const ev = evaluate(roundInput({ round: { executed: { T1: { usd: 100, complete: true } } },
+    qqq: { price: 90, candles: [{ h: 100, c: 91 }] } }));
+  assert.equal(ev.primary.title, '观察区');
+  assert.match(ev.primary.body, /T1 已执行。等待 T2 执行条件，触发价 88\.000/);
+  assert.equal(ev.buyPreview.available, false);
+});
+
 test('legacy pre-trigger round rebases to dedicated cash without resetting reference highs or dates', () => {
   const round = { ...emptyRound(), startedAt: '2026-10-23T13:36:50Z', budgetBase: 23926.87,
     referenceHighs: { QQQ: 100 }, firedAlerts: { 'openSummary:2026-10-23': 'sent' } };
