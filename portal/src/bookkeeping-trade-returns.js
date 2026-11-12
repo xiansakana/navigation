@@ -51,7 +51,7 @@ export function reconstructTradeReturns(trades,{start,end,today,quote,fx,splits=
       else {invalidCost=true;issues.add('未支持的交易类型');}
     }
     const floatingIncluded=!hybrid || !!hybrid.cutover && date>=hybrid.cutover;
-    let unrealized=0,missing=invalidCost;
+    let unrealized=0,missing=invalidCost,backfilled=false;
     for(const lot of queues.values()){
       if(!floatingIncluded)break;
       if(!lot.items.length)continue;
@@ -61,9 +61,10 @@ export function reconstructTradeReturns(trades,{start,end,today,quote,fx,splits=
       }
       const shares=lot.items.reduce((n,item)=>n+item.shares,0),cost=lot.items.reduce((n,item)=>n+item.cost,0),mult=optionSymbol(lot.symbol)?100:1;
       unrealized+=shares*q.close*mult*rate-cost;
+      if(q.source==='backfill')backfilled=true;
     }
     if(hybrid&&floatingIncluded){if(!Number.isFinite(hybrid.anchorUnrealized))missing=true;else unrealized-=hybrid.anchorUnrealized;}
-    if(date>=opening)points.push({date,currency:'CNY',realized:invalidCost?null:round(realized),unrealized:missing?null:round(unrealized),total:missing?null:round(round(realized)+round(unrealized)),source:'trades',...(hybrid?{floatingIncluded,...(date===hybrid.cutover?{valuationBoundary:true}:{})}:{}),...(date===opening?{periodBoundary:'opening'}:{}),...(date===today?{provisional:true}:{})});
+    if(date>=opening)points.push({date,currency:'CNY',realized:invalidCost?null:round(realized),unrealized:missing?null:round(unrealized),total:missing?null:round(round(realized)+round(unrealized)),source:'trades',...(backfilled?{backfilled:true}:{}),...(hybrid?{floatingIncluded,...(date===hybrid.cutover?{valuationBoundary:true}:{})}:{}),...(date===opening?{periodBoundary:'opening'}:{}),...(date===today?{provisional:true}:{})});
   }
   const baseline=points[0];
   const delta=(value,base)=>Number.isFinite(value)&&Number.isFinite(base)?round(value-base):null;

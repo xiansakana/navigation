@@ -9,6 +9,8 @@ export function tradeValuation(db,userId,includedIds,today,currentQuotes={},curr
     return {date:row.date,capturedAt:row.captured_at,prices,rates,portfolio:accounts.some(a=>a.source==='portfolio')};
   }).filter(frame=>frame.portfolio):[];
   const first=frames[0]||null;
+  const hasPrices=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bookkeeping_security_prices'").get();
+  const backfill=hasPrices?db.prepare("SELECT date,close FROM bookkeeping_security_prices WHERE user_id=? AND symbol=? AND date=? AND source LIKE 'verified-backfill:%'"):null;
   const at=date=>{let low=0,high=frames.length;while(low<high){const mid=(low+high)>>1;if(frames[mid].date<=date)low=mid+1;else high=mid;}return frames[low-1]||null;};
   const snapshotQuote=(frame,symbol)=>frame?.prices.has(symbol)?{date:frame.date,close:frame.prices.get(symbol),source:'valuation'}:null;
   return {
@@ -19,7 +21,10 @@ export function tradeValuation(db,userId,includedIds,today,currentQuotes={},curr
       if(!first||date<first.date)return null;
       const q=currentQuotes[symbol],price=q?.price,asOf=q?Date.parse(q.asOf||q.updatedAt||q.date||''):NaN;
       if(date===today&&price!=null&&Number.isFinite(Number(price))&&Number(price)>=0&&(!Number.isFinite(asOf)||asOf<=Date.now()))return {date,close:Number(price),source:'current'};
-      return snapshotQuote(at(date),symbol);
+      const saved=snapshotQuote(at(date),symbol);
+      if(saved)return saved;
+      const verified=backfill?.get(userId,symbol,date);
+      return verified?{...verified,source:'backfill'}:null;
     },
     fx(currency,date){
       if(!first||date<first.date)return null;

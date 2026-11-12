@@ -70,11 +70,21 @@ test('valuation frames are user scoped, never use future snapshots or live price
   const db=new Database(':memory:');db.exec('CREATE TABLE bookkeeping_asset_snapshots(user_id TEXT,date TEXT,captured_at TEXT,details TEXT)');
   try{
     const insert=db.prepare('INSERT INTO bookkeeping_asset_snapshots VALUES(?,?,?,?)');
+    db.exec('CREATE TABLE bookkeeping_security_prices(user_id TEXT,symbol TEXT,date TEXT,close REAL,source TEXT)');
+    const price=db.prepare('INSERT INTO bookkeeping_security_prices VALUES(?,?,?,?,?)');
+    price.run('one','NVDA','2026-10-27',20,'verified-backfill:sina');
+    price.run('one','AAPL','2026-10-27',99,'verified-backfill:sina');
+    price.run('one','MSFT','2026-10-27',99,'sina');
+    price.run('two','GOOG','2026-10-27',99,'verified-backfill:sina');
     const details=price=>JSON.stringify([{id:'ledger',source:'portfolio',currency:'USD',rate:7,quotes:[{symbol:'AAPL',price}]}]);
     insert.run('one','2026-10-26','2026-10-26T15:59:00Z',details(12));insert.run('one','2026-10-27','2026-10-27T15:59:00Z',details(13));insert.run('two','2026-10-25','2026-10-25T15:59:00Z',details(99));
     const v=tradeValuation(db,'one',new Set(['ledger']),'2026-10-28',{AAPL:{price:15}},{USD:8});
     assert.equal(v.first.date,'2026-10-26');assert.equal(v.quote('AAPL','2026-10-25'),null);assert.equal(v.baselineQuote('AAPL').close,12);
     assert.equal(v.quote('AAPL','2026-10-27').close,13);assert.equal(v.quote('AAPL','2026-10-28').close,15);assert.equal(v.baselineFx('USD').rate,7);assert.equal(v.fx('USD','2026-10-28').rate,8);
+    assert.deepEqual(v.quote('NVDA','2026-10-27'),{date:'2026-10-27',close:20,source:'backfill'});
+    assert.equal(v.quote('NVDA','2026-10-28'),null);
+    assert.equal(v.quote('MSFT','2026-10-27'),null);
+    assert.equal(v.quote('GOOG','2026-10-27'),null);
     assert.equal(tradeValuation(db,'one',new Set(),'2026-10-28',{AAPL:{price:15}}).quote('AAPL','2026-10-28'),null);
     assert.equal(tradeValuation(db,'one',new Set(['ledger']),'2026-10-25').first,null);
   }finally{db.close();}
