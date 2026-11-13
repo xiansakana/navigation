@@ -261,14 +261,13 @@ export class UndercutMonitor extends EventEmitter {
                     const signature = JSON.stringify([entry.myPrice, compareLow, ownMarket.filter(row => Number(row.item?.id || row.item?.ID) === Number(entry.itemId)).map(row => [row.id, row.price, row.amount, row.item?.uid ?? null]).sort((a,b) => Number(a[0])-Number(b[0]))]);
                     const now = this.now(), candidate = state.pendingMarket.get(entry.key);
                     pendingKeys.add(entry.key);
-                    const minimumWait = Math.max(60, Math.min(3600, Number(marketLow?.cacheDelay) || 0));
                     if (!candidate || candidate.signature !== signature || candidate.marketCacheAt === null && marketLow?.cacheTimestamp != null) {
                         state.pendingMarket.set(entry.key, { signature, firstSeenAt: now, marketCacheAt: marketLow?.cacheTimestamp ?? null });
                         continue;
                     }
                     // Do not "confirm" the same globally cached market snapshot.
                     if (!marketLow.coveredOwnListings.includes(entry.key.slice(3))) continue;
-                    if (now - candidate.firstSeenAt < minimumWait || marketLow?.cacheTimestamp == null || candidate.marketCacheAt == null || marketLow.cacheTimestamp <= candidate.marketCacheAt) continue;
+                    if (now - candidate.firstSeenAt < 60 || marketLow?.cacheTimestamp == null || candidate.marketCacheAt == null || marketLow.cacheTimestamp <= candidate.marketCacheAt) continue;
                     state.pendingMarket.delete(entry.key); pendingKeys.delete(entry.key);
                 }
 

@@ -64,3 +64,15 @@ test('missing market cache timestamps are not accepted as confirmation; valid ca
   f.set({now:1180,cacheAt:1180});await f.scan();assert.equal(f.messages.length,0);
   f.set({now:1240,cacheAt:1240});await f.scan();assert.equal(f.messages.length,1);
 });
+
+test('long market cache periods do not add a second wait after a newer covered snapshot', async t => {
+  const f = fixture(t);
+  f.set({ now: 1000, cacheAt: -2500, cacheDelay: 3600 });
+  await f.scan();
+  f.set({ now: 1061 });
+  await f.scan();
+  assert.equal(f.messages.length, 0, 'unchanged cache still cannot confirm');
+  f.set({ now: 1100, cacheAt: 1100 });
+  await f.scan();
+  assert.equal(f.messages.length, 1);
+});
