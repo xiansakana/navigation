@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { UndercutMonitor } from './undercut-monitor.js';
-import { fetchUserItemMarket } from './torn-api.js';
+import { fetchUserItemMarket, installWorkerApi } from './torn-api.js';
 
 test('a hung scan times out, releases its lock and recovers without accepting late results', async t => {
   let release, saves = 0;
@@ -71,4 +71,33 @@ test('competitor listing quantities reach alerts and notifications and refresh w
   assert.match(monitor.buildAlertText(alerts.find(a => a.source === 'Item Market')), /压价挂单数量：未知/);
   assert.match(monitor.buildAlertText(alerts.find(a => a.source === 'Bazaar')), /压价挂单数量：0 件/);
   assert.equal(messages.length, 2);
+});
+
+test('a rate limit schedules the next scan at the advertised cooldown, then resumes', async t => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 });
+  let requests = 0;
+  installWorkerApi(async () => {
+    if (++requests === 1) throw Object.assign(new Error('Torn API 已限流'), { rateLimited: true, retryAfterMs: 90000 });
+    return { itemmarket: [] };
+  });
+  t.after(() => installWorkerApi());
+  const config = { undercut: { intervalSeconds: 30, watchers: [
+    { id: 'w', label: 'Account', apiKey: 'test', watchBazaar: false, watchItemMarket: true }
+  ] } };
+  const monitor = new UndercutMonitor(() => config);
+  t.after(() => monitor.stop());
+  monitor.on('error', () => {});
+  monitor.running = true;
+  await monitor.runOnce();
+  assert.equal(requests, 1);
+  assert.equal(monitor.nextScanAt, 91000);
+  assert.match(monitor.lastScanError, /限流/);
+  t.mock.timers.tick(89999);
+  assert.equal(monitor.checks, 1);
+  t.mock.timers.tick(1);
+  assert.equal(monitor.checks, 2);
+  await new Promise(resolve => monitor.once('alerts', resolve));
+  await Promise.resolve();
+  assert.equal(requests, 2);
+  assert.equal(monitor.nextScanAt, 121000);
 });

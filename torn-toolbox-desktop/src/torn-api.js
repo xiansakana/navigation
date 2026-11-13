@@ -24,6 +24,7 @@ export async function fetchJsonWithRetry(url, onWait, options = {}) {
             catch (error) {
                 if (signal?.aborted) throw error;
                 const limited = error.apiCode === 5 || error.rateLimited;
+                if (limited && options.deferRateLimit) throw error;
                 if (attempt >= 3 || (!limited && !error.transient)) throw error;
                 const ms = limited ? Math.max(65000 * 2 ** attempt, error.retryAfterMs || 0) : 10000 * 2 ** attempt;
                 onWait?.(ms, attempt + 1);

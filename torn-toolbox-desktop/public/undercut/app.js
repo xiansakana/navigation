@@ -69,7 +69,7 @@ function updateUndercutState(state) {
     $('uc-status').classList.toggle('stopped', !running);
     $('uc-checks').textContent = state.checks || 0;
     $('uc-alerts').textContent = state.alerts || 0;
-    $('uc-next').textContent = formatNext(state.nextScanAt);
+    $('uc-next').textContent = state.checking && running ? '本轮结束后安排' : formatNext(state.nextScanAt);
     $('uc-message').textContent = state.statusMessage || '';
     $('global-status').textContent = running ? '压价监听中' : '就绪';
     WUI.renderWatcherMeta(state.watchers || [], 'alerts');

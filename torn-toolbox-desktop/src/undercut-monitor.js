@@ -17,6 +17,7 @@ export class UndercutMonitor extends EventEmitter {
         this.store = dependencies.store;
         this.now = dependencies.now || (() => Math.floor(Date.now() / 1000));
         this.scanTimeoutMs = dependencies.scanTimeoutMs || 600000;
+        this.requestTimeoutMs = dependencies.requestTimeoutMs || 45000;
         this.lastScanError = '';
         this.timer = null;
         this.running = false;
@@ -92,31 +93,31 @@ export class UndercutMonitor extends EventEmitter {
         if (!this.getWatchers().length) {
             throw new Error('请至少添加一个监听账号并填写 API Key');
         }
-        var interval = Math.max(30, Number(this.getConfig().undercut?.intervalSeconds) || 60);
         this.running = true;
-        this.emit('state', this.getState());
-        this.runOnce().catch(function(err) {
-            this.emit('error', err.message);
-        }.bind(this));
-        this.timer = setInterval(function() {
-            this.runOnce().catch(function(err) {
-                this.emit('error', err.message);
-            }.bind(this));
-        }.bind(this), interval * 1000);
+        if (!this.checking) this.runScheduledScan();
+    }
+
+    runScheduledScan() {
+        this.runOnce().catch(error => this.emit('error', error.message));
     }
 
     stop() {
-        this.scanController?.abort(new Error('扫描已停止'));
-        if (this.timer) clearInterval(this.timer);
-        this.timer = null;
         this.running = false;
+        this.scanController?.abort(new Error('扫描已停止'));
+        clearTimeout(this.timer);
+        this.timer = null;
         this.nextScanAt = null;
         this.statusMessage = '';
         this.emit('state', this.getState());
     }
 
-    scheduleNext(intervalSeconds) {
-        this.nextScanAt = Date.now() + intervalSeconds * 1000;
+    scheduleNext() {
+        clearTimeout(this.timer);
+        const interval = Math.max(30, Number(this.getConfig().undercut?.intervalSeconds) || 60);
+        const delay = Math.max(interval * 1000, (this.retryNotBefore || 0) - Date.now());
+        this.nextScanAt = Date.now() + delay;
+        this.timer = setTimeout(() => this.runScheduledScan(), delay);
+        this.timer.unref?.();
         this.emit('state', this.getState());
     }
 
@@ -140,13 +141,26 @@ export class UndercutMonitor extends EventEmitter {
             signal?.throwIfAborted();
             this.statusMessage = watcher.label + '：' + label;
             this.emit('state', this.getState());
+            const controller = new AbortController();
+            const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+            const timeout = setTimeout(() => controller.abort(new Error(label + '超时')), this.requestTimeoutMs);
             let abort;
             const cancelled = new Promise((_, reject) => {
-                abort = () => reject(signal.reason);
-                signal?.addEventListener('abort', abort, { once:true });
+                abort = () => reject(requestSignal.reason);
+                if (requestSignal.aborted) abort();
+                else requestSignal.addEventListener('abort', abort, { once: true });
             });
-            try { const result = await Promise.race([Promise.resolve().then(action), cancelled]); signal?.throwIfAborted(); return result; }
-            finally { signal?.removeEventListener('abort', abort); }
+            try {
+                const result = await Promise.race([Promise.resolve().then(() => {
+                    requestSignal.throwIfAborted();
+                    return action({ signal: requestSignal, deferRateLimit: true });
+                }), cancelled]);
+                requestSignal.throwIfAborted();
+                return result;
+            } finally {
+                clearTimeout(timeout);
+                requestSignal.removeEventListener('abort', abort);
+            }
         };
         var state = this.ensureWatcherState(watcher.id);
         var apiKey = watcher.apiKey;
@@ -162,11 +176,11 @@ export class UndercutMonitor extends EventEmitter {
         }
 
         state.checks++;
-        var myPlayerId = watchBazaar ? await step('读取玩家身份', () => fetchMyPlayerId(apiKey, state.playerCache, { signal })) : null;
+        var myPlayerId = watchBazaar ? await step('读取玩家身份', options => fetchMyPlayerId(apiKey, state.playerCache, options)) : null;
         var listings = [], ownMarket = [];
 
         if (watchItemMarket) {
-            var imRows = await step('读取个人市场挂单', () => fetchUserItemMarket(apiKey, { signal })); ownMarket = imRows;
+            var imRows = await step('读取个人市场挂单', options => fetchUserItemMarket(apiKey, options)); ownMarket = imRows;
             imRows.forEach(function(row) {
                 var item = row.item || {};
                 var itemId = item.id || item.ID;
@@ -182,7 +196,7 @@ export class UndercutMonitor extends EventEmitter {
         }
 
         if (watchBazaar) {
-            var bazaar = await step('读取巴扎挂单', () => fetchUserBazaar(apiKey, { signal }));
+            var bazaar = await step('读取巴扎挂单', options => fetchUserBazaar(apiKey, options));
             bazaar.forEach(function(row) {
                 var itemId = row.ID || row.id;
                 listings.push({
@@ -242,14 +256,14 @@ export class UndercutMonitor extends EventEmitter {
             var undercutQuantity = null;
             var undercutBy = null;
             if (entry.kind === 'bazaar') {
-                var bazaarLow = await step('巴扎比价 · ' + entry.name, () => fetchWeav3rBazaarLowest(entry.itemId, myPlayerId, bazaarPriceCache, { signal }));
+                var bazaarLow = await step('巴扎比价 · ' + entry.name, options => fetchWeav3rBazaarLowest(entry.itemId, myPlayerId, bazaarPriceCache, options));
                 if (bazaarLow) {
                     compareLow = bazaarLow.price;
                     undercutQuantity = bazaarLow.quantity;
                     undercutBy = { playerId: bazaarLow.playerId, playerName: bazaarLow.playerName };
                 }
             } else {
-                var marketLow = await step('市场比价 · ' + entry.name, () => fetchMarketLowestListing(apiKey, entry.itemId, imPriceCache, ownMarket.filter(row => Number(row.item?.id || row.item?.ID) === Number(entry.itemId)), { signal }));
+                var marketLow = await step('市场比价 · ' + entry.name, options => fetchMarketLowestListing(apiKey, entry.itemId, imPriceCache, ownMarket.filter(row => Number(row.item?.id || row.item?.ID) === Number(entry.itemId)), options));
                 if (marketLow) {
                     compareLow = marketLow.price;
                     undercutQuantity = marketLow.quantity;
@@ -315,15 +329,21 @@ export class UndercutMonitor extends EventEmitter {
 
     async runOnce() {
         if (this.checking) return;
+        clearTimeout(this.timer);
+        this.timer = null;
         this.checking = true;
+        this.retryNotBefore = 0;
         this.scanStartedAt = Date.now(); this.nextScanAt = null; this.lastScanError = '';
         const controller = this.scanController = new AbortController();
         const timeout = setTimeout(() => controller.abort(new Error('本轮扫描超时，已取消等待并安排重试')), this.scanTimeoutMs);
         try { await this.scanOnce(controller.signal); }
-        catch (error) { this.lastScanError = error.message; this.statusMessage = error.message; throw error; }
+        catch (error) {
+            if (controller.signal.aborted && !this.running) return;
+            this.lastScanError = error.message; this.statusMessage = error.message; throw error;
+        }
         finally {
             clearTimeout(timeout); this.checking = false; this.lastScanFinishedAt = Date.now();
-            if (this.running) this.scheduleNext(Math.max(30, Number(this.getConfig().undercut?.intervalSeconds) || 60));
+            if (this.running) this.scheduleNext();
             else this.emit('state', this.getState());
         }
     }
@@ -356,6 +376,10 @@ export class UndercutMonitor extends EventEmitter {
                 if (signal?.aborted) throw err;
                 errors.push(watcher.label + '：' + err.message);
                 this.emit('error', watcher.label + ': ' + err.message);
+                if (err.rateLimited || err.apiCode === 5) {
+                    this.retryNotBefore = Date.now() + Math.max(65000, Number(err.retryAfterMs) || 0);
+                    break;
+                }
             }
         }
 
@@ -368,9 +392,5 @@ export class UndercutMonitor extends EventEmitter {
         this.emit('alerts', this.getAllAlerts());
         this.emit('state', this.getState());
 
-        if (this.running) {
-            var interval = Math.max(30, Number(config.undercut?.intervalSeconds) || 60);
-            this.scheduleNext(interval);
-        }
     }
 }
