@@ -20,7 +20,7 @@ export async function fetchJsonWithRetry(url, onWait, options = {}) {
         const parsed = new URL(url), key = parsed.searchParams.get('key');
         parsed.searchParams.delete('key');
         for (let attempt = 0; ; attempt++) {
-            try { return await workerRequest(parsed.href, key, signal, { scope: 'legacy-toolbox', spacingMs: 2000 }); }
+            try { return await workerRequest(parsed.href, key, signal, { scope: 'legacy-toolbox', spacingMs: 2000, onQueueWait: options.onQueueWait }); }
             catch (error) {
                 if (signal?.aborted) throw error;
                 const limited = error.apiCode === 5 || error.rateLimited;

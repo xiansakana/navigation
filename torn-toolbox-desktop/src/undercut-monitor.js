@@ -143,7 +143,16 @@ export class UndercutMonitor extends EventEmitter {
             this.emit('state', this.getState());
             const controller = new AbortController();
             const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-            const timeout = setTimeout(() => controller.abort(new Error(label + '超时')), this.requestTimeoutMs);
+            let timeout;
+            const onQueueWait = (wait = 0) => {
+                requestSignal.throwIfAborted();
+                clearTimeout(timeout);
+                timeout = setTimeout(() => controller.abort(new Error(label + '超时')), wait + this.requestTimeoutMs);
+                this.statusMessage = watcher.label + '：' + label
+                    + (wait >= 1000 ? '（共享限速排队，预计等待 ' + Math.ceil(wait / 1000) + ' 秒）' : '');
+                this.emit('state', this.getState());
+            };
+            onQueueWait();
             let abort;
             const cancelled = new Promise((_, reject) => {
                 abort = () => reject(requestSignal.reason);
@@ -153,7 +162,7 @@ export class UndercutMonitor extends EventEmitter {
             try {
                 const result = await Promise.race([Promise.resolve().then(() => {
                     requestSignal.throwIfAborted();
-                    return action({ signal: requestSignal, deferRateLimit: true });
+                    return action({ signal: requestSignal, deferRateLimit: true, onQueueWait });
                 }), cancelled]);
                 requestSignal.throwIfAborted();
                 return result;

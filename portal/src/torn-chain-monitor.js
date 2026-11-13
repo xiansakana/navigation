@@ -41,8 +41,14 @@ export function chainConfig(input, previous = DEFAULT_CHAIN_CONFIG) {
 // One serial lane: approximately 30 requests/minute, leaving headroom for
 // other tools. The Portal client below groups these lanes by Torn account.
 export function createChainApiClient({ fetchImpl = fetch, spacingMs = 2000, beforeFetch = async () => {} } = {}) {
-  let queue = Promise.resolve(), lastAt = null;
-  return (path, key, signal) => {
+  let queue = Promise.resolve(), lastAt = null, queued = 0;
+  const spacing = () => typeof spacingMs === 'function' ? spacingMs() : spacingMs;
+  return (path, key, signal, onQueueWait) => {
+    signal?.throwIfAborted();
+    const interval = spacing();
+    const wait = Math.max(0, lastAt === null ? 0 : lastAt + interval - Date.now());
+    onQueueWait?.(wait + queued * (interval + 15000));
+    queued++;
     const job = queue.catch(() => {}).then(async () => {
       signal?.throwIfAborted();
       const url = new URL(path, 'https://api.torn.com/v2/');
@@ -51,8 +57,9 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 2000, befo
       const companyApplications = url.pathname === '/company/' && url.searchParams.get('selections') === 'applications';
       if (url.origin !== 'https://api.torn.com' || !v2 && !legacyReport && !companyApplications) throw new Error('API 分页地址无效');
       url.searchParams.set('key', key); url.searchParams.set('comment', 'NavChain');
-      const interval = typeof spacingMs === 'function' ? spacingMs() : spacingMs;
-      await delay(Math.max(0, lastAt === null ? 0 : lastAt + interval - Date.now()), undefined, { signal });
+      const wait = Math.max(0, lastAt === null ? 0 : lastAt + spacing() - Date.now());
+      onQueueWait?.(wait);
+      await delay(wait, undefined, { signal });
       await beforeFetch(signal);
       signal?.throwIfAborted(); lastAt = Date.now();
       let response;
@@ -70,7 +77,7 @@ export function createChainApiClient({ fetchImpl = fetch, spacingMs = 2000, befo
         throw Object.assign(new Error('Torn API 错误 ' + code + (code === 5 ? '：账号请求过多，请等待冷却' : [1, 2, 10, 13, 16, 18].includes(code) ? '，请检查 Key 和权限' : '')), { apiCode: code, fatal: [1, 2, 5, 8, 9, 10, 13, 14, 16, 18].includes(code) });
       }
       return data;
-    });
+    }).finally(() => { queued--; });
     queue = job.catch(() => {}); return job;
   };
 }
@@ -112,7 +119,7 @@ export function createTornAccountClient({ fetchImpl = fetch, spacingMs = 2000, g
         const active = [...scopes.values()].filter(scope => scope.owner === owner).map(scope => scope.spacingMs);
         return active.length ? Math.max(...active) : spacingMs;
       } }));
-      return await lanes.get(owner)(path, key, signal);
+      return await lanes.get(owner)(path, key, signal, policy.onQueueWait);
     } catch (error) {
       if (!error.localCooldown && ([5, 8, 9].includes(error.apiCode) || error.rateLimited)) {
         blockedUntil = Math.max(blockedUntil, Date.now() + Math.max(60000, error.retryAfterMs || 0)); blockedCode = error.apiCode;

@@ -101,3 +101,24 @@ test('a rate limit schedules the next scan at the advertised cooldown, then resu
   assert.equal(requests, 2);
   assert.equal(monitor.nextScanAt, 121000);
 });
+
+test('shared account queue wait is added to the request timeout', async t => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 });
+  installWorkerApi(async (_path, _key, signal, policy) => {
+    policy.onQueueWait(60000);
+    await new Promise(resolve => setTimeout(resolve, 60000));
+    signal.throwIfAborted();
+    return { itemmarket: [] };
+  });
+  t.after(() => installWorkerApi());
+  const monitor = new UndercutMonitor(() => ({ undercut: { watchers: [
+    { id: 'w', label: 'Account', apiKey: 'test', watchBazaar: false, watchItemMarket: true }
+  ] } }));
+  const done = monitor.runOnce();
+  await Promise.resolve();
+  assert.match(monitor.statusMessage, /预计等待 60 秒/);
+  t.mock.timers.tick(60000);
+  await done;
+  assert.equal(monitor.lastScanError, '');
+  assert.match(monitor.statusMessage, /未发现/);
+});
