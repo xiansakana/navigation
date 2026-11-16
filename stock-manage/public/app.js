@@ -5,7 +5,7 @@ import { renderTradeReview } from './js/trade-review.js';
 import { formatPrice, priceInputValue } from './js/price-format.js';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=20261004-full-history';
-import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js';
+import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js?v=fund-holdings-2';
 import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -35,6 +35,7 @@ function looksLikeAShare(symbol) {
 }
 
 function holdingTypeLabel(h) {
+  if (h.type === 'fund') return '场外基金';
   if (h.type === 'option') return '期权';
   if (h.type === 'ashare' || h.currency === 'CNY' || looksLikeAShare(h.symbol)) return 'A股/ETF';
   return '股票';
@@ -217,7 +218,7 @@ function applyPermissions() {
   document.querySelector('.sm-pnl-visible-toggle')?.classList.toggle('hidden', !can('pnl-toggle'));
   $('#btn-trades').hidden = !can('trades');
   $('#btn-import').hidden = !can('import', 'edit');
-  $('#btn-add').hidden = !can('trade', 'edit');
+  $('#btn-add').hidden = !can('trade', 'edit') && !can('fund-holdings', 'edit');
   $('#btn-refresh').hidden = !can('refresh', 'edit');
   $('#btn-col-toggle').hidden = !can('columns');
   if (!can('columns')) $('#col-toggle-panel')?.classList.add('hidden');
@@ -405,6 +406,9 @@ function holdingsCellContent(h, key, ctx) {
     case 'cost':
       return maskCol('cost', formatPrice(h.avgCost, cur) + lots);
     case 'price': {
+      if (h.type === 'fund') {
+        return maskCol('price', `${h.price.toFixed(4)}<div class="sm-lots-hint">净值 ${escapeHtml(h.quoteAsOf)}</div>`);
+      }
       const sourceLabel = h.quoteSource === 'cboe-delayed-midpoint' ? 'Cboe 延时报价（买卖中间价）'
         : h.quoteSource === 'polygon-daily-delayed' ? 'Polygon 延时日线' : `${h.quoteSource || '供应商'}延时行情`;
       const delayHint = h.delayed
@@ -430,6 +434,13 @@ function holdingsCellContent(h, key, ctx) {
     case 'optinfo':
       return maskCol('optinfo', optStr);
     case 'actions':
+      if (h.type === 'fund') {
+        const index = h.fundIndex;
+        return maskCol('actions', can('fund-holdings', 'edit') ? `
+          <button type="button" class="btn link" data-fund-edit="${index}">编辑</button>
+          <button type="button" class="btn link" data-fund-refresh="${index}">更新净值</button>
+          <button type="button" class="btn link" data-fund-delete="${index}">移除</button>` : '—');
+      }
       return maskCol('actions', can('row-trade', 'edit') ? `
         <button type="button" class="btn link" data-trade="buy" data-symbol="${h.symbol}" data-account="${h.accountId || ''}">买</button>
         <button type="button" class="btn link" data-trade="sell" data-symbol="${h.symbol}" data-account="${h.accountId || ''}">卖</button>
@@ -462,7 +473,7 @@ function renderHoldingsRowCells(h, group, i) {
     const opt = h.optionInfo;
     const optStr = opt ? `${opt.type} ${formatPrice(opt.strike, 'USD')} · ${opt.expiration}` : '—';
     const lots = h.costLots?.length > 1 ? `<div class="sm-lots-hint">${h.costLots.length} 笔合计</div>` : '';
-    const symInner = colVis.symbol !== false && canCol('symbol') ? `
+    const symInner = h.type === 'fund' ? `<strong>${escapeHtml(h.symbol)}</strong>` : colVis.symbol !== false && canCol('symbol') ? `
         <span class="sm-symbol-drag" draggable="true" data-drag="${h.symbol}" title="拖动代码到另一行，合并为同一标的">
           <strong>${h.symbol}</strong>
           ${h.groupWith ? `<button type="button" class="btn link sm-clear-group" data-clear-group="${h.symbol}" title="恢复自动分组">↺</button>` : ''}
@@ -489,7 +500,13 @@ function renderCashRowCells(cashPct) {
 function renderHoldings() {
   renderHoldingsHead();
   const cols = visibleHoldingsColumns();
-  const groups = buildHoldingsGroups(state.holdings || [], tableSort.key, tableSort.dir);
+  const funds = (state.fundHoldings || []).map((fund, fundIndex) => ({
+    ...fund, type: 'fund', currency: 'CNY', fundIndex,
+    avgCost: fund.cost / fund.shares, marketValueNative: fund.marketValue,
+    marketValue: fund.marketValue / state.usdCnyRate,
+    pnlPct: fund.cost > 0 ? fund.pnl / fund.cost * 100 : null
+  }));
+  const groups = buildHoldingsGroups([...(state.holdings || []), ...funds], tableSort.key, tableSort.dir);
   let html = '';
   groups.forEach((group, gi) => {
     group.items.forEach((h, i) => {
@@ -498,7 +515,8 @@ function renderHoldings() {
         h.type === 'option' ? 'sm-holding-option' : '',
         (h.type === 'ashare' || h.currency === 'CNY') ? 'sm-holding-ashare' : ''
       ].filter(Boolean).join(' ');
-      html += `<tr data-symbol="${h.symbol}" class="${rowCls}">${renderHoldingsRowCells(h, group, i)}</tr>`;
+      const symbolAttr = h.type === 'fund' ? 'data-fund-holding' : `data-symbol="${h.symbol}"`;
+      html += `<tr ${symbolAttr} class="${rowCls}">${renderHoldingsRowCells(h, group, i)}</tr>`;
     });
   });
 
@@ -562,33 +580,12 @@ function fundPath(fund) {
   return `/fund-holdings/${encodeURIComponent(fund.accountId)}/${encodeURIComponent(fund.symbol)}`;
 }
 
-function renderFundHoldings() {
-  const funds = state.fundHoldings || [];
-  const edit = can('fund-holdings', 'edit');
-  $('#fund-section').hidden = !edit && !funds.length;
-  $('#btn-add-fund').hidden = !edit;
-  $('#fund-holdings-body').innerHTML = funds.map((fund, index) => `
-    <tr>
-      <td>${maskCol('name', escapeHtml(fund.name))} <small>${maskCol('symbol', escapeHtml(fund.symbol))}</small></td>
-      <td>${maskCol('account', escapeHtml(fund.accountName))}</td>
-      <td>${maskCol('shares', fund.shares)}</td>
-      <td>${maskCol('cost', fmtCny(fund.cost))}</td>
-      <td>${maskCol('price', `${fund.price.toFixed(4)} <small>${escapeHtml(fund.quoteAsOf)}</small>`)}</td>
-      <td>${maskCol('position', fmtCny(fund.marketValue))}</td>
-      <td>${maskCol('pnl', maskPnlValue(fmtMoneySigned(fund.pnl, 'CNY')))}</td>
-      <td>${edit ? `<button type="button" class="btn link" data-fund-edit="${index}">编辑</button>
-        <button type="button" class="btn link" data-fund-refresh="${index}">更新净值</button>
-        <button type="button" class="btn link" data-fund-delete="${index}">移除</button>` : '—'}</td>
-    </tr>`).join('') || '<tr><td class="empty" colspan="8">暂无场外基金持仓</td></tr>';
-}
-
-function openFundModal(fund) {
+function fundFormFields(fund, hidden = false) {
   const accounts = (state.investmentAccounts || []).filter(a => a.currency === 'CNY');
-  if (!accounts.length) return toastErr('请先在账户管理中创建人民币渠道账户，例如支付宝基金');
   const selected = fund?.accountId || selectedAccountId;
-  openModal(fund ? '编辑基金持仓' : '录入基金持仓', `
-    <form class="sm-form-grid" id="fund-form">
-      <p class="hint">录入当前持有份额和剩余成本。渠道账户的现金基准填写可用现金。</p>
+  return `
+    <form class="sm-form-grid${hidden ? ' hidden' : ''}" id="fund-form" data-validate ${hidden ? 'hidden' : ''}>
+      <p class="hint">${accounts.length ? '录入当前持有份额和剩余成本。渠道账户的现金基准填写可用现金。' : '请先在账户管理中创建人民币渠道账户。'}</p>
       <label>渠道账户<select name="account" required ${fund ? 'disabled' : ''}>
         <option value="">请选择人民币渠道账户</option>
         ${accounts.map(a => `<option value="${escapeHtml(a.id)}" ${a.id === selected ? 'selected' : ''}>${escapeHtml(a.name)}</option>`).join('')}
@@ -597,19 +594,21 @@ function openFundModal(fund) {
       <label>基金名称<input name="name" required maxlength="100" value="${escapeHtml(fund?.name || '')}"></label>
       <label>已确认份额<input name="shares" required type="number" min="0.000001" step="any" value="${fund?.shares ?? ''}"></label>
       <label>剩余持仓总成本（元）<input name="cost" required type="number" min="0" step="0.01" value="${fund?.cost ?? ''}"></label>
-    </form>`, null, async layer => {
-    const form = $('#fund-form', layer);
-    if (!form.reportValidity()) throw new Error('请填写完整的基金持仓信息');
-    const fields = new FormData(form);
-    await api(fundPath({ accountId: fund?.accountId || fields.get('account'), symbol: fields.get('code') }), {
-      method: 'PUT', body: { name: fields.get('name'), shares: fields.get('shares'), cost: fields.get('cost'), edit: !!fund }
-    });
-    return '基金持仓已保存';
-  });
+    </form>`;
 }
 
-$('#btn-add-fund').addEventListener('click', () => openFundModal());
-$('#fund-holdings-body').addEventListener('click', async event => {
+async function saveFund(fields, fund) {
+  await api(fundPath({ accountId: fund?.accountId || fields.get('account'), symbol: fields.get('code') }), {
+    method: 'PUT', body: { name: fields.get('name'), shares: fields.get('shares'), cost: fields.get('cost'), edit: !!fund }
+  });
+  return '基金持仓已保存';
+}
+
+function openFundModal(fund) {
+  openModal('编辑基金持仓', fundFormFields(fund), null, layer => saveFund(layer._formData, fund));
+}
+
+$('#holdings-body').addEventListener('click', async event => {
   const button = event.target.closest('button');
   if (!button) return;
   const { fundEdit, fundRefresh, fundDelete } = button.dataset;
@@ -637,7 +636,6 @@ function applyPortfolio(data) {
   if (filter) filter.value = selectedAccountId;
   renderDashboard();
   renderHoldings();
-  renderFundHoldings();
   renderPnl();
 }
 
@@ -718,7 +716,8 @@ function openModal(title, bodyHtml, footHtml, onSubmit, opts = {}) {
   if (onSubmit) {
     layer.querySelector('[data-modal-save]')?.addEventListener('click', async () => {
       if (layer.dataset.busy === '1') return;
-      const form = layer.querySelector('form');
+      const form = layer.querySelector('form:not([hidden])');
+      if (form?.hasAttribute('data-validate') && !form.reportValidity()) return;
       if (form) layer._formData = new FormData(form);
       setModalBusy(layer, true, opts.busyLabel || '保存中…');
       try {
@@ -736,7 +735,7 @@ function openModal(title, bodyHtml, footHtml, onSubmit, opts = {}) {
   return layer;
 }
 
-function tradeFormFields(trade = {}) {
+function tradeFormFields(trade = {}, allowFund = false) {
   const type = trade.type || trade.prefillType || 'buy';
   const dt = toDatetimeLocalValue(trade.trade_date || Date.now());
   const currency = trade.currency
@@ -746,6 +745,7 @@ function tradeFormFields(trade = {}) {
       <label>类型<select name="type" id="trade-type">
         <option value="buy" ${type === 'buy' ? 'selected' : ''}>买入</option>
         <option value="sell" ${type === 'sell' ? 'selected' : ''}>卖出</option>
+        ${allowFund ? '<option value="fund">场外基金</option>' : ''}
         <option value="other" ${type === 'other' ? 'selected' : ''}>其它收支</option>
       </select></label>
       ${(state.investmentAccounts || []).length ? `<label>证券账户<select name="account_id" required><option value="">请选择实际归属账户</option>${state.investmentAccounts.map((a) => `<option value="${a.id}" ${a.id === (trade.account_id || selectedAccountId) ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></label>` : ''}
@@ -803,12 +803,19 @@ function formToTrade(fd, existing = {}) {
   };
 }
 
-function openTradeModal(trade = {}) {
+function openTradeModal(trade = {}, allowFund = false) {
   const recordingAt = new Date().toISOString();
   const initialDateValue = toDatetimeLocalValue(trade.trade_date || recordingAt);
-  const layer = openModal(trade.id ? '编辑交易' : '记一笔', tradeFormFields(trade), null, async (modal) => {
+  const layer = openModal(trade.id ? '编辑交易' : '记一笔', tradeFormFields(trade, allowFund) + (allowFund ? fundFormFields(null, true) : ''), null, async (modal) => {
+    const type = $('#trade-type', modal).value;
+    if (type === 'fund') {
+      const message = await saveFund(modal._formData);
+      await loadPortfolio();
+      return message;
+    }
     const form = modal.querySelector('#trade-form');
     const fd = modal._formData || new FormData(form);
+    fd.set('type', type);
     const body = formToTrade(fd, trade);
     if (!trade.id && !trade.trade_date && fd.get('trade_date') === initialDateValue) body.trade_date = recordingAt;
     const data = trade.id
@@ -818,6 +825,22 @@ function openTradeModal(trade = {}) {
     return trade.id ? '交易已更新' : '交易已保存';
   }, { reload: false });
   bindTradeForm(layer.querySelector('.sm-modal-body'));
+  if (allowFund) {
+    const tradeForm = $('#trade-form', layer);
+    const fundForm = $('#fund-form', layer);
+    const type = $('#trade-type', layer);
+    tradeForm.before(type.closest('label'));
+    type.addEventListener('change', () => {
+      tradeForm.hidden = type.value === 'fund';
+      fundForm.hidden = !tradeForm.hidden;
+      tradeForm.classList.toggle('hidden', tradeForm.hidden);
+      fundForm.classList.toggle('hidden', fundForm.hidden);
+    });
+    fundForm.addEventListener('submit', event => {
+      event.preventDefault();
+      $('[data-modal-save]', layer).click();
+    });
+  }
   const category = layer.querySelector('[name="other_category"]');
   const amount = layer.querySelector('[name="total_amount"]');
   const taxHint = document.createElement('p');
@@ -1396,7 +1419,11 @@ async function refreshQuotes(symbol) {
 
 $('#btn-refresh').addEventListener('click', () => refreshQuotes());
 
-$('#btn-add').addEventListener('click', () => openTradeModal());
+$('#btn-add').addEventListener('click', () => {
+  const allowFund = can('fund-holdings', 'edit');
+  if (can('trade', 'edit')) return openTradeModal({}, allowFund);
+  if (allowFund) openModal('记一笔 · 场外基金', fundFormFields(), null, layer => saveFund(layer._formData));
+});
 $('#account-filter')?.addEventListener('change', (e) => { selectedAccountId = e.target.value; loadPortfolio().catch((error) => toastErr(error.message)); });
 const openAccounts = () => openInvestmentAccounts({ api, openModal, closeModal, reload: loadPortfolio, can, toastErr, toastOk });
 $('#btn-accounts')?.addEventListener('click', openAccounts);

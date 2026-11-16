@@ -153,7 +153,9 @@ function buildPortfolio(data, pnlOpts = {}) {
     quotes: data.quotes,
     holdingsMeta: data.holdingsMeta,
     holdings: enriched.rows.filter(row => row.type !== 'fund'),
-    fundHoldings: funds,
+    fundHoldings: funds.map(fund => ({ ...fund,
+      weight: enriched.totalAssets > 0 ? (fund.marketValue / rate) / enriched.totalAssets * 100 : 0
+    })),
     chartSparse: sparse,
     summary: {
       stockMv: enriched.stockMv,

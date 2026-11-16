@@ -9,6 +9,7 @@ export function rawTicker(h) {
 }
 
 export function effectiveGroupKey(h) {
+  if (h.type === 'fund') return `${h.symbol}:fund:${h.accountId}`;
   const manual = String(h.groupWith || '').trim().toUpperCase();
   if (manual) return manual;
   return rawTicker(h);
@@ -17,7 +18,7 @@ export function effectiveGroupKey(h) {
 /** stock < ashare < option，便于类型排序 */
 export function typeRank(type) {
   if (type === 'stock') return 0;
-  if (type === 'ashare') return 1;
+  if (type === 'ashare' || type === 'fund') return 1;
   if (type === 'option') return 2;
   return 3;
 }
