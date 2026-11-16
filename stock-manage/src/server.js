@@ -1,3 +1,5 @@
+import { ensureFundHoldings } from '../../shared/fund-holdings.js';
+import { getFundNav } from './fund-nav.js';
 import { TRADE_ASSET_TYPES, tradeAssetType } from '../public/js/trade-asset-type.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
 import { portfolioIdentityMiddleware } from '../../shared/portfolio-user.js';
@@ -58,6 +60,7 @@ try {
 
 const store = createStore(config);
 const portfolioDb = getDatabase({ dbPath: config.dbPath });
+ensureFundHoldings(portfolioDb);
 const quantStore = createQuantStore(config);
 const quantBacktestStore = createQuantBacktestStore(config);
 const quotes = createQuoteService(config);
@@ -124,7 +127,19 @@ function buildPortfolio(data, pnlOpts = {}) {
     cashCny: Number(data.cashCny) || 0,
     usdCnyRate: rate
   };
-  const enriched = enrichHoldings(holdings, data.quotes, cashState, data.holdingsMeta);
+  const funds = (data.investmentAccounts || [])
+    .filter(account => !pnlOpts.accountId || account.id === pnlOpts.accountId)
+    .flatMap(account => account.positions.filter(position => position.type === 'fund').map(position => ({
+      ...position, accountId: account.id, accountName: account.name,
+      pnl: roundMoney(position.marketValue - position.cost)
+    })));
+  const fundQuotes = {};
+  for (const fund of funds) {
+    const symbol = `FUND:${fund.accountId}:${fund.symbol}`;
+    holdings.push({ symbol, type: 'fund', currency: 'CNY', shares: fund.shares, avgCost: fund.cost / fund.shares });
+    fundQuotes[symbol] = { price: fund.price };
+  }
+  const enriched = enrichHoldings(holdings, { ...data.quotes, ...fundQuotes }, cashState, data.holdingsMeta);
   const pnl = computePnl(data.trades, fxOpts);
   const sparse = buildDailyCumulativeSeries(data.trades, fxOpts);
   const daily = computeDailySummary(enriched.rows, data.trades, fxOpts);
@@ -137,7 +152,8 @@ function buildPortfolio(data, pnlOpts = {}) {
     trades: data.trades,
     quotes: data.quotes,
     holdingsMeta: data.holdingsMeta,
-    holdings: enriched.rows,
+    holdings: enriched.rows.filter(row => row.type !== 'fund'),
+    fundHoldings: funds,
     chartSparse: sparse,
     summary: {
       stockMv: enriched.stockMv,
@@ -164,6 +180,7 @@ function buildPortfolio(data, pnlOpts = {}) {
 
 function pnlOptsFromReq(req) {
   return {
+    accountId: req.query?.accountId,
     startDate: req.query?.start || undefined,
     endDate: req.query?.end || undefined
   };
@@ -201,6 +218,63 @@ function accountEditor(req, res, binding = false) {
   }
   return true;
 }
+
+app.put('/api/fund-holdings/:accountId/:code', async (req, res) => {
+  if (!requireStockPermission(req, res, 'fund-holdings', 'edit')) return;
+  const user = currentPortfolioUserId();
+  const { accountId, code } = req.params;
+  const name = String(req.body?.name || '').trim();
+  const shares = Number(req.body?.shares);
+  const cost = Number(req.body?.cost);
+  if (!investmentRows(portfolioDb, user).some(a => a.id === accountId && a.currency === 'CNY')) {
+    return res.status(400).json({ error: '请选择本人名下的人民币渠道账户' });
+  }
+  if (!/^\d{6}$/.test(code) || !name || name.length > 100 || !Number.isFinite(shares) || shares <= 0 || shares > 1e12 ||
+    req.body?.cost == null || req.body.cost === '' || !Number.isFinite(cost) || cost < 0 || cost > 1e12) {
+    return res.status(400).json({ error: '请填写有效的基金代码、名称、份额和成本' });
+  }
+  const previous = portfolioDb.prepare('SELECT nav,nav_date FROM fund_holdings WHERE user_id=? AND account_id=? AND code=?').get(user, accountId, code);
+  try {
+    if (req.body.edit === true) {
+      if (!previous) return res.status(404).json({ error: '基金持仓不存在' });
+      portfolioDb.prepare('UPDATE fund_holdings SET name=?,shares=?,cost=? WHERE user_id=? AND account_id=? AND code=?')
+        .run(name, shares, roundMoney(cost), user, accountId, code);
+    } else {
+      if (previous) return res.status(409).json({ error: '该账户已录入此基金，请使用编辑' });
+      const quote = await getFundNav(code);
+      const inserted = portfolioDb.prepare('INSERT OR IGNORE INTO fund_holdings(user_id,account_id,code,name,shares,cost,nav,nav_date) VALUES(?,?,?,?,?,?,?,?)')
+        .run(user, accountId, code, name, shares, roundMoney(cost), quote.nav, quote.date);
+      if (!inserted.changes) return res.status(409).json({ error: '该账户已录入此基金，请使用编辑' });
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    const unsupported = error.message.includes('按万份收益');
+    res.status(unsupported ? 400 : 502).json({ error: unsupported ? error.message : '无法获取该基金的公布净值，请核对代码后重试' });
+  }
+});
+
+app.post('/api/fund-holdings/:accountId/:code/refresh', async (req, res) => {
+  if (!requireStockPermission(req, res, 'fund-holdings', 'edit')) return;
+  const key = [currentPortfolioUserId(), req.params.accountId, req.params.code];
+  if (!portfolioDb.prepare('SELECT 1 FROM fund_holdings WHERE user_id=? AND account_id=? AND code=?').get(...key)) {
+    return res.status(404).json({ error: '基金持仓不存在' });
+  }
+  try {
+    const { nav, date } = await getFundNav(req.params.code);
+    portfolioDb.prepare('UPDATE fund_holdings SET nav=?,nav_date=? WHERE user_id=? AND account_id=? AND code=? AND nav_date<=?')
+      .run(nav, date, ...key, date);
+    res.json({ ok: true });
+  } catch {
+    res.status(502).json({ error: '净值更新失败，已保留上次净值' });
+  }
+});
+
+app.delete('/api/fund-holdings/:accountId/:code', (req, res) => {
+  if (!requireStockPermission(req, res, 'fund-holdings', 'edit')) return;
+  portfolioDb.prepare('DELETE FROM fund_holdings WHERE user_id=? AND account_id=? AND code=?')
+    .run(currentPortfolioUserId(), req.params.accountId, req.params.code);
+  res.json({ ok: true });
+});
 
 app.get('/api/accounts', (req, res) => {
   if (!requireStockPermission(req, res, 'accounts')) return;

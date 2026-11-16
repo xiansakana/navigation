@@ -255,14 +255,14 @@ function renderDashboard() {
   const dailyUsDisplay = dailyUs == null ? '—' : fmtUsdSigned(dailyUs);
   const hasAshare = Number(s.ashareMvNative) > 0 || (Number.isFinite(cnPnl) && cnPnl !== 0);
   const ashareMvLine = hasAshare || Number(s.ashareMvNative) > 0
-    ? `<div class="sm-sub-value">A股/ETF ${maskDashboardValue(fmtCny(s.ashareMvNative ?? 0))}</div>`
+    ? `<div class="sm-sub-value">${state.fundHoldings?.length ? '人民币证券及基金' : 'A股/ETF'} ${maskDashboardValue(fmtCny(s.ashareMvNative ?? 0))}</div>`
     : '';
   const totalPnlAshare = hasAshare
-    ? `<div class="sm-sub-value ${dashboardVisible && pnlVisible ? cls(cnPnl) : ''}">A股/ETF ${maskDashboardValue(maskPnlValue(fmtMoneySigned(Number.isFinite(cnPnl) ? cnPnl : 0, 'CNY')))}</div>`
+    ? `<div class="sm-sub-value ${dashboardVisible && pnlVisible ? cls(cnPnl) : ''}">${state.fundHoldings?.length ? '人民币证券及基金' : 'A股/ETF'} ${maskDashboardValue(maskPnlValue(fmtMoneySigned(Number.isFinite(cnPnl) ? cnPnl : 0, 'CNY')))}</div>`
     : '';
   const totalPnlHint = hasAshare ? '' : '美股未实现盈亏';
   const dailyPnlAshare = (hasAshare || (Number.isFinite(dailyCn) && dailyCn !== 0))
-    ? `<div class="sm-sub-value ${dashboardVisible && pnlVisible && dailyCn != null ? cls(dailyCn) : ''}">A股/ETF ${maskDashboardValue(maskPnlValue(dailyCn == null ? '—' : fmtMoneySigned(dailyCn, 'CNY')))}</div>`
+    ? `<div class="sm-sub-value ${dashboardVisible && pnlVisible && dailyCn != null ? cls(dailyCn) : ''}">${state.fundHoldings?.length ? '人民币证券及基金' : 'A股/ETF'} ${maskDashboardValue(maskPnlValue(dailyCn == null ? '—' : fmtMoneySigned(dailyCn, 'CNY')))}</div>`
     : '';
   const dailyMetaHint = (dailyHint && dailyHint !== '—') ? dailyHint : '';
   const cashField = !dashboardVisible
@@ -558,6 +558,78 @@ function renderPnl() {
   });
 }
 
+function fundPath(fund) {
+  return `/fund-holdings/${encodeURIComponent(fund.accountId)}/${encodeURIComponent(fund.symbol)}`;
+}
+
+function renderFundHoldings() {
+  const funds = state.fundHoldings || [];
+  const edit = can('fund-holdings', 'edit');
+  $('#fund-section').hidden = !edit && !funds.length;
+  $('#btn-add-fund').hidden = !edit;
+  $('#fund-holdings-body').innerHTML = funds.map((fund, index) => `
+    <tr>
+      <td>${maskCol('name', escapeHtml(fund.name))} <small>${maskCol('symbol', escapeHtml(fund.symbol))}</small></td>
+      <td>${maskCol('account', escapeHtml(fund.accountName))}</td>
+      <td>${maskCol('shares', fund.shares)}</td>
+      <td>${maskCol('cost', fmtCny(fund.cost))}</td>
+      <td>${maskCol('price', `${fund.price.toFixed(4)} <small>${escapeHtml(fund.quoteAsOf)}</small>`)}</td>
+      <td>${maskCol('position', fmtCny(fund.marketValue))}</td>
+      <td>${maskCol('pnl', maskPnlValue(fmtMoneySigned(fund.pnl, 'CNY')))}</td>
+      <td>${edit ? `<button type="button" class="btn link" data-fund-edit="${index}">编辑</button>
+        <button type="button" class="btn link" data-fund-refresh="${index}">更新净值</button>
+        <button type="button" class="btn link" data-fund-delete="${index}">移除</button>` : '—'}</td>
+    </tr>`).join('') || '<tr><td class="empty" colspan="8">暂无场外基金持仓</td></tr>';
+}
+
+function openFundModal(fund) {
+  const accounts = (state.investmentAccounts || []).filter(a => a.currency === 'CNY');
+  if (!accounts.length) return toastErr('请先在账户管理中创建人民币渠道账户，例如支付宝基金');
+  const selected = fund?.accountId || selectedAccountId;
+  openModal(fund ? '编辑基金持仓' : '录入基金持仓', `
+    <form class="sm-form-grid" id="fund-form">
+      <p class="hint">录入当前持有份额和剩余成本。渠道账户的现金基准填写可用现金。</p>
+      <label>渠道账户<select name="account" required ${fund ? 'disabled' : ''}>
+        <option value="">请选择人民币渠道账户</option>
+        ${accounts.map(a => `<option value="${escapeHtml(a.id)}" ${a.id === selected ? 'selected' : ''}>${escapeHtml(a.name)}</option>`).join('')}
+      </select></label>
+      <label>基金代码<input name="code" required pattern="[0-9]{6}" inputmode="numeric" value="${escapeHtml(fund?.symbol || '')}" ${fund ? 'readonly' : ''}></label>
+      <label>基金名称<input name="name" required maxlength="100" value="${escapeHtml(fund?.name || '')}"></label>
+      <label>已确认份额<input name="shares" required type="number" min="0.000001" step="any" value="${fund?.shares ?? ''}"></label>
+      <label>剩余持仓总成本（元）<input name="cost" required type="number" min="0" step="0.01" value="${fund?.cost ?? ''}"></label>
+    </form>`, null, async layer => {
+    const form = $('#fund-form', layer);
+    if (!form.reportValidity()) throw new Error('请填写完整的基金持仓信息');
+    const fields = new FormData(form);
+    await api(fundPath({ accountId: fund?.accountId || fields.get('account'), symbol: fields.get('code') }), {
+      method: 'PUT', body: { name: fields.get('name'), shares: fields.get('shares'), cost: fields.get('cost'), edit: !!fund }
+    });
+    return '基金持仓已保存';
+  });
+}
+
+$('#btn-add-fund').addEventListener('click', () => openFundModal());
+$('#fund-holdings-body').addEventListener('click', async event => {
+  const button = event.target.closest('button');
+  if (!button) return;
+  const { fundEdit, fundRefresh, fundDelete } = button.dataset;
+  const fund = state.fundHoldings?.[fundEdit ?? fundRefresh ?? fundDelete];
+  if (!fund) return;
+  if (fundEdit != null) return openFundModal(fund);
+  if (fundDelete != null && !window.confirm(`移除 ${fund.name} 的场外持仓？`)) return;
+  button.disabled = true;
+  try {
+    const path = fundPath(fund);
+    await api(fundRefresh != null ? `${path}/refresh` : path, { method: fundRefresh != null ? 'POST' : 'DELETE' });
+    await loadPortfolio();
+    toastOk(fundRefresh != null ? '净值已更新' : '持仓已移除');
+  } catch (err) {
+    toastErr(err.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 function applyPortfolio(data) {
   state = data;
   const filter = $('#account-filter');
@@ -565,6 +637,7 @@ function applyPortfolio(data) {
   if (filter) filter.value = selectedAccountId;
   renderDashboard();
   renderHoldings();
+  renderFundHoldings();
   renderPnl();
 }
 

@@ -20,6 +20,8 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
   const server = fileURLToPath(new URL('./server.js', import.meta.url));
   const provider = path.join(directory, 'quote-provider.mjs');
   fs.writeFileSync(provider, `globalThis.fetch = async url => {
+    if (String(url).includes('fundCode=000198')) return Response.json({Data:{FundType:'005',SYType:'每万份收益',LSJZList:[{DWJZ:'0.2168',FSRQ:'2026-11-13'}]}});
+    if (String(url).includes('/f10/lsjz')) return Response.json({Data:{LSJZList:[{DWJZ:'2.9800',FSRQ:'2026-11-13'}]}});
     if (String(url).includes('/chart/AAPL')) return Response.json({chart:{result:[{meta:{regularMarketPrice:25,chartPreviousClose:20}}]}});
     if (String(url).includes('fredgraph.csv')) return new Response('observation_date,DEXCHUS\\n2026-10-23,7.1\\n');
     throw new Error('Unexpected fixture request');
@@ -128,6 +130,36 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     cnResult=await (await cnUpload(cnRoute)).json();
     assert.equal(cnResult.importSummary.skipped,1);assert.equal(cnResult.cashCny,1289.02);
     assert.equal((await (await call('/portfolio','b')).json()).trades.some(t=>t.broker==='eastmoney'),false);
+    const fund = `/fund-holdings/${cnId}/501225`;
+    const fundInput = { name:'场外份额', shares:250.5, cost:700 };
+    assert.equal((await call(fund, 'b', 'PUT', fundInput)).status, 400);
+    assert.equal((await call(`/fund-holdings/${cnId}/000198`, 'a', 'PUT', fundInput)).status, 400);
+    assert.equal((await fetch(base+fund,{method:'PUT',headers:{'x-portal-user-id':'a','x-portal-permissions':'W10','Content-Type':'application/json'},body:JSON.stringify(fundInput)})).status,403);
+    assert.equal((await call(fund, 'a', 'PUT', fundInput)).status, 200);
+    assert.equal((await call(fund, 'a', 'PUT', fundInput)).status, 409);
+    const fundPortfolio = await (await call('/portfolio?accountId='+cnId, 'a')).json();
+    assert.equal(fundPortfolio.cashCny, 1289.02);
+    assert.equal(fundPortfolio.fundHoldings[0].marketValue, 746.49);
+    assert.equal(fundPortfolio.fundHoldings[0].pnl, 46.49);
+    assert.equal(fundPortfolio.holdings.find(t=>t.symbol==='501225').shares, 200);
+    assert.equal((await (await call('/portfolio?accountId='+investment.id, 'a')).json()).fundHoldings.length, 0);
+    assert.equal((await (await call('/portfolio','b')).json()).fundHoldings.length, 0);
+    assert.equal((await call(fund+'/refresh','a','POST')).status, 200);
+    const channelDb = new Database(path.join(directory, 'db.sqlite'));
+    try {
+      const channel = createBookkeepingStore(channelDb).saveAccount('a', { name:'基金渠道', currency:'CNY', balance:9999 });
+      assert.equal((await call('/accounts','a','POST',{name:'基金渠道',currency:'CNY',bookkeepingId:channel,baselineCash:50})).status,200);
+      const account = (await (await call('/accounts','a')).json()).accounts.find(x=>x.bookkeepingId===channel);
+      const channelFund = `/fund-holdings/${account.id}/501225`;
+      assert.equal((await call(channelFund,'a','PUT',fundInput)).status,200);
+      const linked = createBookkeepingStore(channelDb).accounts('a').find(x=>x.id===channel);
+      assert.equal(linked.ledgerBalance,9999);
+      assert.equal(linked.balance,796.49);
+      assert.equal((await call('/accounts','a').then(r=>r.json())).accounts.find(x=>x.id===account.id).cash,50);
+      assert.equal((await call(fund,'a','DELETE')).status,200);
+      assert.equal((await call(channelFund,'a','DELETE')).status,200);
+    } finally { channelDb.close(); }
+    assert.equal((await (await call('/portfolio','a')).json()).fundHoldings.length, 0);
     const readonly = await fetch(base + '/accounts', { headers: { 'x-portal-user-id': 'a', 'x-portal-permissions': Buffer.from('["service:stock-manage:accounts:view"]').toString('base64url') } });
     const masked = await readonly.json();
     assert.equal('cash' in masked.accounts[0], false);

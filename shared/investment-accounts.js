@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { requirePortfolioUserId } from './portfolio-user.js';
+import { fundHoldings } from './fund-holdings.js';
 
 const round = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const cents = (n) => {
@@ -44,6 +45,7 @@ export function projectInvestments(db, userId, input) {
   const rows = investmentRows(db, userId);
   if (!rows.length) return [];
   const raw = input || (tableExists(db, 'portfolio_users') ? JSON.parse(db.prepare('SELECT data FROM portfolio_users WHERE user_id=?').get(userId)?.data || '{}') : {});
+  const funds = fundHoldings(db, userId);
   const entries = tableExists(db, 'bookkeeping_entries') ? db.prepare('SELECT * FROM bookkeeping_entries WHERE user_id=? AND affects_balance=1').all(userId) : [];
   return rows.map((account) => {
     const trades = (raw.trades || []).filter((t) => t.account_id === account.id).sort((a, b) => time(a.trade_date) - time(b.trade_date) || String(a.id).localeCompare(String(b.id)));
@@ -77,6 +79,12 @@ export function projectInvestments(db, userId, input) {
       const value = Number.isFinite(price) && price >= 0 ? round(q.shares * price * (/^[A-Z]+\d{6}[CP]/.test(symbol) ? 100 : 1)) : null;
       if (value != null) marketValue += value;
       positions.push({ symbol, name: q.name, shares: q.shares, price: Number.isFinite(price) ? price : null, marketValue: value, quoteAsOf: quote?.asOf || quote?.updatedAt || quote?.timestamp || quote?.date || null, delayed: !!quote?.delayed });
+    }
+    for (const fund of funds.filter(f => f.account_id === account.id)) {
+      const value = round(fund.shares * fund.nav);
+      marketValue += value;
+      positions.push({ type: 'fund', symbol: fund.code, name: fund.name, shares: fund.shares,
+        cost: fund.cost, price: fund.nav, marketValue: value, quoteAsOf: fund.nav_date });
     }
     const ledger = account.bookkeeping_id && tableExists(db, 'bookkeeping_accounts') ? db.prepare('SELECT name,archived FROM bookkeeping_accounts WHERE user_id=? AND id=?').get(userId, account.bookkeeping_id) : null;
     return { id: account.id, name: account.name, currency: account.currency, bookkeepingId: account.bookkeeping_id,
