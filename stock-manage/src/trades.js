@@ -38,15 +38,16 @@ export function cashDelta(trade) {
   return roundMoney(amt - fee);
 }
 
-export function toUsd(amount, currency, rate = DEFAULT_USD_CNY_RATE) {
+export function toUsd(amount, currency, rate = DEFAULT_USD_CNY_RATE, usdHkdRate) {
   const n = Number(amount) || 0;
   const r = Number(rate) > 0 ? Number(rate) : DEFAULT_USD_CNY_RATE;
   if (String(currency).toUpperCase() === 'CNY') return n / r;
+  if (String(currency).toUpperCase() === 'HKD') return n === 0 ? 0 : usdHkdRate > 0 ? n / usdHkdRate : NaN;
   return n;
 }
 
-export function cashUsdEquivalent(cashUsd, cashCny, rate = DEFAULT_USD_CNY_RATE) {
-  return roundMoney(toUsd(cashUsd, 'USD', rate) + toUsd(cashCny, 'CNY', rate));
+export function cashUsdEquivalent(cashUsd, cashCny, rate = DEFAULT_USD_CNY_RATE, cashHkd = 0, usdHkdRate) {
+  return roundMoney(toUsd(cashUsd, 'USD', rate) + toUsd(cashCny, 'CNY', rate) + toUsd(cashHkd, 'HKD', rate, usdHkdRate));
 }
 
 export function applyCashDelta(cashState, trade) {
@@ -55,11 +56,13 @@ export function applyCashDelta(cashState, trade) {
   const next = {
     cashUsd: Number(cashState.cashUsd) || 0,
     cashCny: Number(cashState.cashCny) || 0,
+    ...(cur === 'HKD' || cashState.cashHkd != null ? { cashHkd: Number(cashState.cashHkd) || 0, usdHkdRate: cashState.usdHkdRate } : {}),
     usdCnyRate: Number(cashState.usdCnyRate) > 0 ? Number(cashState.usdCnyRate) : DEFAULT_USD_CNY_RATE
   };
   if (cur === 'CNY') next.cashCny = roundMoney(next.cashCny + delta);
+  else if (cur === 'HKD') next.cashHkd = roundMoney(next.cashHkd + delta);
   else next.cashUsd = roundMoney(next.cashUsd + delta);
-  next.cash = cashUsdEquivalent(next.cashUsd, next.cashCny, next.usdCnyRate);
+  next.cash = cashUsdEquivalent(next.cashUsd, next.cashCny, next.usdCnyRate, next.cashHkd, next.usdHkdRate);
   return next;
 }
 
@@ -70,11 +73,13 @@ export function undoCashDelta(cashState, trade) {
   const next = {
     cashUsd: Number(cashState.cashUsd) || 0,
     cashCny: Number(cashState.cashCny) || 0,
+    ...(cur === 'HKD' || cashState.cashHkd != null ? { cashHkd: Number(cashState.cashHkd) || 0, usdHkdRate: cashState.usdHkdRate } : {}),
     usdCnyRate: Number(cashState.usdCnyRate) > 0 ? Number(cashState.usdCnyRate) : DEFAULT_USD_CNY_RATE
   };
   if (cur === 'CNY') next.cashCny = roundMoney(next.cashCny - delta);
+  else if (cur === 'HKD') next.cashHkd = roundMoney(next.cashHkd - delta);
   else next.cashUsd = roundMoney(next.cashUsd - delta);
-  next.cash = cashUsdEquivalent(next.cashUsd, next.cashCny, next.usdCnyRate);
+  next.cash = cashUsdEquivalent(next.cashUsd, next.cashCny, next.usdCnyRate, next.cashHkd, next.usdHkdRate);
   return next;
 }
 
@@ -188,7 +193,7 @@ export function deriveHoldings(trades) {
       avgCost: cost / shares,
       costLots: queue.map((x) => ({ shares: x.shares, costPerShare: x.price })),
       type,
-      currency: type === 'ashare' ? 'CNY' : 'USD'
+      currency: inferCurrency(symbol)
     });
   }
   out.sort((a, b) => a.symbol.localeCompare(b.symbol));
@@ -197,6 +202,7 @@ export function deriveHoldings(trades) {
 
 export function computePnl(trades, options = {}) {
   const { startDate, endDate } = options;
+  const usdHkdRate = options.usdHkdRate;
   const rate = Number(options.usdCnyRate) > 0 ? Number(options.usdCnyRate) : DEFAULT_USD_CNY_RATE;
   const inWindow = (t) => {
     const d = dateKey(t);
@@ -213,10 +219,10 @@ export function computePnl(trades, options = {}) {
   for (const t of trades) {
     if (!inWindow(t)) continue;
     const cur = tradeCurrency(t);
-    commission += toUsd(t.commission || 0, cur, rate);
-    if (t.type === 'buy') totalBuy += toUsd(t.total_amount, cur, rate);
-    else if (t.type === 'sell') totalSell += toUsd(t.total_amount, cur, rate);
-    else if (t.type === 'other') otherAmount += toUsd(t.total_amount, cur, rate);
+    commission += toUsd(t.commission || 0, cur, rate, usdHkdRate);
+    if (t.type === 'buy') totalBuy += toUsd(t.total_amount, cur, rate, usdHkdRate);
+    else if (t.type === 'sell') totalSell += toUsd(t.total_amount, cur, rate, usdHkdRate);
+    else if (t.type === 'other') otherAmount += toUsd(t.total_amount, cur, rate, usdHkdRate);
   }
 
   const fifoTrades = trades.filter((t) => t.type === 'buy' || t.type === 'sell');
@@ -237,7 +243,7 @@ export function computePnl(trades, options = {}) {
       if (tr.type === 'buy') queue.push({ shares: tr.shares, price: tr.price });
       else {
         const gainNative = applyFifoSellToQueue(queue, tr.shares, tr.price, tr.symbol);
-        realized += toUsd(gainNative, tradeCurrency(tr) || cur, rate);
+        realized += toUsd(gainNative, tradeCurrency(tr) || cur, rate, usdHkdRate);
       }
     }
   }
@@ -254,6 +260,7 @@ export function computePnl(trades, options = {}) {
 
 export function computeSymbolSummaries(trades, options = {}) {
   const { startDate, endDate } = options;
+  const usdHkdRate = options.usdHkdRate;
   const rate = Number(options.usdCnyRate) > 0 ? Number(options.usdCnyRate) : DEFAULT_USD_CNY_RATE;
   const symbolsInWindow = new Set();
   for (const t of trades) {
@@ -310,15 +317,15 @@ export function computeSymbolSummaries(trades, options = {}) {
     let unmatchedSellShares = 0;
     for (const t of win) {
       const cur = tradeCurrency(t);
-      totalCommission += toUsd(t.commission || 0, cur, rate);
+      totalCommission += toUsd(t.commission || 0, cur, rate, usdHkdRate);
       if (t.type === 'buy') {
-        totalBuy += toUsd(t.total_amount, cur, rate);
+        totalBuy += toUsd(t.total_amount, cur, rate, usdHkdRate);
         queue.push({ shares: t.shares, price: t.price });
       } else {
-        totalSell += toUsd(t.total_amount, cur, rate);
+        totalSell += toUsd(t.total_amount, cur, rate, usdHkdRate);
         const matched = { cost: 0, unmatchedShares: 0 };
-        fifoGross += toUsd(applyFifoSellToQueue(queue, t.shares, t.price, symbol, matched), cur, rate);
-        soldCost += toUsd(matched.cost, cur, rate);
+        fifoGross += toUsd(applyFifoSellToQueue(queue, t.shares, t.price, symbol, matched), cur, rate, usdHkdRate);
+        soldCost += toUsd(matched.cost, cur, rate, usdHkdRate);
         unmatchedSellShares += matched.unmatchedShares;
       }
     }
@@ -357,8 +364,8 @@ export function computeSymbolSummaries(trades, options = {}) {
       totalCommission: 0, fifoRealizedGross: 0, soldCostAmount: 0,
       netPnlRate: null, pnlRateUnavailableReason: 'other-income' });
     const row = otherGroups.get(key);
-    row.otherAmount += toUsd(trade.total_amount || 0, tradeCurrency(trade), rate);
-    row.totalCommission += toUsd(trade.commission || 0, tradeCurrency(trade), rate);
+    row.otherAmount += toUsd(trade.total_amount || 0, tradeCurrency(trade), rate, usdHkdRate);
+    row.totalCommission += toUsd(trade.commission || 0, tradeCurrency(trade), rate, usdHkdRate);
   }
   for (const row of otherGroups.values()) {
     row.netPnl = roundMoney(row.otherAmount - row.totalCommission);
@@ -372,6 +379,7 @@ export function computeSymbolSummaries(trades, options = {}) {
 
 export function buildDailyCumulativeSeries(trades, options = {}) {
   if (!trades.length) return [];
+  const usdHkdRate = options.usdHkdRate;
   const rate = Number(options.usdCnyRate) > 0 ? Number(options.usdCnyRate) : DEFAULT_USD_CNY_RATE;
   const sorted = [...trades].sort((a, b) => tradeTime(a.trade_date) - tradeTime(b.trade_date) || a.id.localeCompare(b.id));
   const byDay = new Map();
@@ -394,16 +402,16 @@ export function buildDailyCumulativeSeries(trades, options = {}) {
   for (const day of days) {
     for (const tr of byDay.get(day)) {
       const cur = tradeCurrency(tr);
-      cumCommission += toUsd(tr.commission || 0, cur, rate);
+      cumCommission += toUsd(tr.commission || 0, cur, rate, usdHkdRate);
       if (tr.type === 'other') {
-        cumOther += toUsd(tr.total_amount, cur, rate);
+        cumOther += toUsd(tr.total_amount, cur, rate, usdHkdRate);
         continue;
       }
       const key = JSON.stringify([tr.account_id || '', normalizeSymbol(tr.symbol)]);
       if (!queues.has(key)) queues.set(key, []);
       const q = queues.get(key);
       if (tr.type === 'buy') q.push({ shares: tr.shares, price: tr.price });
-      else cumRealized += toUsd(applyFifoSellToQueue(q, tr.shares, tr.price, tr.symbol), cur, rate);
+      else cumRealized += toUsd(applyFifoSellToQueue(q, tr.shares, tr.price, tr.symbol), cur, rate, usdHkdRate);
     }
     const cumulativeNet = roundMoney(cumRealized - cumCommission + cumOther);
     out.push({ date: day, cumulativeNet, dayNet: roundMoney(cumulativeNet - prevNet) });
@@ -459,6 +467,8 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
       usdCnyRate: Number(cashOrState?.usdCnyRate) > 0 ? Number(cashOrState.usdCnyRate) : DEFAULT_USD_CNY_RATE
     };
   const rate = cashState.usdCnyRate;
+  const cashHkd = Number(cashOrState?.cashHkd) || 0;
+  const usdHkdRate = cashOrState?.usdHkdRate;
 
   let stockMv = 0;
   let optionMv = 0;
@@ -466,6 +476,8 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
   let ashareMvNative = 0;
   let unrealizedUsd = 0;
   let unrealizedCny = 0;
+  let hkMv = 0;
+  let unrealizedHkd = 0;
   let marketDailyUsd = 0;
   let marketDailyCny = 0;
   let hasMarketDailyUsd = false;
@@ -478,30 +490,32 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
     const isCny = currency === 'CNY';
     const mvNative = price * h.shares * mult;
     const costNative = h.avgCost * h.shares * mult;
-    const mv = toUsd(mvNative, currency, rate);
+    const mv = toUsd(mvNative, currency, rate, usdHkdRate);
     const pnlNative = price > 0 ? roundMoney(mvNative - costNative) : null;
-    const pnlUsd = pnlNative != null ? roundMoney(toUsd(pnlNative, currency, rate)) : null;
+    const pnlUsd = pnlNative != null ? roundMoney(toUsd(pnlNative, currency, rate, usdHkdRate)) : null;
     const pnlPct = price > 0 && h.avgCost ? ((price - h.avgCost) / h.avgCost) * 100 : null;
     const change = q.change != null && q.change !== '' ? Number(q.change) : null;
     const changePct = q.changePercent != null && q.changePercent !== '' ? Number(q.changePercent) : null;
     const dailyPnlNative = price > 0 && change != null && Number.isFinite(change)
       ? roundMoney(change * h.shares * mult) : null;
-    const dailyPnlUsd = dailyPnlNative != null ? roundMoney(toUsd(dailyPnlNative, currency, rate)) : null;
+    const dailyPnlUsd = dailyPnlNative != null ? roundMoney(toUsd(dailyPnlNative, currency, rate, usdHkdRate)) : null;
     const m = meta[h.symbol] || {};
     if (h.type === 'option') optionMv += mv;
     else if (h.type === 'ashare' || isCny) {
       ashareMv += mv;
       ashareMvNative += mvNative;
-    } else stockMv += mv;
+    } else if (currency === 'HKD') hkMv += mvNative;
+    else stockMv += mv;
     if (pnlNative != null) {
       if (isCny) unrealizedCny += pnlNative;
+      else if (currency === 'HKD') unrealizedHkd += pnlNative;
       else unrealizedUsd += pnlNative;
     }
     if (dailyPnlNative != null) {
       if (isCny) {
         marketDailyCny += dailyPnlNative;
         hasMarketDailyCny = true;
-      } else {
+      } else if (currency !== 'HKD') {
         marketDailyUsd += dailyPnlNative;
         hasMarketDailyUsd = true;
       }
@@ -539,14 +553,15 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
       optionInfo: opt
     };
   });
-  const totalMv = stockMv + optionMv + ashareMv;
-  const cashEq = cashUsdEquivalent(cashState.cashUsd, cashState.cashCny, rate);
+  const totalMv = stockMv + optionMv + ashareMv + toUsd(hkMv, 'HKD', rate, usdHkdRate);
+  const cashEq = cashUsdEquivalent(cashState.cashUsd, cashState.cashCny, rate, cashHkd, usdHkdRate);
   const totalAssets = totalMv + cashEq;
   // Native-currency asset pockets (holdings + cash in that currency).
   const assetsUsd = roundMoney(stockMv + optionMv + (Number(cashState.cashUsd) || 0));
   const assetsCny = roundMoney(ashareMvNative + (Number(cashState.cashCny) || 0));
-  const totalAssetsCny = roundMoney(assetsUsd * rate + assetsCny);
-  const unrealized = roundMoney(unrealizedUsd + toUsd(unrealizedCny, 'CNY', rate));
+  const assetsHkd = roundMoney(hkMv + cashHkd);
+  const totalAssetsCny = roundMoney(assetsUsd * rate + assetsCny + toUsd(assetsHkd, 'HKD', rate, usdHkdRate) * rate);
+  const unrealized = roundMoney(unrealizedUsd + toUsd(unrealizedCny, 'CNY', rate, usdHkdRate) + toUsd(unrealizedHkd, 'HKD', rate, usdHkdRate));
   rows.forEach((r) => {
     r.groupKey = (() => {
       const manual = String(meta[r.symbol]?.groupWith || '').trim().toUpperCase();
@@ -580,6 +595,9 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
     totalAssetsCny,
     assetsUsd,
     assetsCny,
+    assetsHkd,
+    hkMv: roundMoney(hkMv),
+    unrealizedHkd: roundMoney(unrealizedHkd),
     cashUsdEq: cashEq,
     unrealized,
     unrealizedUsd: roundMoney(unrealizedUsd),
@@ -591,11 +609,14 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
 
 /** 当日总盈亏：美股/期权按美元，A 股按人民币分开累计；交易净变动仍按当前汇率折美元（兼容旧字段） */
 export function computeDailySummary(holdingRows, trades, options = {}) {
+  const usdHkdRate = options.usdHkdRate;
   const rate = Number(options.usdCnyRate) > 0 ? Number(options.usdCnyRate) : DEFAULT_USD_CNY_RATE;
   let marketDailyUsd = 0;
   let marketDailyCny = 0;
   let hasMarketUsd = false;
   let hasMarketCny = false;
+  let marketDailyHkd = 0;
+  let hasMarketHkd = false;
   for (const h of holdingRows) {
     const isCny = h.currency === 'CNY' || h.type === 'ashare';
     const native = h.dailyPnlNative != null ? h.dailyPnlNative : h.dailyPnl;
@@ -603,6 +624,9 @@ export function computeDailySummary(holdingRows, trades, options = {}) {
     if (isCny) {
       marketDailyCny += native;
       hasMarketCny = true;
+    } else if (h.currency === 'HKD') {
+      marketDailyHkd += native;
+      hasMarketHkd = true;
     } else {
       marketDailyUsd += native;
       hasMarketUsd = true;
@@ -613,7 +637,7 @@ export function computeDailySummary(holdingRows, trades, options = {}) {
   const todayPoint = sparse.find((p) => p.date === today);
   const tradeDaily = todayPoint?.dayNet ?? 0;
   const hasTradeToday = !!todayPoint;
-  const hasMarket = hasMarketUsd || hasMarketCny;
+  const hasMarket = hasMarketUsd || hasMarketCny || hasMarketHkd;
 
   if (!hasMarket && !hasTradeToday) {
     return {
@@ -630,7 +654,7 @@ export function computeDailySummary(holdingRows, trades, options = {}) {
   const marketUsd = hasMarketUsd ? roundMoney(marketDailyUsd) : null;
   const marketCny = hasMarketCny ? roundMoney(marketDailyCny) : null;
   const marketUsdEq = roundMoney(
-    (marketUsd || 0) + toUsd(marketCny || 0, 'CNY', rate)
+    (marketUsd || 0) + toUsd(marketCny || 0, 'CNY', rate, usdHkdRate) + toUsd(marketDailyHkd, 'HKD', rate, usdHkdRate)
   );
   const tradeUsd = hasTradeToday ? roundMoney(tradeDaily) : null;
 
@@ -643,7 +667,8 @@ export function computeDailySummary(holdingRows, trades, options = {}) {
     dailyTotalPnlUsd: hasMarketUsd || hasTradeToday
       ? roundMoney((marketUsd || 0) + (tradeUsd || 0))
       : null,
-    dailyTotalPnlCny: marketCny
+    dailyTotalPnlCny: marketCny,
+    dailyTotalPnlHkd: hasMarketHkd ? roundMoney(marketDailyHkd) : null
   };
 }
 
@@ -662,7 +687,7 @@ export function normalizeTrade(input) {
       name: String(input.name || cat),
       type: 'other',
       other_category: cat,
-      currency: currency === 'CNY' ? 'CNY' : 'USD',
+      currency,
       shares: 1,
       price: 0,
       total_amount: roundMoney(normalizeOtherAmount(cat, amt)),
@@ -671,6 +696,7 @@ export function normalizeTrade(input) {
       created_at: input.created_at || new Date().toISOString()
     };
   }
+  if (currency === 'HKD' && holdingTypeForSymbol(symbol) !== 'hkstock') throw new Error('港股代码请填写 00700 或 00700.HK');
   const shares = Number(input.shares);
   const price = roundPrice(input.price);
   if (!symbol || !(shares > 0) || !(price > 0)) throw new Error('买卖需填写代码、数量与价格');
@@ -696,6 +722,7 @@ export function recalcCashFromTrades(trades, base = {}) {
   let state = {
     cashUsd: Number(base.cashUsd) || (typeof base === 'number' ? base : 0),
     cashCny: Number(base.cashCny) || 0,
+    ...(base.usdHkdRate ? { usdHkdRate: base.usdHkdRate } : {}),
     usdCnyRate: Number(base.usdCnyRate) > 0 ? Number(base.usdCnyRate) : DEFAULT_USD_CNY_RATE
   };
   if (typeof base === 'number') {
@@ -704,6 +731,6 @@ export function recalcCashFromTrades(trades, base = {}) {
   for (const t of trades) {
     state = applyCashDelta(state, t);
   }
-  state.cash = cashUsdEquivalent(state.cashUsd, state.cashCny, state.usdCnyRate);
+  state.cash = cashUsdEquivalent(state.cashUsd, state.cashCny, state.usdCnyRate, state.cashHkd, state.usdHkdRate);
   return state;
 }

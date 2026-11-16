@@ -2,6 +2,7 @@ import {
   isAShareSymbol,
   ashareCode,
   ashareExchange,
+  hkCode,
   normalizeSymbol
 } from './markets.js';
 import { yoloMarketDate } from './yolo-time.js';
@@ -241,7 +242,7 @@ export function createQuoteService(config) {
 
   async function getStockHistory(symbol, options = {}) {
     const sym = normalizeSymbol(symbol);
-    if (!sym || isAShareSymbol(sym) || parseOptionSymbol(sym)) {
+    if (!sym || isAShareSymbol(sym) || hkCode(sym) || parseOptionSymbol(sym)) {
       throw new Error('历史量化行情当前仅支持美股正股');
     }
     const days = Math.min(2190, Math.max(90, Number(options.days) || 365));
@@ -291,12 +292,13 @@ export function createQuoteService(config) {
     throw new Error(`历史行情不可用（${errors.join('; ')}）`);
   }
 
-  async function getYahooQuote(symbol) {
+  async function getYahooQuote(symbol, expectedCurrency) {
     const sym = String(symbol).toUpperCase();
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=5d`;
     const data = await fetchJson(url, { 'User-Agent': 'Mozilla/5.0' });
     const result = data?.chart?.result?.[0];
     const meta = result?.meta;
+    if (expectedCurrency && meta?.currency !== expectedCurrency) throw new Error('Yahoo 报价币种不匹配');
     const price = Number(meta?.regularMarketPrice);
     if (!Number.isFinite(price) || price <= 0) throw new Error('Yahoo 无有效价');
     const prev = Number(meta?.chartPreviousClose || meta?.previousClose) || price;
@@ -307,7 +309,7 @@ export function createQuoteService(config) {
       change: price - prev,
       changePercent: prev ? ((price - prev) / prev) * 100 : 0,
       prevClose: prev,
-      currency: 'USD',
+      currency: expectedCurrency || 'USD',
       source: 'yahoo',
       delayed: true
     };
@@ -492,7 +494,33 @@ export function createQuoteService(config) {
     return foreignExchange.getRate('USD');
   }
 
+  async function getUsdHkd() {
+    const { quotes } = await foreignExchange.getRates(['USD', 'HKD']);
+    if (!quotes.USD || !quotes.HKD || quotes.USD.stale || quotes.HKD.stale) throw new Error('USD/HKD 汇率不可用');
+    return { rate: quotes.USD.rate / quotes.HKD.rate };
+  }
+
+  async function getHongKongQuote(code) {
+    const symbol = `${code}.HK`;
+    try {
+      const body = await fetchText(`https://qt.gtimg.cn/q=hk${code}`, { 'User-Agent': 'Mozilla/5.0' }, 'gbk');
+      const parts = body.match(/="([^"]*)"/)?.[1].split('~') || [];
+      const price = Number(parts[3]);
+      const prevClose = Number(parts[4]);
+      if (parts[2] !== code || !parts.includes('HKD') || !(price > 0) || !(prevClose > 0)) throw new Error('腾讯无有效港币报价');
+      const stamp = parts[30]?.replace(/\//g, '-').replace(' ', 'T');
+      const time = Date.parse(`${stamp}+08:00`);
+      return { symbol, name: parts[1] || symbol, price, prevClose, change: price - prevClose,
+        changePercent: (price / prevClose - 1) * 100, currency: 'HKD', source: 'tencent',
+        asOf: Number.isFinite(time) ? new Date(time).toISOString() : null };
+    } catch {
+      const yahooSymbol = `${String(Number(code)).padStart(4, '0')}.HK`;
+      return { ...await getYahooQuote(yahooSymbol, 'HKD'), symbol };
+    }
+  }
+
   async function getStock(symbol) {
+    if (hkCode(symbol)) return getHongKongQuote(hkCode(symbol));
     if (isAShareSymbol(symbol)) return getAShareQuote(symbol);
     return getUsStockQuote(symbol);
   }
@@ -892,6 +920,11 @@ export function createQuoteService(config) {
   async function search(q) {
     const query = String(q || '').trim();
     if (query.length < 1) return [];
+    if (hkCode(query)) {
+      const symbol = normalizeSymbol(query);
+      try { return [{ symbol, name: (await getHongKongQuote(hkCode(query))).name }]; }
+      catch { return [{ symbol, name: symbol }]; }
+    }
     if (isAShareSymbol(query)) {
       const code = ashareCode(query);
       try {
@@ -918,8 +951,7 @@ export function createQuoteService(config) {
   async function getQuote(symbol) {
     const sym = normalizeSymbol(symbol);
     if (/^[A-Z]+\d{6}[CP]\d/i.test(sym)) return getOption(sym);
-    if (isAShareSymbol(sym)) return getAShareQuote(sym);
-    return getUsStockQuote(sym);
+    return getStock(sym);
   }
 
   async function getInstrumentName(symbol) {
@@ -928,7 +960,7 @@ export function createQuoteService(config) {
       const name = String(value || '').trim();
       return name && name.toUpperCase() !== sym ? name : '';
     };
-    if (!isAShareSymbol(sym) && !parseOptionSymbol(sym)) {
+    if (!isAShareSymbol(sym) && !hkCode(sym) && !parseOptionSymbol(sym)) {
       const matches = await search(sym);
       const match = matches.find((item) => normalizeSymbol(item.symbol) === sym);
       const name = realName(match?.name);
@@ -946,5 +978,5 @@ export function createQuoteService(config) {
     return realName((await getQuote(sym)).name);
   }
 
-  return { getStock, getOption, getQqq1dteChain, getQqqOptionChains, getQqqPreviousSessionSummary, getQuote, getInstrumentName, getStockHistory, getAShareQuote, getUsdCny, search };
+  return { getStock, getOption, getQqq1dteChain, getQqqOptionChains, getQqqPreviousSessionSummary, getQuote, getInstrumentName, getStockHistory, getAShareQuote, getUsdCny, getUsdHkd, search };
 }

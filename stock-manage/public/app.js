@@ -1,11 +1,11 @@
-import { TRADE_ASSET_TYPES, tradeAssetType } from './js/trade-asset-type.js';
+import { TRADE_ASSET_TYPES, tradeAssetType } from './js/trade-asset-type.js?v=hk-1';
 import { openInvestmentAccounts } from './js/investment-accounts.js?v=datetime-20261110';
 import { isDividendTax, normalizeOtherAmount } from './js/dividend-tax.js';
-import { renderTradeReview } from './js/trade-review.js';
-import { formatPrice, priceInputValue } from './js/price-format.js';
+import { renderTradeReview } from './js/trade-review.js?v=hk-1';
+import { formatPrice, priceInputValue } from './js/price-format.js?v=hk-1';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=20261004-full-history';
-import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js?v=fund-holdings-2';
+import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js?v=hk-1';
 import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -13,7 +13,11 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => 
 const fmt = (n) => Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 const fmtUsd = (n) => Number.isFinite(n) ? '$' + fmt(n) : '—';
 const fmtCny = (n) => Number.isFinite(n) ? '¥' + fmt(n) : '—';
-const fmtMoney = (n, currency = 'USD') => (String(currency).toUpperCase() === 'CNY' ? fmtCny(n) : fmtUsd(n));
+const fmtMoney = (n, currency = 'USD') => {
+  if (!Number.isFinite(n)) return '—';
+  const prefix = { USD: '$', CNY: '¥', HKD: 'HK$' };
+  return (prefix[currency] || '') + fmt(n);
+};
 const fmtUsdSigned = (n) => !Number.isFinite(n) ? '—' : `${n >= 0 ? '+' : ''}$${fmt(n)}`;
 const fmtMoneySigned = (n, currency = 'USD') => {
   if (!Number.isFinite(n)) return '—';
@@ -34,7 +38,12 @@ function looksLikeAShare(symbol) {
   return /^\d{6}$/.test(s);
 }
 
+function looksLikeHongKong(symbol) {
+  return /^(?:HK\.?)?\d{1,5}(?:\.HK)?$/i.test(String(symbol || '').trim());
+}
+
 function holdingTypeLabel(h) {
+  if (h.type === 'hkstock') return '港股';
   if (h.type === 'fund') return '场外基金';
   if (h.type === 'option') return '期权';
   if (h.type === 'ashare' || h.currency === 'CNY' || looksLikeAShare(h.symbol)) return 'A股/ETF';
@@ -261,10 +270,13 @@ function renderDashboard() {
   const totalPnlAshare = hasAshare
     ? `<div class="sm-sub-value ${dashboardVisible && pnlVisible ? cls(cnPnl) : ''}">${state.fundHoldings?.length ? '人民币证券及基金' : 'A股/ETF'} ${maskDashboardValue(maskPnlValue(fmtMoneySigned(Number.isFinite(cnPnl) ? cnPnl : 0, 'CNY')))}</div>`
     : '';
-  const totalPnlHint = hasAshare ? '' : '美股未实现盈亏';
+  const totalPnlHint = hasAshare || state.summary?.hkMv > 0 ? '' : '美股未实现盈亏';
   const dailyPnlAshare = (hasAshare || (Number.isFinite(dailyCn) && dailyCn !== 0))
     ? `<div class="sm-sub-value ${dashboardVisible && pnlVisible && dailyCn != null ? cls(dailyCn) : ''}">${state.fundHoldings?.length ? '人民币证券及基金' : 'A股/ETF'} ${maskDashboardValue(maskPnlValue(dailyCn == null ? '—' : fmtMoneySigned(dailyCn, 'CNY')))}</div>`
     : '';
+  const hasHkd = (state.investmentAccounts || []).some(a => a.currency === 'HKD' && (!selectedAccountId || a.id === selectedAccountId));
+  const hkLine = (value, signed = false) => hasHkd ? `<div class="sm-sub-value">港股 ${maskDashboardValue(signed ? maskPnlValue(fmtMoneySigned(value, 'HKD')) : fmtMoney(value, 'HKD'))}</div>` : '';
+  const cashHkdLine = hasHkd ? ` · ${fmtMoney(state.cashHkd, 'HKD')}` : '';
   const dailyMetaHint = (dailyHint && dailyHint !== '—') ? dailyHint : '';
   const cashField = !dashboardVisible
     ? `<div class="value">${MASK}</div>`
@@ -273,7 +285,7 @@ function renderDashboard() {
           <div class="sm-cash-input-wrap"><span>$</span><input type="number" step="0.01" id="cash-usd-input" value="${state.cashUsd ?? 0}"></div>
           <div class="sm-cash-input-wrap"><span>¥</span><input type="number" step="0.01" id="cash-cny-input" value="${state.cashCny ?? 0}"></div>
         </div>`
-      : `<div class="value">${fmtUsd(state.cashUsd)} · ${fmtCny(state.cashCny)}</div>`;
+      : `<div class="value">${fmtUsd(state.cashUsd)} · ${fmtCny(state.cashCny)}${cashHkdLine}</div>`;
   const rateHint = `汇率 ${Number(state.usdCnyRate || 0).toFixed(4)} · 折合 ${maskDashboardValue(fmtUsd(cashEq))} · 占组合 ${maskDashboardValue(fmtPct(cashPct))}`;
   const rate = Number(state.usdCnyRate) > 0 ? Number(state.usdCnyRate) : 7.2;
   const assetsUsd = s.assetsUsd === null ? null : Number.isFinite(s.assetsUsd)
@@ -302,13 +314,15 @@ function renderDashboard() {
             <span class="sm-asset-split-label">人民币资产</span>
             <span class="sm-asset-split-value">${maskDashboardValue(fmtCny(assetsCny))}</span>
           </div>
+          ${hasHkd ? `<div class="sm-asset-split-item"><span class="sm-asset-split-label">港币资产</span><span class="sm-asset-split-value">${maskDashboardValue(fmtMoney(s.assetsHkd, 'HKD'))}</span></div>` : ''}
         </div>
-        <div class="hint">美元口径含 A 股折汇；分币种为持仓+现金本币合计</div>
+        <div class="hint">分币种资产为持仓市值与现金的本币合计</div>
       </div>` : ''}
       <div class="sm-summary-card">
         <div class="label">股票市值</div>
         <div class="value">${maskDashboardValue(fmtUsd(s.stockMv))}</div>
         ${ashareMvLine}
+        ${hkLine(s.hkMv)}
       </div>
       <div class="sm-summary-card">
         <div class="label">期权市值</div>
@@ -318,12 +332,14 @@ function renderDashboard() {
         <div class="label">总盈亏</div>
         <div class="value ${dashboardVisible && pnlVisible ? cls(usPnl) : ''}">${maskDashboardValue(maskPnlValue(usPnlDisplay))}</div>
         ${totalPnlAshare}
+        ${hkLine(s.totalPnlHkd, true)}
         ${totalPnlHint ? `<div class="hint">${maskDashboardValue(maskPnlValue(totalPnlHint))}</div>` : ''}
       </div>
       <div class="sm-summary-card sm-summary-card--amber">
         <div class="label">当日总盈亏</div>
         <div class="value ${dashboardVisible && pnlVisible && dailyUs != null ? cls(dailyUs) : ''}">${maskDashboardValue(maskPnlValue(dailyUsDisplay))}</div>
         ${dailyPnlAshare}
+        ${hkLine(s.dailyTotalPnlHkd, true)}
         ${dailyMetaHint ? `<div class="hint">${maskDashboardValue(maskPnlValue(dailyMetaHint))}</div>` : ''}
       </div>
       ${cashVisible ? `<div class="sm-summary-card sm-summary-card--cash">
@@ -489,7 +505,7 @@ function renderCashRowCells(cashPct) {
     if (c.key === 'type' || c.key === 'name') return cell('现金');
     if (c.key === 'symbol') return cell('CASH');
     if (c.key === 'position') {
-      return cell(`${fmtUsd(state.cashUsd)} · ${fmtCny(state.cashCny)}`);
+      return cell(`${fmtUsd(state.cashUsd)} · ${fmtCny(state.cashCny)}${state.cashHkd ? ' · ' + fmtMoney(state.cashHkd, 'HKD') : ''}`);
     }
     if (c.key === 'cost') return cell(`折合 ${fmtUsd(cashEq)}`);
     if (c.key === 'weight') return cell(fmtPct(cashPct));
@@ -739,7 +755,7 @@ function tradeFormFields(trade = {}, allowFund = false) {
   const type = trade.type || trade.prefillType || 'buy';
   const dt = toDatetimeLocalValue(trade.trade_date || Date.now());
   const currency = trade.currency
-    || (looksLikeAShare(trade.symbol) ? 'CNY' : 'USD');
+    || (looksLikeHongKong(trade.symbol) ? 'HKD' : looksLikeAShare(trade.symbol) ? 'CNY' : 'USD');
   return `
     <form id="trade-form" class="sm-form-grid">
       <label>类型<select name="type" id="trade-type">
@@ -756,6 +772,7 @@ function tradeFormFields(trade = {}, allowFund = false) {
       <label>币种<select name="currency" id="trade-currency">
         <option value="USD" ${currency === 'USD' ? 'selected' : ''}>USD 美元</option>
         <option value="CNY" ${currency === 'CNY' ? 'selected' : ''}>CNY 人民币</option>
+        <option value="HKD" ${currency === 'HKD' ? 'selected' : ''}>HKD 港币</option>
       </select></label>
       <label class="field-trade ${type === 'other' ? 'hidden' : ''}">数量<input name="shares" type="number" step="any" value="${trade.shares ?? ''}"></label>
       <label class="field-trade ${type === 'other' ? 'hidden' : ''}">价格<input name="price" type="number" step="0.001" value="${priceInputValue(trade.price)}"></label>
@@ -778,7 +795,10 @@ function bindTradeForm(root) {
   }
   if (symbolEl && currencyEl) {
     const syncCurrency = () => {
-      if (looksLikeAShare(symbolEl.value)) currencyEl.value = 'CNY';
+      if (typeEl?.value === 'other') return;
+      if (looksLikeHongKong(symbolEl.value)) currencyEl.value = 'HKD';
+      else if (looksLikeAShare(symbolEl.value)) currencyEl.value = 'CNY';
+      else if (currencyEl.value === 'HKD' && symbolEl.value.trim()) currencyEl.value = 'USD';
     };
     symbolEl.addEventListener('input', syncCurrency);
     symbolEl.addEventListener('change', syncCurrency);

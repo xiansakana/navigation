@@ -2,6 +2,7 @@ import XLSX from 'xlsx';
 import { parseEastmoneyBuffer } from './import-eastmoney.js';
 import { parseBbaeBuffer } from './import-bbae.js';
 import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
+import { hkCode, normalizeSymbol } from './markets.js';
 import { isOptionSymbol, optionMult, roundMoney, roundPrice } from './trades.js';
 
 function normalizeCell(v) {
@@ -10,7 +11,7 @@ function normalizeCell(v) {
 }
 
 function parseMoney(s) {
-  const t = normalizeCell(s).replace(/,/g, '').replace(/^\$/, '');
+  const t = normalizeCell(s).replace(/,/g, '').replace(/^(?:HK)?\$/i, '');
   if (!t || t === '市价') return NaN;
   const n = parseFloat(t);
   return Number.isFinite(n) ? n : NaN;
@@ -131,7 +132,7 @@ function parseMoomooRows(rows) {
     const price = parseMoney(cells[iPx]);
     const amount = parseMoney(cells[iAmt]);
     if (!(price > 0) || !(amount > 0)) continue;
-    const sym = normalizeMoomooOptionSymbol(code.toUpperCase());
+    const sym = hkCode(code) ? normalizeSymbol(code) : normalizeMoomooOptionSymbol(code.toUpperCase());
     const isOpt = isOptionSymbol(sym);
     let shares = iQty >= 0 ? parseQty(cells[iQty]) : NaN;
     if (!(shares > 0)) {
@@ -149,6 +150,7 @@ function parseMoomooRows(rows) {
     out.push({
       id: `import-${r}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       symbol: sym,
+      ...(hkCode(sym) ? { currency: 'HKD' } : {}),
       name: (iName >= 0 ? normalizeCell(cells[iName]) : '') || code,
       type,
       shares,
@@ -188,7 +190,7 @@ export function parseAppBackupBuffer(buffer) {
     if (ext) {
       const typeRaw = normalizeCell(cells[1]);
       const otherCat = normalizeCell(cells[2]);
-      const symbol = normalizeCell(cells[3]).toUpperCase();
+      const symbol = normalizeSymbol(cells[3]);
       if (!symbol) continue;
       if (typeRaw === '其它' || typeRaw.toLowerCase() === 'other') {
         const amt = parseMoney(cells[7]);
@@ -231,7 +233,7 @@ export function parseAppBackupBuffer(buffer) {
       });
     } else {
       const typeRaw = normalizeCell(cells[1]);
-      const symbol = normalizeCell(cells[2]).toUpperCase();
+      const symbol = normalizeSymbol(cells[2]);
       const shares = parseQty(cells[4]);
       const price = parseMoney(cells[5]);
       if (!symbol || !(shares > 0) || !(price > 0)) continue;

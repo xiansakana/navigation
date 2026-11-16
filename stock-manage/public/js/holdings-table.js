@@ -19,8 +19,9 @@ export function effectiveGroupKey(h) {
 export function typeRank(type) {
   if (type === 'stock') return 0;
   if (type === 'ashare' || type === 'fund') return 1;
-  if (type === 'option') return 2;
-  return 3;
+  if (type === 'hkstock') return 2;
+  if (type === 'option') return 3;
+  return 4;
 }
 
 /** 组内主类型：优先非期权（正股 / A股） */

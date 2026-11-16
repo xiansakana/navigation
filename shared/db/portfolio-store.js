@@ -43,6 +43,7 @@ function normalizePortfolio(raw) {
     cashUsd,
     cashCny,
     usdCnyRate,
+    ...(Number(raw?.usdHkdRate) > 0 && Number.isFinite(Number(raw.usdHkdRate)) ? { usdHkdRate: Number(raw.usdHkdRate) } : {}),
     cash,
     trades: Array.isArray(raw?.trades) ? raw.trades : [],
     quotes: raw?.quotes && typeof raw.quotes === 'object' ? raw.quotes : {},
@@ -156,15 +157,17 @@ export function createPortfolioStore(db, userId) {
       const accounts = projectInvestments(db, userId, data);
       if (!accounts.length) return data;
       const sum = (cur) => roundMoney(accounts.filter((a) => a.currency === cur).reduce((s, a) => s + a.cash, 0));
-      return { ...data, cashUsd: sum('USD'), cashCny: sum('CNY'), cash: roundMoney(sum('USD') + sum('CNY') / data.usdCnyRate), investmentAccounts: accounts, accountCashEnabled: true };
+      const cashHkd = sum('HKD');
+      const cash = sum('USD') + sum('CNY') / data.usdCnyRate + (cashHkd ? cashHkd / data.usdHkdRate : 0);
+      return { ...data, cashUsd: sum('USD'), cashCny: sum('CNY'), cashHkd, cash: Number.isFinite(cash) ? roundMoney(cash) : null, investmentAccounts: accounts, accountCashEnabled: true };
     },
     write(input, options = {}) {
       const payload = correctDividendTaxPortfolio(normalizePortfolio(input));
       const updatedAt = new Date().toISOString();
       return db.transaction(() => {
         const before = normalizePortfolio(JSON.parse(select.get(userId)?.data || '{}'));
+        payload.trades = prepareInvestmentTrades(db, userId, payload.trades, before);
         if (investmentRows(db, userId).length) {
-          payload.trades = prepareInvestmentTrades(db, userId, payload.trades, before);
           // Managed cash is derived, never write a displayed aggregate back into its baseline.
           payload.cashUsd = before.cashUsd; payload.cashCny = before.cashCny; payload.cash = before.cash;
         }

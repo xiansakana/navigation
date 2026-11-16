@@ -23,6 +23,13 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     if (String(url).includes('fundCode=000198')) return Response.json({Data:{FundType:'005',SYType:'每万份收益',LSJZList:[{DWJZ:'0.2168',FSRQ:'2026-11-13'}]}});
     if (String(url).includes('/f10/lsjz')) return Response.json({Data:{LSJZList:[{DWJZ:'2.9800',FSRQ:'2026-11-13'}]}});
     if (String(url).includes('/chart/AAPL')) return Response.json({chart:{result:[{meta:{regularMarketPrice:25,chartPreviousClose:20}}]}});
+    if (String(url).includes('q=hk00700')) {
+      const fields = Array(83).fill('');
+      fields[1] = 'Tencent'; fields[2] = '00700'; fields[3] = '40'; fields[4] = '39';
+      fields[30] = '2026/11/16 15:00:00'; fields[82] = 'HKD';
+      return new Response('v_hk00700="'+fields.join('~')+'";');
+    }
+    if (String(url).includes('DEXHKUS')) return new Response('observation_date,DEXCHUS,DEXHKUS\\n2026-11-13,7.1,8\\n');
     if (String(url).includes('fredgraph.csv')) return new Response('observation_date,DEXCHUS\\n2026-10-23,7.1\\n');
     throw new Error('Unexpected fixture request');
   };`);
@@ -160,6 +167,40 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
       assert.equal((await call(channelFund,'a','DELETE')).status,200);
     } finally { channelDb.close(); }
     assert.equal((await (await call('/portfolio','a')).json()).fundHoldings.length, 0);
+    const hkTrade = {type:'buy',symbol:'0700.HK',shares:10,price:32,commission:8,trade_date:'2099-01-01T12:00:00Z'};
+    assert.equal((await call('/trades','b','POST',hkTrade)).status,400);
+    const hkDb = new Database(path.join(directory, 'db.sqlite'));
+    try {
+      const ledger = createBookkeepingStore(hkDb).saveAccount('a', { name:'港币券商', currency:'HKD', balance:9999 });
+      const hkCreated = await call('/accounts','a','POST',{name:'港股',currency:'HKD',bookkeepingId:ledger,baselineCash:800});
+      assert.equal(hkCreated.status,200);
+      const hkId = (await hkCreated.json()).id;
+      assert.equal((await call('/trades','a','POST',{...hkTrade,account_id:investment.id})).status,400);
+      assert.equal((await call('/trades','a','POST',{...hkTrade,account_id:hkId})).status,200);
+      const refresh = await (await call('/quotes/refresh?accountId='+hkId,'a','POST',{symbol:'00700'})).json();
+      assert.equal(refresh.refresh.ok,1);
+      assert.equal(refresh.cashHkd,472);
+      assert.equal(refresh.summary.assetsHkd,872);
+      assert.equal(refresh.summary.totalAssets,109);
+      assert.equal(refresh.summary.totalPnlHkd,80);
+      assert.equal(refresh.summary.dailyTotalPnlHkd,10);
+      assert.equal(refresh.summary.commission,1);
+      assert.equal(refresh.holdings[0].symbol,'00700.HK');
+      assert.equal(refresh.holdings[0].currency,'HKD');
+      assert.equal(createBookkeepingStore(hkDb).accounts('a').find(a=>a.id===ledger).balance,872);
+      const hidden = await fetch(base+'/portfolio?accountId='+hkId,{headers:{'x-portal-user-id':'a','x-portal-permissions':'W10'}}).then(r=>r.json());
+      assert.equal('cashHkd' in hidden,false);
+      assert.equal('assetsHkd' in hidden.summary,false);
+      assert.equal((await (await call('/trades/summary?assetType=hkstock','a')).json())[0].totalBuyAmount,40);
+      assert.equal((await call('/trades','a','POST',{...hkTrade,type:'sell',symbol:'00700',shares:5,price:40,commission:4,account_id:hkId,trade_date:'2099-01-02T12:00:00Z'})).status,200);
+      const afterSale = await (await call('/portfolio?accountId='+hkId,'a')).json();
+      assert.equal(afterSale.cashHkd,668);
+      assert.equal(afterSale.holdings[0].shares,5);
+      assert.equal(afterSale.summary.realizedPL,5);
+      assert.equal(afterSale.summary.netPL,3.5);
+      assert.equal(afterSale.summary.totalAssets,108.5);
+      assert.equal(createBookkeepingStore(hkDb).accounts('a').find(a=>a.id===ledger).balance,868);
+    } finally { hkDb.close(); }
     const readonly = await fetch(base + '/accounts', { headers: { 'x-portal-user-id': 'a', 'x-portal-permissions': Buffer.from('["service:stock-manage:accounts:view"]').toString('base64url') } });
     const masked = await readonly.json();
     assert.equal('cash' in masked.accounts[0], false);

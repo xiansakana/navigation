@@ -32,25 +32,33 @@ export function ashareCode(symbol) {
   return /^\d{6}$/.test(code) ? code : '';
 }
 
+export function hkCode(symbol) {
+  const match = String(symbol ?? '').trim().match(/^(?:HK\.?)?(\d{1,5})(?:\.HK)?$/i);
+  return match && Number(match[1]) > 0 ? match[1].padStart(5, '0') : '';
+}
+
 /** Normalize for storage: A-share → 6 digits; US/option → uppercase. */
 export function normalizeSymbol(symbol) {
   const raw = String(symbol || '').trim();
   if (!raw) return '';
   if (isAShareSymbol(raw)) return ashareCode(raw);
-  return raw.toUpperCase();
+  const hk = hkCode(raw);
+  return hk ? `${hk}.HK` : raw.toUpperCase();
 }
 
-/** @returns {'CN'|'US'|'OPTION'} */
+/** @returns {'CN'|'HK'|'US'|'OPTION'} */
 export function inferMarket(symbol) {
   const sym = String(symbol || '').trim();
   if (/^[A-Z]+\d{6}[CP]\d+(?:\.\d+)?$/i.test(sym)) return 'OPTION';
   if (isAShareSymbol(sym)) return 'CN';
+  if (hkCode(sym)) return 'HK';
   return 'US';
 }
 
 export function inferCurrency(symbol, explicit) {
   const e = String(explicit || '').trim().toUpperCase();
-  if (e === 'CNY' || e === 'USD') return e;
+  if (hkCode(symbol)) return 'HKD';
+  if (['CNY', 'USD', 'HKD'].includes(e)) return e;
   return inferMarket(symbol) === 'CN' ? 'CNY' : 'USD';
 }
 
@@ -58,5 +66,6 @@ export function holdingTypeForSymbol(symbol) {
   const m = inferMarket(symbol);
   if (m === 'OPTION') return 'option';
   if (m === 'CN') return 'ashare';
+  if (m === 'HK') return 'hkstock';
   return 'stock';
 }

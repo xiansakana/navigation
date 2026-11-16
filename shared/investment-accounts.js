@@ -7,7 +7,8 @@ const cents = (n) => {
   if (n === '' || n == null || !Number.isFinite(Number(n)) || !Number.isSafeInteger(Math.round(Number(n) * 100))) throw new Error('请填写有效的可用现金');
   return Math.round(Number(n) * 100);
 };
-const currency = (t) => t.currency ? String(t.currency).toUpperCase() : (/\d{6}/.test(String(t.symbol)) && !/[CP]\d/.test(String(t.symbol)) ? 'CNY' : 'USD');
+const isHk = symbol => /^(?:HK\.?)?\d{1,5}(?:\.HK)?$/i.test(String(symbol || ''));
+const currency = (t) => isHk(t.symbol) ? 'HKD' : t.currency ? String(t.currency).toUpperCase() : (/\d{6}/.test(String(t.symbol)) && !/[CP]\d/.test(String(t.symbol)) ? 'CNY' : 'USD');
 const time = (s) => Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(String(s)) ? s : String(s).replace(' ', 'T') + '+08:00');
 export { time as investmentRecordTime };
 const tableExists = (db, name) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
@@ -104,7 +105,7 @@ export function saveInvestmentAccount(db, userId, input, id) {
     const name = String(input.name ?? old?.name ?? '').trim();
     if (!name || name.length > 100) throw new Error('请填写100字以内的账户名称');
     const cur = input.currency || old?.currency;
-    if (!['USD', 'CNY'].includes(cur) || (old && old.currency !== cur)) throw new Error('证券账户币种只能为USD或CNY，创建后不可更改');
+    if (!['USD', 'CNY', 'HKD'].includes(cur) || (old && old.currency !== cur)) throw new Error('证券账户币种只能为 USD、CNY 或 HKD，创建后不可更改');
     if (db.prepare('SELECT 1 FROM investment_accounts WHERE user_id=? AND currency=? AND name=? AND id!=?').get(userId, cur, name, id || '')) throw new Error('同币种账户名称已存在，请使用可区分的名称');
     const reconcile = Object.hasOwn(input, 'baselineCash');
     if (!old && !reconcile) throw new Error('首次启用必须确认可用现金，不能使用券商总资产代替');
@@ -140,7 +141,10 @@ export function saveInvestmentAccount(db, userId, input, id) {
 
 export function prepareInvestmentTrades(db, userId, next, before) {
   const accounts = investmentRows(db, userId);
-  if (!accounts.length) return next;
+  if (!accounts.length) {
+    if (next.some(t => currency(t) === 'HKD')) throw new Error('请先创建港币证券账户');
+    return next;
+  }
   const old = new Map((before.trades || []).map((t) => [t.id, t]));
   const financial = (t) => JSON.stringify([t.type, t.symbol, t.shares, t.price, t.total_amount, t.commission, t.currency, t.trade_date, t.account_id]);
   const ids = new Set();
@@ -151,11 +155,12 @@ export function prepareInvestmentTrades(db, userId, next, before) {
     if (!trade.account_id && previous && financial(previous) === financial(trade)) return trade;
     if (!Number.isFinite(time(trade.trade_date))) throw new Error('交易时间无效，无法确定现金基准');
     const cur = currency(trade);
+    if (cur === 'HKD' && trade.type !== 'other' && !isHk(trade.symbol)) throw new Error('港股代码请填写 00700 或 00700.HK');
     const candidates = accounts.filter((a) => a.currency === cur);
     const accountId = trade.account_id || (candidates.length === 1 ? candidates[0].id : '');
     const account = accounts.find((a) => a.id === accountId);
     if (!account || account.currency !== cur) throw new Error('请选择本人名下、同币种的证券账户');
-    return { ...trade, account_id: accountId };
+    return { ...trade, account_id: accountId, ...(cur === 'HKD' ? { currency: cur } : {}) };
   });
 }
 

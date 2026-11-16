@@ -120,11 +120,13 @@ function requireQuantPermission(req, res, feature, action = 'view') {
 
 function buildPortfolio(data, pnlOpts = {}) {
   const rate = Number(data.usdCnyRate) > 0 ? Number(data.usdCnyRate) : DEFAULT_USD_CNY_RATE;
-  const fxOpts = { ...pnlOpts, usdCnyRate: rate };
+  const fxOpts = { ...pnlOpts, usdCnyRate: rate, usdHkdRate: data.usdHkdRate };
   const holdings = deriveHoldings(data.trades);
   const cashState = {
     cashUsd: Number(data.cashUsd) || 0,
     cashCny: Number(data.cashCny) || 0,
+    cashHkd: Number(data.cashHkd) || 0,
+    usdHkdRate: data.usdHkdRate,
     usdCnyRate: rate
   };
   const funds = (data.investmentAccounts || [])
@@ -143,11 +145,13 @@ function buildPortfolio(data, pnlOpts = {}) {
   const pnl = computePnl(data.trades, fxOpts);
   const sparse = buildDailyCumulativeSeries(data.trades, fxOpts);
   const daily = computeDailySummary(enriched.rows, data.trades, fxOpts);
-  const cashEq = cashUsdEquivalent(cashState.cashUsd, cashState.cashCny, rate);
+  const cashEq = enriched.cashUsdEq;
   return {
     cash: cashEq,
     cashUsd: cashState.cashUsd,
     cashCny: cashState.cashCny,
+    cashHkd: cashState.cashHkd,
+    usdHkdRate: data.usdHkdRate,
     usdCnyRate: rate,
     trades: data.trades,
     quotes: data.quotes,
@@ -167,6 +171,9 @@ function buildPortfolio(data, pnlOpts = {}) {
       totalAssetsCny: enriched.totalAssetsCny,
       assetsUsd: enriched.assetsUsd,
       assetsCny: enriched.assetsCny,
+      assetsHkd: enriched.assetsHkd,
+      hkMv: enriched.hkMv,
+      totalPnlHkd: enriched.unrealizedHkd,
       unrealized: enriched.unrealized,
       unrealizedUsd: enriched.unrealizedUsd,
       unrealizedCny: enriched.unrealizedCny,
@@ -192,7 +199,7 @@ function portfolioForRequest(req, data = store.read()) {
   const accounts = data.investmentAccounts || [];
   if (req.query.accountId) {
     const selected = accounts.find((a) => a.id === req.query.accountId);
-    data = { ...data, trades: data.trades.filter((t) => (t.account_id || 'unassigned') === req.query.accountId), cashUsd: selected?.currency === 'USD' ? selected.cash : 0, cashCny: selected?.currency === 'CNY' ? selected.cash : 0 };
+    data = { ...data, trades: data.trades.filter((t) => (t.account_id || 'unassigned') === req.query.accountId), cashUsd: selected?.currency === 'USD' ? selected.cash : 0, cashCny: selected?.currency === 'CNY' ? selected.cash : 0, cashHkd: selected?.currency === 'HKD' ? selected.cash : 0 };
   }
   const portfolio = buildPortfolio(data, pnlOptsFromReq(req));
   portfolio.investmentAccounts = accounts.map(({ id, name, currency }) => ({ id, name, currency }));
@@ -203,6 +210,7 @@ function portfolioForRequest(req, data = store.read()) {
     portfolio.summary.totalAssets = null; portfolio.summary.totalAssetsCny = null; portfolio.summary.totalMv = null;
     if (incomplete.some((a) => a.currency === 'USD')) portfolio.summary.assetsUsd = null;
     if (incomplete.some((a) => a.currency === 'CNY')) portfolio.summary.assetsCny = null;
+    if (incomplete.some((a) => a.currency === 'HKD')) portfolio.summary.assetsHkd = null;
   }
   for (const holding of portfolio.holdings) holding.accountName = accounts.find((a) => a.id === holding.accountId)?.name || '待归属';
   return hasStockPermission(req, 'cash') ? { ...portfolio, cashVisible: true } : redactPortfolioCash(portfolio);
@@ -300,11 +308,18 @@ app.get('/api/accounts/bookkeeping-options', (req, res) => {
   const permissions = portalPermissions(req) || [];
   if (!permissions.includes('*') && !permissions.includes('bookkeeping:accounts:view')) return res.status(403).json({ error: '需要记账账户查看权限' });
   const accounts = createBookkeepingStore(portfolioDb).accounts(currentPortfolioUserId());
-  res.json(accounts.filter((a) => !a.archived && ['USD', 'CNY'].includes(a.currency) && a.accountType !== '信用卡').map(({ id, name, group, currency, balance, balanceSource }) => ({ id, name, group, currency, balance, balanceSource })));
+  res.json(accounts.filter((a) => !a.archived && ['USD', 'CNY', 'HKD'].includes(a.currency) && a.accountType !== '信用卡').map(({ id, name, group, currency, balance, balanceSource }) => ({ id, name, group, currency, balance, balanceSource })));
 });
-app.post('/api/accounts', (req, res) => {
+app.post('/api/accounts', async (req, res) => {
   if (!accountEditor(req, res, !!req.body.bookkeepingId)) return;
-  try { const id = saveInvestmentAccount(portfolioDb, currentPortfolioUserId(), req.body); res.json({ id }); } catch (e) { res.status(400).json({ error: e.message }); }
+  try {
+    if (req.body.currency === 'HKD' && !store.read().usdHkdRate) {
+      const { rate } = await quotes.getUsdHkd();
+      store.write({ ...store.read(), usdHkdRate: rate });
+    }
+    const id = saveInvestmentAccount(portfolioDb, currentPortfolioUserId(), req.body);
+    res.json({ id });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.put('/api/accounts/:id', (req, res) => {
   const old = investmentRows(portfolioDb, currentPortfolioUserId()).find((a) => a.id === req.params.id);
@@ -500,7 +515,8 @@ app.post('/api/trades/import', express.raw({
     const recalc = recalcCashFromTrades(data.trades, {
       cashUsd: 0,
       cashCny: 0,
-      usdCnyRate: data.usdCnyRate || DEFAULT_USD_CNY_RATE
+      usdCnyRate: data.usdCnyRate || DEFAULT_USD_CNY_RATE,
+      usdHkdRate: data.usdHkdRate
     });
     Object.assign(data, recalc);
     store.write(data, { externalSync: true });
@@ -515,7 +531,8 @@ app.get('/api/pnl', (req, res) => {
   res.json(computePnl(scopedTrades(req, data.trades), {
     startDate: req.query.start || undefined,
     endDate: req.query.end || undefined,
-    usdCnyRate: data.usdCnyRate
+    usdCnyRate: data.usdCnyRate,
+    usdHkdRate: data.usdHkdRate
   }));
 });
 
@@ -538,6 +555,7 @@ app.get('/api/trades/summary', (req, res) => {
     startDate: req.query.start || undefined,
     endDate: req.query.end || undefined,
     usdCnyRate: data.usdCnyRate,
+    usdHkdRate: data.usdHkdRate,
     quotes: data.quotes,
     assetType: req.query.assetType,
     otherCategory: req.query.otherCategory,
@@ -1071,7 +1089,8 @@ app.post('/api/quotes/refresh', async (req, res) => {
   if (!symbols.length) {
     return res.status(400).json({ error: '暂无持仓可刷新' });
   }
-  const updated = { ...data.quotes };
+  const updated = {};
+  const rates = {};
   const errors = [];
   let ok = 0;
   for (const sym of symbols) {
@@ -1085,13 +1104,16 @@ app.post('/api/quotes/refresh', async (req, res) => {
   }
   try {
     const fx = await quotes.getUsdCny();
-    if (fx?.rate > 0) data.usdCnyRate = fx.rate;
+    if (fx?.rate > 0) rates.usdCnyRate = fx.rate;
   } catch (e) {
     errors.push({ symbol: 'USDCNY', error: e.message || '汇率失败' });
   }
-  data.quotes = updated;
-  data.cash = cashUsdEquivalent(data.cashUsd, data.cashCny, data.usdCnyRate);
-  const saved = store.write(data);
+  if (data.investmentAccounts?.some(account => account.currency === 'HKD')) {
+    try { rates.usdHkdRate = (await quotes.getUsdHkd()).rate; }
+    catch (e) { errors.push({ symbol: 'USDHKD', error: e.message || '汇率失败' }); }
+  }
+  const latest = store.read();
+  const saved = store.write({ ...latest, ...rates, quotes: { ...latest.quotes, ...updated } });
   const payload = portfolioForRequest(req, saved);
   payload.refresh = { ok, failed: errors.length, errors };
   if (!ok && errors.length) {

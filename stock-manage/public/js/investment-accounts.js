@@ -46,7 +46,7 @@ export async function openInvestmentAccounts({ api, openModal, closeModal, reloa
     try { options = await api('/accounts/bookkeeping-options'); } catch { /* Unbound accounts do not require bookkeeping permission. */ }
     const form = `<form id="investment-form" class="sm-trade-form">
       <label>账户名称<input name="name" required maxlength="100" value="${esc(account?.name || '')}"></label>
-      <label>币种<select name="currency" ${account ? 'disabled' : ''}><option ${account?.currency !== 'CNY' ? 'selected' : ''}>USD</option><option ${account?.currency === 'CNY' ? 'selected' : ''}>CNY</option></select></label>
+      <label>币种<select name="currency" ${account ? 'disabled' : ''}>${['USD', 'CNY', 'HKD'].map(cur => `<option ${cur === (account?.currency || 'USD') ? 'selected' : ''}>${cur}</option>`).join('')}</select></label>
       <label>绑定记账理财账户<select name="bookkeepingId" ${account?.bookkeepingId ? 'disabled' : ''}></select></label>
       <label>确认当前可用现金<input name="baselineCash" type="number" step="0.01" ${account ? '' : 'required'} placeholder="${account ? '不填写则保持现金基准' : '必须填写，仅可用现金'}"></label>
       <label><input name="confirmed" type="checkbox"> 我确认这里填写的是当前可用现金，不是包含持仓的总资产；核对后以当前时间重建现金基准。</label>

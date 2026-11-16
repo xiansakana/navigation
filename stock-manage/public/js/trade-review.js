@@ -21,7 +21,7 @@ export function renderTradeReview(report, selectedCurrency = '', visible = true)
   if (!visible) return controls + '<p class="hint">盈亏数据已隐藏。开启盈亏显示后查看复盘。</p>';
   if (!current) return controls + '<p class="empty">当前筛选条件下暂无交易记录。</p>';
   const r = current;
-  const amount = (n) => `${r.currency === 'CNY' ? '¥' : '$'}${fmt(n)}`;
+  const amount = (n) => `${r.currency === 'CNY' ? '¥' : r.currency === 'HKD' ? 'HK$' : '$'}${fmt(n)}`;
   const card = (title, value, note = '') => `<div class="sm-review-card"><span>${title}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></div>`;
   const summaryTable = (groups, names = labels) => table(['分组', '记录数', '胜率', '盈利金额', '亏损金额', '净盈亏'], groups.map((g) => [names[g.key] || g.key, g.count, pct(g.winRate), amount(g.profit), amount(g.loss), amount(g.net)]));
   const symbolRows = [...r.symbols.slice(0, 10), ...r.symbols.slice(-10).reverse()].filter((g, i, all) => all.findIndex((x) => x.key === g.key) === i);

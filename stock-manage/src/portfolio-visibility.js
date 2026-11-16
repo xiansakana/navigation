@@ -3,7 +3,8 @@ const CASH_SUMMARY_FIELDS = [
   'totalAssets',
   'totalAssetsCny',
   'assetsUsd',
-  'assetsCny'
+  'assetsCny',
+  'assetsHkd'
 ];
 
 export function redactPortfolioCash(portfolio) {
@@ -15,6 +16,7 @@ export function redactPortfolioCash(portfolio) {
   delete redacted.cash;
   delete redacted.cashUsd;
   delete redacted.cashCny;
+  delete redacted.cashHkd;
   CASH_SUMMARY_FIELDS.forEach((field) => { delete redacted.summary[field]; });
   return redacted;
 }
