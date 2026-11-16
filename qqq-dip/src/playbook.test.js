@@ -55,6 +55,28 @@ test('observation after T1 execution shows the next tier instead of an unreached
   assert.equal(ev.buyPreview.available, false);
 });
 
+test('a return to the T2 threshold describes recorded fills and the remaining plan', () => {
+  const round = {
+    executed: { T1: { usd: 600 }, T2: { usd: 400, complete: false } },
+    executionPlans: { T2: { legs: [
+      { kind: 'equity', symbol: '159509', currency: 'CNY', cny: 4000, spent: 2800 },
+      { kind: 'call', symbol: 'QQQ', currency: 'USD', usd: 200, pendingOption: true, skipped: true }
+    ] } }
+  };
+  for (const scenario of [
+    { price: 87, close: 87, rth: true, status: 'confirmed' },
+    { price: 87, close: 90, rth: true, status: 'intraday' },
+    { price: 90, close: 90, rth: false, status: 'idle' }
+  ]) {
+    const { price, close, rth, status } = scenario;
+    const ev = evaluate(roundInput({ round, rth, qqq: { price, candles: [{ h: 100, c: close }] } }));
+    assert.equal(ev.tiers.find((tier) => tier.id === 'T2').status, status);
+    assert.equal(ev.primary.title, status === 'idle' ? '观察区' : 'T2 部分成交');
+    assert.match(ev.primary.body, /T2 已部分成交（159509）.*计划仍有未成交预算（159509）.*QQQ 期权待补买/);
+    assert.doesNotMatch(ev.primary.body, /动用 8%B/);
+  }
+});
+
 test('legacy pre-trigger round rebases to dedicated cash without resetting reference highs or dates', () => {
   const round = { ...emptyRound(), startedAt: '2026-10-23T13:36:50Z', budgetBase: 23926.87,
     referenceHighs: { QQQ: 100 }, firedAlerts: { 'openSummary:2026-10-23': 'sent' } };

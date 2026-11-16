@@ -232,7 +232,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
       const openAlready = !!(nextRound.firedAlerts || {})[openKey];
       if (!opts.silent && isOpenSummaryTime() && !openAlready) {
         const text = ev.primary ? `${ev.primary.title}：${ev.primary.body}` : '抄底监控已开盘';
-        const qq = await stage('openSummary', () => publish(notify, { source: 'stock', eventKey: 'openSummary', message: appendMarketSnapshot(text, ev.qqq, 'QQQ') }));
+        const qq = await stage('openSummary', () => publish(notify, { source: 'stock', eventKey: 'openSummary', message: appendMarketSnapshot(`【美股开盘摘要】${text}`, ev.qqq, 'QQQ') }));
         nextRound.firedAlerts = { ...(nextRound.firedAlerts || {}), [openKey]: new Date().toISOString() };
         store.addAction({
           type: 'notify',

@@ -724,6 +724,25 @@ export function evaluate(input) {
     }
   }
 
+  function partialExecutionText(id) {
+    if (executed[id]?.complete !== false) return '';
+    const plan = round.executionPlans?.[id];
+    const legs = plan?.legs || [];
+    const symbol = (leg) => leg.kind === 'call' ? `${leg.symbol} 期权` : leg.symbol;
+    const labels = (rows) => [...new Set(rows.map(symbol))].join('、');
+    const filled = labels(legs.filter((leg) => Number(leg.spent) > 0));
+    const remaining = labels(legs.filter((leg) => !leg.complete && !leg.skipped && !leg.pendingOption
+      && Number(leg.currency === 'CNY' ? leg.cny : leg.usd) > Number(leg.spent || 0)));
+    const pending = labels(legs.filter((leg) => !leg.complete && leg.pendingOption));
+    return [
+      `${id} 已部分成交${filled ? `（${filled}）` : ''}`,
+      ...(plan?.cancelled ? ['剩余计划已取消'] : [
+        remaining && `原计划仍有未成交预算（${remaining}），请核对剩余计划`,
+        pending && `${pending}待补买，须满足期权条件并取得预算内的有效卖价`
+      ])
+    ].filter(Boolean).join('；') + '。';
+  }
+
   let primary = null;
   if (reset) {
     primary = {
@@ -745,9 +764,10 @@ export function evaluate(input) {
       const skipNote = sameDaySkip.size
         ? `同一天连跳多档：只执行最深左侧 ${deepestLeft.id}，T4 留到收盘或 0.75H 限价。`
         : '';
+      const partial = partialExecutionText(pick.id);
       primary = {
-        title: `${pick.id} ${pick.status === 'confirmed' ? '操作推荐' : '盘中预警'}`,
-        body: [wait, pick.recommendation, skipNote].filter(Boolean).join(' '),
+        title: `${pick.id} ${partial ? '部分成交' : pick.status === 'confirmed' ? '操作推荐' : '盘中预警'}`,
+        body: [partial, wait, partial ? '' : pick.recommendation, skipNote].filter(Boolean).join(' '),
         tier: pick.id,
         prohibitions: globalProhibitions(pick.id, round)
       };
@@ -757,9 +777,14 @@ export function evaluate(input) {
       const next = left.find((tier) => tier.status !== 'executed');
       const t1 = left[0];
       let detail = '等待行情与 60 日高点。';
-      if (completed.length) {
-        detail = `${completed.join('、')} 已执行。${next?.triggerPrice != null
-          ? `等待 ${next.id} 执行条件，触发价 ${next.triggerPrice.toFixed(3)}。` : '等待下一信号。'}`;
+      const partial = next && partialExecutionText(next.id);
+      if (completed.length || partial) {
+        detail = [
+          completed.length && `${completed.join('、')} 已执行。`,
+          partial,
+          next?.triggerPrice != null
+            ? `等待 ${next.id} ${partial ? '剩余计划的' : ''}执行条件，触发价 ${next.triggerPrice.toFixed(3)}。` : '等待下一信号。'
+        ].filter(Boolean).join('');
       } else if (t1.triggerPrice != null) {
         const reached = hitLive(qqqMarket.price, qqq.H, TIER_DEFS.T1.closeMult);
         const state = reached ? '当前报价已到 T1，等待执行条件。'
