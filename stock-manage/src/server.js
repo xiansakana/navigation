@@ -167,7 +167,7 @@ function buildPortfolio(data, pnlOpts = {}) {
   const enriched = enrichHoldings(valuedHoldings, { ...data.quotes, ...fundQuotes }, cashState, data.holdingsMeta);
   const pnl = computePnl(calculationTrades, fxOpts);
   const sparse = buildDailyCumulativeSeries(calculationTrades, fxOpts);
-  const daily = computeDailySummary(enriched.rows, data.trades, fxOpts);
+  const daily = computeDailySummary(enriched.rows, calculationTrades, fxOpts);
   const cashEq = enriched.cashUsdEq;
   return {
     cash: cashEq,

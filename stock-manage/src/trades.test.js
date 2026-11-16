@@ -7,9 +7,34 @@ import {
   enrichHoldings,
   deriveHoldings,
   computeSymbolSummaries,
+  computeDailySummary,
+  zonedDateKey,
   cashUsdEquivalent,
   roundMoney
 } from './trades.js';
+
+test('daily P&L attributes trading gains, fees and market moves to each native currency', () => {
+  const today = zonedDateKey() + 'T12:00:00+08:00';
+  const opening = { openingFund: true, id: 'opening', symbol: '005827.OF', type: 'buy',
+    shares: 10, price: 2, trade_date: '1970-01-01T00:00:00Z' };
+  const trades = [
+    opening,
+    normalizeTrade({ symbol: opening.symbol, type: 'sell', shares: 10, price: 3, commission: 1, trade_date: today }),
+    normalizeTrade({ symbol: '00700', type: 'other', other_category: '股息', total_amount: 16, trade_date: today })
+  ];
+  const holdings = [
+    { currency: 'USD', dailyPnlNative: -1 },
+    { currency: 'CNY', dailyPnlNative: 5 },
+    { currency: 'HKD', dailyPnlNative: 8 }
+  ];
+  const summary = computeDailySummary(holdings, trades, { usdCnyRate: 7, usdHkdRate: 8 });
+  assert.equal(summary.dailyTotalPnlUsd, -1);
+  assert.equal(summary.dailyTotalPnlCny, 14);
+  assert.equal(summary.dailyTotalPnlHkd, 24);
+  assert.equal(summary.dailyTotalPnl, 4);
+  assert.equal(summary.tradeDailyPnl, 3.29);
+  assert.equal(computeDailySummary([], [opening]).dailyTotalPnl, null);
+});
 
 test('normalizeTrade infers CNY for A-share', () => {
   const t = normalizeTrade({

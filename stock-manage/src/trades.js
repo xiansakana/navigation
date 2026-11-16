@@ -404,7 +404,7 @@ export function buildDailyCumulativeSeries(trades, options = {}) {
 
   const queues = new Map();
   for (const t of trades) {
-    if (t.openingFund) queues.set(JSON.stringify([t.account_id, t.symbol]), [{ shares: t.shares, price: t.price }]);
+    if (t.openingFund) queues.set(JSON.stringify([t.account_id || '', normalizeSymbol(t.symbol)]), [{ shares: t.shares, price: t.price }]);
   }
   let cumRealized = 0;
   let cumCommission = 0;
@@ -620,7 +620,7 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
   };
 }
 
-/** 当日总盈亏：美股/期权按美元，A 股按人民币分开累计；交易净变动仍按当前汇率折美元（兼容旧字段） */
+/** 持仓涨跌和交易净变动均先按本币累计，再折成美元汇总。 */
 export function computeDailySummary(holdingRows, trades, options = {}) {
   const usdHkdRate = options.usdHkdRate;
   const rate = Number(options.usdCnyRate) > 0 ? Number(options.usdCnyRate) : DEFAULT_USD_CNY_RATE;
@@ -646,42 +646,34 @@ export function computeDailySummary(holdingRows, trades, options = {}) {
     }
   }
   const today = zonedDateKey();
-  const sparse = buildDailyCumulativeSeries(trades, options);
-  const todayPoint = sparse.find((p) => p.date === today);
-  const tradeDaily = todayPoint?.dayNet ?? 0;
-  const hasTradeToday = !!todayPoint;
-  const hasMarket = hasMarketUsd || hasMarketCny || hasMarketHkd;
-
-  if (!hasMarket && !hasTradeToday) {
-    return {
-      dailyTotalPnl: null,
-      marketDailyPnl: null,
-      tradeDailyPnl: null,
-      marketDailyPnlUsd: null,
-      marketDailyPnlCny: null,
-      dailyTotalPnlUsd: null,
-      dailyTotalPnlCny: null
-    };
-  }
-
+  const byCurrency = { USD: [], CNY: [], HKD: [] };
+  for (const trade of trades) byCurrency[tradeCurrency(trade)].push(trade);
+  const nativeTradePnl = (currency) => {
+    const list = byCurrency[currency];
+    if (!list.some(t => !t.openingFund && dateKey(t) === today)) return null;
+    return buildDailyCumulativeSeries(list, { usdCnyRate: 1, usdHkdRate: 1 }).find(p => p.date === today)?.dayNet ?? null;
+  };
+  const tradeUsd = nativeTradePnl('USD');
+  const tradeCny = nativeTradePnl('CNY');
+  const tradeHkd = nativeTradePnl('HKD');
   const marketUsd = hasMarketUsd ? roundMoney(marketDailyUsd) : null;
   const marketCny = hasMarketCny ? roundMoney(marketDailyCny) : null;
-  const marketUsdEq = roundMoney(
-    (marketUsd || 0) + toUsd(marketCny || 0, 'CNY', rate, usdHkdRate) + toUsd(marketDailyHkd, 'HKD', rate, usdHkdRate)
-  );
-  const tradeUsd = hasTradeToday ? roundMoney(tradeDaily) : null;
-
+  const marketHkd = hasMarketHkd ? roundMoney(marketDailyHkd) : null;
+  const add = (a, b) => a == null && b == null ? null : roundMoney((a ?? 0) + (b ?? 0));
+  const fold = (usd, cny, hkd) => usd == null && cny == null && hkd == null ? null
+    : cashUsdEquivalent(usd, cny, rate, hkd, usdHkdRate);
+  const dailyTotalPnlUsd = add(marketUsd, tradeUsd);
+  const dailyTotalPnlCny = add(marketCny, tradeCny);
+  const dailyTotalPnlHkd = add(marketHkd, tradeHkd);
   return {
-    dailyTotalPnl: roundMoney(marketUsdEq + (tradeUsd || 0)),
-    marketDailyPnl: hasMarket ? marketUsdEq : null,
-    tradeDailyPnl: tradeUsd,
+    dailyTotalPnl: fold(dailyTotalPnlUsd, dailyTotalPnlCny, dailyTotalPnlHkd),
+    marketDailyPnl: fold(marketUsd, marketCny, marketHkd),
+    tradeDailyPnl: fold(tradeUsd, tradeCny, tradeHkd),
     marketDailyPnlUsd: marketUsd,
     marketDailyPnlCny: marketCny,
-    dailyTotalPnlUsd: hasMarketUsd || hasTradeToday
-      ? roundMoney((marketUsd || 0) + (tradeUsd || 0))
-      : null,
-    dailyTotalPnlCny: marketCny,
-    dailyTotalPnlHkd: hasMarketHkd ? roundMoney(marketDailyHkd) : null
+    dailyTotalPnlUsd,
+    dailyTotalPnlCny,
+    dailyTotalPnlHkd
   };
 }
 

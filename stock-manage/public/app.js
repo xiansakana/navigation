@@ -30,7 +30,6 @@ const fmtCommission = (n, currency = 'USD') => {
 };
 const fmtPct = (n) => Number.isFinite(n) ? n.toFixed(2) + '%' : '—';
 const cls = (n) => n > 0 ? 'pos' : n < 0 ? 'neg' : '';
-const roundMoneyClient = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const MASK = '<span class="sm-mask">—</span>';
 const pad2 = (n) => String(n).padStart(2, '0');
 
@@ -172,10 +171,6 @@ function maskPnlValue(html) {
   return pnlVisible ? html : MASK;
 }
 
-function maskDashboardValue(html) {
-  return dashboardVisible ? html : MASK;
-}
-
 function schedulePrefsSave(partial) {
   clearTimeout(prefSaveTimer);
   prefSaveTimer = setTimeout(() => {
@@ -248,106 +243,81 @@ function renderDashboard() {
   el.classList.remove('hidden');
   const s = state.summary || {};
   const cashVisible = can('cash') && state.cashVisible !== false;
-  const cashEq = Number.isFinite(s.cashUsdEq) ? s.cashUsdEq : state.cash;
-  const cashPct = s.totalAssets > 0 ? (cashEq / s.totalAssets * 100) : 0;
-  const usPnl = s.totalPnlUsd;
-  const cnPnl = s.totalPnlCny;
-  const dailyUs = s.dailyTotalPnlUsd != null ? s.dailyTotalPnlUsd : s.marketDailyPnlUsd;
-  const dailyCn = s.dailyTotalPnlCny != null ? s.dailyTotalPnlCny : s.marketDailyPnlCny;
-  const hasDaily = dailyUs != null || dailyCn != null || s.dailyTotalPnl != null;
-  const dailyHint = !dashboardVisible || !pnlVisible
-    ? '—'
-    : !hasDaily
-      ? '刷新行情后显示持仓涨跌'
-      : (s.tradeDailyPnl != null && s.tradeDailyPnl !== 0
-        ? `含今日交易净变动 ${fmtUsd(s.tradeDailyPnl)}`
-        : '持仓当日涨跌');
-  const usPnlDisplay = usPnl == null ? '—' : fmtUsdSigned(usPnl);
-  const dailyUsDisplay = dailyUs == null ? '—' : fmtUsdSigned(dailyUs);
-  const hasAshare = Number(s.ashareMvNative) > 0 || (Number.isFinite(cnPnl) && cnPnl !== 0);
-  const ashareMvLine = hasAshare || Number(s.ashareMvNative) > 0
-    ? `<div class="sm-sub-value">${state.fundHoldings?.length ? '人民币证券及基金' : 'A股/ETF'} ${maskDashboardValue(fmtCny(s.ashareMvNative ?? 0))}</div>`
-    : '';
-  const totalPnlAshare = hasAshare
-    ? `<div class="sm-sub-value ${dashboardVisible && pnlVisible ? cls(cnPnl) : ''}">${state.fundHoldings?.length ? '人民币证券及基金' : 'A股/ETF'} ${maskDashboardValue(maskPnlValue(fmtMoneySigned(Number.isFinite(cnPnl) ? cnPnl : 0, 'CNY')))}</div>`
-    : '';
-  const totalPnlHint = hasAshare || state.summary?.hkMv > 0 ? '' : '美股未实现盈亏';
-  const dailyPnlAshare = (hasAshare || (Number.isFinite(dailyCn) && dailyCn !== 0))
-    ? `<div class="sm-sub-value ${dashboardVisible && pnlVisible && dailyCn != null ? cls(dailyCn) : ''}">${state.fundHoldings?.length ? '人民币证券及基金' : 'A股/ETF'} ${maskDashboardValue(maskPnlValue(dailyCn == null ? '—' : fmtMoneySigned(dailyCn, 'CNY')))}</div>`
-    : '';
+  const rate = Number(state.usdCnyRate);
+  const hkdRate = Number(state.usdHkdRate);
   const hasHkd = (state.investmentAccounts || []).some(a => a.currency === 'HKD' && (!selectedAccountId || a.id === selectedAccountId));
-  const hkLine = (value, signed = false) => hasHkd ? `<div class="sm-sub-value">港股 ${maskDashboardValue(signed ? maskPnlValue(fmtMoneySigned(value, 'HKD')) : fmtMoney(value, 'HKD'))}</div>` : '';
-  const cashHkdLine = hasHkd ? ` · ${fmtMoney(state.cashHkd, 'HKD')}` : '';
-  const dailyMetaHint = (dailyHint && dailyHint !== '—') ? dailyHint : '';
-  const cashField = !dashboardVisible
-    ? `<div class="value">${MASK}</div>`
-    : can('cash', 'edit') && !state.accountCashEnabled
-      ? `<div class="sm-cash-dual">
-          <div class="sm-cash-input-wrap"><span>$</span><input type="number" step="0.01" id="cash-usd-input" value="${state.cashUsd ?? 0}"></div>
-          <div class="sm-cash-input-wrap"><span>¥</span><input type="number" step="0.01" id="cash-cny-input" value="${state.cashCny ?? 0}"></div>
-        </div>`
-      : `<div class="value">${fmtUsd(state.cashUsd)} · ${fmtCny(state.cashCny)}${cashHkdLine}</div>`;
-  const rateHint = `汇率 ${Number(state.usdCnyRate || 0).toFixed(4)} · 折合 ${maskDashboardValue(fmtUsd(cashEq))} · 占组合 ${maskDashboardValue(fmtPct(cashPct))}`;
-  const rate = Number(state.usdCnyRate) > 0 ? Number(state.usdCnyRate) : 7.2;
-  const assetsUsd = s.assetsUsd === null ? null : Number.isFinite(s.assetsUsd)
-    ? s.assetsUsd
-    : roundMoneyClient((Number(s.stockMv) || 0) + (Number(s.optionMv) || 0) + (Number(state.cashUsd) || 0));
-  const assetsCny = s.assetsCny === null ? null : Number.isFinite(s.assetsCny)
-    ? s.assetsCny
-    : roundMoneyClient((Number(s.ashareMvNative) || 0) + (Number(state.cashCny) || 0));
-  const totalAssetsCny = s.totalAssetsCny === null ? null : Number.isFinite(s.totalAssetsCny)
-    ? s.totalAssetsCny
-    : roundMoneyClient((Number(s.totalAssets) || 0) * rate);
-  const totalAssetsLine = `${fmtUsd(s.totalAssets)}（${fmtCny(totalAssetsCny)}）`;
+  const currencies = hasHkd ? ['USD', 'CNY', 'HKD'] : ['USD', 'CNY'];
+  const currencyLabel = { USD: '美元', CNY: '人民币', HKD: '港币' };
+  const cash = { USD: state.cashUsd, CNY: state.cashCny, HKD: state.cashHkd };
+  const cashPct = s.totalAssets > 0 && Number.isFinite(s.cashUsdEq) ? s.cashUsdEq / s.totalAssets * 100 : null;
+  const missing = new Set(state.missingQuotes || []);
+  const unpriced = [...(state.holdings || []), ...(state.fundHoldings || [])]
+    .filter(h => missing.has(h.tradeSymbol || h.symbol));
+  const available = (values, holdings) => {
+    const unavailable = new Set(holdings.map(h => h.currency));
+    return Object.fromEntries(Object.entries(values).map(([currency, amount]) => [currency, unavailable.has(currency) ? null : amount]));
+  };
+  const stock = available({ USD: s.stockMv, CNY: s.ashareMvNative, HKD: s.hkMv }, unpriced.filter(h => h.type !== 'option'));
+  const option = available({ USD: s.optionMv, CNY: 0, HKD: 0 }, unpriced.filter(h => h.type === 'option'));
+  const pnl = available({ USD: s.totalPnlUsd, CNY: s.totalPnlCny, HKD: s.totalPnlHkd }, unpriced);
+  const daily = { USD: s.dailyTotalPnlUsd, CNY: s.dailyTotalPnlCny, HKD: s.dailyTotalPnlHkd };
+
+  function convert(values, allowPartial = false) {
+    if (!(rate > 0) || (!allowPartial && currencies.some(cur => !Number.isFinite(values[cur])))
+      || !currencies.some(cur => Number.isFinite(values[cur]))) return {};
+    const hkd = values.HKD || 0;
+    if (hkd && !(hkdRate > 0)) return {};
+    const usd = (values.USD || 0) + (hkd ? hkd / hkdRate : 0);
+    const cny = values.CNY || 0;
+    return { USD: usd + cny / rate, CNY: usd * rate + cny };
+  }
+
+  function card(label, values, { total = convert(values), classes = '', signed = false, assets = false, editCash = false,
+    notice = '', hint = '' } = {}) {
+    const format = signed ? fmtMoneySigned : fmtMoney;
+    const hidden = !dashboardVisible || (signed && !pnlVisible);
+    const mask = html => hidden ? MASK : html;
+    const color = amount => signed && !hidden ? cls(amount) : '';
+    const split = currencies.map(currency => {
+      const name = currencyLabel[currency] + (assets ? '资产' : '');
+      const value = values[currency];
+      const input = editCash && !hidden && currency !== 'HKD'
+        ? `<span class="sm-cash-input-wrap"><span>${currency === 'USD' ? '$' : '¥'}</span><input aria-label="${name}现金" type="number" step="0.01" id="cash-${currency.toLowerCase()}-input" value="${value ?? 0}"></span>`
+        : mask(format(value, currency));
+      return `<div class="sm-asset-split-item">
+        <span class="sm-asset-split-label">${name}</span>
+        <span class="sm-asset-split-value ${color(value)}">${input}</span>
+      </div>`;
+    });
+    return `<div class="sm-summary-card ${classes}">
+      <div class="label">${label}</div>
+      <div class="value ${color(total.USD)}">${mask(`${format(total.USD, 'USD')}（${format(total.CNY, 'CNY')}）`)}</div>
+      ${notice && !hidden ? `<div class="hint">${notice}</div>` : ''}
+      <div class="sm-asset-split">${split.join('')}</div>
+      ${hint && !hidden ? `<div class="hint">${hint}</div>` : ''}
+    </div>`;
+  }
+
+  const quoteNotice = missing.size
+    ? `缺少报价：${[...missing].map(escapeHtml).join('、')}。请刷新价格；报价补齐后恢复总资产。`
+    : '';
+  const dailyHint = !Object.values(daily).some(Number.isFinite)
+    ? '刷新行情后显示持仓涨跌'
+    : s.tradeDailyPnl
+      ? `含今日交易净变动 ${fmtUsdSigned(s.tradeDailyPnl)}`
+      : '持仓当日涨跌';
+  const cashHint = rate > 0 ? `美元兑人民币 ${rate.toFixed(4)}${cashPct == null ? '' : ` · 占组合 ${fmtPct(cashPct)}`}` : '';
   el.innerHTML = `
     <div class="sm-summary-grid">
-      ${cashVisible ? `
-      <div class="sm-summary-card sm-summary-card--accent sm-summary-card--assets">
-        <div class="label">总资产</div>
-        <div class="value">${maskDashboardValue(totalAssetsLine)}</div>
-        ${state.missingQuotes?.length ? `<div class="hint">缺少报价：${state.missingQuotes.map(escapeHtml).join('、')}。请刷新价格；报价补齐后恢复总资产。</div>` : ''}
-        <div class="sm-asset-split">
-          <div class="sm-asset-split-item">
-            <span class="sm-asset-split-label">美元资产</span>
-            <span class="sm-asset-split-value">${maskDashboardValue(fmtUsd(assetsUsd))}</span>
-          </div>
-          <div class="sm-asset-split-item">
-            <span class="sm-asset-split-label">人民币资产</span>
-            <span class="sm-asset-split-value">${maskDashboardValue(fmtCny(assetsCny))}</span>
-          </div>
-          ${hasHkd ? `<div class="sm-asset-split-item"><span class="sm-asset-split-label">港币资产</span><span class="sm-asset-split-value">${maskDashboardValue(fmtMoney(s.assetsHkd, 'HKD'))}</span></div>` : ''}
-        </div>
-        <div class="hint">分币种资产为持仓市值与现金的本币合计</div>
-      </div>` : ''}
-      <div class="sm-summary-card">
-        <div class="label">股票市值</div>
-        <div class="value">${maskDashboardValue(fmtUsd(s.stockMv))}</div>
-        ${ashareMvLine}
-        ${hkLine(s.hkMv)}
-      </div>
-      <div class="sm-summary-card">
-        <div class="label">期权市值</div>
-        <div class="value">${maskDashboardValue(fmtUsd(s.optionMv))}</div>
-      </div>
-      <div class="sm-summary-card sm-summary-card--green">
-        <div class="label">总盈亏</div>
-        <div class="value ${dashboardVisible && pnlVisible ? cls(usPnl) : ''}">${maskDashboardValue(maskPnlValue(usPnlDisplay))}</div>
-        ${totalPnlAshare}
-        ${hkLine(s.totalPnlHkd, true)}
-        ${totalPnlHint ? `<div class="hint">${maskDashboardValue(maskPnlValue(totalPnlHint))}</div>` : ''}
-      </div>
-      <div class="sm-summary-card sm-summary-card--amber">
-        <div class="label">当日总盈亏</div>
-        <div class="value ${dashboardVisible && pnlVisible && dailyUs != null ? cls(dailyUs) : ''}">${maskDashboardValue(maskPnlValue(dailyUsDisplay))}</div>
-        ${dailyPnlAshare}
-        ${hkLine(s.dailyTotalPnlHkd, true)}
-        ${dailyMetaHint ? `<div class="hint">${maskDashboardValue(maskPnlValue(dailyMetaHint))}</div>` : ''}
-      </div>
-      ${cashVisible ? `<div class="sm-summary-card sm-summary-card--cash">
-        <div class="label">现金</div>
-        ${cashField}
-        <div class="hint">${rateHint}</div>
-      </div>` : ''}
+      ${cashVisible ? card('总资产', { USD: s.assetsUsd, CNY: s.assetsCny, HKD: s.assetsHkd }, {
+        total: { USD: s.totalAssets, CNY: s.totalAssetsCny }, classes: 'sm-summary-card--accent', assets: true,
+        notice: quoteNotice, hint: '分币种资产为持仓市值与现金的本币合计'
+      }) : ''}
+      ${card('股票市值', stock, { hint: state.fundHoldings?.length ? '含场外基金' : '' })}
+      ${card('期权市值', option)}
+      ${card('总盈亏', pnl, { signed: true, classes: 'sm-summary-card--green', hint: '持仓未实现盈亏' })}
+      ${card('当日总盈亏', daily, { total: convert(daily, true), signed: true, classes: 'sm-summary-card--amber', hint: dailyHint })}
+      ${cashVisible ? card('现金', cash, { editCash: can('cash', 'edit') && !state.accountCashEnabled, hint: cashHint }) : ''}
     </div>`;
   bindCashInput();
 }
