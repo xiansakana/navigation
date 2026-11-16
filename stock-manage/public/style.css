@@ -687,6 +687,9 @@ body:has(.sm-modal-backdrop) {
 .sm-total-row td { font-weight: 600; background: rgba(255, 255, 255, 0.03); }
 .sm-form-grid { display: grid; gap: 12px; }
 .sm-form-grid label { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+.sm-instrument-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.sm-instrument-choices:not(:empty), [data-instrument-status]:not(:empty) { margin-top: 6px; }
+.sm-instrument-choices button { white-space: normal; text-align: left; }
 
 .sm-import-preview { margin-top: 16px; }
 .sm-import-preview-head {

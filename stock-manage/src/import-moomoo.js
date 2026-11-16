@@ -3,7 +3,7 @@ import { parseEastmoneyBuffer } from './import-eastmoney.js';
 import { parseBbaeBuffer } from './import-bbae.js';
 import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
 import { hkCode, normalizeSymbol } from './markets.js';
-import { isOptionSymbol, optionMult, roundMoney, roundPrice } from './trades.js';
+import { isOptionSymbol, optionMult, roundMoney, roundTradePrice } from './trades.js';
 
 function normalizeCell(v) {
   if (v == null) return '';
@@ -154,7 +154,7 @@ function parseMoomooRows(rows) {
       name: (iName >= 0 ? normalizeCell(cells[iName]) : '') || code,
       type,
       shares,
-      price: roundPrice(price),
+      price: roundTradePrice(price, sym),
       total_amount: roundMoney(shares * price * mult),
       commission: roundMoney(commission),
       trade_date: iTime >= 0 ? parseTradeDate(cells[iTime]) : now,
@@ -225,7 +225,7 @@ export function parseAppBackupBuffer(buffer) {
         name: normalizeCell(cells[4]) || symbol,
         type,
         shares,
-        price: roundPrice(price),
+        price: roundTradePrice(price, symbol),
         total_amount: roundMoney(shares * price * mult),
         commission: roundMoney(parseMoney(cells[8]) || 0),
         trade_date: parseTradeDate(cells[0]),
@@ -245,7 +245,7 @@ export function parseAppBackupBuffer(buffer) {
         name: normalizeCell(cells[3]) || symbol,
         type,
         shares,
-        price: roundPrice(price),
+        price: roundTradePrice(price, symbol),
         total_amount: roundMoney(shares * price * mult),
         commission: roundMoney(parseMoney(cells[7]) || 0),
         trade_date: parseTradeDate(cells[0]),

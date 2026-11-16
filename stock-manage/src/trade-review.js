@@ -52,7 +52,7 @@ export function computeTradeReview(trades, options = {}) {
     && (t.type !== 'other' || !otherCategory || String(t.other_category || '').includes(otherCategory));
   const inWindow = (day) => day && (!startDate || day >= startDate) && (!endDate || day <= endDate);
   const history = trades.filter(included).map((t, index) => ({ ...t, index, day: tradeCalendarDate(t.trade_date), currency: tradeCurrency(t), category: category(t) }))
-    .filter((t) => t.day && (!endDate || t.day <= endDate))
+    .filter((t) => t.openingFund || (t.day && (!endDate || t.day <= endDate)))
     .sort((a, b) => new Date(a.trade_date) - new Date(b.trade_date) || (a.type === 'buy' ? 0 : 1) - (b.type === 'buy' ? 0 : 1) || a.index - b.index);
   const currencies = [...new Set(history.map((t) => t.currency))].sort();
   const reports = currencies.map((currency) => {
@@ -82,14 +82,15 @@ export function computeTradeReview(trades, options = {}) {
       if (!queue.has(inventoryKey)) queue.set(inventoryKey, []);
       const lots = queue.get(inventoryKey);
       if (t.type === 'buy') { lots.push({ trade: t, remaining: qty }); continue; }
-      let remaining = qty, cost = 0, gross = 0, fees = 0, holding = 0, matched = 0;
+      let remaining = qty, cost = 0, gross = 0, fees = 0, holding = 0, matched = 0, unknownHolding = false;
       while (remaining > 1e-8 && lots.length) {
         const lot = lots[0], b = lot.trade, bought = number(b.shares);
         const q = Math.min(remaining, lot.remaining);
         const buyAmount = number(b.total_amount) * q / bought;
         const proceeds = number(t.total_amount) * q / qty;
         const fee = number(b.commission) * q / bought + number(t.commission) * q / qty;
-        const days = (new Date(t.trade_date) - new Date(b.trade_date)) / 86400000;
+        const days = b.openingFund ? 0 : (new Date(t.trade_date) - new Date(b.trade_date)) / 86400000;
+        if (b.openingFund) unknownHolding = true;
         const info = parseOptionInfo(key);
         const dte = info ? Math.round((Date.parse(info.expiration) - Date.parse(b.day)) / 86400000) : null;
         const dteBucket = dte == null ? '' : dte < 0 ? 'invalid' : dte <= 1 ? '0to1' : dte <= 7 ? '2to7' : dte <= 30 ? '8to30' : dte <= 90 ? '31to90' : 'over90';
@@ -102,7 +103,7 @@ export function computeTradeReview(trades, options = {}) {
         if (remaining > 1e-8) unmatched.push({ id: t.id, symbol: key, name: t.name, date: t.day, shares: remaining, proceeds: money(number(t.total_amount) * remaining / qty) });
         if (matched > 1e-8) sales.push({ id: t.id, symbol: key, name: t.name || key, date: t.day, category: t.category,
           underlying: parseOptionInfo(key)?.underlying || key, matched, complete: remaining < 1e-8,
-          cost, gross, fees, pnl: gross - fees, holding: holding / matched });
+          cost, gross, fees, pnl: gross - fees, holding: unknownHolding ? null : holding / matched });
       }
     }
     const complete = sales.filter((s) => s.complete);
@@ -142,7 +143,7 @@ export function computeTradeReview(trades, options = {}) {
       bigLossCount: bigLosses.length, bigLossAmount: money(-bigLosses.reduce((s, r) => s + r.pnl, 0)),
       bigLossShare: tradeStats.loss ? -bigLosses.reduce((s, r) => s + r.pnl, 0) / tradeStats.loss * 100 : null,
       smallWinCount: smallWins.length, smallWinShare: tradeStats.wins ? smallWins.length / tradeStats.wins * 100 : null,
-      assets, bins, holding: groupStats(complete, (s) => holdBucket(s.holding)),
+      assets, bins, holding: groupStats(complete, (s) => s.holding == null ? 'unknown' : holdBucket(s.holding)),
       dte: groupStats(fragments.filter((f) => f.category === 'option'), (f) => f.dteBucket),
       months: groupStats(sales, (s) => s.date.slice(0, 7)).sort((a, b) => a.key.localeCompare(b.key)),
       symbols: groupStats(sales, (s) => s.symbol).map((g) => ({ ...g, name: sales.find((s) => s.symbol === g.key)?.name || g.key })),
@@ -151,5 +152,6 @@ export function computeTradeReview(trades, options = {}) {
       worst: [...sales].sort((a, b) => a.pnl - b.pnl).slice(0, 10).map((s) => ({ ...s, pnl: money(s.pnl), cost: money(s.cost), fees: money(s.fees) })),
       insights };
   });
-  return { startDate, endDate, firstDate: history[0]?.day || null, lastDate: history.at(-1)?.day || null, currencies: reports };
+  const recorded = history.filter(t => !t.openingFund);
+  return { startDate, endDate, firstDate: recorded[0]?.day || null, lastDate: recorded.at(-1)?.day || null, currencies: reports };
 }

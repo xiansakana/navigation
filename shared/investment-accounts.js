@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { requirePortfolioUserId } from './portfolio-user.js';
-import { fundHoldings } from './fund-holdings.js';
+import { fundCode, fundHoldings, fundTradeOrder, fundValuation, openingFundTrades } from './fund-holdings.js';
 
 const round = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const cents = (n) => {
@@ -8,9 +8,10 @@ const cents = (n) => {
   return Math.round(Number(n) * 100);
 };
 const isHk = symbol => /^(?:HK\.?)?\d{1,5}(?:\.HK)?$/i.test(String(symbol || ''));
-const currency = (t) => isHk(t.symbol) ? 'HKD' : t.currency ? String(t.currency).toUpperCase() : (/\d{6}/.test(String(t.symbol)) && !/[CP]\d/.test(String(t.symbol)) ? 'CNY' : 'USD');
+const currency = (t) => isHk(t.symbol) ? 'HKD' : fundCode(t.symbol) ? 'CNY' : t.currency ? String(t.currency).toUpperCase() : (/\d{6}/.test(String(t.symbol)) && !/[CP]\d/.test(String(t.symbol)) ? 'CNY' : 'USD');
 const time = (s) => Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(String(s)) ? s : String(s).replace(' ', 'T') + '+08:00');
 export { time as investmentRecordTime };
+const compareTrades = (a, b) => time(a.trade_date) - time(b.trade_date) || fundTradeOrder(a) - fundTradeOrder(b) || String(a.id).localeCompare(String(b.id));
 const tableExists = (db, name) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
 export const investmentCashDelta = (t) => (t.type === 'buy' ? -Number(t.total_amount || 0) : Number(t.total_amount || 0)) - Number(t.commission || 0);
 
@@ -49,7 +50,7 @@ export function projectInvestments(db, userId, input) {
   const funds = fundHoldings(db, userId);
   const entries = tableExists(db, 'bookkeeping_entries') ? db.prepare('SELECT * FROM bookkeeping_entries WHERE user_id=? AND affects_balance=1').all(userId) : [];
   return rows.map((account) => {
-    const trades = (raw.trades || []).filter((t) => t.account_id === account.id).sort((a, b) => time(a.trade_date) - time(b.trade_date) || String(a.id).localeCompare(String(b.id)));
+    const trades = (raw.trades || []).filter((t) => t.account_id === account.id).sort(compareTrades);
     const baseline = time(account.baseline_at);
     const baselineEntryIds = new Set(JSON.parse(account.baseline_entry_ids || '[]'));
     const baselineTradeIds = new Set(JSON.parse(account.baseline_trade_ids || '[]'));
@@ -63,29 +64,26 @@ export function projectInvestments(db, userId, input) {
       const delta = ledgerCashDelta(e, account.bookkeeping_id) / 100;
       if (delta) { cash += delta; movements.push({ id: e.id, date: e.date, kind: 'bookkeeping', type: e.type, delta: round(delta) }); }
     }
-    const quantities = new Map();
+    const openingFunds = new Map(funds.filter(f => f.account_id === account.id).map(f => [`${f.code}.OF`, f]));
+    const quantities = new Map([...openingFunds].map(([symbol, f]) => [symbol, { shares: f.shares, name: f.name }]));
     for (const t of trades) {
       if (!['buy', 'sell'].includes(t.type)) continue;
       const q = quantities.get(t.symbol) || { shares: 0, name: t.name || t.symbol };
       q.shares = t.type === 'buy' ? q.shares + Number(t.shares) : Math.max(0, q.shares - Number(t.shares));
+      if (fundCode(t.symbol) && t.name) q.name = t.name;
       quantities.set(t.symbol, q);
     }
     const missing = [], positions = [];
     let marketValue = 0;
     for (const [symbol, q] of quantities) {
       if (q.shares < 1e-8) continue;
-      const quote = raw.quotes?.[symbol];
+      const code = fundCode(symbol);
+      const quote = code ? fundValuation(raw.quotes?.[symbol], openingFunds.get(symbol)) : raw.quotes?.[symbol];
       const price = quote?.price == null || quote.price === '' ? NaN : Number(quote.price);
       if (!Number.isFinite(price) || price < 0) missing.push(symbol);
       const value = Number.isFinite(price) && price >= 0 ? round(q.shares * price * (/^[A-Z]+\d{6}[CP]/.test(symbol) ? 100 : 1)) : null;
       if (value != null) marketValue += value;
-      positions.push({ symbol, name: q.name, shares: q.shares, price: Number.isFinite(price) ? price : null, marketValue: value, quoteAsOf: quote?.asOf || quote?.updatedAt || quote?.timestamp || quote?.date || null, delayed: !!quote?.delayed });
-    }
-    for (const fund of funds.filter(f => f.account_id === account.id)) {
-      const value = round(fund.shares * fund.nav);
-      marketValue += value;
-      positions.push({ type: 'fund', symbol: fund.code, name: fund.name, shares: fund.shares,
-        cost: fund.cost, price: fund.nav, marketValue: value, quoteAsOf: fund.nav_date });
+      positions.push({ symbol, ...(code ? { type: 'fund' } : {}), name: q.name, shares: q.shares, price: Number.isFinite(price) ? price : null, marketValue: value, quoteAsOf: quote?.asOf || quote?.updatedAt || quote?.timestamp || quote?.date || null, delayed: !!quote?.delayed });
     }
     const ledger = account.bookkeeping_id && tableExists(db, 'bookkeeping_accounts') ? db.prepare('SELECT name,archived FROM bookkeeping_accounts WHERE user_id=? AND id=?').get(userId, account.bookkeeping_id) : null;
     return { id: account.id, name: account.name, currency: account.currency, bookkeepingId: account.bookkeeping_id,
@@ -143,12 +141,13 @@ export function prepareInvestmentTrades(db, userId, next, before) {
   const accounts = investmentRows(db, userId);
   if (!accounts.length) {
     if (next.some(t => currency(t) === 'HKD')) throw new Error('请先创建港币证券账户');
+    if (next.some(t => t.type !== 'other' && fundCode(t.symbol))) throw new Error('请先创建人民币证券账户');
     return next;
   }
   const old = new Map((before.trades || []).map((t) => [t.id, t]));
   const financial = (t) => JSON.stringify([t.type, t.symbol, t.shares, t.price, t.total_amount, t.commission, t.currency, t.trade_date, t.account_id]);
   const ids = new Set();
-  return next.map((trade) => {
+  const prepared = next.map((trade) => {
     if (ids.has(trade.id)) throw new Error('同一用户交易ID重复，导入已取消');
     ids.add(trade.id);
     const previous = old.get(trade.id);
@@ -160,8 +159,20 @@ export function prepareInvestmentTrades(db, userId, next, before) {
     const accountId = trade.account_id || (candidates.length === 1 ? candidates[0].id : '');
     const account = accounts.find((a) => a.id === accountId);
     if (!account || account.currency !== cur) throw new Error('请选择本人名下、同币种的证券账户');
-    return { ...trade, account_id: accountId, ...(cur === 'HKD' ? { currency: cur } : {}) };
+    return { ...trade, account_id: accountId, ...(cur === 'HKD' || fundCode(trade.symbol) ? { currency: cur } : {}) };
   });
+  const fundTrades = prepared.filter(t => ['buy', 'sell'].includes(t.type) && fundCode(t.symbol));
+  if (fundTrades.length) {
+    const balances = new Map();
+    const ordered = fundTrades.sort(compareTrades);
+    for (const t of [...openingFundTrades(fundHoldings(db, userId)), ...ordered]) {
+      const key = JSON.stringify([t.account_id, t.symbol]);
+      const shares = (balances.get(key) || 0) + (t.type === 'buy' ? 1 : -1) * Number(t.shares);
+      if (shares < -1e-8) throw new Error(`${t.symbol} 卖出份额超过该账户当时的可用份额`);
+      balances.set(key, Math.max(0, shares));
+    }
+  }
+  return prepared;
 }
 
 export function decorateInvestmentBalances(db, userId, accounts) {

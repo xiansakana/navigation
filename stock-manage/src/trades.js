@@ -1,6 +1,7 @@
 import { tradeAssetType } from '../public/js/trade-asset-type.js';
 import { dateTimeFormatter } from './date-formatters.js';
 import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
+import { fundCode, fundTradeOrder } from '../../shared/fund-holdings.js';
 import {
   normalizeSymbol,
   inferCurrency,
@@ -24,6 +25,10 @@ export function roundMoney(n) {
 export function roundPrice(n) {
   const value = Number(n);
   return Math.round((value + Number.EPSILON * Math.abs(value)) * 1000) / 1000;
+}
+
+export function roundTradePrice(value, symbol) {
+  return fundCode(symbol) ? Math.round(Number(value) * 10000) / 10000 : roundPrice(value);
 }
 
 export function tradeCurrency(trade) {
@@ -125,6 +130,11 @@ function tradeTime(t) {
   return new Date(t).getTime();
 }
 
+function compareTrades(a, b) {
+  return Number(!!b.openingFund) - Number(!!a.openingFund)
+    || tradeTime(a.trade_date) - tradeTime(b.trade_date) || fundTradeOrder(a) - fundTradeOrder(b) || a.id.localeCompare(b.id);
+}
+
 function dateKey(t) {
   return tradeCalendarDate(t.trade_date);
 }
@@ -173,7 +183,7 @@ export function deriveHoldings(trades) {
   const out = [];
   for (const [, list] of bySym) {
     const symbol = normalizeSymbol(list[0].symbol);
-    list.sort((a, b) => tradeTime(a.trade_date) - tradeTime(b.trade_date) || a.id.localeCompare(b.id));
+    list.sort(compareTrades);
     const queue = [];
     let name = symbol;
     for (const tr of list) {
@@ -217,7 +227,7 @@ export function computePnl(trades, options = {}) {
   let commission = 0;
   let otherAmount = 0;
   for (const t of trades) {
-    if (!inWindow(t)) continue;
+    if (t.openingFund || !inWindow(t)) continue;
     const cur = tradeCurrency(t);
     commission += toUsd(t.commission || 0, cur, rate, usdHkdRate);
     if (t.type === 'buy') totalBuy += toUsd(t.total_amount, cur, rate, usdHkdRate);
@@ -236,7 +246,7 @@ export function computePnl(trades, options = {}) {
   let realized = 0;
   for (const [, list] of bySym) {
     const symbol = normalizeSymbol(list[0].symbol);
-    list.sort((a, b) => tradeTime(a.trade_date) - tradeTime(b.trade_date));
+    list.sort((a, b) => fundCode(symbol) ? compareTrades(a, b) : tradeTime(a.trade_date) - tradeTime(b.trade_date));
     const queue = [];
     const cur = isAShareSymbol(symbol) ? 'CNY' : 'USD';
     for (const tr of list) {
@@ -264,7 +274,7 @@ export function computeSymbolSummaries(trades, options = {}) {
   const rate = Number(options.usdCnyRate) > 0 ? Number(options.usdCnyRate) : DEFAULT_USD_CNY_RATE;
   const symbolsInWindow = new Set();
   for (const t of trades) {
-    if (t.type !== 'buy' && t.type !== 'sell') continue;
+    if (t.openingFund || (t.type !== 'buy' && t.type !== 'sell')) continue;
     const d = dateKey(t);
     if (!d) continue;
     if (startDate && d < startDate) continue;
@@ -288,7 +298,7 @@ export function computeSymbolSummaries(trades, options = {}) {
   const out = [];
   for (const [, symTrades] of bySym) {
     const symbol = normalizeSymbol(symTrades[0].symbol);
-    symTrades.sort((a, b) => tradeTime(a.trade_date) - tradeTime(b.trade_date) || a.id.localeCompare(b.id));
+    symTrades.sort(compareTrades);
     const quoteName = String(options.quotes?.[symbol]?.name || '').trim();
     const name = symTrades.reduce((latest, trade) => {
       const candidate = String(trade.name || '').trim();
@@ -298,7 +308,7 @@ export function computeSymbolSummaries(trades, options = {}) {
     const win = [];
     for (const t of symTrades) {
       const d = dateKey(t);
-      if (startDate && d < startDate) pre.push(t);
+      if (t.openingFund || (startDate && d < startDate)) pre.push(t);
       else win.push(t);
     }
     if (!win.length) continue;
@@ -381,7 +391,7 @@ export function buildDailyCumulativeSeries(trades, options = {}) {
   if (!trades.length) return [];
   const usdHkdRate = options.usdHkdRate;
   const rate = Number(options.usdCnyRate) > 0 ? Number(options.usdCnyRate) : DEFAULT_USD_CNY_RATE;
-  const sorted = [...trades].sort((a, b) => tradeTime(a.trade_date) - tradeTime(b.trade_date) || a.id.localeCompare(b.id));
+  const sorted = trades.filter(t => !t.openingFund).sort(compareTrades);
   const byDay = new Map();
   for (const t of sorted) {
     const d = dateKey(t);
@@ -393,6 +403,9 @@ export function buildDailyCumulativeSeries(trades, options = {}) {
   if (!days.length) return [];
 
   const queues = new Map();
+  for (const t of trades) {
+    if (t.openingFund) queues.set(JSON.stringify([t.account_id, t.symbol]), [{ shares: t.shares, price: t.price }]);
+  }
   let cumRealized = 0;
   let cumCommission = 0;
   let cumOther = 0;
@@ -698,8 +711,8 @@ export function normalizeTrade(input) {
   }
   if (currency === 'HKD' && holdingTypeForSymbol(symbol) !== 'hkstock') throw new Error('港股代码请填写 00700 或 00700.HK');
   const shares = Number(input.shares);
-  const price = roundPrice(input.price);
-  if (!symbol || !(shares > 0) || !(price > 0)) throw new Error('买卖需填写代码、数量与价格');
+  const price = roundTradePrice(input.price, symbol);
+  if (!symbol || !Number.isFinite(shares) || !Number.isFinite(price) || !(shares > 0) || !(price > 0)) throw new Error('买卖需填写代码、数量与价格');
   const mult = optionMult(symbol);
   const total = roundMoney(shares * price * mult);
   return {

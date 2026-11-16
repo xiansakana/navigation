@@ -22,7 +22,17 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
   fs.writeFileSync(provider, `globalThis.fetch = async url => {
     if (String(url).includes('fundCode=000198')) return Response.json({Data:{FundType:'005',SYType:'每万份收益',LSJZList:[{DWJZ:'0.2168',FSRQ:'2026-11-13'}]}});
     if (String(url).includes('/f10/lsjz')) return Response.json({Data:{LSJZList:[{DWJZ:'2.9800',FSRQ:'2026-11-13'}]}});
-    if (String(url).includes('/chart/AAPL')) return Response.json({chart:{result:[{meta:{regularMarketPrice:25,chartPreviousClose:20}}]}});
+    if (String(url).includes('/chart/AAPL')) return Response.json({chart:{result:[{meta:{longName:'Apple Inc.',regularMarketPrice:25,chartPreviousClose:20}}]}});
+    if (String(url).includes('FundSearchAPI.ashx')) {
+      const code = new URL(url).searchParams.get('key');
+      const fund = (NAME, MINSG) => ({CODE:code, NAME, CATEGORY:700, FundBaseInfo:{MINSG}});
+      const datas = ({
+        '000001': [fund('华夏成长混合',10), {CODE:code, NAME:'平安银行', CATEGORY:150, STOCKMARKET:'2'}],
+        '110022': [fund('易方达消费行业股票',10)],
+        '159509': [fund('纳指科技ETF景顺',null)]
+      })[code] || [];
+      return Response.json({ErrCode:0,Datas:datas});
+    }
     if (String(url).includes('q=hk00700')) {
       const fields = Array(83).fill('');
       fields[1] = 'Tencent'; fields[2] = '00700'; fields[3] = '40'; fields[4] = '39';
@@ -167,6 +177,57 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
       assert.equal((await call(channelFund,'a','DELETE')).status,200);
     } finally { channelDb.close(); }
     assert.equal((await (await call('/portfolio','a')).json()).fundHoldings.length, 0);
+    const resolve = async symbol => (await call('/instruments/resolve?symbol=' + symbol, 'a')).json();
+    assert.deepEqual((await resolve('000001')).map(i => [i.symbol, i.name]),
+      [['000001','平安银行'], ['000001.OF','华夏成长混合']]);
+    assert.deepEqual((await resolve('159509')).map(i => i.assetType), ['ashare']);
+    assert.deepEqual(await resolve('110022'), [{symbol:'110022.OF', name:'易方达消费行业股票', assetType:'fund', currency:'CNY'}]);
+    assert.equal((await resolve('00700'))[0].name, 'Tencent');
+    assert.equal((await resolve('AAPL'))[0].name, 'Apple Inc.');
+    assert.equal((await resolve('000001.OF'))[0].name, '华夏成长混合');
+    assert.equal((await fetch(base + '/instruments/resolve?symbol=AAPL', {headers:{'x-portal-user-id':'a','x-portal-permissions':'W10'}})).status, 403);
+
+    assert.equal((await call(fund, 'a', 'PUT', fundInput)).status, 200);
+    const fundTrade = { symbol:'501225.OF', account_id:cnId, type:'sell', shares:50.5,
+      price:3.1234, commission:1, trade_date:'2099-01-01T12:00:00Z' };
+    const sale = await call('/trades?accountId=' + cnId, 'a', 'POST', fundTrade);
+    assert.equal(sale.status, 200);
+    const afterSale = await sale.json();
+    const sold = afterSale.trades.find(t => t.symbol === fundTrade.symbol);
+    assert.equal(sold.price, 3.1234);
+    assert.equal(afterSale.cashCny, 1445.75);
+    assert.equal(afterSale.fundHoldings[0].shares, 200);
+    assert.equal(afterSale.fundHoldings[0].cost, 558.88);
+    assert.equal(afterSale.fundHoldings[0].marketValue, 596);
+    assert.equal(afterSale.fundHoldings[0].editableSnapshot, false);
+    assert.equal(afterSale.holdings.find(t => t.symbol === '501225').shares, 200);
+    assert.equal(afterSale.trades.some(t => t.openingFund), false);
+    const fundSummary = await (await call('/trades/summary?assetType=fund&accountId=' + cnId, 'a')).json();
+    assert.equal(fundSummary[0].totalBuyAmount, 0);
+    assert.ok(fundSummary[0].netPnl > 0);
+    assert.ok(fundSummary[0].netPnlRate > 0);
+    const review = await (await call('/trades/review?assetType=fund&accountId=' + cnId, 'a')).json();
+    assert.equal(review.firstDate, '2099-01-01');
+    assert.equal(review.currencies[0].unmatched.length, 0);
+    assert.equal(review.currencies[0].holding[0].key, 'unknown');
+    assert.equal((await call(fund, 'a', 'DELETE')).status, 409);
+    assert.equal((await call('/trades', 'a', 'POST', {...fundTrade, shares:201})).status, 400);
+    assert.equal((await call('/trades/' + sold.id, 'a', 'DELETE')).status, 200);
+    assert.equal((await call(fund, 'a', 'DELETE')).status, 200);
+    const buy = await call('/trades?accountId=' + cnId, 'a', 'POST',
+      {...fundTrade, type:'buy', symbol:'110022.OF', shares:100, price:2.9001, commission:0});
+    assert.equal(buy.status, 200);
+    const afterBuy = await buy.json();
+    assert.equal(afterBuy.cashCny, 999.01);
+    assert.equal(afterBuy.fundHoldings[0].name, '易方达消费行业股票');
+    assert.equal(afterBuy.fundHoldings[0].marketValue, 298);
+    assert.equal((await call(`/fund-holdings/${cnId}/110022/refresh`, 'a', 'POST')).status, 200);
+    const bought = afterBuy.trades.find(t => t.symbol === '110022.OF');
+    const exportFund = await call('/trades/export?assetType=fund', 'a');
+    const exported = XLSX.read(Buffer.from(await exportFund.arrayBuffer()), {cellNF:true});
+    assert.equal(exported.Sheets.交易记录.K2.v, 2.9001);
+    assert.equal(exported.Sheets.交易记录.K2.z, '0.0000');
+    assert.equal((await call('/trades/' + bought.id, 'a', 'DELETE')).status, 200);
     const hkTrade = {type:'buy',symbol:'0700.HK',shares:10,price:32,commission:8,trade_date:'2099-01-01T12:00:00Z'};
     assert.equal((await call('/trades','b','POST',hkTrade)).status,400);
     const hkDb = new Database(path.join(directory, 'db.sqlite'));

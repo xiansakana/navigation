@@ -1,7 +1,7 @@
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (n) => Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 const pct = (n) => Number.isFinite(n) ? n.toFixed(1) + '%' : '—';
-const labels = { stock: '股票与非杠杆ETF', leveraged: '杠杆／反向及波动率产品', option: '期权', ashare: 'A股', other: '其它收支', under1: '不足24小时', '1to7': '1至不足8天', '8to30': '8至不足31天', '31to90': '31至不足91天', over90: '91天及以上', '0to1': '0–1天', '2to7': '2–7天', invalid: '日期需核对' };
+const labels = { stock: '股票与非杠杆ETF', leveraged: '杠杆／反向及波动率产品', option: '期权', ashare: 'A股', hkstock: '港股', fund: '场外基金', other: '其它收支', under1: '不足24小时', '1to7': '1至不足8天', '8to30': '8至不足31天', '31to90': '31至不足91天', over90: '91天及以上', unknown: '买入日期未知', '0to1': '0–1天', '2to7': '2–7天', invalid: '日期需核对' };
 
 function table(headings, rows) {
   return `<div class="sm-table-wrap sm-table-wrap--modal"><table class="sm-table"><thead><tr>${headings.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>${rows.length ? rows.map((r) => `<tr>${r.map((v, i) => `<td data-label="${escapeHtml(headings[i])}">${escapeHtml(v)}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${headings.length}" class="empty">暂无数据</td></tr>`}</tbody></table></div>`;

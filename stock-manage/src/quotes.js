@@ -9,6 +9,8 @@ import { yoloMarketDate } from './yolo-time.js';
 import { dateTimeFormatter } from './date-formatters.js';
 import { fetchQuoteResource } from '../../shared/quote-network.js';
 import { createForeignExchangeService } from '../../shared/foreign-exchange.js';
+import { fundCode } from '../../shared/fund-holdings.js';
+import { findMainlandInstruments, getFundNav } from './fund-nav.js';
 
 function parseOptionSymbol(symbol) {
   const m = String(symbol).toUpperCase().match(/^([A-Z]+)(\d{6})([CP])(\d+(?:\.\d+)?)$/);
@@ -474,7 +476,7 @@ export function createQuoteService(config) {
       const q = await getYahooQuote(yahooSym);
       return {
         symbol: code,
-        name: code,
+        name: q.name || code,
         price: q.price,
         change: q.change,
         changePercent: q.changePercent,
@@ -950,12 +952,19 @@ export function createQuoteService(config) {
 
   async function getQuote(symbol) {
     const sym = normalizeSymbol(symbol);
+    const code = fundCode(sym);
+    if (code) {
+      const { nav, date } = await getFundNav(code);
+      return { symbol: sym, price: nav, asOf: date, currency: 'CNY', source: 'eastmoney-fund-nav' };
+    }
     if (/^[A-Z]+\d{6}[CP]\d/i.test(sym)) return getOption(sym);
     return getStock(sym);
   }
 
   async function getInstrumentName(symbol) {
     const sym = normalizeSymbol(symbol);
+    const code = fundCode(sym);
+    if (code) return (await findMainlandInstruments(code)).fund?.name || '';
     const realName = (value) => {
       const name = String(value || '').trim();
       return name && name.toUpperCase() !== sym ? name : '';

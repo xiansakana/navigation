@@ -1,4 +1,5 @@
 /** A-share / mainland ETF symbol helpers (CNY). */
+import { fundCode } from '../../shared/fund-holdings.js';
 
 export function stripAShareDecorators(raw) {
   let s = String(raw || '').trim();
@@ -46,9 +47,10 @@ export function normalizeSymbol(symbol) {
   return hk ? `${hk}.HK` : raw.toUpperCase();
 }
 
-/** @returns {'CN'|'HK'|'US'|'OPTION'} */
+/** @returns {'CN'|'HK'|'US'|'OPTION'|'FUND'} */
 export function inferMarket(symbol) {
   const sym = String(symbol || '').trim();
+  if (fundCode(sym)) return 'FUND';
   if (/^[A-Z]+\d{6}[CP]\d+(?:\.\d+)?$/i.test(sym)) return 'OPTION';
   if (isAShareSymbol(sym)) return 'CN';
   if (hkCode(sym)) return 'HK';
@@ -58,6 +60,7 @@ export function inferMarket(symbol) {
 export function inferCurrency(symbol, explicit) {
   const e = String(explicit || '').trim().toUpperCase();
   if (hkCode(symbol)) return 'HKD';
+  if (fundCode(symbol)) return 'CNY';
   if (['CNY', 'USD', 'HKD'].includes(e)) return e;
   return inferMarket(symbol) === 'CN' ? 'CNY' : 'USD';
 }
@@ -67,5 +70,6 @@ export function holdingTypeForSymbol(symbol) {
   if (m === 'OPTION') return 'option';
   if (m === 'CN') return 'ashare';
   if (m === 'HK') return 'hkstock';
+  if (m === 'FUND') return 'fund';
   return 'stock';
 }

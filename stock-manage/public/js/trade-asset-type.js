@@ -1,8 +1,9 @@
-export const TRADE_ASSET_TYPES = { stock: '股票', option: '期权', ashare: 'A股', hkstock: '港股', other: '其它收支' };
+export const TRADE_ASSET_TYPES = { stock: '股票', option: '期权', ashare: 'A股', hkstock: '港股', fund: '场外基金', other: '其它收支' };
 
 export function tradeAssetType(trade) {
   if (trade?.type === 'other') return 'other';
   const symbol = String(trade?.symbol || '').trim().toUpperCase();
+  if (/^\d{6}\.OF$/.test(symbol)) return 'fund';
   if (/^[A-Z]+\d{6}[CP]\d+(?:\.\d+)?$/.test(symbol)) return 'option';
   if (/^(?:HK\.?)?\d{1,5}(?:\.HK)?$/.test(symbol)) return 'hkstock';
   const code = symbol.replace(/^(SH|SZ|SS)\.?/, '').replace(/\.(SH|SZ|SS)$/, '');
