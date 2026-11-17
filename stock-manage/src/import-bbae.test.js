@@ -23,6 +23,8 @@ test('stock orders use multiplier one, exclude unfilled orders and include execu
   const columns = headers.map(x=>x==='期权代码'?'股票代码':x);
   const [t] = parseBbaeBuffer(buffer([['部成已撤','买入','GOOG','$328.935',2,'$658.87',row[6],row[7]]], columns));
   assert.equal(t.total_amount,657.87);assert.equal(t.commission,1);
+  const named = parseBbaeBuffer(buffer([['已成','买入','GOOG','$328.935',2,'$658.87',row[6],row[7],'Alphabet Inc.']], [...columns,'股票名称']));
+  assert.equal(named[0].name, 'Alphabet Inc.');
   assert.deepEqual(parseBbaeBuffer(buffer([['已撤','买入','GOOG','','','$0.00','','']],columns)),[]);
 });
 test('BBAE duplicate imports are idempotent and cumulative fills update within the selected account', () => {

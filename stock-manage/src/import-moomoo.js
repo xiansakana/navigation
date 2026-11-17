@@ -109,7 +109,7 @@ function parseMoomooRows(rows) {
   const idx = (n) => headerIndex(headers, n);
   const iDir = idx('方向');
   const iCode = idx('代码');
-  const iName = idx('名称');
+  const iName = ['名称', '股票名称', '证券名称'].map(idx).find(index => index >= 0) ?? -1;
   const iStatus = idx('交易状态');
   let iPx = idx('成交价格');
   if (iPx < 0) iPx = idx('成交价');

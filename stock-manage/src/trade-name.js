@@ -5,14 +5,31 @@ export function needsTradeName(trade) {
   if (!['buy', 'sell'].includes(trade?.type)) return false;
   const symbol = normalizeSymbol(trade.symbol);
   const name = String(trade.name || '').trim();
-  return !!symbol && (!name || normalizeSymbol(name) === symbol);
+  return !!symbol && (!name || /^(?:--?|—|N\/A)$/i.test(name) || normalizeSymbol(name) === symbol);
+}
+
+export function knownTradeNames(trades, quotes = {}) {
+  const names = new Map();
+  for (const trade of trades) {
+    if (['buy', 'sell'].includes(trade.type) && !needsTradeName(trade)) {
+      const symbol = normalizeSymbol(trade.symbol);
+      if (symbol) names.set(symbol, String(trade.name).trim());
+    }
+  }
+  for (const [key, quote] of Object.entries(quotes)) {
+    const symbol = normalizeSymbol(key);
+    if (!needsTradeName({ type: 'buy', symbol, name: quote?.name })) {
+      if (symbol) names.set(symbol, String(quote.name).trim());
+    }
+  }
+  return names;
 }
 
 export function backfillTradeName(trade, names) {
   if (!needsTradeName(trade)) return trade;
   const symbol = normalizeSymbol(trade.symbol);
   const name = String(names.get(symbol) || '').trim();
-  return name && normalizeSymbol(name) !== symbol ? { ...trade, name } : trade;
+  return !needsTradeName({ ...trade, name }) ? { ...trade, name } : trade;
 }
 
 export async function normalizeNamedTrade(input, getQuote) {

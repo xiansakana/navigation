@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import XLSX from 'xlsx';
 import { isOptionSymbol, roundMoney } from './trades.js';
+import { needsTradeName } from './trade-name.js';
 
 const hash = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const text = value => String(value ?? '').trim();
@@ -44,7 +45,8 @@ export function parseBbaeBuffer(buffer) {
       keys.add(key);
       trades.push({ id: `bbae-${key}`, broker: 'bbae', broker_order_key: key, broker_net: net,
         symbol, type, shares, price, total_amount: amount, commission: fee, currency: 'USD',
-        name: text(get('名称')) || symbol, trade_date: tradedAt, created_at: new Date().toISOString() });
+        name: ['名称', '股票名称', '证券名称', '期权名称'].map(column => text(get(column))).find(name => !needsTradeName({ symbol, type, name })) || symbol,
+        trade_date: tradedAt, created_at: new Date().toISOString() });
     }
   }
   return recognized ? trades : null;
@@ -67,7 +69,7 @@ export function mergeBbaeTrades(existing, incoming, accountId) {
       preview.push({ ...t, importAction: 'needsAssignment' });
       continue;
     }
-    const trade = { ...old, ...t, account_id: accountId, id: old?.id || `${t.broker || 'bbae'}-${hash([accountId, t.broker_order_key])}`, name: old?.name && old.name !== old.symbol ? old.name : t.name, created_at: old?.created_at || t.created_at };
+    const trade = { ...old, ...t, account_id: accountId, id: old?.id || `${t.broker || 'bbae'}-${hash([accountId, t.broker_order_key])}`, name: old && !needsTradeName(old) ? old.name : t.name, created_at: old?.created_at || t.created_at };
     const action = !old ? 'added' : financial(old) === financial(trade) ? 'skipped' : 'updated';
     summary[action]++;
     if (old) { used.add(old.id); next[next.indexOf(old)] = trade; }

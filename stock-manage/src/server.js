@@ -23,7 +23,7 @@ import { createQuoteService } from './quotes.js';
 import { parseImportBuffer } from './import-moomoo.js';
 import { mergeEastmoneyTrades } from './import-eastmoney.js';
 import { mergeBbaeTrades } from './import-bbae.js';
-import { normalizeNamedTrade } from './trade-name.js';
+import { backfillTradeName, knownTradeNames, needsTradeName, normalizeNamedTrade } from './trade-name.js';
 import { computeTradeReview } from './trade-review.js';
 import {
   deriveHoldings,
@@ -529,16 +529,34 @@ function brokerImportPlan(req, trades, data) {
   return eastmoney ? mergeEastmoneyTrades(data.trades, trades, account.id, { repoInterestStart: req.query.repoInterestStart || new Date(Date.parse(account.baseline_at) + 8 * 3600000).toISOString().slice(0,10), baselineAt: account.baseline_at, baselineExcluded: req.query.repoInterestBaselineExcluded === '1' }) : mergeBbaeTrades(data.trades, trades, account.id);
 }
 
+async function fillImportedNames(trades, data) {
+  const names = knownTradeNames(data.trades, data.quotes);
+  for (const [symbol, name] of knownTradeNames(trades)) {
+    if (!names.has(symbol)) names.set(symbol, name);
+  }
+  const symbols = [...new Set(trades.filter(needsTradeName).map(t => normalizeSymbol(t.symbol)))];
+  const lookup = symbols.filter(symbol => !names.has(symbol) && inferMarket(symbol) !== 'OPTION');
+  await mapWithConcurrency(lookup, 4, async symbol => {
+    try {
+      const name = await lookupInstrumentName(symbol);
+      if (name) names.set(symbol, name);
+    } catch { /* Keep the import usable during a name-provider outage. */ }
+  });
+  for (let i = 0; i < trades.length; i++) trades[i] = backfillTradeName(trades[i], names);
+}
+
 app.post('/api/trades/import/preview', express.raw({
   type: ['application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
   limit: '20mb'
-}), (req, res) => {
+}), async (req, res) => {
   const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
   if (!buf.length) return res.status(400).json({ error: '空文件' });
   try {
     const trades = parseImportBuffer(buf);
     if (!trades.length && !trades.importInfo) return res.status(400).json({ error: '未解析到有效记录' });
-    const plan = (trades.importInfo || trades[0]?.broker === 'bbae') ? brokerImportPlan(req, trades, store.read()) : null;
+    const data = store.read();
+    await fillImportedNames(trades, data);
+    const plan = (trades.importInfo || trades[0]?.broker === 'bbae') ? brokerImportPlan(req, trades, data) : null;
     res.json({ count: plan ? plan.preview.length : trades.length, format: trades.importInfo ? 'eastmoney' : plan ? 'bbae' : 'other', summary: plan?.summary, trades: trades.slice(0, 5), preview: (plan?.preview || trades).slice(0, plan ? 50 : 5) });
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -548,12 +566,13 @@ app.post('/api/trades/import/preview', express.raw({
 app.post('/api/trades/import', express.raw({
   type: ['application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
   limit: '20mb'
-}), (req, res) => {
+}), async (req, res) => {
   const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
   if (!buf.length) return res.status(400).json({ error: '空文件' });
   try {
     const imported = parseImportBuffer(buf);
     if (!imported.length) return res.status(400).json({ error: imported.importInfo ? '此交割单没有本次支持的可导入交易，请查看预览中的未导入原因' : '未解析到有效记录' });
+    await fillImportedNames(imported, store.read());
     const data = store.read();
     const mode = String(req.query.mode || 'merge');
     let importSummary;
@@ -669,6 +688,12 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
+async function lookupInstrumentName(symbol) {
+  const market = inferMarket(symbol);
+  return await quotes.getInstrumentName(symbol).catch(() => '')
+    || (['US', 'HK'].includes(market) ? await findInternationalStockName(symbol, market) : '');
+}
+
 app.get('/api/instruments/resolve', async (req, res) => {
   if (!['trade', 'row-trade'].some(feature => hasStockPermission(req, feature, 'edit'))) {
     return res.status(403).json({ error: '无权录入交易' });
@@ -679,14 +704,13 @@ app.get('/api/instruments/resolve', async (req, res) => {
   const market = inferMarket(raw);
   const candidate = (symbol, name) => ({ symbol, name, assetType: holdingTypeForSymbol(symbol), currency: inferCurrency(symbol) });
   const data = store.read();
+  const names = knownTradeNames(data.trades, data.quotes);
   const storedName = symbol => {
-    const realName = name => name && normalizeSymbol(name) !== symbol;
     if (fundCode(symbol)) {
       const opening = openingFundsForAccount().find(fund => fund.code === fundCode(symbol));
       if (opening) return opening.name;
     }
-    if (realName(data.quotes[symbol]?.name)) return data.quotes[symbol].name;
-    return data.trades.findLast(t => t.symbol === symbol && t.type !== 'other' && realName(t.name))?.name;
+    return names.get(symbol);
   };
   const listedName = async () => storedName(symbol) || await quotes.getInstrumentName(symbol).catch(() => '');
   try {
@@ -704,7 +728,7 @@ app.get('/api/instruments/resolve', async (req, res) => {
       if (!result.length && fund?.moneyMarket) return res.status(400).json({ error: '此基金按万份收益估值，暂不支持录入' });
       return res.json(result);
     }
-    const name = await listedName() || (['HK', 'US'].includes(market) ? await findInternationalStockName(symbol, market) : '');
+    const name = storedName(symbol) || await lookupInstrumentName(symbol);
     res.json(name ? [candidate(symbol, name)] : []);
   } catch {
     res.status(502).json({ error: '标的识别暂时失败，请重试' });

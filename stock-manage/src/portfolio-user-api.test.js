@@ -110,9 +110,13 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.equal((await upload('/trades/import/preview?accountId='+investment.id,'b')).status,400);
     let bbae = await (await upload('/trades/import/preview?accountId='+investment.id)).json();
     assert.deepEqual(bbae.summary,{added:1,updated:0,skipped:0});
+    const [resolvedAapl] = await (await call('/instruments/resolve?symbol=AAPL', 'a')).json();
+    assert.notEqual(resolvedAapl.name, 'AAPL');
+    assert.equal(bbae.preview[0].name, resolvedAapl.name);
     const importRoute='/trades/import?accountId='+investment.id;
     bbae=await (await upload(importRoute)).json();
     assert.equal(bbae.importSummary.added,1);assert.equal(bbae.cashUsd,74);
+    assert.equal(bbae.trades.find(t => t.broker === 'bbae').name, resolvedAapl.name);
     bbae=await (await upload(importRoute)).json();
     assert.deepEqual(bbae.importSummary,{added:0,updated:0,skipped:1});assert.equal(bbae.cashUsd,74);
     bbaeRows[1][5]='$26.02';bbaeBook.Sheets['股票']=XLSX.utils.aoa_to_sheet(bbaeRows);
