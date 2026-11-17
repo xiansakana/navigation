@@ -4,6 +4,7 @@ import { historicalFx } from './bookkeeping-historical-fx.js';
 import { effectiveBookkeepingFx, refreshBookkeepingFx } from './bookkeeping-fx.js';
 import { SOCIAL_ACCOUNT_GROUP } from './bookkeeping-scope.js';
 import { investmentReturns } from './bookkeeping-investment-returns.js';
+import { refreshHoldingQuotes } from './bookkeeping-holding-quotes.js';
 
 const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
 export const assetDate = time => new Date(time + 8 * 3600000).toISOString().slice(0,10);
@@ -144,20 +145,23 @@ export function createAssetHistory(db) {
   return { capture, read, returns };
 }
 
-export function startAssetHistory(db, { clock = Date.now, refresh = refreshBookkeepingFx, schedule = setTimeout, cancel = clearTimeout } = {}) {
+export function startAssetHistory(db, { clock = Date.now, refresh = refreshBookkeepingFx, refreshQuotes = refreshHoldingQuotes, schedule = setTimeout, cancel = clearTimeout } = {}) {
   const history = createAssetHistory(db);
   let running = false;
   const collect = async () => {
-    if (running || clock() < captureTime(clock())) return;
+    const startedAt = clock();
+    const cutoff = captureTime(startedAt);
+    if (running || startedAt < cutoff) return;
     running = true;
     try {
       const store = createBookkeepingStore(db), fx = historicalFx(db);
       if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='investment_accounts'").get()) return;
       const users = db.prepare('SELECT DISTINCT user_id FROM investment_accounts WHERE bookkeeping_id IS NOT NULL').all();
       for (const {user_id:userId} of users) {
+        if (clock() >= cutoff + 60000) break;
         try {
-          const saved = db.prepare('SELECT captured_at FROM bookkeeping_asset_snapshots WHERE user_id=? AND date=?').get(userId,assetDate(clock()));
-          if (saved && Date.parse(saved.captured_at) >= captureTime(clock())) continue;
+          const saved = db.prepare('SELECT captured_at FROM bookkeeping_asset_snapshots WHERE user_id=? AND date=?').get(userId,assetDate(startedAt));
+          if (saved && Date.parse(saved.captured_at) >= cutoff) continue;
           const original = store.entries(userId);
           const accounts = store.accounts(userId);
           const destinations = original.filter(e=>e.toAccountId).map(e=>({...e,currency:accounts.find(a=>a.id===e.toAccountId)?.currency || e.currency}));
@@ -169,8 +173,13 @@ export function startAssetHistory(db, { clock = Date.now, refresh = refreshBookk
             e.toHistoricalRate = currency ? fx.quote(currency,e.date.slice(0,10))?.rate : null;
             if (e.toAmount!=null && !e.toHistoricalRate) e.toFxMissing=currency;
           }
-          // Read balances again after network requests so the observation is current.
-          history.capture(userId,store.accounts(userId),entries,effectiveBookkeepingFx(store.settings(userId)).rates,clock(),{daily:true});
+          // Leave time to write the observation before the Beijing date rolls over.
+          const budget = Math.max(0, Math.min(40000, cutoff + 55000 - clock()));
+          try { await refreshQuotes(db,userId,store.accounts(userId),budget); }
+          catch (error) { console.error('[asset-history] quote refresh:', error.message); }
+          const capturedAt = clock();
+          if (capturedAt >= cutoff + 60000) continue;
+          history.capture(userId,store.accounts(userId),entries,effectiveBookkeepingFx(store.settings(userId)).rates,capturedAt,{daily:true});
         } catch (error) { console.error('[asset-history]', error.message); }
       }
     } catch (error) { console.error('[asset-history]', error.message); }

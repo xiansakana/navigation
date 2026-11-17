@@ -10,6 +10,7 @@ import { createBookkeepingStore } from './bookkeeping-store.js';
 import { saveInvestmentAccount } from '../../shared/investment-accounts.js';
 import { getDatabase, closeDatabase } from '../../shared/db/index.js';
 import { handleBookkeepingApi } from './bookkeeping.js';
+import { refreshHoldingQuotes } from './bookkeeping-holding-quotes.js';
 
 const now = Date.parse('2026-10-15T10:00:00Z');
 const accounts = [{id:'cash',currency:'CNY',balance:100,included:true},
@@ -214,5 +215,37 @@ test('daily collector waits until Beijing 23:59 and saves once per day, includin
     clock=Date.parse('2026-10-16T15:59:00Z');await worker.collect();
     assert.equal(refreshes,2);
     assert.deepEqual(db.prepare('SELECT balance FROM bookkeeping_asset_snapshots ORDER BY date').all().map(r=>r.balance),[100,200]);
+  } finally {worker.stop();db.close();}
+});
+
+test('daily snapshot refreshes linked holdings before valuation and preserves quotes on provider failure',async()=>{
+  const db=new Database(':memory:'),store=createBookkeepingStore(db);
+  const aid=store.saveAccount('daily',{name:'证券',currency:'CNY',balance:150});
+  const accountId=saveInvestmentAccount(db,'daily',{name:'证券',currency:'CNY',bookkeepingId:aid,baselineCash:100});
+  let clock=Date.parse('2026-10-15T15:58:59Z');
+  db.exec('CREATE TABLE portfolio_users (user_id TEXT PRIMARY KEY,data TEXT NOT NULL,updated_at TEXT NOT NULL)');
+  const trade=symbol=>({id:symbol,symbol,type:'buy',shares:1,total_amount:10,currency:'CNY',trade_date:'2026-10-01T12:00:00',account_id:accountId});
+  const original={trades:['510300','159915'].map(trade),quotes:{'159915':{price:12}}};
+  const insert=db.prepare('INSERT INTO portfolio_users VALUES (?,?,?)');
+  insert.run('daily',JSON.stringify(original),'');
+  insert.run('other',JSON.stringify(original),'');
+  const requested=[];
+  const worker=startAssetHistory(db,{clock:()=>clock,refresh:async()=>{},schedule:()=>({unref(){}}),cancel(){},
+    refreshQuotes:(...args)=>refreshHoldingQuotes(...args,async symbol=>{
+      requested.push(symbol);
+      if(symbol==='159915')throw Error('provider unavailable');
+      return {symbol,price:20,asOf:'2026-10-15T07:00:00Z'};
+    })});
+  try {
+    clock+=1000;
+    await worker.collect();
+    assert.deepEqual(requested.sort(),['159915','510300']);
+    const saved=JSON.parse(db.prepare('SELECT details FROM bookkeeping_asset_snapshots WHERE user_id=?').get('daily').details);
+    assert.deepEqual(Object.fromEntries(saved[0].quotes.map(q=>[q.symbol,q.price])),{'510300':20,'159915':12});
+    const portfolio=db.prepare('SELECT data FROM portfolio_users WHERE user_id=?');
+    const updated=JSON.parse(portfolio.get('daily').data);
+    assert.deepEqual(updated.trades,original.trades);
+    assert.equal(updated.quotes['510300'].price,20);
+    assert.deepEqual(JSON.parse(portfolio.get('other').data),original);
   } finally {worker.stop();db.close();}
 });
