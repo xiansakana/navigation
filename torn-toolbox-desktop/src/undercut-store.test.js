@@ -27,3 +27,52 @@ test('undercut prevents overlapping scan rounds and releases the guard on failur
   monitor.scanOnce = async () => { throw Error('failed'); };
   await assert.rejects(monitor.runOnce(), /failed/); assert.equal(monitor.checking, false);
 });
+
+
+test('same Bazaar alert stays deduplicated after a missing result and restart', async t => {
+  const db = new Database(':memory:');
+  t.after(() => db.close());
+  const store = createUndercutStore(db);
+  const watcher = { id: 'a', label: 'Account', apiKey: 'test', watchBazaar: true, watchItemMarket: false };
+  const config = { undercut: { watchers: [watcher] }, notify: { qq: { url: 'http://127.0.0.1:8787/notify', token: 'test' } } };
+  let now = 1000, price = 100;
+  let ownListings = [{ id: 101, price: 200 }];
+  const messages = [];
+  t.mock.method(globalThis, 'fetch', async (address, options) => {
+    const pathname = new URL(address).pathname;
+    if (pathname === '/api/business-events') messages.push(JSON.parse(options.body).message);
+    const data = pathname.endsWith('/basic') ? { player_id: 1 }
+      : pathname.endsWith('/bazaar') ? { bazaar: { items: ownListings } }
+      : pathname.endsWith('/101') ? { listings: price ? [{ player_id: 2, price, quantity: 8 }] : [] }
+      : { ok: true };
+    return { ok: true, json: async () => data };
+  });
+  const create = () => new UndercutMonitor(() => config, { store, now: () => now });
+  let monitor = create();
+  await monitor.scanWatcher(config, watcher);
+  assert.equal(messages.length, 1);
+  price = 0;
+  now += 60;
+  await monitor.scanWatcher(config, watcher);
+  assert.equal(monitor.getAllAlerts().length, 0);
+  ownListings = [];
+  await monitor.scanWatcher(config, watcher);
+  monitor = create();
+  ownListings = [{ id: 101, price: 200 }];
+  price = 100;
+  await monitor.scanWatcher(config, watcher);
+  assert.equal(monitor.getAllAlerts().length, 1);
+  assert.equal(messages.length, 1);
+
+  price = 0;
+  await monitor.scanWatcher(config, watcher);
+  price = 90;
+  await monitor.scanWatcher(config, watcher);
+  assert.equal(messages.length, 2, 'different competing price can alert after recovery');
+  price = 0;
+  await monitor.scanWatcher(config, watcher);
+  price = 100;
+  now += 6 * 3600;
+  await monitor.scanWatcher(config, watcher);
+  assert.equal(messages.length, 3, 'an identical recurrence after the window may alert');
+});

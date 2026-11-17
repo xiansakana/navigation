@@ -10,6 +10,10 @@ import {
 import { publishBusinessEvent } from '../../shared/business-events.js';
 import { normalizeUndercutWatchers } from './watchers.js';
 
+const BAZAAR_REPEAT_WINDOW_SECONDS = 6 * 60 * 60;
+const bazaarAlertSignature = alert =>
+    JSON.stringify([alert.key, alert.undercutBy?.playerId ?? null, alert.compareLow]);
+
 export class UndercutMonitor extends EventEmitter {
     constructor(getConfig, dependencies = {}) {
         super();
@@ -37,6 +41,9 @@ export class UndercutMonitor extends EventEmitter {
             this.watcherStates.set(id, {
                 playerCache: {},
                 pendingMarket: new Map(saved?.pendingMarket || []),
+                recentBazaarAlerts: new Map(saved?.recentBazaarAlerts ?? (saved?.alerts || [])
+                    .filter(([, alert]) => alert.source === 'Bazaar' && Number.isSafeInteger(alert.detectedAt))
+                    .map(([, alert]) => [bazaarAlertSignature(alert), alert.detectedAt])),
                 activeKeys: new Set(saved?.activeKeys || []),
                 alertMap: new Map(saved?.alerts || []),
                 checks: 0,
@@ -251,6 +258,8 @@ export class UndercutMonitor extends EventEmitter {
         var bazaarPriceCache = {};
         var currentUndercuts = new Set();
         var newAlerts = [], pendingKeys = new Set();
+        const recentBazaarAlerts = new Map([...state.recentBazaarAlerts]
+            .filter(([, at]) => this.now() - at < BAZAAR_REPEAT_WINDOW_SECONDS));
 
         for (var i = 0; i < listings.length; i++) {
             var entry = listings[i];
@@ -308,7 +317,13 @@ export class UndercutMonitor extends EventEmitter {
                     watcherId: watcher.id,
                     watcherLabel: watcher.label
                 };
-                if (!state.activeKeys.has(entry.key)) newAlerts.push(alert);
+                if (!state.activeKeys.has(entry.key)) {
+                    const signature = entry.kind === 'bazaar' ? bazaarAlertSignature(alert) : null;
+                    if (signature === null || !recentBazaarAlerts.has(signature)) {
+                        newAlerts.push(alert);
+                        if (signature !== null) recentBazaarAlerts.set(signature, alert.detectedAt);
+                    }
+                }
                 state.alertMap.set(entry.key, alert);
             }
 
@@ -320,6 +335,7 @@ export class UndercutMonitor extends EventEmitter {
             if (!currentUndercuts.has(key)) state.alertMap.delete(key);
         });
         state.activeKeys = currentUndercuts;
+        state.recentBazaarAlerts = recentBazaarAlerts;
         this.store?.save(watcher, state);
 
         if (newAlerts.length) {
