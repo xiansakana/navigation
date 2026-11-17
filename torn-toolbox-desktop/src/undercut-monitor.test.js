@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { UndercutMonitor } from './undercut-monitor.js';
-import { fetchUserItemMarket, installWorkerApi } from './torn-api.js';
+import { fetchUserItemMarket, fetchUserBazaar, installWorkerApi } from './torn-api.js';
 
 test('a hung scan times out, releases its lock and recovers without accepting late results', async t => {
   let release, saves = 0;
@@ -41,7 +41,7 @@ test('competitor listing quantities reach alerts and notifications and refresh w
     } else if (address.includes('/user/itemmarket')) {
       data = { itemmarket: [{ id: 1, item: { id: 100, name: 'Market item' }, price: 200, amount: 999, available: 99 }] };
     } else if (address.includes('/user/bazaar')) {
-      data = { bazaar: [{ ID: 101, name: 'Bazaar item', price: 200, quantity: 999 }] };
+      data = { bazaar: { exists: true, is_open: true, items: [{ id: 101, name: 'Bazaar item', price: 200, quantity: 999 }] } };
     } else if (address.includes('/market/100/itemmarket')) {
       data = { itemmarket: { cache_timestamp: now, listings: [{price:200,amount:999}, { price: 150, amount: 555 }, { price: 100, amount: marketAmount }] } };
     } else {
@@ -121,4 +121,16 @@ test('shared account queue wait is added to the request timeout', async t => {
   await done;
   assert.equal(monitor.lastScanError, '');
   assert.match(monitor.statusMessage, /未发现/);
+});
+
+test('bazaar reads nested paginated listings and distinct UID price tiers', async t => {
+  t.mock.method(globalThis, 'fetch', async url => {
+    const offset = new URL(url).searchParams.get('offset');
+    return { ok: true, json: async () => offset === '0' ? {
+      bazaar: { exists: true, is_open: true, items: [{ id: 101, price: null, uids: [{ uid: 1, price: 100 }, { uid: 2, price: 100 }, { uid: 3, price: 120 }] }] },
+      _metadata: { links: { next: 'https://api.torn.com/v2/user/bazaar?offset=100' } }
+    } : { bazaar: [{ ID: 102, price: 300 }] } };
+  });
+  const rows = await fetchUserBazaar('test');
+  assert.deepEqual(rows.map(row => [row.id, row.price]), [[101, 100], [101, 120], [102, 300]]);
 });

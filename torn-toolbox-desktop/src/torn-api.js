@@ -60,10 +60,36 @@ export async function fetchItems(apiKey) {
 }
 
 export async function fetchUserBazaar(apiKey, options = {}) {
-    var data = await fetchJsonWithRetry(
-        'https://api.torn.com/v2/user/bazaar?key=' + encodeURIComponent(apiKey), undefined, options
-    );
-    return data.bazaar || [];
+    const endpoint = 'https://api.torn.com/v2/user/bazaar';
+    const listings = new Map();
+    for (let offset = 0, page = 0; page < 100; page++) {
+        const data = await fetchJsonWithRetry(
+            endpoint + '?key=' + encodeURIComponent(apiKey) + '&limit=100&offset=' + offset,
+            undefined, options
+        );
+        const bazaar = data.bazaar;
+        const items = Array.isArray(bazaar) ? bazaar : bazaar?.items;
+        if (!Array.isArray(items)) throw new Error('个人巴扎挂单数据无效');
+        for (const row of items) {
+            const id = Number(row?.id ?? row?.ID);
+            if (!Number.isSafeInteger(id) || id <= 0) throw new Error('个人巴扎物品 ID 无效');
+            // Unique items can have a null group price and a price per UID.
+            const prices = Array.isArray(row.uids) && row.uids.length ? row.uids.map(item => item.price) : [row.price];
+            for (const price of prices) {
+                if (!Number.isSafeInteger(Number(price)) || Number(price) <= 0) continue;
+                listings.set(id + ':' + Number(price), { ...row, id, price: Number(price) });
+            }
+        }
+        const next = data._metadata?.links?.next;
+        if (!next) return [...listings.values()];
+        const url = new URL(next, endpoint);
+        const nextOffset = Number(url.searchParams.get('offset'));
+        if (url.origin + url.pathname !== endpoint || !Number.isSafeInteger(nextOffset) || nextOffset <= offset) {
+            throw new Error('个人巴扎分页地址无效');
+        }
+        offset = nextOffset;
+    }
+    throw new Error('个人巴扎分页超过安全上限');
 }
 
 export async function fetchUserItemMarket(apiKey, options = {}) {
