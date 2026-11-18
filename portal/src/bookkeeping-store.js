@@ -178,6 +178,7 @@ export function createBookkeepingStore(db) {
       accountId: e.account_id, toAccountId: e.to_account_id, toAmount: e.to_amount == null ? null : e.to_amount / 100,
       accountName: e.account_name, toAccountName: e.to_account_name, note: e.note, book: e.book, tags: e.tags, location: e.location,
       refund: e.refund / 100, discount: e.discount / 100, fee: e.fee / 100, historical: !e.affects_balance,
+      ...(e.source_key && e.raw && JSON.parse(e.raw).reviewedBalance === 'history' ? { reviewedHistory: true } : {}),
       ...(e.type==='余额调整'?screenshotCheckpoint(e.raw):{})
     }));
   }
@@ -255,7 +256,7 @@ export function createBookkeepingStore(db) {
         date: input.date, category: '余额调整', note: input.note || '手动核对余额' });
     })();
   }
-  function importRows(userId, rows, accountSnapshots = []) {
+  function importRows(userId, rows, accountSnapshots = [], decisions = null) {
     if (!Array.isArray(rows) || rows.length > 50000) fail('导入记录超出限制');
     if (!Array.isArray(accountSnapshots) || accountSnapshots.length > 500) fail('账户快照无效');
     return db.transaction(() => {
@@ -270,15 +271,17 @@ export function createBookkeepingStore(db) {
         if (!a) { const aid = saveAccount(userId, { name, currency: c, group: '待核对账户', balance: 0 }); a = { id: aid }; accountMap.set(name, a); createdAccounts++; }
         return a.id;
       };
-      for (const row of rows) {
+      for (const [index,row] of rows.entries()) {
         if (!row.sourceKey) fail('导入记录缺少来源标识');
         if (db.prepare('SELECT 1 FROM bookkeeping_entries WHERE user_id=? AND source_key=?').get(userId, row.sourceKey)) { duplicates++; continue; }
+        const decision=decisions?.[index];
+        if (decision==='skip') continue;
         const accountId = resolve(row.accountName, row.currency), toAccountId = resolve(row.toAccountName, row.currency);
-        // iCost exports specify transaction currency, which can differ from account currency.
-        // Historical imports do not alter the snapshot balance and retain the original currency.
-        const e = normalizeEntry(userId, { ...row, accountId, toAccountId }, true, [accountId,toAccountId]);
-        if (TRANSFER_TYPES.includes(e.type)) e.toAmount = null;
-        insertEntry(userId, e, { historical: true, sourceKey: row.sourceKey, raw: row.raw }); inserted++;
+        const historical=decision!=='post';
+        const e = normalizeEntry(userId, { ...row, accountId, toAccountId }, historical, historical?[accountId,toAccountId]:[]);
+        if (historical && TRANSFER_TYPES.includes(e.type)) e.toAmount = null;
+        const raw=decisions?{...row.raw,reviewedBalance:historical?'history':'posted'}:row.raw;
+        insertEntry(userId, e, { historical, sourceKey: row.sourceKey, raw }); inserted++;
       }
       return { inserted, duplicates, createdAccounts };
     })();

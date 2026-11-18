@@ -5,6 +5,7 @@ import ExcelJS from 'exceljs';
 import { createBookkeepingStore, summarize, entryDate } from './bookkeeping-store.js';
 import { parseIcost, exportIcost, ICOST_HEADERS } from './bookkeeping-import.js';
 import { canBookkeep, handleBookkeepingApi, publicAccounts } from './bookkeeping.js';
+import { reviewIcostImport } from './bookkeeping-import-review.js';
 import { buildMenusFromServices, SYSTEM_PERMISSIONS } from './rbac.js';
 import { resolveRoute, resolveProxyContext } from './router.js';
 
@@ -22,6 +23,32 @@ test('linked bookkeeping assets respect stock cash permissions and omit raw port
   assert.equal(visible.investment.positions, undefined);
 });
 function setup() { const db = new Database(':memory:'); return { db, store: createBookkeepingStore(db) }; }
+test('reviewed iCost import projects and posts only explicitly selected balance movements',()=>{
+  const {db,store}=setup();
+  try {
+    const options={visible:()=>true,canPost:true,quote:()=>null};
+    const accountId=store.saveAccount('a',{name:'5431',balance:-61.83,currency:'USD',snapshotAt:'2026-10-11'});
+    store.saveAccount('a',{name:'银行卡',balance:100,currency:'USD',snapshotAt:'2026-11-15'});
+    const charge={date:'2026-11-14T09:00:00',type:'支出',amount:7.14,currency:'USD',accountName:'5431',sourceKey:'expense'};
+    const rows=[charge,{...charge,amount:1,date:'2026-10-10T09:00:00',sourceKey:'old'},
+      {...charge,type:'转账',toAccountName:'银行卡',sourceKey:'transfer'}];
+    const review=(decisions,extra={})=>reviewIcostImport(db,store,'a',rows,[],decisions,{...options,...extra});
+    const initial=review({});
+    assert.equal(initial.unresolved,2);
+    assert.deepEqual(initial.candidates.map(row=>[row.index,row.postAllowed,row.historyAllowed]),[[0,true,true],[2,false,false]]);
+    const choices={0:'post',2:'skip'}, ready=review(choices);
+    assert.equal(ready.unresolved,0);
+    assert.deepEqual(ready.balances.map(a=>[a.current,a.change,a.after,a.latest]),[[-61.83,-7.14,-68.97,-68.97]]);
+    assert.equal(store.entries('a').length,0);
+    assert.throws(()=>review({0:'post',2:'history'},{expected:ready.revision}),/核对/);
+    const concurrent=store.saveEntry('a',{date:'2026-11-15T12:00:00',type:'支出',amount:1,currency:'USD',accountId});
+    assert.throws(()=>review(choices,{expected:ready.revision}),/核对/);
+    store.removeEntry('a',concurrent);
+    review(choices,{expected:review(choices).revision});
+    assert.equal(store.accounts('a').find(a=>a.name==='5431').balance,-68.97);
+    assert.equal(review({2:'skip'}).duplicates,2);
+  } finally {db.close();}
+});
 test('account balances use integer cents, transfers and refunds; changes reverse correctly', () => {
   const { db, store:s } = setup();
   try {

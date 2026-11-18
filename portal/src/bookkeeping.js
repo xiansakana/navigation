@@ -10,6 +10,7 @@ import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
 import { createBookkeepingStore, summarize } from './bookkeeping-store.js';
 import { parseIcost, exportIcost } from './bookkeeping-import.js';
+import { reviewIcostImport } from './bookkeeping-import-review.js';
 import { effectiveBookkeepingFx, refreshBookkeepingFx } from './bookkeeping-fx.js';
 import { analyticsScope, scopedBills } from './bookkeeping-scope.js';
 import { tradeHistoryReturns } from './bookkeeping-trade-history.js';
@@ -150,14 +151,24 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       return json(res, 200, { ok: true, token, count: parsed.rows.length, errors: parsed.errors.slice(0, 100), errorCount: parsed.errors.length,
         warnings: parsed.warnings, summary: summarize(parsed.rows), sample: parsed.rows.slice(0, 8).map(({ raw, sourceKey, ...e }) => e) });
     }
-    if (route === '/import/confirm' && method === 'POST') {
+    if (['/import/review','/import/confirm'].includes(route) && method === 'POST') {
       const input = await body(req), pending = imports.get(input.token);
       if (!pending || pending.uid !== uid || Date.now() - pending.at > ttl) throw new Error('导入预览已过期，请重新选择文件');
       if (pending.errors.length) throw new Error('存在无效行，请修正文件后重新导入');
+      const snapshots=input.accounts||[];
+      if(!Array.isArray(snapshots)||snapshots.length>500)throw new Error('账户快照无效');
       const names = new Set(store.accounts(uid).map(a => a.name));
-      const createsAccounts = input.accounts?.length || pending.rows.some(r => [r.accountName, r.toAccountName].some(n => n && !names.has(n)));
+      const createsAccounts = snapshots.length || pending.rows.some((r,i) => input.decisions?.[i]!=='skip' && [r.accountName, r.toAccountName].some(n => n && !names.has(n)));
       if (createsAccounts && !canBookkeep(session, 'accounts:edit')) return json(res, 403, { ok: false, error: '创建导入账户或账户快照需要账户编辑权限' });
-      const result = store.importRows(uid, pending.rows, input.accounts || []); imports.delete(input.token);
+      const confirm=route.endsWith('/confirm');
+      if(confirm && (typeof input.revision!=='string'||!/^[a-f0-9]{64}$/.test(input.revision)))throw new Error('请先核对余额预览');
+      const db=getDatabase();
+      const result=reviewIcostImport(db,store,uid,pending.rows,snapshots,input.decisions,{
+        visible:a=>canBookkeep(session,'accounts:view')&&(!a.investment||portfolioCashAllowed(session)),
+        canPost:canBookkeep(session,'accounts:view')&&canBookkeep(session,'entries:edit'),quote:historicalFx(db).quote,
+        expected:confirm?input.revision:undefined,
+      });
+      if(confirm)imports.delete(input.token);
       return json(res, 200, { ok: true, ...result });
     }
     if (route === '/export' && method === 'GET') {

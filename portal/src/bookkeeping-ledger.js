@@ -22,7 +22,8 @@ export function accountLedger(entries, account, quote) {
       return from?.rate > 0 && to?.rate > 0 ? Math.round(amount * from.rate / to.rate * 100) : null;
     };
     let delta;
-    if (incoming && e.toAmount != null) delta = Math.round(e.toAmount * 100);
+    if (e.historical && e.reviewedHistory && account.snapshotAt && e.date.slice(0,10)>=account.snapshotAt.slice(0,10)) delta = 0;
+    else if (incoming && e.toAmount != null) delta = Math.round(e.toAmount * 100);
     else if (incoming) { estimated = true; movementEstimated = true; delta = convert(e.amount); }
     else {
       const debit = TRANSFER_TYPES.includes(e.type) || ['支出', '已报销'].includes(e.type);

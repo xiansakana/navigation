@@ -319,19 +319,103 @@
   $('all-dates').onclick=()=>periods.choose('all'); $('more').onclick=()=>load(true);
   $('privacy').onclick=()=>{const on=document.querySelector('.bk-shell').classList.toggle('bk-private');$('privacy').setAttribute('aria-pressed',String(on));$('privacy').textContent=on?'显示金额':'隐藏金额';};
   $('import-shortcut').onclick=()=>tab('import');
+  function invalidateImportReview() {
+    if(pendingImport)pendingImport.revision=null;
+    $('confirm-import').classList.add('hidden');
+  }
+  function renderImportReview() {
+    const task=pendingImport;
+    if(!task?.review)return;
+    const {candidates,balances,unresolved,duplicates,inserted}=task.review;
+    const amount=(value,currency)=>Number.isFinite(value)?m(value,currency):'待核对';
+    const pageSize=30, lastPage=Math.max(0,Math.ceil(candidates.length/pageSize)-1);
+    task.page=Math.min(task.page,lastPage);
+    const cards=balances.map(a=>'<li><strong>'+esc(a.name)+'</strong> · 当前 '+amount(a.current,a.currency)+' · 变动 '+amount(a.change,a.currency)+' · 导入后 '+amount(a.after,a.currency)+(a.latest===null?'':' · 明细末笔 '+amount(a.latest,a.currency))+(a.mismatch?' <span class="bk-error">余额与明细不一致</span>':'')+'</li>').join('');
+    const rows=candidates.slice(task.page*pageSize,(task.page+1)*pageSize).map(r=>{
+      const options=[['','请选择'],...(r.historyAllowed?[['history','已计入余额，仅补明细']]:[]),...(r.postAllowed?[['post','尚未计入，更新余额']]:[]),['skip','跳过此笔']];
+      const sides=r.sides.map(a=>esc(a.name+'（基准 '+(a.baseline||'未知')+(a.reconciled?'，核对 '+a.reconciled:'')+'）')).join(' → ');
+      return '<label class="bk-import-choice"><span>'+esc(r.date.replace('T',' ')+' · '+r.type)+' '+m(r.amount,r.currency)+' · '+sides+'</span>'+(r.note?'<small>'+esc(r.note)+'</small>':'')+(r.flags.length?'<small>'+esc(r.flags.join('；'))+'</small>':'')+'<select data-import-choice="'+r.index+'" aria-label="选择账单入账方式">'+options.map(([value,label])=>'<option value="'+value+'"'+((task.decisions[r.index]||'')===value?' selected':'')+'>'+label+'</option>').join('')+'</select></label>';
+    }).join('');
+    const pages=lastPage?'<p><button type="button" class="btn ghost" data-import-page="-1" '+(!task.page?'disabled':'')+'>上一页</button> '+(task.page+1)+' / '+(lastPage+1)+' <button type="button" class="btn ghost" data-import-page="1" '+(task.page===lastPage?'disabled':'')+'>下一页</button></p>':'';
+    $('import-review').innerHTML='<p>预计新增 '+inserted+' 笔，跳过已导入 '+duplicates+' 笔。</p>'+(cards?'<ul class="bk-import-balances">'+cards+'</ul>':'')+(unresolved?'<p class="bk-muted">还有 '+unresolved+' 笔需要选择入账方式。</p>':'')+rows+pages;
+  }
+  $('import-review').addEventListener('change',event=>{
+    if(event.target.matches('[data-import-choice]')&&pendingImport){
+      pendingImport.decisions[event.target.dataset.importChoice]=event.target.value;
+      invalidateImportReview();
+      $('import-review-status').textContent='选择已修改，请重新计算余额预览。';
+    }
+  });
+  $('import-review').addEventListener('click',event=>{
+    const button=event.target.closest('[data-import-page]');
+    if(button&&pendingImport){pendingImport.page+=Number(button.dataset.importPage);renderImportReview();}
+  });
+  async function reviewImport() {
+    const task=pendingImport;
+    if(!task||task.errorCount)return;
+    invalidateImportReview();
+    const input=JSON.stringify({token:task.token,accounts:snapshots,decisions:task.decisions});
+    $('review-import').disabled=true;
+    $('import-review-status').textContent='正在计算账户余额…';
+    try{
+      const review=await api('/import/review',{method:'POST',body:input});
+      if(task!==pendingImport||input!==JSON.stringify({token:task.token,accounts:snapshots,decisions:task.decisions}))return;
+      task.review=review;
+      task.revision=review.revision;
+      renderImportReview();
+      const blocked=review.balances.some(a=>a.blocking);
+      $('import-review-status').textContent=blocked?'账户汇总与明细末笔仍有差额，请核对对应账户后重新预览。':'';
+      $('confirm-import').classList.toggle('hidden',!!review.unresolved||blocked||!review.inserted&&!review.createdAccounts);
+    }catch(error){if(task===pendingImport)$('import-review-status').textContent=error.message;}
+    finally{$('review-import').disabled=false;}
+  }
+  $('review-import').onclick=reviewImport;
   $('snapshot-file').addEventListener('change',async()=>{
-    try { const file=$('snapshot-file').files[0]; if(!file){snapshots=[];return;} if(file.size>1024*1024)throw new Error('快照文件过大');const data=JSON.parse(await file.text());snapshots=Array.isArray(data)?data:data.accounts;if(!Array.isArray(snapshots))throw new Error('账户快照应为数组或含 accounts 数组');$('snapshot-status').textContent='已读取 '+snapshots.length+' 个账户快照；确认账单导入时一起保存。'; } catch(e){snapshots=[];$('snapshot-status').textContent=e.message;}
+    invalidateImportReview();
+    const file=$('snapshot-file').files[0];
+    try {
+      if(file?.size>1024*1024)throw new Error('快照文件过大');
+      const data=file?JSON.parse(await file.text()):[];
+      snapshots=Array.isArray(data)?data:data.accounts;
+      if(!Array.isArray(snapshots))throw new Error('账户快照应为数组或含 accounts 数组');
+      $('snapshot-status').textContent='已读取 '+snapshots.length+' 个账户快照。';
+      if(pendingImport)await reviewImport();
+    }catch(error){snapshots=[];$('snapshot-status').textContent=error.message;}
   });
   $('import-file').addEventListener('change',async()=>{
-    const file=$('import-file').files[0]; if(!file)return;pendingImport=null;$('confirm-import').classList.add('hidden');$('import-preview').textContent='正在解析账单…';
-    try { const data=await api('/import/preview',{method:'POST',body:file,headers:{'Content-Type':'application/octet-stream'}});pendingImport=data;
-      $('import-preview').innerHTML='<h3>可导入 '+data.count+' 笔 · 无效 '+data.errorCount+' 行</h3>'+data.warnings.map(w=>'<p class="bk-muted">'+esc(w)+'</p>').join('')+data.errors.map(e=>'<p class="bk-error">第 '+e.line+' 行：'+esc(e.error)+'</p>').join('')+'<p class="bk-muted">预览：'+data.sample.map(e=>esc(e.date.slice(0,10)+' '+e.type+' '+e.category+' '+e.currency+' '+e.amount)).join('<br>')+'</p>';
-      $('confirm-import').classList.toggle('hidden',data.errorCount>0||data.count===0);
-    }catch(e){$('import-preview').textContent=e.message;}
+    const file=$('import-file').files[0];
+    pendingImport=null;
+    invalidateImportReview();
+    $('review-import').classList.add('hidden');
+    $('import-review').textContent='';
+    $('import-review-status').textContent='';
+    $('import-preview').textContent=file?'正在解析账单…':'';
+    if(!file)return;
+    try{
+      const data=await api('/import/preview',{method:'POST',body:file,headers:{'Content-Type':'application/octet-stream'}});
+      if(file!==$('import-file').files[0])return;
+      pendingImport={...data,decisions:{},page:0};
+      $('import-preview').innerHTML='<h3>有效 '+data.count+' 笔 · 无效 '+data.errorCount+' 行</h3>'+data.warnings.map(w=>'<p class="bk-muted">'+esc(w)+'</p>').join('')+data.errors.map(e=>'<p class="bk-error">第 '+e.line+' 行：'+esc(e.error)+'</p>').join('');
+      if(!data.errorCount&&data.count){$('review-import').classList.remove('hidden');await reviewImport();}
+    }catch(error){if(file===$('import-file').files[0])$('import-preview').textContent=error.message;}
   });
   $('confirm-import').onclick=async()=>{
-    if(!pendingImport)return;$('confirm-import').disabled=true;
-    try{const result=await write('/import/confirm',{token:pendingImport.token,accounts:snapshots});$('import-preview').textContent='导入完成：新增 '+result.inserted+' 笔，跳过重复 '+result.duplicates+' 笔，创建 '+result.createdAccounts+' 个账户。';pendingImport=null;$('confirm-import').classList.add('hidden');await load();}catch(e){$('import-preview').textContent=e.message;}finally{$('confirm-import').disabled=false;}
+    const task=pendingImport;
+    if(!task?.revision)return;
+    $('confirm-import').disabled=true;
+    try{
+      const result=await write('/import/confirm',{token:task.token,accounts:snapshots,decisions:task.decisions,revision:task.revision});
+      if(task===pendingImport){
+        $('import-preview').textContent='导入完成：新增 '+result.inserted+' 笔，跳过重复 '+result.duplicates+' 笔，创建 '+result.createdAccounts+' 个账户。';
+        pendingImport=null;
+        $('import-review').textContent='';
+        $('import-review-status').textContent='';
+        $('review-import').classList.add('hidden');
+        invalidateImportReview();
+      }
+      await load();
+    }catch(error){if(task===pendingImport){invalidateImportReview();$('import-review-status').textContent=error.message;}}
+    finally{$('confirm-import').disabled=false;}
   };
   $('export').onclick=()=>{location.href='/api/bookkeeping/export?'+query();};
   $('refresh-fx').onclick = () => refreshFx(true); $('refresh-asset-fx').onclick = () => refreshFx(true);

@@ -72,7 +72,7 @@ export async function parseIcost(buffer) {
       row.sourceKey = hash + ':' + occurrence; rows.push(row);
     } catch (e) { errors.push({ line, error: e.message }); }
   });
-  warnings.add('历史账单不改变账户快照余额；跨币种转账的到账金额无法从导出文件还原');
+  warnings.add('按余额预览确认入账方式。跨币种转账的到账金额无法从导出文件还原');
   warnings.add('退款/报销入账冲减支出；原账单退款与优惠字段仅保留，不重复冲减；图片链接保留为来源信息');
   return { rows, errors, warnings: [...warnings] };
 }

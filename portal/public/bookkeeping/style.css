@@ -133,3 +133,9 @@
 .bk-edit-revealed .bk-entry { transform:translateX(-144px); }
 
 .bk-copy-revealed .bk-copy-action, .bk-edit-revealed .bk-swipe-edit-actions { z-index:1; }
+
+.bk-import-choice { display:grid; gap:6px; padding:12px 0; border-top:1px solid var(--border); overflow-wrap:anywhere; }
+.bk-import-choice small { color:var(--muted); }
+.bk-import-choice select { max-width:100%; min-height:40px; }
+.bk-import-balances { padding-inline-start:20px; overflow-wrap:anywhere; }
+.bk-import-balances li { margin-block:8px; }
