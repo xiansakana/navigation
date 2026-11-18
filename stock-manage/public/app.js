@@ -927,7 +927,7 @@ function openImportModal() {
   importState.accountId = selectedAccountId === 'unassigned' ? '' : selectedAccountId;
   importState.summary = null;
   const layer = openModal('导入交易', `
-    <p class="hint">支持东方财富交割单、BBAE 股票／期权订单、Moomoo 历史及本应用备份。请选择对应币种的账户；券商文件只合并，重复记录跳过，更新已有记录须勾选确认。</p>
+    <p class="hint">支持场外基金交割单、东方财富交割单、BBAE 股票／期权订单、Moomoo 历史及本应用备份。请选择对应币种的账户；券商文件只合并，重复记录跳过，更新已有记录须勾选确认。</p>
     <form id="import-form" class="sm-form-grid">
       <label>所属证券账户<select id="import-account"><option value="">请选择账户（券商原始文件必选）</option>${(state.investmentAccounts || []).map(a => `<option value="${a.id}" ${a.id === importState.accountId ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></label>
       <label>导入模式<select name="mode" id="import-mode">
