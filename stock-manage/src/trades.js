@@ -535,7 +535,7 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
     const change = q.change != null && q.change !== '' ? Number(q.change) : null;
     const changePct = q.changePercent != null && q.changePercent !== '' ? Number(q.changePercent) : null;
     const dailyPnlNative = price > 0 && change != null && Number.isFinite(change)
-      ? roundMoney(change * h.shares * mult) : null;
+      ? roundMoney(new Decimal(change).times(h.shares).times(mult)) : null;
     const dailyPnlUsd = dailyPnlNative != null ? roundMoney(toUsd(dailyPnlNative, currency, rate, usdHkdRate)) : null;
     const m = meta[h.symbol] || {};
     if (h.type === 'option') optionMv += mv;

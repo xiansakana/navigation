@@ -22,7 +22,9 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
   const provider = path.join(directory, 'quote-provider.mjs');
   fs.writeFileSync(provider, `globalThis.fetch = async url => {
     if (String(url).includes('fundCode=000198')) return Response.json({Data:{FundType:'005',SYType:'每万份收益',LSJZList:[{DWJZ:'0.2168',FSRQ:'2026-11-13'}]}});
-    if (String(url).includes('/f10/lsjz')) return Response.json({Data:{LSJZList:[{DWJZ:'2.9800',FSRQ:'2026-11-13'}]}});
+    if (String(url).includes('/f10/lsjz')) return Response.json({Data:{LSJZList:[
+      {DWJZ:'2.9800',FSRQ:'2026-11-13'}, {DWJZ:'2.9000',FSRQ:'2026-11-12'}
+    ]}});
     if (String(url).includes('/chart/AAPL')) return Response.json({chart:{result:[{meta:{longName:'Apple Inc.',regularMarketPrice:25,chartPreviousClose:20}}]}});
     if (String(url).includes('FundSearchAPI.ashx')) {
       const code = new URL(url).searchParams.get('key');
@@ -163,6 +165,8 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.equal(fundPortfolio.cashCny, 1289.02);
     assert.equal(fundPortfolio.fundHoldings[0].marketValue, 746.49);
     assert.equal(fundPortfolio.fundHoldings[0].pnl, 46.49);
+    assert.equal(fundPortfolio.fundHoldings[0].dailyPnl, null);
+    assert.equal(fundPortfolio.fundHoldings[0].dailyPnlPct, null);
     assert.equal(fundPortfolio.holdings.find(t=>t.symbol==='501225').shares, 200);
     const grouped = await (await call('/holdings-meta/501225.OF', 'a', 'PUT', {groupWith:'AAPL'})).json();
     const groupedFund = grouped.fundHoldings[0];
@@ -176,6 +180,10 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.equal((await (await call('/portfolio?accountId='+investment.id, 'a')).json()).fundHoldings.length, 0);
     assert.equal((await (await call('/portfolio','b')).json()).fundHoldings.length, 0);
     assert.equal((await call(fund+'/refresh','a','POST')).status, 200);
+    const refreshedFund = await (await call('/portfolio?accountId='+cnId, 'a')).json();
+    assert.equal(refreshedFund.fundHoldings[0].dailyPnl, 20.04);
+    assert.equal(refreshedFund.fundHoldings[0].dailyPnlPct, 2.7586206896551726);
+    assert.equal(refreshedFund.summary.marketDailyPnlCny, 20.04);
     const channelDb = new Database(path.join(directory, 'db.sqlite'));
     try {
       const channel = createBookkeepingStore(channelDb).saveAccount('a', { name:'基金渠道', currency:'CNY', balance:9999 });
@@ -235,6 +243,7 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.equal(afterBuy.cashCny, 999.01);
     assert.equal(afterBuy.fundHoldings[0].name, '易方达消费行业股票');
     assert.equal(afterBuy.fundHoldings[0].marketValue, 298);
+    assert.equal(afterBuy.fundHoldings[0].dailyPnl, 8);
     assert.equal((await call(`/fund-holdings/${cnId}/110022/refresh`, 'a', 'POST')).status, 200);
     const bought = afterBuy.trades.find(t => t.symbol === '110022.OF');
     const exportFund = await call('/trades/export?assetType=fund', 'a');

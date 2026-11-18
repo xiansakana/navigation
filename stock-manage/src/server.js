@@ -144,11 +144,15 @@ function buildPortfolio(data, pnlOpts = {}) {
   const openingByKey = new Map(openings.map(fund => [JSON.stringify([fund.account_id, fund.code]), fund]));
   const fundTrades = new Set(data.trades.filter(t => t.type !== 'other' && fundCode(t.symbol))
     .map(t => JSON.stringify([t.account_id, fundCode(t.symbol)])));
+  // Each account can have a different legacy NAV for the same fund.
+  const fundQuotes = {};
   const fundRows = holdings.filter(h => h.type === 'fund').map(holding => {
     const code = fundCode(holding.symbol);
     const key = JSON.stringify([holding.accountId, code]);
     const opening = openingByKey.get(key);
     const quote = fundValuation(data.quotes[holding.symbol], opening);
+    const valuationSymbol = `FUND:${holding.accountId}:${code}`;
+    if (quote) fundQuotes[valuationSymbol] = quote;
     const accountName = data.investmentAccounts?.find(a => a.id === holding.accountId)?.name || '待归属';
     const cost = roundMoney(holding.costBasisNative);
     const marketValue = quote ? roundMoney(new Decimal(holding.shares).times(quote.price)) : null;
@@ -157,13 +161,10 @@ function buildPortfolio(data, pnlOpts = {}) {
       quoteAsOf: quote?.asOf ?? null, editableSnapshot: !!opening && !fundTrades.has(key),
       pnl: marketValue == null ? null : roundMoney(new Decimal(marketValue).minus(cost)) };
   });
-  // Each account can have a different legacy NAV for the same fund.
-  const fundQuotes = {};
   const valuedHoldings = holdings.filter(h => h.type !== 'fund');
   for (const fund of fundRows) {
     const symbol = `FUND:${fund.accountId}:${fund.symbol}`;
     valuedHoldings.push({ ...fund, symbol });
-    if (fund.price != null) fundQuotes[symbol] = { price: fund.price };
   }
   const enriched = enrichHoldings(valuedHoldings, { ...data.quotes, ...fundQuotes }, cashState, data.holdingsMeta);
   const enrichedFunds = enriched.rows.filter(row => row.type === 'fund');
@@ -183,6 +184,8 @@ function buildPortfolio(data, pnlOpts = {}) {
     holdingsMeta: data.holdingsMeta,
     holdings: enriched.rows.filter(row => row.type !== 'fund'),
     fundHoldings: fundRows.map((fund, index) => ({ ...fund,
+      dailyPnl: enrichedFunds[index].dailyPnl,
+      dailyPnlPct: enrichedFunds[index].dailyPnlPct,
       groupWith: enrichedFunds[index].groupWith,
       groupMarketValue: enrichedFunds[index].groupMarketValue,
       weight: fund.marketValue == null && !enrichedFunds[index].groupMarketValue ? null : enrichedFunds[index].weight

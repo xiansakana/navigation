@@ -954,8 +954,8 @@ export function createQuoteService(config) {
     const sym = normalizeSymbol(symbol);
     const code = fundCode(sym);
     if (code) {
-      const { nav, date } = await getFundNav(code);
-      return { symbol: sym, price: nav, asOf: date, currency: 'CNY', source: 'eastmoney-fund-nav' };
+      const { nav, date, ...movement } = await getFundNav(code);
+      return { symbol: sym, price: nav, asOf: date, ...movement, currency: 'CNY', source: 'eastmoney-fund-nav' };
     }
     if (/^[A-Z]+\d{6}[CP]\d/i.test(sym)) return getOption(sym);
     return getStock(sym);
