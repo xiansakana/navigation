@@ -1,6 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { adjustCandlesForSplits, createQuoteService } from './quotes.js';
+import { enrichHoldings } from './trades.js';
+
+test('US holding quotes use the same-day premarket price against the prior regular close', async context => {
+  const original = global.fetch; context.after(() => { global.fetch = original; });
+  let stamp = 'Nov 18, 2026 6:28 AM ET';
+  const requests = [];
+  global.fetch = async url => {
+    requests.push(new URL(url).hostname);
+    if (String(url).includes('/QQQ/info?assetclass=stocks')) return response({status:{bCodeMessage:[{code:1001}]}});
+    if (String(url).includes('nasdaq.com')) return response({ data: { marketStatus:'Pre-Market', primaryData:{
+      lastSalePrice:'$370.993', netChange:'+11.303', lastTradeTimestamp:stamp, isRealTime:true
+    } } });
+    return response({c:359.69,d:-13.76,dp:-3.68});
+  };
+  const service = createQuoteService({finnhubApiKey:'fixture'});
+  const now = new Date('2026-11-18T11:29:00Z');
+  const holdings = [{symbol:'TSM',type:'stock',shares:2,avgCost:350,currency:'USD'}];
+  const quote = await service.getQuote('TSM',now);
+  assert.deepEqual(requests,['api.nasdaq.com']);
+  assert.equal(quote.session,'premarket');
+  assert.equal(quote.price,370.993);
+  assert.equal(quote.prevClose,359.69);
+  assert.equal(enrichHoldings(holdings,{TSM:quote},0).rows[0].dailyPnl,22.61);
+  assert.equal((await service.getQuote('QQQ',now)).session,'premarket');
+  stamp = 'Nov 17, 2026 6:28 AM ET';
+  const stale = await service.getQuote('TSM',now);
+  assert.equal(stale.session,'no-premarket');
+  assert.equal(stale.price,359.69);
+  const [row] = enrichHoldings(holdings,{TSM:stale},0).rows;
+  assert.equal(row.dailyPnl,null);
+  assert.equal(row.dailyPnlPct,null);
+  assert.equal((await service.getQuote('TSM',new Date('2026-11-18T14:31:00Z'))).source,'finnhub');
+});
 
 test('USD/CNY uses the shared Finnhub/FRED fallback and caches observation metadata', async context => {
   const original = global.fetch; context.after(() => { global.fetch = original; });
@@ -76,7 +109,7 @@ test('US stock quote falls back to Yahoo when Finnhub is not configured', async 
     } }], error: null } });
   };
   const service = createQuoteService({ finnhubApiKey: '', polygonApiKey: '' });
-  const quote = await service.getQuote('goog');
+  const quote = await service.getQuote('goog', new Date('2026-11-18T15:00:00Z'));
   assert.equal(quote.symbol, 'GOOG');
   assert.equal(quote.price, 245.5);
   assert.equal(quote.prevClose, 242.25);
@@ -117,7 +150,7 @@ test('US stock quote falls back to Nasdaq when Yahoo is blocked', async (context
     } });
   };
   const service = createQuoteService({ finnhubApiKey: '', polygonApiKey: '' });
-  const quote = await service.getQuote('SOFI');
+  const quote = await service.getQuote('SOFI', new Date('2026-11-18T15:00:00Z'));
   assert.equal(quote.source, 'nasdaq');
   assert.equal(quote.price, 25.2);
   assert.equal(quote.prevClose, 24.8);

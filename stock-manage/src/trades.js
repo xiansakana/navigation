@@ -585,6 +585,7 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
       delayed: !!q.delayed,
       quoteAsOf: q.asOf || null,
       quoteSource: q.source || null,
+      quoteSession: q.session || null,
       etfPremiumPct: q.etfPremiumPct ?? null,
       fundPremiumBasis: q.fundPremiumBasis || null,
       etfPremiumAsOf: q.etfPremiumAsOf || null,

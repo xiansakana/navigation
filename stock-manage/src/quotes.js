@@ -26,7 +26,29 @@ function toPolygonOptionSymbol(symbol) {
 }
 
 async function fetchJson(url, headers = {}, options = {}) {
-  return fetchQuoteResource(url, { headers, retries: options.retries });
+  return fetchQuoteResource(url, { headers, ...options });
+}
+
+const newYorkClock = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+});
+
+function usPremarket(now) {
+  const clock = Object.fromEntries(newYorkClock.formatToParts(now).map(part => [part.type, part.value]));
+  const minute = Number(clock.hour) * 60 + Number(clock.minute);
+  if (clock.weekday === 'Sat' || clock.weekday === 'Sun' || minute < 240 || minute >= 570) return null;
+  return { date: yoloMarketDate(now), minute };
+}
+
+function validPremarketTimestamp(timestamp, session) {
+  const match = String(timestamp || '').match(/^([A-Za-z]{3} \d{1,2}, \d{4}) (\d{1,2}):(\d{2}) (AM|PM) ET$/);
+  if (!match || match[4] !== 'AM') return false;
+  const date = new Date(match[1] + ' GMT');
+  const hour = Number(match[2]);
+  const minutes = Number(match[3]);
+  const minute = hour * 60 + minutes;
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === session.date
+    && minutes < 60 && minute >= 240 && minute <= session.minute;
 }
 
 async function fetchText(url, headers = {}, encoding = 'utf-8') {
@@ -317,30 +339,42 @@ export function createQuoteService(config) {
     };
   }
 
-  async function getNasdaqQuote(symbol) {
+  async function getNasdaqQuote(symbol, premarket, assetClass = 'stocks') {
     const sym = String(symbol).toUpperCase();
-    const url = `https://api.nasdaq.com/api/quote/${encodeURIComponent(sym)}/info?assetclass=stocks`;
+    const url = `https://api.nasdaq.com/api/quote/${encodeURIComponent(sym)}/info?assetclass=${assetClass}`;
     const data = await fetchJson(url, {
       Accept: 'application/json, text/plain, */*',
       Origin: 'https://www.nasdaq.com',
+      Referer: 'https://www.nasdaq.com/',
       'User-Agent': 'Mozilla/5.0'
-    });
+    }, premarket ? { retries: 0, timeoutMs: 5000 } : {});
+    if (assetClass === 'stocks' && data?.status?.bCodeMessage?.some?.(entry => Number(entry.code) === 1001)) {
+      return getNasdaqQuote(sym, premarket, 'etf');
+    }
     const quote = data?.data?.primaryData;
-    const parseNumber = (value) => Number(String(value ?? '').replace(/[$,%+,]/g, '').trim());
+    const parseNumber = (value) => {
+      const raw = String(value ?? '').replace(/[$,%+,]/g, '').trim();
+      return raw ? Number(raw) : NaN;
+    };
     const price = parseNumber(quote?.lastSalePrice);
     const change = parseNumber(quote?.netChange);
     if (!Number.isFinite(price) || price <= 0) throw new Error('Nasdaq 无有效价');
+    if (premarket && (data?.data?.marketStatus !== 'Pre-Market'
+      || !validPremarketTimestamp(quote.lastTradeTimestamp, premarket)
+      || !Number.isFinite(change) || !(price - change > 0))) throw new Error('Nasdaq 暂无当天盘前报价');
     const delta = Number.isFinite(change) ? change : 0;
     return {
       symbol: sym,
       name: data?.data?.companyName || sym,
       price,
       change: delta,
-      changePercent: Number.isFinite(parseNumber(quote?.percentageChange)) ? parseNumber(quote?.percentageChange) : 0,
+      changePercent: premarket ? delta / (price - delta) * 100
+        : Number.isFinite(parseNumber(quote?.percentageChange)) ? parseNumber(quote?.percentageChange) : 0,
       prevClose: price - delta,
       currency: 'USD',
       source: 'nasdaq',
-      delayed: true
+      delayed: premarket ? quote.isRealTime !== true : true,
+      ...(premarket ? { session: 'premarket', asOf: quote.lastTradeTimestamp } : {})
     };
   }
 
@@ -950,7 +984,7 @@ export function createQuoteService(config) {
       .map((r) => ({ symbol: r.symbol, name: r.description || r.symbol }));
   }
 
-  async function getQuote(symbol) {
+  async function getQuote(symbol, now = new Date()) {
     const sym = normalizeSymbol(symbol);
     const code = fundCode(sym);
     if (code) {
@@ -958,7 +992,14 @@ export function createQuoteService(config) {
       return { symbol: sym, price: nav, asOf: date, ...movement, currency: 'CNY', source: 'eastmoney-fund-nav' };
     }
     if (/^[A-Z]+\d{6}[CP]\d/i.test(sym)) return getOption(sym);
-    return getStock(sym);
+    const session = !isAShareSymbol(sym) && !hkCode(sym) ? usPremarket(now) : null;
+    if (!session) return getStock(sym);
+    try {
+      return await getNasdaqQuote(sym, session);
+    } catch {
+      const fallback = await getStock(sym);
+      return { ...fallback, change: null, changePercent: null, session: 'no-premarket' };
+    }
   }
 
   async function getInstrumentName(symbol) {

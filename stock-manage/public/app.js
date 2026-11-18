@@ -416,7 +416,10 @@ function holdingsCellContent(h, key, ctx) {
       const delayHint = h.delayed
         ? ` <span class="hint" title="${escapeHtml(sourceLabel + (h.quoteAsOf ? `（截至 ${h.quoteAsOf}）` : ''))}">延时</span>`
         : '';
-      return maskCol('price', `<span>${formatPrice(h.price, cur)}</span>${delayHint}${refresh}`);
+      const sessionHint = h.quoteSession === 'premarket'
+        ? `<div class="sm-lots-hint" title="${escapeHtml(h.quoteAsOf)}">盘前${h.delayed ? '延时' : ''}</div>`
+        : h.quoteSession === 'no-premarket' ? '<div class="sm-lots-hint">盘前暂无报价</div>' : '';
+      return maskCol('price', `<span>${formatPrice(h.price, cur)}</span>${sessionHint ? '' : delayHint}${refresh}${sessionHint}`);
     }
     case 'pnl':
       return maskCol('pnl', h.pnl == null ? '—' : `<span class="${cls(h.pnl)}">${fmtMoneySigned(h.pnl, cur)}</span>`);
