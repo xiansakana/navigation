@@ -523,6 +523,12 @@ app.delete('/api/trades/:id', (req, res) => {
 });
 
 function brokerImportPlan(req, trades, data) {
+  if (trades.fundImportInfo) {
+    const account = investmentRows(portfolioDb, currentPortfolioUserId()).find(a => a.id === req.query.accountId && a.currency === 'CNY');
+    if (!account) throw new Error('基金交割单请选择本人名下的人民币证券账户');
+    const plan = mergeBbaeTrades(data.trades, trades, account.id);
+    return { ...plan, summary: { ...plan.summary, ...trades.fundImportInfo } };
+  }
   const eastmoney = !!trades.importInfo;
   const account = investmentRows(portfolioDb, currentPortfolioUserId()).find(a => a.id === req.query.accountId && a.currency === (eastmoney ? 'CNY' : 'USD'));
   if (!account) throw new Error(eastmoney ? '东方财富导入请选择本人名下的人民币证券账户' : 'BBAE 导入请选择本人名下的美元证券账户');
@@ -553,11 +559,11 @@ app.post('/api/trades/import/preview', express.raw({
   if (!buf.length) return res.status(400).json({ error: '空文件' });
   try {
     const trades = parseImportBuffer(buf);
-    if (!trades.length && !trades.importInfo) return res.status(400).json({ error: '未解析到有效记录' });
+    if (!trades.length && !trades.importInfo && !trades.fundImportInfo) return res.status(400).json({ error: '未解析到有效记录' });
     const data = store.read();
     await fillImportedNames(trades, data);
-    const plan = (trades.importInfo || trades[0]?.broker === 'bbae') ? brokerImportPlan(req, trades, data) : null;
-    res.json({ count: plan ? plan.preview.length : trades.length, format: trades.importInfo ? 'eastmoney' : plan ? 'bbae' : 'other', summary: plan?.summary, trades: trades.slice(0, 5), preview: (plan?.preview || trades).slice(0, plan ? 50 : 5) });
+    const plan = (trades.importInfo || trades.fundImportInfo || trades[0]?.broker === 'bbae') ? brokerImportPlan(req, trades, data) : null;
+    res.json({ count: plan ? plan.preview.length : trades.length, format: trades.fundImportInfo ? 'fund' : trades.importInfo ? 'eastmoney' : plan ? 'bbae' : 'other', summary: plan?.summary, trades: trades.slice(0, 5), preview: (plan?.preview || trades).slice(0, plan ? 50 : 5) });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -576,7 +582,7 @@ app.post('/api/trades/import', express.raw({
     const data = store.read();
     const mode = String(req.query.mode || 'merge');
     let importSummary;
-    if (['bbae','eastmoney'].includes(imported[0]?.broker)) {
+    if (['bbae','eastmoney','fund-settlement'].includes(imported[0]?.broker)) {
       if (mode !== 'merge') throw new Error('券商导出可能只含部分日期，请使用合并模式，避免删除其他交易');
       const plan = brokerImportPlan(req, imported, data);
       if (plan.summary.unassigned) throw new Error('存在可能重复的未归属历史，请先核对并设置账户归属，未导入');

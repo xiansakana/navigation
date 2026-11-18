@@ -850,7 +850,7 @@ function renderImportPreviewSection() {
   return `
     <div class="sm-import-preview">
       <div class="sm-import-preview-head">预览（${importState.summary?.sourceCount != null ? '来源 ' + importState.summary.sourceCount + ' 条，' : ''}可导入 ${importState.count} 条，显示 ${importState.preview.length} 条）</div>
-      ${importState.summary ? `<p class="hint">${importState.format === 'eastmoney' ? '东方财富' : 'BBAE'}：新增 ${importState.summary.added}，更新 ${importState.summary.updated}，重复跳过 ${importState.summary.skipped}。${importState.format === 'eastmoney' ? '按交收日期入账，费用包含佣金、其他费用、印花税和过户费。' : '时间按北京时间；费用按“总计”反推。'}</p>` : ''}
+      ${importState.summary ? `<p class="hint">${({ eastmoney: '东方财富', fund: '场外基金', bbae: 'BBAE' })[importState.format]}：新增 ${importState.summary.added}，更新 ${importState.summary.updated}，重复跳过 ${importState.summary.skipped}。${importState.format === 'eastmoney' ? '按交收日期入账，费用包含佣金、其他费用、印花税和过户费。' : importState.format === 'fund' ? '' : '时间按北京时间；费用按“总计”反推。'}</p>` : ''}
       ${importState.summary?.excluded?.length ? `<details><summary>未单独导入 ${importState.summary.excluded.reduce((s,x) => s + x.count, 0)} 条来源记录（含新债合并入账），展开查看原因</summary>${importState.summary.excluded.map(x => `<p class="hint">${escapeHtml(x.reason)}：${x.count} 条</p>`).join('')}</details>` : ''}
       ${(importState.summary?.warnings || []).map(x => `<p class="hint">${escapeHtml(x)}</p>`).join('')}
       ${importState.summary?.unassigned ? `<p class="sm-error-box">${importState.summary.unassigned} 笔可能与未归属历史重复。请先核对原记录的账户归属，再重新预览；本次不会导入。</p>` : ''}
@@ -889,7 +889,7 @@ function bindImportModal(layer) {
       importState.summary = data.summary || null;
       importState.format = data.format || '';
       const modeEl = $('#import-mode', layer);
-      modeEl.disabled = ['bbae', 'eastmoney'].includes(importState.format);
+      modeEl.disabled = ['bbae', 'eastmoney', 'fund'].includes(importState.format);
       if (modeEl.disabled) { modeEl.value = 'merge'; importState.mode = 'merge'; }
       importState.error = null;
     } catch (err) {

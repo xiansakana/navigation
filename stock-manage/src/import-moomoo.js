@@ -1,4 +1,5 @@
 import XLSX from 'xlsx';
+import { parseFundBuffer } from './import-fund.js';
 import { parseEastmoneyBuffer } from './import-eastmoney.js';
 import { parseBbaeBuffer } from './import-bbae.js';
 import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
@@ -257,6 +258,8 @@ export function parseAppBackupBuffer(buffer) {
 }
 
 export function parseImportBuffer(buffer) {
+  const fund = parseFundBuffer(buffer);
+  if (fund !== null) return fund;
   const eastmoney = parseEastmoneyBuffer(buffer);
   if (eastmoney !== null) return eastmoney;
   const bbae = parseBbaeBuffer(buffer);

@@ -232,6 +232,28 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.equal(exported.Sheets.交易记录.K2.v, 2.9001);
     assert.equal(exported.Sheets.交易记录.K2.z, '0.0000');
     assert.equal((await call('/trades/' + bought.id, 'a', 'DELETE')).status, 200);
+    const fundBook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(fundBook, XLSX.utils.aoa_to_sheet([
+      ['成交日期','基金代码','基金名称','操作','成交数量','成交金额','基金账号','合同编号'],
+      ['2099-01-01','017730','嘉实全球产业升级','申购',167.3,500,'test-fund-account','test-contract']
+    ]), '基金');
+    const uploadFund = route => fetch(base + route, { method:'POST', headers:{
+      'x-portal-user-id':'a','x-portal-permissions':'WyIqIl0','Content-Type':'application/octet-stream'
+    }, body:XLSX.write(fundBook,{type:'buffer',bookType:'xlsx'}) });
+    assert.equal((await uploadFund('/trades/import/preview?accountId=' + investment.id)).status,400);
+    const fp = await (await uploadFund('/trades/import/preview?accountId=' + cnId)).json();
+    assert.equal(fp.format,'fund');
+    assert.equal(fp.preview[0].symbol,'017730.OF');
+    assert.equal(fp.preview[0].total_amount,500);
+    const fundImported = await (await uploadFund('/trades/import?accountId=' + cnId)).json();
+    assert.equal(fundImported.importSummary.added,1);
+    assert.equal(fundImported.cashCny,789.02);
+    assert.equal(fundImported.fundHoldings[0].shares,167.3);
+    assert.equal(fundImported.fundHoldings[0].cost,500);
+    const again = await (await uploadFund('/trades/import?accountId=' + cnId)).json();
+    assert.equal(again.importSummary.skipped,1);
+    assert.equal(again.cashCny,789.02);
+    assert.equal((await call('/trades/' + fundImported.trades.find(t=>t.broker==='fund-settlement').id,'a','DELETE')).status,200);
     const hkTrade = {type:'buy',symbol:'0700.HK',shares:10,price:32,commission:8,trade_date:'2099-01-01T12:00:00Z'};
     assert.equal((await call('/trades','b','POST',hkTrade)).status,400);
     const hkDb = new Database(path.join(directory, 'db.sqlite'));
