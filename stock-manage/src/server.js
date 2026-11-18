@@ -1,7 +1,7 @@
 import { ensureFundHoldings, fundCode, fundHoldings, fundValuation, openingFundTrades } from '../../shared/fund-holdings.js';
 import { Decimal } from '../../shared/portfolio-decimal.js';
 import { estimatedReinvestmentIncome, tradesWithReinvestmentIncome } from '../../shared/fund-reinvestment.js';
-import { findInternationalStockName, findMainlandInstruments, getFundNav } from './fund-nav.js';
+import { findInternationalStockName, findMainlandInstruments, findReinvestmentNav, getFundNav } from './fund-nav.js';
 import { TRADE_ASSET_TYPES, tradeAssetType } from '../public/js/trade-asset-type.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
 import { portfolioIdentityMiddleware } from '../../shared/portfolio-user.js';
@@ -713,6 +713,17 @@ async function lookupInstrumentName(symbol) {
   return await quotes.getInstrumentName(symbol).catch(() => '')
     || (['US', 'HK'].includes(market) ? await findInternationalStockName(symbol, market) : '');
 }
+
+app.get('/api/fund-reinvestment/nav', async (req, res) => {
+  if (!hasStockPermission(req, 'trade', 'edit') && !requireStockPermission(req, res, 'row-trade', 'edit')) return;
+  res.set('Cache-Control', 'no-store');
+  try {
+    const code = fundCode(req.query.symbol);
+    res.json(await findReinvestmentNav(code, String(req.query.date || '')));
+  } catch {
+    res.status(502).json({ error: '暂时查不到折算净值，仍可按份额保存' });
+  }
+});
 
 app.get('/api/instruments/resolve', async (req, res) => {
   if (!['trade', 'row-trade'].some(feature => hasStockPermission(req, feature, 'edit'))) {

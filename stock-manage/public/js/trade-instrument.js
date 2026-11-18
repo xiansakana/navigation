@@ -34,6 +34,7 @@ export function bindTradeInstrument(form, { resolve, assetTypes, accounts }) {
     choices.replaceChildren();
     status.textContent = assetTypes[item.assetType] || '';
     lookup = { code: key(), promise: Promise.resolve(true) };
+    form.dispatchEvent(new Event('instrument-resolved'));
   }
 
   function lookUp() {

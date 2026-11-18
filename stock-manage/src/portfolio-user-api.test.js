@@ -22,6 +22,14 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
   const provider = path.join(directory, 'quote-provider.mjs');
   fs.writeFileSync(provider, `globalThis.fetch = async url => {
     if (String(url).includes('fundCode=000198')) return Response.json({Data:{FundType:'005',SYType:'每万份收益',LSJZList:[{DWJZ:'0.2168',FSRQ:'2026-11-13'}]}});
+    if (String(url).includes('/f10/lsjz') && String(url).includes('startDate=')) {
+      const code = new URL(url).searchParams.get('fundCode');
+      const dividend = {DWJZ:'1.6656',FSRQ:'2026-11-05',FHFCZ:'0.005',FHSP:'每10份派现金0.0500元'};
+      return Response.json({ErrCode:0,Data:{LSJZList:[
+        {DWJZ:'1.6825',FSRQ:'2026-11-06'}, dividend,
+        ...(code === '000001' ? [{...dividend,FSRQ:'2026-11-04'}] : [])
+      ]}});
+    }
     if (String(url).includes('/f10/lsjz')) return Response.json({Data:{LSJZList:[
       {DWJZ:'2.9800',FSRQ:'2026-11-13'}, {DWJZ:'2.9000',FSRQ:'2026-11-12'}
     ]}});
@@ -57,6 +65,10 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     }
     assert.ok(ready);
     assert.equal((await call('/portfolio')).status, 401);
+    assert.deepEqual(await (await call('/fund-reinvestment/nav?symbol=022951.OF&date=2026-11-06','a')).json(),
+      {nav:1.6656,date:'2026-11-05'});
+    assert.equal(await (await call('/fund-reinvestment/nav?symbol=022951.OF&date=2026-11-10','a')).json(),null);
+    assert.equal(await (await call('/fund-reinvestment/nav?symbol=000001.OF&date=2026-11-06','a')).json(),null);
     assert.equal((await call('/portfolio', 'bad id')).status, 401);
     let response = await call('/cash', 'a', 'PUT', { cashUsd: 1000, userId: 'b' });
     assert.equal(response.status, 200);

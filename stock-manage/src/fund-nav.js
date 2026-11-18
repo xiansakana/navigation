@@ -25,6 +25,24 @@ export async function findMainlandInstruments(code) {
     fund: fund && !listedEtf ? { name: fund.NAME, moneyMarket: String(info?.FUNDTYPE) === '005' } : null };
 }
 
+export async function findReinvestmentNav(code, confirmationDate) {
+  const end = new Date(confirmationDate + 'T00:00:00Z');
+  if (!/^\d{6}$/.test(code) || !/^\d{4}-\d{2}-\d{2}$/.test(confirmationDate)
+    || !Number.isFinite(end.getTime()) || end.toISOString().slice(0, 10) !== confirmationDate) return null;
+  const start = new Date(end.getTime() - 3 * 86400000).toISOString().slice(0, 10);
+  const query = new URLSearchParams({ fundCode: code, pageIndex: 1, pageSize: 8, startDate: start, endDate: confirmationDate });
+  const data = await fetchQuoteResource(`https://api.fund.eastmoney.com/f10/lsjz?${query}`, {
+    headers: { Referer: 'https://fundf10.eastmoney.com/' }, retries: 0, timeoutMs: 5000
+  });
+  if (data?.ErrCode !== 0 || data?.Data?.FundType === '005') return null;
+  const candidates = (data?.Data?.LSJZList || []).filter(row => /^\d{4}-\d{2}-\d{2}$/.test(row.FSRQ)
+    && row.FSRQ >= start && row.FSRQ <= confirmationDate && Number(row.FHFCZ) > 0 && /派现金/.test(row.FHSP || ''));
+  if (candidates.length !== 1) return null;
+  const [row] = candidates;
+  const nav = Number(row.DWJZ);
+  return Number.isFinite(nav) && nav > 0 ? { nav, date: row.FSRQ } : null;
+}
+
 export async function getFundNav(code) {
   if (!/^\d{6}$/.test(code)) throw new Error('请输入六位基金代码');
   const data = await fetchQuoteResource(`https://api.fund.eastmoney.com/f10/lsjz?fundCode=${code}&pageIndex=1&pageSize=2`, {

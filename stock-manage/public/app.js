@@ -3,7 +3,7 @@ import { openInvestmentAccounts } from './js/investment-accounts.js?v=quantity-1
 import { isDividendTax, normalizeOtherAmount } from './js/dividend-tax.js';
 import { renderTradeReview } from './js/trade-review.js?v=fund-trades-1';
 import { formatPrice, formatQuantity, priceInputValue } from './js/price-format.js?v=quantity-1';
-import { bindTradeInstrument } from './js/trade-instrument.js?v=fund-trades-1';
+import { bindTradeInstrument } from './js/trade-instrument.js?v=reinvest-nav-auto-1';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=20261004-full-history';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js?v=fund-groups-1';
@@ -769,7 +769,7 @@ function tradeFormFields(trade = {}) {
       </select></label>
       <label class="field-trade ${type === 'other' ? 'hidden' : ''}"><span data-trade-shares-label>数量</span><input name="shares" type="number" step="any" value="${trade.shares ?? ''}"></label>
       <label class="field-trade field-price"><span data-trade-price-label>价格</span><input name="price" type="number" step="${fund ? '0.0001' : '0.001'}" value="${priceInputValue(trade.price, fund ? 4 : 3)}"></label>
-      <label class="field-reinvestment hidden">折算净值（选填）<input name="reinvestmentNav" type="number" step="any" min="0" value="${escapeHtml(trade.reinvestmentNav ?? '')}"><small class="hint">填写基金公告指定日期的单位净值，用来估算分红和新增份额成本。</small></label>
+      <label class="field-reinvestment hidden">折算净值（选填）<input name="reinvestmentNav" type="number" step="any" min="0" value="${escapeHtml(trade.reinvestmentNav ?? '')}"><small class="hint" data-reinvestment-status aria-live="polite">可按确认日期自动查找，也可填写基金公告指定日期的单位净值。</small></label>
       <label class="field-other-amt ${type !== 'other' ? 'hidden' : ''}">金额<input name="total_amount" type="number" step="any" value="${trade.total_amount ?? ''}"></label>
       <label>手续费<input name="commission" type="number" step="any" value="${trade.commission ?? 0}"></label>
       <label>时间<input name="trade_date" type="datetime-local" value="${dt}"></label>
@@ -815,12 +815,66 @@ function formToTrade(fd, existing = {}) {
   };
 }
 
+function bindReinvestmentNav(form) {
+  const { symbol, type, trade_date: tradeDate, reinvestmentNav: input } = form.elements;
+  const status = form.querySelector('[data-reinvestment-status]');
+  const hint = status.textContent;
+  let manual = !!input.value;
+  let current;
+  let timer;
+  const lookupKey = () => {
+    const code = (form.dataset.resolvedSymbol || symbol.value).trim().toUpperCase();
+    const date = tradeDate.value.slice(0, 10);
+    return type.value === 'reinvest' && /^\d{6}\.OF$/.test(code) && date ? { symbol: code, date } : null;
+  };
+  function lookup() {
+    clearTimeout(timer);
+    if (manual || !form.isConnected) return;
+    const params = lookupKey();
+    const key = JSON.stringify(params);
+    if (key === current?.key) return current.promise;
+    input.value = '';
+    status.textContent = params ? '正在查询折算净值…' : hint;
+    const request = { key };
+    current = request;
+    if (!params) return;
+    const isCurrent = () => !manual && form.isConnected && current === request && JSON.stringify(lookupKey()) === key;
+    request.promise = api('/fund-reinvestment/nav?' + new URLSearchParams(params)).then(result => {
+      if (!isCurrent()) return;
+      if (result?.nav > 0) {
+        input.value = result.nav;
+        status.textContent = `参考 ${result.date} 除息日单位净值估算，可按基金公告修改。`;
+      } else {
+        status.textContent = '未找到可匹配的分红净值，可留空或按公告填写。';
+      }
+    }).catch(() => {
+      if (isCurrent()) status.textContent = '暂时无法查询净值，可留空或手动填写。';
+    });
+    return request.promise;
+  }
+  const schedule = () => {
+    clearTimeout(timer);
+    timer = setTimeout(lookup, 300);
+  };
+  input.addEventListener('input', () => {
+    manual = true;
+    status.textContent = hint;
+  });
+  symbol.addEventListener('input', schedule);
+  tradeDate.addEventListener('input', schedule);
+  type.addEventListener('change', schedule);
+  form.addEventListener('instrument-resolved', schedule);
+  schedule();
+  return lookup;
+}
+
 function openTradeModal(trade = {}) {
   const recordingAt = new Date().toISOString();
   const initialDateValue = toDatetimeLocalValue(trade.trade_date || recordingAt);
   const layer = openModal(trade.id ? '编辑交易' : '记一笔', tradeFormFields(trade), null, async (modal) => {
     const form = modal.querySelector('#trade-form');
     if (!await resolveInstrument()) throw new Error('请先确认代码对应的标的');
+    await resolveReinvestmentNav();
     const fd = new FormData(form);
     if (form.dataset.resolvedSymbol) fd.set('symbol', form.dataset.resolvedSymbol);
     const body = formToTrade(fd, trade);
@@ -832,6 +886,7 @@ function openTradeModal(trade = {}) {
     return trade.id ? '交易已更新' : '交易已保存';
   }, { reload: false });
   bindTradeForm(layer.querySelector('.sm-modal-body'));
+  const resolveReinvestmentNav = bindReinvestmentNav($('#trade-form', layer));
   const resolveInstrument = bindTradeInstrument($('#trade-form', layer), {
     resolve: symbol => api('/instruments/resolve?' + new URLSearchParams({ symbol })),
     accounts: state.investmentAccounts || [], assetTypes: TRADE_ASSET_TYPES
