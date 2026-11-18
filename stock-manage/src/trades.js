@@ -2,6 +2,7 @@ import { tradeAssetType } from '../public/js/trade-asset-type.js';
 import { dateTimeFormatter } from './date-formatters.js';
 import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
 import { fundCode, fundTradeOrder } from '../../shared/fund-holdings.js';
+import { Decimal, roundDecimal, tradeCashAmount } from '../../shared/portfolio-decimal.js';
 import {
   normalizeSymbol,
   inferCurrency,
@@ -19,16 +20,15 @@ export function optionMult(symbol) {
 }
 
 export function roundMoney(n) {
-  return Math.round(Number(n) * 100) / 100;
+  return roundDecimal(n, 2);
 }
 
 export function roundPrice(n) {
-  const value = Number(n);
-  return Math.round((value + Number.EPSILON * Math.abs(value)) * 1000) / 1000;
+  return roundDecimal(n, 3);
 }
 
 export function roundTradePrice(value, symbol) {
-  return fundCode(symbol) ? Math.round(Number(value) * 10000) / 10000 : roundPrice(value);
+  return roundDecimal(value, fundCode(symbol) ? 4 : 3);
 }
 
 export function tradeCurrency(trade) {
@@ -37,22 +37,25 @@ export function tradeCurrency(trade) {
 
 /** Cash delta in the trade's native currency. */
 export function cashDelta(trade) {
-  const fee = roundMoney(trade.commission || 0);
-  const amt = roundMoney(trade.total_amount || 0);
-  if (trade.type === 'buy') return roundMoney(-(amt + fee));
-  return roundMoney(amt - fee);
+  return roundMoney(tradeCashAmount({
+    ...trade, total_amount: roundMoney(trade.total_amount || 0), commission: roundMoney(trade.commission || 0)
+  }));
 }
 
-export function toUsd(amount, currency, rate = DEFAULT_USD_CNY_RATE, usdHkdRate) {
-  const n = Number(amount) || 0;
+function decimalUsd(amount, currency, rate = DEFAULT_USD_CNY_RATE, usdHkdRate) {
+  const n = amount instanceof Decimal ? amount : new Decimal(Number(amount) || 0);
   const r = Number(rate) > 0 ? Number(rate) : DEFAULT_USD_CNY_RATE;
-  if (String(currency).toUpperCase() === 'CNY') return n / r;
-  if (String(currency).toUpperCase() === 'HKD') return n === 0 ? 0 : usdHkdRate > 0 ? n / usdHkdRate : NaN;
+  if (String(currency).toUpperCase() === 'CNY') return n.div(r);
+  if (String(currency).toUpperCase() === 'HKD' && !n.isZero()) return n.div(usdHkdRate > 0 ? usdHkdRate : NaN);
   return n;
 }
 
+export function toUsd(amount, currency, rate, usdHkdRate) {
+  return decimalUsd(amount, currency, rate, usdHkdRate).toNumber();
+}
+
 export function cashUsdEquivalent(cashUsd, cashCny, rate = DEFAULT_USD_CNY_RATE, cashHkd = 0, usdHkdRate) {
-  return roundMoney(toUsd(cashUsd, 'USD', rate) + toUsd(cashCny, 'CNY', rate) + toUsd(cashHkd, 'HKD', rate, usdHkdRate));
+  return roundMoney(decimalUsd(cashUsd, 'USD', rate).plus(decimalUsd(cashCny, 'CNY', rate)).plus(decimalUsd(cashHkd, 'HKD', rate, usdHkdRate)));
 }
 
 export function applyCashDelta(cashState, trade) {
@@ -64,9 +67,8 @@ export function applyCashDelta(cashState, trade) {
     ...(cur === 'HKD' || cashState.cashHkd != null ? { cashHkd: Number(cashState.cashHkd) || 0, usdHkdRate: cashState.usdHkdRate } : {}),
     usdCnyRate: Number(cashState.usdCnyRate) > 0 ? Number(cashState.usdCnyRate) : DEFAULT_USD_CNY_RATE
   };
-  if (cur === 'CNY') next.cashCny = roundMoney(next.cashCny + delta);
-  else if (cur === 'HKD') next.cashHkd = roundMoney(next.cashHkd + delta);
-  else next.cashUsd = roundMoney(next.cashUsd + delta);
+  const key = currencyCashKey(cur);
+  next[key] = roundMoney(new Decimal(next[key]).plus(delta));
   next.cash = cashUsdEquivalent(next.cashUsd, next.cashCny, next.usdCnyRate, next.cashHkd, next.usdHkdRate);
   return next;
 }
@@ -81,11 +83,14 @@ export function undoCashDelta(cashState, trade) {
     ...(cur === 'HKD' || cashState.cashHkd != null ? { cashHkd: Number(cashState.cashHkd) || 0, usdHkdRate: cashState.usdHkdRate } : {}),
     usdCnyRate: Number(cashState.usdCnyRate) > 0 ? Number(cashState.usdCnyRate) : DEFAULT_USD_CNY_RATE
   };
-  if (cur === 'CNY') next.cashCny = roundMoney(next.cashCny - delta);
-  else if (cur === 'HKD') next.cashHkd = roundMoney(next.cashHkd - delta);
-  else next.cashUsd = roundMoney(next.cashUsd - delta);
+  const key = currencyCashKey(cur);
+  next[key] = roundMoney(new Decimal(next[key]).minus(delta));
   next.cash = cashUsdEquivalent(next.cashUsd, next.cashCny, next.usdCnyRate, next.cashHkd, next.usdHkdRate);
   return next;
+}
+
+function currencyCashKey(currency) {
+  return { CNY: 'cashCny', HKD: 'cashHkd' }[currency] || 'cashUsd';
 }
 
 export const APP_TIME_ZONE = process.env.STOCK_TZ || 'Asia/Shanghai';
@@ -139,21 +144,36 @@ function dateKey(t) {
   return tradeCalendarDate(t.trade_date);
 }
 
-function applyFifoSellToQueue(buyQueue, sellShares, sellPrice, symbol, matched = null) {
-  const mult = optionMult(symbol);
-  const tolerance = fundCode(symbol) ? Number.EPSILON * sellShares : 0;
-  let gain = 0;
-  let rem = sellShares;
-  while (rem > 0 && buyQueue.length) {
-    const u = Math.min(rem, buyQueue[0].shares);
-    if (matched) matched.cost += u * buyQueue[0].price * mult;
-    gain += u * (sellPrice - buyQueue[0].price) * mult;
-    buyQueue[0].shares -= u;
-    rem -= u;
-    if (buyQueue[0].shares <= tolerance) buyQueue.shift();
-    if (rem <= tolerance) rem = 0;
+function unitCost(trade) {
+  if (fundCode(trade.symbol) && Number.isFinite(trade.total_amount) && trade.shares > 0) {
+    return new Decimal(trade.total_amount).div(trade.shares);
   }
-  if (matched) matched.unmatchedShares += Math.max(0, rem);
+  return new Decimal(Number(trade.price));
+}
+
+function tradeLot(trade) {
+  return { shares: new Decimal(Number(trade.shares)), price: unitCost(trade) };
+}
+
+function applyFifoSellToQueue(buyQueue, trade, symbol, matched = null) {
+  const mult = optionMult(symbol);
+  const sellPrice = unitCost(trade);
+  let gain = new Decimal(0);
+  let remaining = new Decimal(Number(trade.shares));
+  let cost = new Decimal(0);
+  while (remaining.gt(0) && buyQueue.length) {
+    const lot = buyQueue[0];
+    const sold = Decimal.min(remaining, lot.shares);
+    if (matched) cost = cost.plus(sold.times(lot.price).times(mult));
+    gain = gain.plus(sold.times(sellPrice.minus(lot.price)).times(mult));
+    lot.shares = lot.shares.minus(sold);
+    remaining = remaining.minus(sold);
+    if (lot.shares.lte(0)) buyQueue.shift();
+  }
+  if (matched) {
+    matched.cost = cost;
+    matched.unmatchedShares = Decimal.max(0, remaining).toNumber();
+  }
   return gain;
 }
 
@@ -190,20 +210,21 @@ export function deriveHoldings(trades) {
     let name = symbol;
     for (const tr of list) {
       if (tr.name) name = tr.name;
-      if (tr.type === 'buy') queue.push({ shares: tr.shares, price: tr.price });
-      else applyFifoSellToQueue(queue, tr.shares, tr.price, symbol);
+      if (tr.type === 'buy') queue.push(tradeLot(tr));
+      else applyFifoSellToQueue(queue, tr, symbol);
     }
-    const shares = queue.reduce((s, x) => s + x.shares, 0);
-    if (shares <= 0) continue;
-    const cost = queue.reduce((s, x) => s + x.shares * x.price, 0);
+    const shares = queue.reduce((s, x) => s.plus(x.shares), new Decimal(0));
+    if (shares.lte(0)) continue;
+    const cost = queue.reduce((s, x) => s.plus(x.shares.times(x.price)), new Decimal(0));
     const type = holdingTypeForSymbol(symbol);
     out.push({
       accountId: list[0].account_id || '',
       symbol,
       name,
-      shares,
-      avgCost: cost / shares,
-      costLots: queue.map((x) => ({ shares: x.shares, costPerShare: x.price })),
+      shares: shares.toNumber(),
+      avgCost: cost.div(shares).toNumber(),
+      costBasisNative: cost.times(optionMult(symbol)).toNumber(),
+      costLots: queue.map(x => ({ shares: x.shares.toNumber(), costPerShare: x.price.toNumber() })),
       type,
       currency: inferCurrency(symbol)
     });
@@ -224,17 +245,17 @@ export function computePnl(trades, options = {}) {
     return true;
   };
 
-  let totalBuy = 0;
-  let totalSell = 0;
-  let commission = 0;
-  let otherAmount = 0;
+  let totalBuy = new Decimal(0);
+  let totalSell = new Decimal(0);
+  let commission = new Decimal(0);
+  let otherAmount = new Decimal(0);
   for (const t of trades) {
     if (t.openingFund || !inWindow(t)) continue;
     const cur = tradeCurrency(t);
-    commission += toUsd(t.commission || 0, cur, rate, usdHkdRate);
-    if (t.type === 'buy') totalBuy += toUsd(t.total_amount, cur, rate, usdHkdRate);
-    else if (t.type === 'sell') totalSell += toUsd(t.total_amount, cur, rate, usdHkdRate);
-    else if (t.type === 'other') otherAmount += toUsd(t.total_amount, cur, rate, usdHkdRate);
+    commission = commission.plus(decimalUsd(t.commission, cur, rate, usdHkdRate));
+    if (t.type === 'buy') totalBuy = totalBuy.plus(decimalUsd(t.total_amount, cur, rate, usdHkdRate));
+    else if (t.type === 'sell') totalSell = totalSell.plus(decimalUsd(t.total_amount, cur, rate, usdHkdRate));
+    else if (t.type === 'other') otherAmount = otherAmount.plus(decimalUsd(t.total_amount, cur, rate, usdHkdRate));
   }
 
   const fifoTrades = trades.filter((t) => t.type === 'buy' || t.type === 'sell');
@@ -245,17 +266,17 @@ export function computePnl(trades, options = {}) {
     bySym.get(JSON.stringify([t.account_id || '', sym])).push(t);
   }
 
-  let realized = 0;
+  let realized = new Decimal(0);
   for (const [, list] of bySym) {
     const symbol = normalizeSymbol(list[0].symbol);
     list.sort((a, b) => fundCode(symbol) ? compareTrades(a, b) : tradeTime(a.trade_date) - tradeTime(b.trade_date));
     const queue = [];
     const cur = isAShareSymbol(symbol) ? 'CNY' : 'USD';
     for (const tr of list) {
-      if (tr.type === 'buy') queue.push({ shares: tr.shares, price: tr.price });
+      if (tr.type === 'buy') queue.push(tradeLot(tr));
       else {
-        const gainNative = applyFifoSellToQueue(queue, tr.shares, tr.price, tr.symbol);
-        realized += toUsd(gainNative, tradeCurrency(tr) || cur, rate, usdHkdRate);
+        const gainNative = applyFifoSellToQueue(queue, tr, tr.symbol);
+        realized = realized.plus(decimalUsd(gainNative, tradeCurrency(tr) || cur, rate, usdHkdRate));
       }
     }
   }
@@ -266,7 +287,7 @@ export function computePnl(trades, options = {}) {
     commission: roundMoney(commission),
     otherAmount: roundMoney(otherAmount),
     realizedPL: roundMoney(realized),
-    netPL: roundMoney(realized - commission + otherAmount)
+    netPL: roundMoney(realized.minus(commission).plus(otherAmount))
   };
 }
 
@@ -317,31 +338,31 @@ export function computeSymbolSummaries(trades, options = {}) {
 
     const queue = [];
     for (const t of pre) {
-      if (t.type === 'buy') queue.push({ shares: t.shares, price: t.price });
-      else applyFifoSellToQueue(queue, t.shares, t.price, symbol);
+      if (t.type === 'buy') queue.push(tradeLot(t));
+      else applyFifoSellToQueue(queue, t, symbol);
     }
 
-    let totalBuy = 0;
-    let totalSell = 0;
-    let totalCommission = 0;
-    let fifoGross = 0;
-    let soldCost = 0;
+    let totalBuy = new Decimal(0);
+    let totalSell = new Decimal(0);
+    let totalCommission = new Decimal(0);
+    let fifoGross = new Decimal(0);
+    let soldCost = new Decimal(0);
     let unmatchedSellShares = 0;
     for (const t of win) {
       const cur = tradeCurrency(t);
-      totalCommission += toUsd(t.commission || 0, cur, rate, usdHkdRate);
+      totalCommission = totalCommission.plus(decimalUsd(t.commission, cur, rate, usdHkdRate));
       if (t.type === 'buy') {
-        totalBuy += toUsd(t.total_amount, cur, rate, usdHkdRate);
-        queue.push({ shares: t.shares, price: t.price });
+        totalBuy = totalBuy.plus(decimalUsd(t.total_amount, cur, rate, usdHkdRate));
+        queue.push(tradeLot(t));
       } else {
-        totalSell += toUsd(t.total_amount, cur, rate, usdHkdRate);
+        totalSell = totalSell.plus(decimalUsd(t.total_amount, cur, rate, usdHkdRate));
         const matched = { cost: 0, unmatchedShares: 0 };
-        fifoGross += toUsd(applyFifoSellToQueue(queue, t.shares, t.price, symbol, matched), cur, rate, usdHkdRate);
-        soldCost += toUsd(matched.cost, cur, rate, usdHkdRate);
+        fifoGross = fifoGross.plus(decimalUsd(applyFifoSellToQueue(queue, t, symbol, matched), cur, rate, usdHkdRate));
+        soldCost = soldCost.plus(decimalUsd(matched.cost, cur, rate, usdHkdRate));
         unmatchedSellShares += matched.unmatchedShares;
       }
     }
-    const netPnl = fifoGross - totalCommission;
+    const netPnl = fifoGross.minus(totalCommission);
     out.push({
       symbol,
       name,
@@ -354,10 +375,10 @@ export function computeSymbolSummaries(trades, options = {}) {
       fifoRealizedGross: roundMoney(fifoGross),
       netPnl: roundMoney(netPnl),
       soldCostAmount: roundMoney(soldCost),
-      netPnlRate: soldCost > 0 && unmatchedSellShares <= 1e-8
-        ? roundMoney((netPnl / soldCost) * 100) : null,
+      netPnlRate: soldCost.gt(0) && unmatchedSellShares <= 1e-8
+        ? roundMoney(netPnl.div(soldCost).times(100)) : null,
       pnlRateUnavailableReason: unmatchedSellShares > 1e-8
-        ? 'missing-buy-cost' : soldCost <= 0 ? 'no-sold-cost' : null
+        ? 'missing-buy-cost' : soldCost.lte(0) ? 'no-sold-cost' : null
     });
   }
   const otherGroups = new Map();
@@ -406,30 +427,30 @@ export function buildDailyCumulativeSeries(trades, options = {}) {
 
   const queues = new Map();
   for (const t of trades) {
-    if (t.openingFund) queues.set(JSON.stringify([t.account_id || '', normalizeSymbol(t.symbol)]), [{ shares: t.shares, price: t.price }]);
+    if (t.openingFund) queues.set(JSON.stringify([t.account_id || '', normalizeSymbol(t.symbol)]), [tradeLot(t)]);
   }
-  let cumRealized = 0;
-  let cumCommission = 0;
-  let cumOther = 0;
+  let cumRealized = new Decimal(0);
+  let cumCommission = new Decimal(0);
+  let cumOther = new Decimal(0);
   let prevNet = 0;
   const out = [];
 
   for (const day of days) {
     for (const tr of byDay.get(day)) {
       const cur = tradeCurrency(tr);
-      cumCommission += toUsd(tr.commission || 0, cur, rate, usdHkdRate);
+      cumCommission = cumCommission.plus(decimalUsd(tr.commission, cur, rate, usdHkdRate));
       if (tr.type === 'other') {
-        cumOther += toUsd(tr.total_amount, cur, rate, usdHkdRate);
+        cumOther = cumOther.plus(decimalUsd(tr.total_amount, cur, rate, usdHkdRate));
         continue;
       }
       const key = JSON.stringify([tr.account_id || '', normalizeSymbol(tr.symbol)]);
       if (!queues.has(key)) queues.set(key, []);
       const q = queues.get(key);
-      if (tr.type === 'buy') q.push({ shares: tr.shares, price: tr.price });
-      else cumRealized += toUsd(applyFifoSellToQueue(q, tr.shares, tr.price, tr.symbol), cur, rate, usdHkdRate);
+      if (tr.type === 'buy') q.push(tradeLot(tr));
+      else cumRealized = cumRealized.plus(decimalUsd(applyFifoSellToQueue(q, tr, tr.symbol), cur, rate, usdHkdRate));
     }
-    const cumulativeNet = roundMoney(cumRealized - cumCommission + cumOther);
-    out.push({ date: day, cumulativeNet, dayNet: roundMoney(cumulativeNet - prevNet) });
+    const cumulativeNet = roundMoney(cumRealized.minus(cumCommission).plus(cumOther));
+    out.push({ date: day, cumulativeNet, dayNet: roundMoney(new Decimal(cumulativeNet).minus(prevNet)) });
     prevNet = cumulativeNet;
   }
   return out;
@@ -503,10 +524,11 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
     const mult = optionMult(h.symbol);
     const currency = h.currency || (h.type === 'ashare' || isAShareSymbol(h.symbol) ? 'CNY' : 'USD');
     const isCny = currency === 'CNY';
-    const mvNative = price * h.shares * mult;
-    const costNative = h.avgCost * h.shares * mult;
+    const valueNative = new Decimal(price).times(h.shares).times(mult);
+    const mvNative = valueNative.toNumber();
+    const costNative = h.costBasisNative ?? new Decimal(Number(h.avgCost)).times(h.shares).times(mult);
     const mv = toUsd(mvNative, currency, rate, usdHkdRate);
-    const pnlNative = price > 0 ? roundMoney(mvNative - costNative) : null;
+    const pnlNative = price > 0 ? roundMoney(valueNative.minus(costNative)) : null;
     const pnlUsd = pnlNative != null ? roundMoney(toUsd(pnlNative, currency, rate, usdHkdRate)) : null;
     const pnlPct = price > 0 && h.avgCost ? ((price - h.avgCost) / h.avgCost) * 100 : null;
     const change = q.change != null && q.change !== '' ? Number(q.change) : null;
@@ -709,7 +731,7 @@ export function normalizeTrade(input) {
   const price = roundTradePrice(input.price, symbol);
   if (!symbol || !Number.isFinite(shares) || !Number.isFinite(price) || !(shares > 0) || !(price > 0)) throw new Error('买卖需填写代码、数量与价格');
   const mult = optionMult(symbol);
-  const total = roundMoney(shares * price * mult);
+  const total = roundMoney(new Decimal(shares).times(price).times(mult));
   return {
     id: input.id || crypto.randomUUID(),
     ...(input.account_id ? { account_id: String(input.account_id) } : {}),

@@ -1,10 +1,12 @@
 import { tradeCalendarDate, tradeCurrency, parseOptionInfo, roundMoney } from './trades.js';
 import { tradeAssetType } from '../public/js/trade-asset-type.js';
+import { Decimal } from '../../shared/portfolio-decimal.js';
 
 const leveraged = new Set(('TQQQ SQQQ SOXL SOXS NVDL NVDU NVDX NVDQ NVDS TSLL TSLT TSLQ TSLS TSDD CONL CONI MSTU MSTX MSTZ UPRO SPXL SPXS TECL TECS FNGU FNGD LABU LABD YINN YANG CWEB TNA TZA BOIL KOLD TMF TMV QLD QID SSO SDS AMZU AMZD AAPU AAPD GGLL GGLS METU PLTU PTIR USD AGQ AMDD AMDL AMDS BABX DAMD GDXU NVD ORCX PLTD SOFX UCO UGL UVIX UVXY ZSL').split(' '));
 const category = (t) => tradeAssetType(t) === 'stock' && leveraged.has(String(t.symbol).toUpperCase()) ? 'leveraged' : tradeAssetType(t);
 const number = (value) => Number(value) || 0;
 const money = (value) => roundMoney(value);
+const prorate = (amount, part, whole) => part.times(number(amount)).div(whole);
 const holdBucket = (days) => days < 1 ? 'under1' : days < 8 ? '1to7' : days < 31 ? '8to30' : days < 91 ? '31to90' : 'over90';
 
 export function validateReviewRange(start = '', end = '') {
@@ -72,8 +74,8 @@ export function computeTradeReview(trades, options = {}) {
         continue;
       }
       if (window) windowFees += number(t.commission);
-      const qty = number(t.shares);
-      if (!(qty > 0) || !['buy', 'sell'].includes(t.type)) {
+      const qty = new Decimal(number(t.shares));
+      if (!qty.isFinite() || !qty.gt(0) || !['buy', 'sell'].includes(t.type)) {
         if (window) invalid.push({ id: t.id, symbol: t.symbol, date: t.day });
         continue;
       }
@@ -82,28 +84,36 @@ export function computeTradeReview(trades, options = {}) {
       if (!queue.has(inventoryKey)) queue.set(inventoryKey, []);
       const lots = queue.get(inventoryKey);
       if (t.type === 'buy') { lots.push({ trade: t, remaining: qty }); continue; }
-      let remaining = qty, cost = 0, gross = 0, fees = 0, holding = 0, matched = 0, unknownHolding = false;
-      while (remaining > 1e-8 && lots.length) {
+      let remaining = qty, cost = new Decimal(0), gross = new Decimal(0), fees = new Decimal(0);
+      let holding = 0, unknownHolding = false;
+      while (remaining.gt(0) && lots.length) {
         const lot = lots[0], b = lot.trade, bought = number(b.shares);
-        const q = Math.min(remaining, lot.remaining);
-        const buyAmount = number(b.total_amount) * q / bought;
-        const proceeds = number(t.total_amount) * q / qty;
-        const fee = number(b.commission) * q / bought + number(t.commission) * q / qty;
+        const q = Decimal.min(remaining, lot.remaining);
+        const buyAmount = prorate(b.total_amount, q, bought);
+        const proceeds = prorate(t.total_amount, q, qty);
+        const fee = prorate(b.commission, q, bought).plus(prorate(t.commission, q, qty));
         const days = b.openingFund ? 0 : (new Date(t.trade_date) - new Date(b.trade_date)) / 86400000;
         if (b.openingFund) unknownHolding = true;
         const info = parseOptionInfo(key);
         const dte = info ? Math.round((Date.parse(info.expiration) - Date.parse(b.day)) / 86400000) : null;
         const dteBucket = dte == null ? '' : dte < 0 ? 'invalid' : dte <= 1 ? '0to1' : dte <= 7 ? '2to7' : dte <= 30 ? '8to30' : dte <= 90 ? '31to90' : 'over90';
-        if (window) fragments.push({ pnl: proceeds - buyAmount - fee, dteBucket, category: t.category });
-        cost += buyAmount; gross += proceeds - buyAmount; fees += fee; holding += days * q; matched += q;
-        remaining -= q; lot.remaining -= q;
-        if (lot.remaining < 1e-8) lots.shift();
+        const gain = proceeds.minus(buyAmount);
+        if (window) fragments.push({ pnl: gain.minus(fee).toNumber(), dteBucket, category: t.category });
+        cost = cost.plus(buyAmount);
+        gross = gross.plus(gain);
+        fees = fees.plus(fee);
+        holding += days * q.toNumber();
+        remaining = remaining.minus(q);
+        lot.remaining = lot.remaining.minus(q);
+        if (lot.remaining.isZero()) lots.shift();
       }
       if (window) {
-        if (remaining > 1e-8) unmatched.push({ id: t.id, symbol: key, name: t.name, date: t.day, shares: remaining, proceeds: money(number(t.total_amount) * remaining / qty) });
-        if (matched > 1e-8) sales.push({ id: t.id, symbol: key, name: t.name || key, date: t.day, category: t.category,
-          underlying: parseOptionInfo(key)?.underlying || key, matched, complete: remaining < 1e-8,
-          cost, gross, fees, pnl: gross - fees, holding: unknownHolding ? null : holding / matched });
+        const matched = qty.minus(remaining).toNumber();
+        if (remaining.gt(1e-8)) unmatched.push({ id: t.id, symbol: key, name: t.name, date: t.day, shares: remaining.toNumber(), proceeds: money(prorate(t.total_amount, remaining, qty)) });
+        if (matched > 0) sales.push({ id: t.id, symbol: key, name: t.name || key, date: t.day, category: t.category,
+          underlying: parseOptionInfo(key)?.underlying || key, matched, complete: remaining.lte(1e-8),
+          cost: cost.toNumber(), gross: gross.toNumber(), fees: fees.toNumber(),
+          pnl: gross.minus(fees).toNumber(), holding: unknownHolding ? null : holding / matched });
       }
     }
     const complete = sales.filter((s) => s.complete);
@@ -111,9 +121,9 @@ export function computeTradeReview(trades, options = {}) {
     const realized = money(sales.reduce((s, r) => s + r.pnl, 0));
     const realizedFees = money(sales.reduce((s, r) => s + r.fees, 0));
     const open = [...queue].flatMap(([inventoryKey, lots]) => lots.length ? [{ symbol: JSON.parse(inventoryKey)[1], accountId: JSON.parse(inventoryKey)[0],
-      shares: lots.reduce((s, l) => s + l.remaining, 0),
-      cost: money(lots.reduce((s, l) => s + number(l.trade.total_amount) * l.remaining / number(l.trade.shares), 0)),
-      buyFees: money(lots.reduce((s, l) => s + number(l.trade.commission) * l.remaining / number(l.trade.shares), 0)) }] : []);
+      shares: Decimal.sum(...lots.map(l => l.remaining)).toNumber(),
+      cost: money(Decimal.sum(...lots.map(l => prorate(l.trade.total_amount, l.remaining, number(l.trade.shares))))),
+      buyFees: money(Decimal.sum(...lots.map(l => prorate(l.trade.commission, l.remaining, number(l.trade.shares))))) }] : []);
     const otherNet = money(other.reduce((s, r) => s + r.pnl, 0));
     const losses = complete.filter((s) => s.pnl < 0);
     const bigLosses = losses.filter((s) => s.pnl <= -500);

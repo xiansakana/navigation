@@ -1,11 +1,14 @@
 import crypto from 'node:crypto';
 import { requirePortfolioUserId } from './portfolio-user.js';
 import { fundCode, fundHoldings, fundTradeOrder, fundValuation, openingFundTrades } from './fund-holdings.js';
+import { Decimal, roundDecimal, tradeCashAmount } from './portfolio-decimal.js';
 
-const round = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const round = (n) => roundDecimal(n, 2);
 const cents = (n) => {
-  if (n === '' || n == null || !Number.isFinite(Number(n)) || !Number.isSafeInteger(Math.round(Number(n) * 100))) throw new Error('请填写有效的可用现金');
-  return Math.round(Number(n) * 100);
+  if (n === '' || n == null || !Number.isFinite(Number(n))) throw new Error('请填写有效的可用现金');
+  const value = roundDecimal(new Decimal(Number(n)).times(100), 0);
+  if (!Number.isSafeInteger(value)) throw new Error('请填写有效的可用现金');
+  return value;
 };
 const isHk = symbol => /^(?:HK\.?)?\d{1,5}(?:\.HK)?$/i.test(String(symbol || ''));
 const currency = (t) => isHk(t.symbol) ? 'HKD' : fundCode(t.symbol) ? 'CNY' : t.currency ? String(t.currency).toUpperCase() : (/\d{6}/.test(String(t.symbol)) && !/[CP]\d/.test(String(t.symbol)) ? 'CNY' : 'USD');
@@ -13,7 +16,7 @@ const time = (s) => Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(String(s)) ? s : Strin
 export { time as investmentRecordTime };
 const compareTrades = (a, b) => time(a.trade_date) - time(b.trade_date) || fundTradeOrder(a) - fundTradeOrder(b) || String(a.id).localeCompare(String(b.id));
 const tableExists = (db, name) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
-export const investmentCashDelta = (t) => (t.type === 'buy' ? -Number(t.total_amount || 0) : Number(t.total_amount || 0)) - Number(t.commission || 0);
+export const investmentCashDelta = (t) => tradeCashAmount(t).toNumber();
 
 export function ensureInvestmentSchema(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS investment_accounts (
@@ -54,42 +57,46 @@ export function projectInvestments(db, userId, input) {
     const baseline = time(account.baseline_at);
     const baselineEntryIds = new Set(JSON.parse(account.baseline_entry_ids || '[]'));
     const baselineTradeIds = new Set(JSON.parse(account.baseline_trade_ids || '[]'));
-    let cash = account.baseline_cash / 100;
+    let cash = new Decimal(account.baseline_cash).div(100);
     const movements = [];
     for (const t of trades) if (!baselineTradeIds.has(t.id) && time(t.cash_effective_at || t.trade_date) >= Math.floor(baseline / 1000) * 1000) {
-      const delta = investmentCashDelta(t); cash += delta;
+      const delta = tradeCashAmount(t);
+      cash = cash.plus(delta);
       movements.push({ id: t.id, date: t.trade_date, kind: 'stock', type: t.type, symbol: t.symbol, name: t.name, delta: round(delta) });
     }
     for (const e of entries) if (account.bookkeeping_id && !baselineEntryIds.has(e.id) && time(e.date) >= Math.floor(baseline / 1000) * 1000) {
-      const delta = ledgerCashDelta(e, account.bookkeeping_id) / 100;
-      if (delta) { cash += delta; movements.push({ id: e.id, date: e.date, kind: 'bookkeeping', type: e.type, delta: round(delta) }); }
+      const delta = new Decimal(ledgerCashDelta(e, account.bookkeeping_id)).div(100);
+      if (!delta.isZero()) {
+        cash = cash.plus(delta);
+        movements.push({ id: e.id, date: e.date, kind: 'bookkeeping', type: e.type, delta: round(delta) });
+      }
     }
     const openingFunds = new Map(funds.filter(f => f.account_id === account.id).map(f => [`${f.code}.OF`, f]));
-    const quantities = new Map([...openingFunds].map(([symbol, f]) => [symbol, { shares: f.shares, name: f.name }]));
+    const quantities = new Map([...openingFunds].map(([symbol, f]) => [symbol, { shares: new Decimal(f.shares), name: f.name }]));
     for (const t of trades) {
       if (!['buy', 'sell'].includes(t.type)) continue;
-      const q = quantities.get(t.symbol) || { shares: 0, name: t.name || t.symbol };
-      q.shares = t.type === 'buy' ? q.shares + Number(t.shares) : Math.max(0, q.shares - Number(t.shares));
+      const q = quantities.get(t.symbol) || { shares: new Decimal(0), name: t.name || t.symbol };
+      q.shares = t.type === 'buy' ? q.shares.plus(Number(t.shares)) : Decimal.max(0, q.shares.minus(Number(t.shares)));
       if (fundCode(t.symbol) && t.name) q.name = t.name;
       quantities.set(t.symbol, q);
     }
     const missing = [], positions = [];
-    let marketValue = 0;
+    let marketValue = new Decimal(0);
     for (const [symbol, q] of quantities) {
-      if (q.shares < 1e-8) continue;
+      if (!q.shares.gt(0)) continue;
       const code = fundCode(symbol);
       const quote = code ? fundValuation(raw.quotes?.[symbol], openingFunds.get(symbol)) : raw.quotes?.[symbol];
       const price = quote?.price == null || quote.price === '' ? NaN : Number(quote.price);
       if (!Number.isFinite(price) || price < 0) missing.push(symbol);
-      const value = Number.isFinite(price) && price >= 0 ? round(q.shares * price * (/^[A-Z]+\d{6}[CP]/.test(symbol) ? 100 : 1)) : null;
-      if (value != null) marketValue += value;
-      positions.push({ symbol, ...(code ? { type: 'fund' } : {}), name: q.name, shares: q.shares, price: Number.isFinite(price) ? price : null, marketValue: value, quoteAsOf: quote?.asOf || quote?.updatedAt || quote?.timestamp || quote?.date || null, delayed: !!quote?.delayed });
+      const value = Number.isFinite(price) && price >= 0 ? round(q.shares.times(price).times(/^[A-Z]+\d{6}[CP]/.test(symbol) ? 100 : 1)) : null;
+      if (value != null) marketValue = marketValue.plus(value);
+      positions.push({ symbol, ...(code ? { type: 'fund' } : {}), name: q.name, shares: q.shares.toNumber(), price: Number.isFinite(price) ? price : null, marketValue: value, quoteAsOf: quote?.asOf || quote?.updatedAt || quote?.timestamp || quote?.date || null, delayed: !!quote?.delayed });
     }
     const ledger = account.bookkeeping_id && tableExists(db, 'bookkeeping_accounts') ? db.prepare('SELECT name,archived FROM bookkeeping_accounts WHERE user_id=? AND id=?').get(userId, account.bookkeeping_id) : null;
     return { id: account.id, name: account.name, currency: account.currency, bookkeepingId: account.bookkeeping_id,
       bookkeepingName: ledger?.name || null, baselineCash: account.baseline_cash / 100, baselineAt: account.baseline_at,
       oldLedgerBalance: account.old_ledger_balance == null ? null : account.old_ledger_balance / 100,
-      cash: round(cash), marketValue: missing.length ? null : round(marketValue), equity: missing.length ? null : round(cash + marketValue),
+      cash: round(cash), marketValue: missing.length ? null : round(marketValue), equity: missing.length ? null : round(cash.plus(marketValue)),
       missingQuotes: missing, positions, movements: movements.sort((a, b) => time(b.date) - time(a.date)),
       latestLedgerSnapshot: ledger ? true : false, linkedAccountArchived: !!ledger?.archived };
   });
@@ -167,9 +174,10 @@ export function prepareInvestmentTrades(db, userId, next, before) {
     const ordered = fundTrades.sort(compareTrades);
     for (const t of [...openingFundTrades(fundHoldings(db, userId)), ...ordered]) {
       const key = JSON.stringify([t.account_id, t.symbol]);
-      const shares = (balances.get(key) || 0) + (t.type === 'buy' ? 1 : -1) * Number(t.shares);
-      if (shares < -1e-8) throw new Error(`${t.symbol} 卖出份额超过该账户当时的可用份额`);
-      balances.set(key, Math.max(0, shares));
+      const before = balances.get(key) || new Decimal(0);
+      const shares = t.type === 'buy' ? before.plus(Number(t.shares)) : before.minus(Number(t.shares));
+      if (shares.lt(-1e-8)) throw new Error(`${t.symbol} 卖出份额超过该账户当时的可用份额`);
+      balances.set(key, Decimal.max(0, shares));
     }
   }
   return prepared;

@@ -1,4 +1,5 @@
 import { ensureFundHoldings, fundCode, fundHoldings, fundValuation, openingFundTrades } from '../../shared/fund-holdings.js';
+import { Decimal } from '../../shared/portfolio-decimal.js';
 import { findInternationalStockName, findMainlandInstruments, getFundNav } from './fund-nav.js';
 import { TRADE_ASSET_TYPES, tradeAssetType } from '../public/js/trade-asset-type.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
@@ -149,12 +150,12 @@ function buildPortfolio(data, pnlOpts = {}) {
     const opening = openingByKey.get(key);
     const quote = fundValuation(data.quotes[holding.symbol], opening);
     const accountName = data.investmentAccounts?.find(a => a.id === holding.accountId)?.name || '待归属';
-    const cost = roundMoney(holding.shares * holding.avgCost);
-    const marketValue = quote ? roundMoney(holding.shares * quote.price) : null;
+    const cost = roundMoney(holding.costBasisNative);
+    const marketValue = quote ? roundMoney(new Decimal(holding.shares).times(quote.price)) : null;
     const { symbol, ...row } = holding;
     return { ...row, symbol: code, tradeSymbol: symbol, accountName, cost, marketValue, price: quote?.price ?? null,
       quoteAsOf: quote?.asOf ?? null, editableSnapshot: !!opening && !fundTrades.has(key),
-      pnl: marketValue == null ? null : roundMoney(marketValue - cost) };
+      pnl: marketValue == null ? null : roundMoney(new Decimal(marketValue).minus(cost)) };
   });
   // Each account can have a different legacy NAV for the same fund.
   const fundQuotes = {};

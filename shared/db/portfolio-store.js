@@ -2,6 +2,7 @@ import { correctDividendTaxPortfolio } from '../dividend-tax.js';
 import { requirePortfolioUserId } from '../portfolio-user.js';
 import { projectInvestments, prepareInvestmentTrades, investmentRows } from '../investment-accounts.js';
 import { applyDipCashRules } from '../dip-cash-funds.js';
+import { Decimal, roundDecimal } from '../portfolio-decimal.js';
 
 const DEFAULT_USD_CNY_RATE = 7.2;
 
@@ -16,7 +17,7 @@ const EMPTY = {
 };
 
 function roundMoney(n) {
-  return Math.round(Number(n) * 100) / 100;
+  return roundDecimal(n, 2);
 }
 
 function normalizePortfolio(raw) {
@@ -156,7 +157,7 @@ export function createPortfolioStore(db, userId) {
       const data = normalizePortfolio(JSON.parse(select.get(userId)?.data || '{}'));
       const accounts = projectInvestments(db, userId, data);
       if (!accounts.length) return data;
-      const sum = (cur) => roundMoney(accounts.filter((a) => a.currency === cur).reduce((s, a) => s + a.cash, 0));
+      const sum = cur => roundMoney(accounts.filter(a => a.currency === cur).reduce((s, a) => s.plus(a.cash), new Decimal(0)));
       const cashHkd = sum('HKD');
       const cash = sum('USD') + sum('CNY') / data.usdCnyRate + (cashHkd ? cashHkd / data.usdHkdRate : 0);
       return { ...data, cashUsd: sum('USD'), cashCny: sum('CNY'), cashHkd, cash: Number.isFinite(cash) ? roundMoney(cash) : null, investmentAccounts: accounts, accountCashEnabled: true };

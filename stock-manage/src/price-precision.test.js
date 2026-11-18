@@ -1,19 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import XLSX from 'xlsx';
-import { normalizeTrade, deriveHoldings, applyCashDelta, roundPrice } from './trades.js';
+import { normalizeTrade, deriveHoldings, applyCashDelta, computeSymbolSummaries, roundMoney, roundPrice } from './trades.js';
 import { parseImportBuffer } from './import-moomoo.js';
 import { formatPrice, formatQuantity, priceInputValue } from '../public/js/price-format.js';
+import { computeTradeReview } from './trade-review.js';
 
 test('fund quantities hide binary rounding noise and full sales clear their position', () => {
   const trade = (type, shares, day) => normalizeTrade({ symbol: '022951.OF', type, shares, price: 1.6849,
     trade_date: `2026-11-${day}T12:00:00+08:00` });
   const buys = [trade('buy', 593.15, '01'), trade('buy', 610.28, '05')];
+  assert.equal(deriveHoldings(buys)[0].shares, 1203.43);
   assert.equal(formatQuantity(deriveHoldings(buys)[0].shares), '1203.43');
   assert.equal(formatQuantity(0.123456789), '0.123456789');
   const smallBuys = [trade('buy', 0.1, '01'), trade('buy', 0.2, '05')];
   assert.deepEqual(deriveHoldings([...smallBuys, trade('sell', 0.3, '06')]), []);
   assert.equal(formatQuantity(deriveHoldings([...buys, trade('sell', 1203.4299, '06')])[0].shares), '0.0001');
+  assert.equal(deriveHoldings([...buys, trade('sell', 1203.4299, '06')])[0].shares, 0.0001);
+  assert.deepEqual(deriveHoldings([...buys, trade('sell', 1203.43, '06')]), []);
+  assert.equal(roundMoney(1.005), 1.01);
+  const recorded = { ...trade('buy', 167.3, '01'), price: 2.9886, total_amount: 500 };
+  const redeemed = { ...trade('sell', 167.3, '05'), price: 3.0484, total_amount: 510.01, commission: 0.01 };
+  assert.equal(deriveHoldings([recorded])[0].costBasisNative, 500);
+  assert.equal(computeSymbolSummaries([recorded, redeemed], { usdCnyRate: 1 })[0].netPnl, 10);
+  assert.equal(computeTradeReview([recorded, redeemed]).currencies[0].realized, 10);
+  const bought = applyCashDelta({cashCny: 500}, recorded);
+  assert.equal(applyCashDelta(bought, redeemed).cashCny, 510);
 });
 
 test('three-decimal ETF and option trades retain price, cost and cash consistency', () => {
