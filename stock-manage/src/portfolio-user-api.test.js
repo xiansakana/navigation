@@ -163,6 +163,15 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.equal(fundPortfolio.fundHoldings[0].marketValue, 746.49);
     assert.equal(fundPortfolio.fundHoldings[0].pnl, 46.49);
     assert.equal(fundPortfolio.holdings.find(t=>t.symbol==='501225').shares, 200);
+    const grouped = await (await call('/holdings-meta/501225.OF', 'a', 'PUT', {groupWith:'AAPL'})).json();
+    const groupedFund = grouped.fundHoldings[0];
+    const groupAnchor = grouped.holdings.find(h => h.symbol === 'AAPL');
+    assert.equal(groupedFund.groupWith, 'AAPL');
+    assert.equal(groupedFund.groupMarketValue, groupAnchor.groupMarketValue);
+    assert.equal(groupedFund.weight, groupAnchor.weight);
+    assert.notEqual(grouped.holdings.find(h => h.symbol === '501225').groupKey, 'AAPL');
+    const resetGroup = await (await call('/holdings-meta/501225.OF', 'a', 'PUT', {groupWith:''})).json();
+    assert.equal(resetGroup.fundHoldings[0].groupWith, '');
     assert.equal((await (await call('/portfolio?accountId='+investment.id, 'a')).json()).fundHoldings.length, 0);
     assert.equal((await (await call('/portfolio','b')).json()).fundHoldings.length, 0);
     assert.equal((await call(fund+'/refresh','a','POST')).status, 200);

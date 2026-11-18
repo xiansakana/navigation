@@ -576,17 +576,18 @@ export function enrichHoldings(holdings, quotes, cashOrState, meta = {}) {
   const totalAssetsCny = roundMoney(assetsUsd * rate + assetsCny + toUsd(assetsHkd, 'HKD', rate, usdHkdRate) * rate);
   const unrealized = roundMoney(unrealizedUsd + toUsd(unrealizedCny, 'CNY', rate, usdHkdRate) + toUsd(unrealizedHkd, 'HKD', rate, usdHkdRate));
   rows.forEach((r) => {
+    const symbol = r.tradeSymbol || r.symbol;
     r.groupKey = (() => {
-      const manual = String(meta[r.symbol]?.groupWith || '').trim().toUpperCase();
+      const manual = String(meta[symbol]?.groupWith || '').trim().toUpperCase();
       if (manual) return manual;
-      const sym = String(r.symbol || '').trim().toUpperCase();
+      const sym = String(symbol || '').trim().toUpperCase();
       if (r.type === 'option' || isOptionSymbol(sym)) {
         const match = sym.match(/^([A-Z]+)\d{6}[CP]/i);
         if (match) return match[1];
       }
       return sym;
     })();
-    r.groupWith = String(meta[r.symbol]?.groupWith || '').trim();
+    r.groupWith = String(meta[symbol]?.groupWith || '').trim();
   });
   const groupSum = new Map();
   for (const r of rows) {

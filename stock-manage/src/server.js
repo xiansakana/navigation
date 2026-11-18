@@ -165,6 +165,7 @@ function buildPortfolio(data, pnlOpts = {}) {
     if (fund.price != null) fundQuotes[symbol] = { price: fund.price };
   }
   const enriched = enrichHoldings(valuedHoldings, { ...data.quotes, ...fundQuotes }, cashState, data.holdingsMeta);
+  const enrichedFunds = enriched.rows.filter(row => row.type === 'fund');
   const pnl = computePnl(calculationTrades, fxOpts);
   const sparse = buildDailyCumulativeSeries(calculationTrades, fxOpts);
   const daily = computeDailySummary(enriched.rows, calculationTrades, fxOpts);
@@ -180,8 +181,10 @@ function buildPortfolio(data, pnlOpts = {}) {
     quotes: data.quotes,
     holdingsMeta: data.holdingsMeta,
     holdings: enriched.rows.filter(row => row.type !== 'fund'),
-    fundHoldings: fundRows.map(fund => ({ ...fund,
-      weight: enriched.totalAssets > 0 && fund.marketValue != null ? (fund.marketValue / rate) / enriched.totalAssets * 100 : null
+    fundHoldings: fundRows.map((fund, index) => ({ ...fund,
+      groupWith: enrichedFunds[index].groupWith,
+      groupMarketValue: enrichedFunds[index].groupMarketValue,
+      weight: fund.marketValue == null && !enrichedFunds[index].groupMarketValue ? null : enrichedFunds[index].weight
     })),
     chartSparse: sparse,
     summary: {

@@ -6,7 +6,7 @@ import { formatPrice, priceInputValue } from './js/price-format.js?v=fund-trades
 import { bindTradeInstrument } from './js/trade-instrument.js?v=fund-trades-1';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=20261004-full-history';
-import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js?v=hk-1';
+import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js?v=fund-groups-1';
 import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -454,12 +454,13 @@ function pnlCellClass(key, h) {
 }
 
 function renderHoldingsRowCells(h, group, i) {
+  const groupSymbol = escapeHtml(h.tradeSymbol || h.symbol);
   return visibleHoldingsColumns().map((c) => {
     if (c.key === 'weight') {
       if (group.items.length === 1) {
         return `<td data-label="${c.label}" class="sm-weight-cell">${holdingsCellContent(h, 'weight', {})}</td>`;
       }
-      const individual = h.groupMarketValue === 0 ? h.weight : h.weight * h.marketValue / h.groupMarketValue;
+      const individual = h.marketValue == null ? null : h.groupMarketValue === 0 ? h.weight : h.weight * h.marketValue / h.groupMarketValue;
       const total = i === 0 ? `<div>合计 ${fmtPct(h.weight)}</div>` : '';
       const item = `<div class="sm-lots-hint">单项 ${fmtPct(individual)}</div>`;
       return `<td data-label="${c.label}" class="sm-weight-cell">${maskCol('weight', `<div>${total}${item}</div>`)}</td>`;
@@ -468,11 +469,12 @@ function renderHoldingsRowCells(h, group, i) {
     const opt = h.optionInfo;
     const optStr = opt ? `${opt.type} ${formatPrice(opt.strike, 'USD')} · ${opt.expiration}` : '—';
     const lots = h.costLots?.length > 1 ? `<div class="sm-lots-hint">${h.costLots.length} 笔合计</div>` : '';
-    const symInner = h.type === 'fund' ? `<strong>${escapeHtml(h.symbol)}</strong>` : colVis.symbol !== false && canCol('symbol') ? `
-        <span class="sm-symbol-drag" draggable="true" data-drag="${h.symbol}" title="拖动代码到另一行，合并为同一标的">
-          <strong>${h.symbol}</strong>
-          ${h.groupWith ? `<button type="button" class="btn link sm-clear-group" data-clear-group="${h.symbol}" title="恢复自动分组">↺</button>` : ''}
-        </span>` : MASK;
+    const symbol = `<strong>${escapeHtml(h.symbol)}</strong>`;
+    const symInner = can('meta', 'edit') ? `
+        <span class="sm-symbol-drag" draggable="true" data-drag="${groupSymbol}" title="拖动代码到另一行，合并为同一标的">
+          ${symbol}
+          ${h.groupWith ? `<button type="button" class="btn link sm-clear-group" data-clear-group="${groupSymbol}" title="恢复自动分组">↺</button>` : ''}
+        </span>` : symbol;
     return `<td data-label="${c.label}"${tdCls ? ` class="${tdCls}"` : ''}>${holdingsCellContent(h, c.key, { optStr, lots, symInner })}</td>`;
   }).join('');
 }
@@ -1449,7 +1451,8 @@ $('#holdings-body').addEventListener('drop', async (e) => {
   const src = (e.dataTransfer?.getData('text/plain') || dragSourceSymbol || '').trim();
   const dst = targetEl.dataset.drag;
   if (!src || !dst || src === dst) return;
-  const anchor = state.holdings.find((h) => h.symbol === dst);
+  const anchor = state.holdings.find(h => h.symbol === dst)
+    || state.fundHoldings?.find(h => h.tradeSymbol === dst);
   if (!anchor) return;
   try {
     await saveMeta(src, { groupWith: effectiveGroupKey(anchor) });

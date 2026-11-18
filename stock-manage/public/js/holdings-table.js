@@ -1,6 +1,6 @@
 /** 自动分组：期权取标的代码，股票取 symbol */
 export function rawTicker(h) {
-  const sym = String(h.symbol || '').trim().toUpperCase();
+  const sym = String(h.tradeSymbol || h.symbol || '').trim().toUpperCase();
   if (h.type === 'option' || /^[A-Z]+\d{6}[CP]/i.test(sym)) {
     const m = sym.match(/^([A-Z]+)\d{6}[CP]/i);
     if (m) return m[1];
@@ -9,7 +9,6 @@ export function rawTicker(h) {
 }
 
 export function effectiveGroupKey(h) {
-  if (h.type === 'fund') return `${h.symbol}:fund:${h.accountId}`;
   const manual = String(h.groupWith || '').trim().toUpperCase();
   if (manual) return manual;
   return rawTicker(h);
