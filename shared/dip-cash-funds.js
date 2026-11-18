@@ -1,5 +1,5 @@
 import { requirePortfolioUserId } from './portfolio-user.js';
-import { projectInvestments, investmentCashDelta, investmentRows, investmentRecordTime } from './investment-accounts.js';
+import { projectInvestments, investmentCashDelta, investmentRows, tradeCashBaseline, tradeAfterCashBaseline } from './investment-accounts.js';
 
 const cents = (value) => {
   const number = Number(value);
@@ -50,14 +50,8 @@ export function applyDipCashRules(db, userId, payload, before, options = {}) {
   schema(db);
   const existing = new Map(before.trades.map((t) => [t.id, t]));
   const accounts = investmentRows(db, userId);
-  const baselines = new Map(accounts.map((a) => [a.id, {
-    at: Math.floor(investmentRecordTime(a.baseline_at) / 1000) * 1000,
-    ids: new Set(JSON.parse(a.baseline_trade_ids || '[]'))
-  }]));
-  const effective = (trade) => {
-    const a = baselines.get(trade.account_id);
-    return a && !a.ids.has(trade.id) && investmentRecordTime(trade.trade_date) >= a.at;
-  };
+  const baselines = new Map(accounts.map(a => [a.id, tradeCashBaseline(a)]));
+  const effective = trade => tradeAfterCashBaseline(trade, baselines.get(trade.account_id));
   const reserveRows = db.prepare('SELECT * FROM dip_cash_funds WHERE user_id=?').all(userId);
   payload.trades = payload.trades.map((input) => {
     const trade = { ...input }; delete trade.dip_fund_account;
@@ -73,6 +67,10 @@ export function applyDipCashRules(db, userId, payload, before, options = {}) {
   });
   const next = new Map(payload.trades.map((t) => [t.id, t]));
   const strategy = new Map(), ordinary = new Map();
+  for (const correction of options.historicalCashCorrections || []) {
+    const map = correction.strategy ? strategy : ordinary;
+    map.set(correction.accountId, (map.get(correction.accountId) || 0) + correction.adjustment);
+  }
   for (const id of new Set([...existing.keys(), ...next.keys()])) {
     const a = existing.get(id), b = next.get(id);
     for (const [t, sign] of [[a, -1], [b, 1]]) {

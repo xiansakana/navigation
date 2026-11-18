@@ -136,6 +136,26 @@ test('cash reconciliation anchors existing records and does not replay them on r
   } finally { db.close(); }
 });
 
+test('editing a historical buy applies only the price and fee correction to both account views', () => {
+  const { db, stock, ledger } = setup();
+  try {
+    const ledgerId = ledger.saveAccount('u', { name:'券商', currency:'USD', balance:1000 });
+    const accountId = saveInvestmentAccount(db, 'u', { name:'A', currency:'USD', bookkeepingId:ledgerId, baselineCash:1000 });
+    const purchase = trade('historical', 'buy', accountId, 100, '2020-01-01T00:00:00Z');
+    stock.write({ trades:[purchase], quotes:{ AAPL:{ price:120 } } });
+    assert.equal(stock.read().cashUsd,1000);
+    saveInvestmentAccount(db, 'u', { baselineCash:899 }, accountId);
+    stock.write({ ...stock.read(), trades:[{ ...purchase, price:101, total_amount:101, commission:1.25 }] });
+    assert.equal(stock.read().cashUsd,897.75);
+    assert.equal(ledger.accounts('u')[0].balance,1017.75);
+    stock.write(stock.read());
+    assert.equal(stock.read().cashUsd,897.75);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM investment_account_audit WHERE action='trade-cash-correction'").get().n,1);
+    stock.write({ ...stock.read(), trades:[purchase] });
+    assert.equal(stock.read().cashUsd,899);
+    assert.equal(ledger.accounts('u')[0].balance,1019);
+  } finally { db.close(); }
+});
 test('confirmed baseline-excluded repo income credits cash once and later reconciliation captures it', () => {
  const {db,stock}=setup();
  try {

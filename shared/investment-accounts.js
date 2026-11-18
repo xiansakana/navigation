@@ -18,6 +18,39 @@ const compareTrades = (a, b) => time(a.trade_date) - time(b.trade_date) || fundT
 const tableExists = (db, name) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
 export const investmentCashDelta = (t) => tradeCashAmount(t).toNumber();
 
+export function tradeCashBaseline(account) {
+  return {
+    at: Math.floor(time(account.baseline_at) / 1000) * 1000,
+    ids: new Set(JSON.parse(account.baseline_trade_ids || '[]'))
+  };
+}
+
+export function tradeAfterCashBaseline(trade, baseline) {
+  return baseline && !baseline.ids.has(trade.id) && time(trade.cash_effective_at || trade.trade_date) >= baseline.at;
+}
+
+export function applyHistoricalTradeCashCorrections(db, userId, previousTrades, nextTrades, accounts, at) {
+  const previous = new Map(previousTrades.map(trade => [trade.id, trade]));
+  const baselines = new Map(accounts.map(account => [account.id, tradeCashBaseline(account)]));
+  const corrections = [];
+  for (const trade of nextTrades) {
+    const old = previous.get(trade.id);
+    const baseline = baselines.get(trade.account_id);
+    if (!old || !baseline || old.account_id !== trade.account_id
+      || tradeAfterCashBaseline(old, baseline) || tradeAfterCashBaseline(trade, baseline)) continue;
+    const adjustment = roundDecimal(tradeCashAmount(trade).minus(tradeCashAmount(old)).times(100), 0);
+    if (adjustment) corrections.push({ tradeId: trade.id, accountId: trade.account_id, adjustment, strategy: !!old.dip_fund_account });
+  }
+  if (!corrections.length) return corrections;
+  const update = db.prepare('UPDATE investment_accounts SET baseline_cash=baseline_cash+? WHERE user_id=? AND id=?');
+  const audit = db.prepare("INSERT INTO investment_account_audit(user_id,account_id,action,data,at) VALUES(?,?,'trade-cash-correction',?,?)");
+  for (const correction of corrections) {
+    update.run(correction.adjustment, userId, correction.accountId);
+    audit.run(userId, correction.accountId, JSON.stringify(correction), at);
+  }
+  return corrections;
+}
+
 export function ensureInvestmentSchema(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS investment_accounts (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, currency TEXT NOT NULL,
@@ -56,10 +89,10 @@ export function projectInvestments(db, userId, input) {
     const trades = (raw.trades || []).filter((t) => t.account_id === account.id).sort(compareTrades);
     const baseline = time(account.baseline_at);
     const baselineEntryIds = new Set(JSON.parse(account.baseline_entry_ids || '[]'));
-    const baselineTradeIds = new Set(JSON.parse(account.baseline_trade_ids || '[]'));
+    const tradeBaseline = tradeCashBaseline(account);
     let cash = new Decimal(account.baseline_cash).div(100);
     const movements = [];
-    for (const t of trades) if (!baselineTradeIds.has(t.id) && time(t.cash_effective_at || t.trade_date) >= Math.floor(baseline / 1000) * 1000) {
+    for (const t of trades) if (tradeAfterCashBaseline(t, tradeBaseline)) {
       const delta = tradeCashAmount(t);
       cash = cash.plus(delta);
       movements.push({ id: t.id, date: t.trade_date, kind: 'stock', type: t.type, symbol: t.symbol, name: t.name, delta: round(delta) });

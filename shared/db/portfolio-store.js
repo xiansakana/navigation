@@ -1,6 +1,6 @@
 import { correctDividendTaxPortfolio } from '../dividend-tax.js';
 import { requirePortfolioUserId } from '../portfolio-user.js';
-import { projectInvestments, prepareInvestmentTrades, investmentRows } from '../investment-accounts.js';
+import { applyHistoricalTradeCashCorrections, projectInvestments, prepareInvestmentTrades, investmentRows } from '../investment-accounts.js';
 import { applyDipCashRules } from '../dip-cash-funds.js';
 import { Decimal, roundDecimal } from '../portfolio-decimal.js';
 
@@ -168,11 +168,13 @@ export function createPortfolioStore(db, userId) {
       return db.transaction(() => {
         const before = normalizePortfolio(JSON.parse(select.get(userId)?.data || '{}'));
         payload.trades = prepareInvestmentTrades(db, userId, payload.trades, before);
-        if (investmentRows(db, userId).length) {
+        const accounts = investmentRows(db, userId);
+        if (accounts.length) {
           // Managed cash is derived, never write a displayed aggregate back into its baseline.
           payload.cashUsd = before.cashUsd; payload.cashCny = before.cashCny; payload.cash = before.cash;
         }
-        applyDipCashRules(db, userId, payload, before, options);
+        const historicalCashCorrections = applyHistoricalTradeCashCorrections(db, userId, before.trades, payload.trades, accounts, updatedAt);
+        applyDipCashRules(db, userId, payload, before, { ...options, historicalCashCorrections });
         upsert.run(userId, JSON.stringify(payload), updatedAt);
         return { ...this.read(), updatedAt };
       }).immediate();
