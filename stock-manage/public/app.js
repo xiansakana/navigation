@@ -393,17 +393,22 @@ function holdingsCellContent(h, key, ctx) {
     case 'cost':
       return maskCol('cost', formatPrice(h.avgCost, cur, h.type === 'fund' ? 4 : 3) + lots);
     case 'price': {
-      if (h.type === 'fund') {
-        const refresh = can('refresh', 'edit') && !can('fund-holdings', 'edit') ? ` <button type="button" class="btn link" data-refresh="${escapeHtml(h.tradeSymbol)}" title="更新净值">↻</button>` : '';
-        const nav = h.price == null ? '待更新净值' : `${formatPrice(h.price, cur, 4)}<div class="sm-lots-hint">净值 ${escapeHtml(h.quoteAsOf)}</div>`;
-        return maskCol('price', nav + refresh);
+      const isFund = h.type === 'fund';
+      const refreshTarget = can('refresh', 'edit') ? `data-refresh="${escapeHtml(h.tradeSymbol || h.symbol)}"`
+        : isFund && can('fund-holdings', 'edit') ? `data-fund-refresh="${h.fundIndex}"` : '';
+      const label = isFund ? '更新净值' : '刷新价格';
+      const refresh = refreshTarget ? ` <button type="button" class="btn link" ${refreshTarget} title="${label}" aria-label="${label}">↻</button>` : '';
+      if (isFund) {
+        const nav = h.price == null ? '待更新净值' : formatPrice(h.price, cur, 4);
+        const date = h.quoteAsOf ? `<div class="sm-lots-hint">净值 ${escapeHtml(h.quoteAsOf)}</div>` : '';
+        return maskCol('price', `<span>${nav}</span>${refresh}${date}`);
       }
       const sourceLabel = h.quoteSource === 'cboe-delayed-midpoint' ? 'Cboe 延时报价（买卖中间价）'
         : h.quoteSource === 'polygon-daily-delayed' ? 'Polygon 延时日线' : `${h.quoteSource || '供应商'}延时行情`;
       const delayHint = h.delayed
         ? ` <span class="hint" title="${escapeHtml(sourceLabel + (h.quoteAsOf ? `（截至 ${h.quoteAsOf}）` : ''))}">延时</span>`
         : '';
-      return maskCol('price', `<span>${formatPrice(h.price, cur)}</span>${delayHint}${can('refresh', 'edit') ? ` <button type="button" class="btn link" data-refresh="${h.symbol}">↻</button>` : ''}`);
+      return maskCol('price', `<span>${formatPrice(h.price, cur)}</span>${delayHint}${refresh}`);
     }
     case 'pnl':
       return maskCol('pnl', h.pnl == null ? '—' : `<span class="${cls(h.pnl)}">${fmtMoneySigned(h.pnl, cur)}</span>`);
@@ -430,10 +435,9 @@ function holdingsCellContent(h, key, ctx) {
           <button type="button" class="btn link" data-trade="buy" data-symbol="${symbol}" data-account="${account}">买</button>
           <button type="button" class="btn link" data-trade="sell" data-symbol="${symbol}" data-account="${account}">卖</button>
           <button type="button" class="btn link" data-history="${symbol}">记录</button>` : '';
-        const snapshotActions = h.type === 'fund' && can('fund-holdings', 'edit') ? `
-          <button type="button" class="btn link" data-fund-refresh="${h.fundIndex}">更新净值</button>
-          ${h.editableSnapshot ? `<button type="button" class="btn link" data-fund-edit="${h.fundIndex}">编辑期初</button>
-          <button type="button" class="btn link" data-fund-delete="${h.fundIndex}">移除</button>` : ''}` : '';
+        const snapshotActions = h.type === 'fund' && h.editableSnapshot && can('fund-holdings', 'edit') ? `
+          <button type="button" class="btn link" data-fund-edit="${h.fundIndex}">编辑期初</button>
+          <button type="button" class="btn link" data-fund-delete="${h.fundIndex}">移除</button>` : '';
         return maskCol('actions', (tradeActions + snapshotActions).trim() || '—');
       }
     default:
