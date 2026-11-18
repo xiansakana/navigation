@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import XLSX from 'xlsx';
 import { createRequire } from 'node:module';
 import { createBookkeepingStore } from '../../portal/src/bookkeeping-store.js';
+import { parseImportBuffer } from './import-moomoo.js';
 
 test('real API rejects anonymous access and scopes portfolio, updates, import, export, review and summary', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-user-api-'));
@@ -259,6 +260,17 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.equal(fundImported.cashCny,789.02);
     assert.equal(fundImported.fundHoldings[0].shares,167.3);
     assert.equal(fundImported.fundHoldings[0].cost,500);
+    const reinvest = await (await call('/trades?accountId=' + cnId, 'a', 'POST', {
+      type:'buy', symbol:'017730.OF', shares:3.61, reinvestedDividend:true, account_id:cnId,
+      trade_date:'2099-01-02T16:11:13+08:00'
+    })).json();
+    assert.equal(reinvest.cashCny,789.02);
+    assert.equal(reinvest.fundHoldings[0].shares,170.91);
+    assert.equal(reinvest.fundHoldings[0].cost,500);
+    const [reinvestExport] = parseImportBuffer(Buffer.from(await (await call('/trades/export?assetType=fund&start=2099-01-02', 'a')).arrayBuffer()));
+    assert.equal(reinvestExport.reinvestedDividend,true);
+    assert.equal(reinvestExport.shares,3.61);
+    assert.equal((await call('/trades/' + reinvest.trades.find(t=>t.reinvestedDividend).id,'a','DELETE')).status,200);
     const again = await (await uploadFund('/trades/import?accountId=' + cnId)).json();
     assert.equal(again.importSummary.skipped,1);
     assert.equal(again.cashCny,789.02);

@@ -1,5 +1,6 @@
 import XLSX from 'xlsx';
 import { parseFundBuffer } from './import-fund.js';
+import { fundCode } from '../../shared/fund-holdings.js';
 import { parseEastmoneyBuffer } from './import-eastmoney.js';
 import { parseBbaeBuffer } from './import-bbae.js';
 import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
@@ -215,8 +216,9 @@ export function parseAppBackupBuffer(buffer) {
       }
       const type = typeRaw === '卖出' || typeRaw === 'sell' ? 'sell' : 'buy';
       const shares = parseQty(cells[5]);
-      const price = parseMoney(cells[6]);
-      if (!(shares > 0) || !(price > 0)) continue;
+      const reinvest = typeRaw === '红利再投资';
+      const price = reinvest ? 0 : parseMoney(cells[6]);
+      if (!(shares > 0) || (reinvest ? !fundCode(symbol) : !(price > 0))) continue;
       const mult = optionMult(symbol);
       out.push({
         id: `backup-${r}-${Date.now()}`,
@@ -225,10 +227,11 @@ export function parseAppBackupBuffer(buffer) {
         symbol,
         name: normalizeCell(cells[4]) || symbol,
         type,
+        ...(reinvest ? { reinvestedDividend: true } : {}),
         shares,
         price: roundTradePrice(price, symbol),
         total_amount: roundMoney(shares * price * mult),
-        commission: roundMoney(parseMoney(cells[8]) || 0),
+        commission: reinvest ? 0 : roundMoney(parseMoney(cells[8]) || 0),
         trade_date: parseTradeDate(cells[0]),
         created_at: now
       });

@@ -37,9 +37,10 @@ export function tradeCurrency(trade) {
 
 /** Cash delta in the trade's native currency. */
 export function cashDelta(trade) {
-  return roundMoney(tradeCashAmount({
+  const delta = roundMoney(tradeCashAmount({
     ...trade, total_amount: roundMoney(trade.total_amount || 0), commission: roundMoney(trade.commission || 0)
   }));
+  return delta === 0 ? 0 : delta;
 }
 
 function decimalUsd(amount, currency, rate = DEFAULT_USD_CNY_RATE, usdHkdRate) {
@@ -706,6 +707,8 @@ export function normalizeTrade(input) {
   const type = input.type;
   const symbol = normalizeSymbol(input.symbol);
   const currency = inferCurrency(symbol, input.currency);
+  const reinvest = input.reinvestedDividend === true;
+  if (reinvest && (type !== 'buy' || !fundCode(symbol))) throw new Error('红利再投资请选择场外基金并填写确认份额');
   if (type === 'other') {
     const cat = String(input.other_category || '').trim();
     const amt = Number(input.total_amount);
@@ -728,8 +731,8 @@ export function normalizeTrade(input) {
   }
   if (currency === 'HKD' && holdingTypeForSymbol(symbol) !== 'hkstock') throw new Error('港股代码请填写 00700 或 00700.HK');
   const shares = Number(input.shares);
-  const price = roundTradePrice(input.price, symbol);
-  if (!symbol || !Number.isFinite(shares) || !Number.isFinite(price) || !(shares > 0) || !(price > 0)) throw new Error('买卖需填写代码、数量与价格');
+  const price = reinvest ? 0 : roundTradePrice(input.price, symbol);
+  if (!symbol || !Number.isFinite(shares) || !(shares > 0) || (!reinvest && (!Number.isFinite(price) || !(price > 0)))) throw new Error(reinvest ? '请填写有效的确认份额' : '买卖需填写代码、数量与价格');
   const mult = optionMult(symbol);
   const total = roundMoney(new Decimal(shares).times(price).times(mult));
   return {
@@ -738,11 +741,12 @@ export function normalizeTrade(input) {
     symbol,
     name: String(input.name || symbol),
     type: type === 'sell' ? 'sell' : 'buy',
+    ...(reinvest ? { reinvestedDividend: true } : {}),
     currency,
     shares,
     price,
     total_amount: total,
-    commission: roundMoney(Number(input.commission) || 0),
+    commission: reinvest ? 0 : roundMoney(Number(input.commission) || 0),
     trade_date: input.trade_date || new Date().toISOString(),
     created_at: input.created_at || new Date().toISOString()
   };

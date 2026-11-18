@@ -479,6 +479,7 @@ app.post('/api/trades', async (req, res) => {
     const { trade, quote } = await recordNamedTrade(req.body || {});
     const strategyFundId = req.body.funding === 'dip' ? trade.account_id : undefined;
     if (req.body.funding === 'dip') {
+      if (trade.reinvestedDividend) return res.status(400).json({ error: '红利再投资不使用现金资金' });
       if (!requireStockPermission(req, res, 'dip-spend', 'edit')) return;
       if (!strategyFundId) return res.status(400).json({ error: '抄底成交须明确选择证券账户' });
     }
@@ -667,13 +668,13 @@ app.get('/api/trades/export', (req, res) => {
     证券账户: data.investmentAccounts?.find((a) => a.id === t.account_id)?.name || '待归属',
     时间: formatZonedDateTime(t.trade_date),
     类型: TRADE_ASSET_TYPES[tradeAssetType(t)],
-    交易方向: t.type === 'buy' ? '买入' : t.type === 'sell' ? '卖出' : '其它',
+    交易方向: t.reinvestedDividend ? '红利再投资' : t.type === 'buy' ? '买入' : t.type === 'sell' ? '卖出' : '其它',
     其它类别: t.other_category || '',
     代码: t.symbol,
     名称: t.name || '',
     币种: t.currency || 'USD',
     股数: t.type === 'other' ? '' : t.shares,
-    价格: t.type === 'other' ? '' : t.price,
+    价格: t.type === 'other' || t.reinvestedDividend ? '' : t.price,
     金额: t.total_amount,
     手续费: t.commission
   }));

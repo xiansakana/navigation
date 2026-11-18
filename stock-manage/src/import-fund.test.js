@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import XLSX from 'xlsx';
 import { parseImportBuffer } from './import-moomoo.js';
 import { mergeBbaeTrades } from './import-bbae.js';
-import { deriveHoldings } from './trades.js';
+import { cashDelta, deriveHoldings, normalizeTrade } from './trades.js';
 
 const columns = ['成交日期','基金代码','基金名称','操作','委托数量','成交数量','成交金额','基金公司','基金账号','合同编号'];
 function parse(rows) {
@@ -31,4 +31,26 @@ test('fund confirmations preserve exact cash and confirmed units with stable con
   assert.equal(parse([[...buy.slice(0,3), '转换出', ...buy.slice(4)]]).fundImportInfo.excluded[0].count, 1);
   assert.throws(() => parse([buy, buy]), /重复/);
   assert.throws(() => parse([[...buy.slice(0,5), '0', ...buy.slice(6)]]), /无效/);
+});
+
+test('fund dividends distinguish shares, cash and ambiguous confirmations', () => {
+  const reinvestment = [...buy]; reinvestment[3] = '红利发放'; reinvestment[5] = '3.61'; reinvestment[6] = '';
+  const cash = [...reinvestment]; cash[5] = '0'; cash[6] = '6.02'; cash[9] = 'contract-2';
+  const ambiguous = [...cash]; ambiguous[5] = '3.61'; ambiguous[9] = 'contract-3';
+  const result = parse([reinvestment, cash, ambiguous]);
+  assert.equal(result.length, 2);
+  assert.equal(result.fundImportInfo.excluded[0].count, 1);
+  assert.equal(result[0].reinvestedDividend, true);
+  assert.equal(cashDelta(result[0]), 0);
+  assert.equal(cashDelta(result[1]), 6.02);
+
+  const purchased = normalizeTrade({type:'buy', symbol:'017730.OF', shares:1203.43, price:2, trade_date:'2026-11-01T00:00:00Z'});
+  const manual = normalizeTrade({...result[0], trade_date:'2026-11-18T16:11:13+08:00', account_id:'cny'});
+  assert.equal(manual.total_amount, 0);
+  assert.equal(deriveHoldings([purchased, {...manual, account_id:''}])[0].shares, 1207.04);
+  assert.equal(deriveHoldings([purchased, {...manual, account_id:''}])[0].costBasisNative, 2406.86);
+  const merged = mergeBbaeTrades([manual], [result[0]], 'cny');
+  assert.equal(merged.trades.length, 1);
+  assert.equal(merged.summary.updated, 1);
+  assert.throws(() => normalizeTrade({...result[0], symbol:'AAPL'}), /场外基金/);
 });

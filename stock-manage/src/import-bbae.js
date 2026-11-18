@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import XLSX from 'xlsx';
-import { isOptionSymbol, roundMoney } from './trades.js';
+import { isOptionSymbol, roundMoney, tradeCalendarDate } from './trades.js';
 import { needsTradeName } from './trade-name.js';
 
 const hash = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -60,7 +60,12 @@ export function mergeBbaeTrades(existing, incoming, accountId) {
   for (const t of incoming) {
     const owned = next.filter(x => x.account_id === accountId);
     let matches = owned.filter(x => x.broker_order_key === t.broker_order_key);
-    const nearTime = x => x.symbol === t.symbol && x.type === t.type && (t.type !== 'other' || (x.other_category || '') === (t.other_category || '') || Number(x.total_amount) === Number(t.total_amount)) && Math.abs(Date.parse(x.trade_date) - Date.parse(t.trade_date)) <= 60000;
+    const nearTime = x => {
+      if (x.symbol !== t.symbol || x.type !== t.type || !!x.reinvestedDividend !== !!t.reinvestedDividend) return false;
+      if (t.reinvestedDividend) return Number(x.shares) === t.shares && tradeCalendarDate(x.trade_date) === tradeCalendarDate(t.trade_date);
+      return (t.type !== 'other' || (x.other_category || '') === (t.other_category || '') || Number(x.total_amount) === Number(t.total_amount))
+        && Math.abs(Date.parse(x.trade_date) - Date.parse(t.trade_date)) <= 60000;
+    };
     if (!matches.length) matches = owned.filter(x => !x.broker_order_key && nearTime(x));
     if (matches.length > 1 || (matches.length && used.has(matches[0].id))) throw new Error('有多条历史记录可能对应同一订单，请先人工核对，未导入');
     const old = matches[0];
