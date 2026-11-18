@@ -237,6 +237,13 @@ function typeLabel(t) {
   return t.type;
 }
 
+function tradeAmountLabel(trade) {
+  const currency = trade.currency || (looksLikeAShare(trade.symbol) ? 'CNY' : 'USD');
+  if (trade.reinvestedDividend) return trade.estimatedReinvestmentIncome == null ? '—'
+    : `估算 ${fmtMoney(trade.estimatedReinvestmentIncome, currency)}`;
+  return fmtMoney(trade.total_amount, currency);
+}
+
 function renderDashboard() {
   const el = $('#dashboard');
   $('#toggle-dashboard').checked = dashboardVisible;
@@ -762,6 +769,7 @@ function tradeFormFields(trade = {}) {
       </select></label>
       <label class="field-trade ${type === 'other' ? 'hidden' : ''}"><span data-trade-shares-label>数量</span><input name="shares" type="number" step="any" value="${trade.shares ?? ''}"></label>
       <label class="field-trade field-price"><span data-trade-price-label>价格</span><input name="price" type="number" step="${fund ? '0.0001' : '0.001'}" value="${priceInputValue(trade.price, fund ? 4 : 3)}"></label>
+      <label class="field-reinvestment hidden">折算净值（选填）<input name="reinvestmentNav" type="number" step="any" min="0" value="${escapeHtml(trade.reinvestmentNav ?? '')}"><small class="hint">填写基金公告指定日期的单位净值，用来估算分红和新增份额成本。</small></label>
       <label class="field-other-amt ${type !== 'other' ? 'hidden' : ''}">金额<input name="total_amount" type="number" step="any" value="${trade.total_amount ?? ''}"></label>
       <label>手续费<input name="commission" type="number" step="any" value="${trade.commission ?? 0}"></label>
       <label>时间<input name="trade_date" type="datetime-local" value="${dt}"></label>
@@ -777,6 +785,7 @@ function bindTradeForm(root) {
       root.querySelectorAll('.field-other,.field-other-amt').forEach((el) => el.classList.toggle('hidden', !other));
       root.querySelectorAll('.field-trade').forEach((el) => el.classList.toggle('hidden', other));
       root.querySelector('.field-price').classList.toggle('hidden', other || reinvest);
+      root.querySelector('.field-reinvestment').classList.toggle('hidden', !reinvest);
       for (const field of ['commission', 'funding']) {
         root.querySelector(`[name="${field}"]`)?.closest('label').classList.toggle('hidden', reinvest);
       }
@@ -791,7 +800,7 @@ function formToTrade(fd, existing = {}) {
   const reinvest = type === 'reinvest';
   return {
     type: reinvest ? 'buy' : type,
-    ...(reinvest ? { reinvestedDividend: true } : {}),
+    ...(reinvest ? { reinvestedDividend: true, reinvestmentNav: fd.get('reinvestmentNav') } : {}),
     ...(fd.get('account_id') ? { account_id: fd.get('account_id') } : {}),
     funding: reinvest ? 'ordinary' : fd.get('funding') || 'ordinary',
     symbol: String(fd.get('symbol') || '').trim(),
@@ -860,8 +869,8 @@ function renderImportPreviewSection() {
       <td data-label="代码">${escapeHtml(t.symbol)}</td>
       <td data-label="名称">${escapeHtml(t.name || '')}</td>
       <td data-label="数量">${t.type === 'other' ? '—' : formatQuantity(t.shares)}</td>
-      <td data-label="价格">${t.type === 'other' || t.reinvestedDividend ? '—' : formatPrice(t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? 4 : 3)}</td>
-      <td data-label="本金">${fmtMoney(t.total_amount, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td><td data-label="总费用">${fmtMoney(t.commission, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
+      <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.reinvestedDividend ? t.reinvestmentNav : t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? 4 : 3)}</td>
+      <td data-label="本金">${tradeAmountLabel(t)}</td><td data-label="总费用">${fmtMoney(t.commission, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
       <td data-label="处理">${({ added: '新增', updated: '更新（需确认）', skipped: '重复跳过', needsAssignment: '先核对未归属历史' })[t.importAction] || '新增'}</td>
     </tr>`).join('');
   return `
@@ -1067,8 +1076,8 @@ function renderTradeListTab() {
               <td data-label="名称" class="sm-trade-name">${escapeHtml(t.name || '')}</td>
               <td data-label="币种">${escapeHtml(t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
               <td data-label="股数">${t.type === 'other' ? '—' : formatQuantity(t.shares)}</td>
-              <td data-label="价格">${t.type === 'other' || t.reinvestedDividend ? '—' : formatPrice(t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? 4 : 3)}</td>
-              <td data-label="金额">${fmtMoney(t.total_amount, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
+              <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.reinvestedDividend ? t.reinvestmentNav : t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? 4 : 3)}</td>
+              <td data-label="金额">${tradeAmountLabel(t)}</td>
               <td data-label="手续费">${fmtCommission(t.commission, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
               <td data-label="操作">${can('trade', 'edit') ? `
                 <button type="button" class="btn link" data-edit="${t.id}">编辑</button>

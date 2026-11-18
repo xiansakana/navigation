@@ -276,9 +276,20 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.equal(reinvest.cashCny,789.02);
     assert.equal(reinvest.fundHoldings[0].shares,170.91);
     assert.equal(reinvest.fundHoldings[0].cost,500);
+    const oldReinvest = reinvest.trades.find(t=>t.reinvestedDividend);
+    const estimated = await (await call('/trades/' + oldReinvest.id + '?accountId=' + cnId, 'a', 'PUT',
+      {...oldReinvest, reinvestmentNav:1.6656})).json();
+    assert.equal(estimated.cashCny,789.02);
+    assert.equal(estimated.fundHoldings[0].shares,170.91);
+    assert.equal(estimated.fundHoldings[0].cost,506.01);
+    assert.equal(estimated.trades.find(t=>t.reinvestedDividend).estimatedReinvestmentIncome,6.01);
+    assert.equal(estimated.trades.filter(t=>t.reinvestedDividend).length,1);
+    const reinvestSummary = await (await call('/trades/summary?assetType=fund&accountId=' + cnId, 'a')).json();
+    assert.ok(reinvestSummary.some(t=>t.otherCategory==='红利再投资（估算）' && t.otherAmount > 0));
     const [reinvestExport] = parseImportBuffer(Buffer.from(await (await call('/trades/export?assetType=fund&start=2099-01-02', 'a')).arrayBuffer()));
     assert.equal(reinvestExport.reinvestedDividend,true);
     assert.equal(reinvestExport.shares,3.61);
+    assert.equal(reinvestExport.reinvestmentNav,1.6656);
     assert.equal((await call('/trades/' + reinvest.trades.find(t=>t.reinvestedDividend).id,'a','DELETE')).status,200);
     const again = await (await uploadFund('/trades/import?accountId=' + cnId)).json();
     assert.equal(again.importSummary.skipped,1);

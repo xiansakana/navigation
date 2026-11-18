@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import XLSX from 'xlsx';
 import { roundMoney } from './trades.js';
+import { parseReinvestmentNav } from '../../shared/fund-reinvestment.js';
 
 const text = value => String(value ?? '').trim();
 const numeric = value => {
@@ -46,9 +47,11 @@ export function parseFundBuffer(buffer) {
       keys.add(key);
       const type = cashDividend ? 'other' : operation === '赎回' ? 'sell' : 'buy';
       const total = reinvest ? 0 : roundMoney(amount);
+      const navInput = get('折算净值') || get('确认净值');
+      const reinvestmentNav = reinvest && !/^[-—]+$/.test(navInput) ? parseReinvestmentNav(navInput) : undefined;
       trades.push({ id: `fund-settlement-${key}`, broker: 'fund-settlement', broker_order_key: key,
         symbol: `${code}.OF`, name: get('基金名称') || code, type, shares: cashDividend ? 1 : shares,
-        ...(reinvest ? { reinvestedDividend: true } : {}),
+        ...(reinvest ? { reinvestedDividend: true, ...(reinvestmentNav == null ? {} : { reinvestmentNav }) } : {}),
         ...(cashDividend ? { other_category: '基金分红' } : {}),
         price: reinvest || cashDividend ? 0 : amount / shares, total_amount: total, commission: 0, currency: 'CNY',
         broker_net: type === 'buy' && total ? -total : total,
@@ -59,6 +62,6 @@ export function parseFundBuffer(buffer) {
   if (!recognized) return null;
   trades.fundImportInfo = { sourceCount, excluded: [...excluded].map(([reason, count]) => ({ reason, count })),
     warnings: ['按成交日期北京时间15:00入账，成交数量作为确认份额。', '申购、认购和赎回的单价按金额÷份额计算，费用记0，现金以原始成交金额为准。',
-      ...(trades.some(t => t.reinvestedDividend) ? ['红利再投资只增加确认份额，现金、总成本及分红入账金额不变。'] : [])] };
+      ...(trades.some(t => t.reinvestedDividend) ? ['红利再投资按份额和折算净值估算分红。未提供折算净值的记录可在导入后补填。'] : [])] };
   return trades;
 }

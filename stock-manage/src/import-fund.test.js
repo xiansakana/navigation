@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import XLSX from 'xlsx';
 import { parseImportBuffer } from './import-moomoo.js';
 import { mergeBbaeTrades } from './import-bbae.js';
-import { cashDelta, deriveHoldings, normalizeTrade } from './trades.js';
+import { cashDelta, computePnl, deriveHoldings, normalizeTrade } from './trades.js';
+import { tradesWithReinvestmentIncome } from '../../shared/fund-reinvestment.js';
 
 const columns = ['成交日期','基金代码','基金名称','操作','委托数量','成交数量','成交金额','基金公司','基金账号','合同编号'];
 function parse(rows) {
@@ -53,4 +54,11 @@ test('fund dividends distinguish shares, cash and ambiguous confirmations', () =
   assert.equal(merged.trades.length, 1);
   assert.equal(merged.summary.updated, 1);
   assert.throws(() => normalizeTrade({...result[0], symbol:'AAPL'}), /场外基金/);
+  const priced = normalizeTrade({...manual, reinvestmentNav:1.6656});
+  const sale = normalizeTrade({type:'sell', symbol:priced.symbol, shares:3.61, price:2, trade_date:'2026-11-19T00:00:00Z'});
+  const pnl = computePnl(tradesWithReinvestmentIncome([priced, {...sale, account_id:'cny'}]), {usdCnyRate:1});
+  assert.equal(cashDelta(priced),0);
+  assert.equal(pnl.otherAmount,6.01);
+  assert.equal(pnl.realizedPL,1.21);
+  assert.equal(pnl.netPL,7.22);
 });

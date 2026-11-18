@@ -50,7 +50,7 @@ export function computeTradeReview(trades, options = {}) {
   validateReviewRange(startDate, endDate);
   const symbolFilter = String(symbol).trim().toUpperCase();
   const included = (t) => (!symbolFilter || String(t.symbol || '').toUpperCase().includes(symbolFilter))
-    && (assetType === 'all' || tradeAssetType(t) === assetType)
+    && (assetType === 'all' || tradeAssetType(t) === assetType || (assetType === 'fund' && t.reinvestedDividend))
     && (t.type !== 'other' || !otherCategory || String(t.other_category || '').includes(otherCategory));
   const inWindow = (day) => day && (!startDate || day >= startDate) && (!endDate || day <= endDate);
   const history = trades.filter(included).map((t, index) => ({ ...t, index, day: tradeCalendarDate(t.trade_date), currency: tradeCurrency(t), category: category(t) }))

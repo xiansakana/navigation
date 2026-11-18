@@ -1,5 +1,6 @@
 import { ensureFundHoldings, fundCode, fundHoldings, fundValuation, openingFundTrades } from '../../shared/fund-holdings.js';
 import { Decimal } from '../../shared/portfolio-decimal.js';
+import { estimatedReinvestmentIncome, tradesWithReinvestmentIncome } from '../../shared/fund-reinvestment.js';
 import { findInternationalStockName, findMainlandInstruments, getFundNav } from './fund-nav.js';
 import { TRADE_ASSET_TYPES, tradeAssetType } from '../public/js/trade-asset-type.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
@@ -125,14 +126,19 @@ function openingFundsForAccount(accountId) {
 }
 
 function tradesForCalculations(req, trades) {
-  return [...openingFundTrades(openingFundsForAccount(req.query.accountId)), ...scopedTrades(req, trades)];
+  return [...openingFundTrades(openingFundsForAccount(req.query.accountId)), ...tradesWithReinvestmentIncome(scopedTrades(req, trades))];
+}
+
+function describeReinvestment(trade) {
+  return trade.reinvestedDividend && trade.reinvestmentNav > 0
+    ? { ...trade, estimatedReinvestmentIncome: estimatedReinvestmentIncome(trade) } : trade;
 }
 
 function buildPortfolio(data, pnlOpts = {}) {
   const rate = Number(data.usdCnyRate) > 0 ? Number(data.usdCnyRate) : DEFAULT_USD_CNY_RATE;
   const fxOpts = { ...pnlOpts, usdCnyRate: rate, usdHkdRate: data.usdHkdRate };
   const openings = openingFundsForAccount(pnlOpts.accountId);
-  const calculationTrades = [...openingFundTrades(openings), ...data.trades];
+  const calculationTrades = [...openingFundTrades(openings), ...tradesWithReinvestmentIncome(data.trades)];
   const holdings = deriveHoldings(calculationTrades);
   const cashState = {
     cashUsd: Number(data.cashUsd) || 0,
@@ -179,7 +185,7 @@ function buildPortfolio(data, pnlOpts = {}) {
     cashHkd: cashState.cashHkd,
     usdHkdRate: data.usdHkdRate,
     usdCnyRate: rate,
-    trades: data.trades,
+    trades: data.trades.map(describeReinvestment),
     quotes: data.quotes,
     holdingsMeta: data.holdingsMeta,
     holdings: enriched.rows.filter(row => row.type !== 'fund'),
@@ -571,7 +577,7 @@ app.post('/api/trades/import/preview', express.raw({
     const data = store.read();
     await fillImportedNames(trades, data);
     const plan = (trades.importInfo || trades.fundImportInfo || trades[0]?.broker === 'bbae') ? brokerImportPlan(req, trades, data) : null;
-    res.json({ count: plan ? plan.preview.length : trades.length, format: trades.fundImportInfo ? 'fund' : trades.importInfo ? 'eastmoney' : plan ? 'bbae' : 'other', summary: plan?.summary, trades: trades.slice(0, 5), preview: (plan?.preview || trades).slice(0, plan ? 50 : 5) });
+    res.json({ count: plan ? plan.preview.length : trades.length, format: trades.fundImportInfo ? 'fund' : trades.importInfo ? 'eastmoney' : plan ? 'bbae' : 'other', summary: plan?.summary, trades: trades.slice(0, 5).map(describeReinvestment), preview: (plan?.preview || trades).slice(0, plan ? 50 : 5).map(describeReinvestment) });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -677,7 +683,7 @@ app.get('/api/trades/export', (req, res) => {
     名称: t.name || '',
     币种: t.currency || 'USD',
     股数: t.type === 'other' ? '' : t.shares,
-    价格: t.type === 'other' || t.reinvestedDividend ? '' : t.price,
+    价格: t.reinvestedDividend ? t.reinvestmentNav ?? '' : t.type === 'other' ? '' : t.price,
     金额: t.total_amount,
     手续费: t.commission
   }));

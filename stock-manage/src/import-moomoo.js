@@ -1,6 +1,7 @@
 import XLSX from 'xlsx';
 import { parseFundBuffer } from './import-fund.js';
 import { fundCode } from '../../shared/fund-holdings.js';
+import { parseReinvestmentNav } from '../../shared/fund-reinvestment.js';
 import { parseEastmoneyBuffer } from './import-eastmoney.js';
 import { parseBbaeBuffer } from './import-bbae.js';
 import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
@@ -219,6 +220,7 @@ export function parseAppBackupBuffer(buffer) {
       const reinvest = typeRaw === '红利再投资';
       const price = reinvest ? 0 : parseMoney(cells[6]);
       if (!(shares > 0) || (reinvest ? !fundCode(symbol) : !(price > 0))) continue;
+      const reinvestmentNav = reinvest ? parseReinvestmentNav(cells[6]) : undefined;
       const mult = optionMult(symbol);
       out.push({
         id: `backup-${r}-${Date.now()}`,
@@ -227,7 +229,7 @@ export function parseAppBackupBuffer(buffer) {
         symbol,
         name: normalizeCell(cells[4]) || symbol,
         type,
-        ...(reinvest ? { reinvestedDividend: true } : {}),
+        ...(reinvest ? { reinvestedDividend: true, ...(reinvestmentNav == null ? {} : { reinvestmentNav }) } : {}),
         shares,
         price: roundTradePrice(price, symbol),
         total_amount: roundMoney(shares * price * mult),

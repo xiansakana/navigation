@@ -3,6 +3,7 @@ import { dateTimeFormatter } from './date-formatters.js';
 import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
 import { fundCode, fundTradeOrder } from '../../shared/fund-holdings.js';
 import { Decimal, roundDecimal, tradeCashAmount } from '../../shared/portfolio-decimal.js';
+import { parseReinvestmentNav, REINVESTMENT_INCOME_CATEGORY } from '../../shared/fund-reinvestment.js';
 import {
   normalizeSymbol,
   inferCurrency,
@@ -385,7 +386,8 @@ export function computeSymbolSummaries(trades, options = {}) {
   const otherGroups = new Map();
   for (const trade of trades) {
     if (trade.type !== 'other') continue;
-    if (options.assetType && !['all', 'other'].includes(options.assetType)) continue;
+    if (options.assetType && !['all', 'other'].includes(options.assetType)
+      && !(options.assetType === 'fund' && trade.other_category === REINVESTMENT_INCOME_CATEGORY && trade.reinvestedDividend)) continue;
     const d = dateKey(trade);
     if (!d || (startDate && d < startDate) || (endDate && d > endDate)) continue;
     const symbol = normalizeSymbol(trade.symbol);
@@ -731,6 +733,7 @@ export function normalizeTrade(input) {
   }
   if (currency === 'HKD' && holdingTypeForSymbol(symbol) !== 'hkstock') throw new Error('港股代码请填写 00700 或 00700.HK');
   const shares = Number(input.shares);
+  const reinvestmentNav = reinvest ? parseReinvestmentNav(input.reinvestmentNav) : undefined;
   const price = reinvest ? 0 : roundTradePrice(input.price, symbol);
   if (!symbol || !Number.isFinite(shares) || !(shares > 0) || (!reinvest && (!Number.isFinite(price) || !(price > 0)))) throw new Error(reinvest ? '请填写有效的确认份额' : '买卖需填写代码、数量与价格');
   const mult = optionMult(symbol);
@@ -741,7 +744,7 @@ export function normalizeTrade(input) {
     symbol,
     name: String(input.name || symbol),
     type: type === 'sell' ? 'sell' : 'buy',
-    ...(reinvest ? { reinvestedDividend: true } : {}),
+    ...(reinvest ? { reinvestedDividend: true, ...(reinvestmentNav == null ? {} : { reinvestmentNav }) } : {}),
     currency,
     shares,
     price,
