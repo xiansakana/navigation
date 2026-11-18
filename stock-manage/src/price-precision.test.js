@@ -3,7 +3,18 @@ import assert from 'node:assert/strict';
 import XLSX from 'xlsx';
 import { normalizeTrade, deriveHoldings, applyCashDelta, roundPrice } from './trades.js';
 import { parseImportBuffer } from './import-moomoo.js';
-import { formatPrice, priceInputValue } from '../public/js/price-format.js';
+import { formatPrice, formatQuantity, priceInputValue } from '../public/js/price-format.js';
+
+test('fund quantities hide binary rounding noise and full sales clear their position', () => {
+  const trade = (type, shares, day) => normalizeTrade({ symbol: '022951.OF', type, shares, price: 1.6849,
+    trade_date: `2026-11-${day}T12:00:00+08:00` });
+  const buys = [trade('buy', 593.15, '01'), trade('buy', 610.28, '05')];
+  assert.equal(formatQuantity(deriveHoldings(buys)[0].shares), '1203.43');
+  assert.equal(formatQuantity(0.123456789), '0.123456789');
+  const smallBuys = [trade('buy', 0.1, '01'), trade('buy', 0.2, '05')];
+  assert.deepEqual(deriveHoldings([...smallBuys, trade('sell', 0.3, '06')]), []);
+  assert.equal(formatQuantity(deriveHoldings([...buys, trade('sell', 1203.4299, '06')])[0].shares), '0.0001');
+});
 
 test('three-decimal ETF and option trades retain price, cost and cash consistency', () => {
   for (const [symbol, shares, amount] of [['159509', 1000, 1234], ['QQQ261009C600', 10, 1234]]) {

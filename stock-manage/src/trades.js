@@ -141,6 +141,7 @@ function dateKey(t) {
 
 function applyFifoSellToQueue(buyQueue, sellShares, sellPrice, symbol, matched = null) {
   const mult = optionMult(symbol);
+  const tolerance = fundCode(symbol) ? Number.EPSILON * sellShares : 0;
   let gain = 0;
   let rem = sellShares;
   while (rem > 0 && buyQueue.length) {
@@ -149,7 +150,8 @@ function applyFifoSellToQueue(buyQueue, sellShares, sellPrice, symbol, matched =
     gain += u * (sellPrice - buyQueue[0].price) * mult;
     buyQueue[0].shares -= u;
     rem -= u;
-    if (buyQueue[0].shares <= 0) buyQueue.shift();
+    if (buyQueue[0].shares <= tolerance) buyQueue.shift();
+    if (rem <= tolerance) rem = 0;
   }
   if (matched) matched.unmatchedShares += Math.max(0, rem);
   return gain;
