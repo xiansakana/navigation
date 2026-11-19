@@ -5,11 +5,13 @@ import { effectiveBookkeepingFx, refreshBookkeepingFx } from './bookkeeping-fx.j
 import { SOCIAL_ACCOUNT_GROUP } from './bookkeeping-scope.js';
 import { investmentReturns } from './bookkeeping-investment-returns.js';
 import { refreshHoldingQuotes } from './bookkeeping-holding-quotes.js';
+import { createSnapshotReplay, snapshotDay } from './bookkeeping-snapshot-replay.js';
+import { investmentRows } from '../../shared/investment-accounts.js';
 
 const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
 export const assetDate = time => new Date(time + 8 * 3600000).toISOString().slice(0,10);
 const previousDate = date => new Date(Date.parse(date + 'T12:00:00Z') - 86400000).toISOString().slice(0,10);
-const captureTime = now => Date.parse(assetDate(now) + 'T23:59:00+08:00');
+const captureTime = now => Date.parse(assetDate(now) + 'T04:30:00+08:00');
 export const nextAssetCapture = now => captureTime(now) + (now >= captureTime(now) ? 86400000 : 0);
 
 export function createAssetHistory(db) {
@@ -22,12 +24,12 @@ export function createAssetHistory(db) {
   function capture(userId, accounts, entries, rates, now = Date.now(), { snapshot = true, daily = false } = {}) {
     const linked = accounts.filter(a => a.included && a.balanceSource === 'portfolio');
     if (!linked.length || linked.some(a => !Number.isFinite(a.ledgerBalance))) return false;
-    const date = assetDate(now);
+    const date = daily?snapshotDay(now):assetDate(now);
     return db.transaction(() => {
       if (daily) {
         if (now < captureTime(now)) return false;
         const saved = db.prepare('SELECT captured_at FROM bookkeeping_asset_snapshots WHERE user_id=? AND date=?').get(userId,date);
-        if (saved && Date.parse(saved.captured_at) >= captureTime(now)) return false;
+        if (saved) return false;
       }
       const latest = db.prepare('SELECT MAX(date) AS date FROM bookkeeping_asset_snapshots WHERE user_id=?').get(userId);
       if (latest.date && date < latest.date) return false;
@@ -50,8 +52,12 @@ export function createAssetHistory(db) {
       const included = accounts.filter(a => a.included);
       if (included.some(a => !Number.isFinite(a.balance) || !(rates[a.currency] > 0))) return false;
       const balance = round(included.reduce((n,a) => n + a.balance * rates[a.currency],0));
+      const bindings=daily?new Map(investmentRows(db,userId).map(a=>[a.id,a])):new Map();
       const details = included.map(a => ({ id:a.id, currency:a.currency, balance:a.balance, rate:rates[a.currency],
-        source:a.balanceSource || 'ledger', quotes:a.investment?.positions?.map(p=>({symbol:p.symbol,asOf:p.quoteAsOf,price:p.price})) || [] }));
+        source:a.balanceSource || 'ledger', quotes:a.investment?.positions?.map(p=>({symbol:p.symbol,asOf:p.quoteAsOf,price:p.price})) || [],
+        ...(a.investment && bindings.has(a.investment.id)?{investmentId:a.investment.id,cashBaseline:{
+          baseline_at:bindings.get(a.investment.id).baseline_at,baseline_trade_ids:bindings.get(a.investment.id).baseline_trade_ids,
+        }}:{}) }));
       // Each day's last observation becomes its historical valuation. Never overwrite an older observation.
       db.prepare(`INSERT INTO bookkeeping_asset_snapshots VALUES (?,?,?,?,?)
         ON CONFLICT(user_id,date) DO UPDATE SET captured_at=excluded.captured_at,balance=excluded.balance,details=excluded.details
@@ -101,7 +107,16 @@ export function createAssetHistory(db) {
       const dates=[...new Set([...legacy.map(p=>p.date),...curves.flat().map(p=>p.date).filter(date=>date>=legacy[0].date&&date<=legacy.at(-1).date)])].sort();
       legacy=dates.map(date=>({date,currency:'CNY',source:'ledger',balance:round(atCurve(history.points,date)-curves.reduce((sum,curve)=>sum+atCurve(curve,date),0)),...(estimated?{scopeEstimated:true}:{})}));
     }
-    const points=[...legacy,...snapshots.map(p=>({date:p.date,currency:'CNY',balance:excluded.size?round(JSON.parse(p.details).filter(a=>!excluded.has(a.id)).reduce((sum,a)=>sum+a.balance*a.rate,0)):p.balance,source:'valuation',capturedAt:p.captured_at}))];
+    const replay=createSnapshotReplay(db,userId,scope.securityHistory);
+    const observed=snapshots.map(p=>{
+      const original=JSON.parse(p.details);
+      const details=replay(p,original).filter(a=>!excluded.has(a.id));
+      const revisionPending=details.some(a=>a.revisionPending),revised=details.some(a=>a.revised);
+      const included=revisionPending?original.filter(a=>!excluded.has(a.id)):details;
+      const balance=excluded.size||revised&&!revisionPending?round(included.reduce((sum,a)=>sum+a.balance*a.rate,0)):p.balance;
+      return {date:p.date,currency:'CNY',balance,source:'valuation',capturedAt:p.captured_at,...(revisionPending?{revisionPending}:revised?{revised}:{})};
+    });
+    const points=[...legacy,...observed];
     if (!points.length) return null;
     // Today's observation is a display-only estimate; never rewrite daily snapshots.
     const live = Number.isFinite(currentBalance);
@@ -121,8 +136,8 @@ export function createAssetHistory(db) {
       historyMode:'hybrid', valuationCutover:baseline.cutover_date, latestValuation:snapshots.at(-1)?.captured_at || null,
       ...(estimated?{scopeEstimatedBefore:baseline.cutover_date}:{}),
       current:points.at(-1).balance, asOf:points.at(-1).date,
-      period:start<=end?{start,end,openingAsOf,opening:opening.balance,closing:closing.balance,change:round(closing.balance-opening.balance),openingSource:opening.source,closingSource:closing.source,closingAsOf:closing.date}:null,
-      note:`${baseline.cutover_date} 前保留账单与余额调整反推的历史账面资产；从该日起按采集时的账户范围、现金及证券最新可用行情记录 CNY 估值，每天北京时间 23:59 采集一次。曲线包含范围首日前一日日末的期初基准，首尾差值与范围内资产变化一致。范围覆盖今天时使用当前账户余额、最新可用证券行情及当前汇率显示“今日暂估”，刷新不会改写历史快照。其他未采集日期沿用上一观测，不代表当日实际收盘净值；切换日可能包含账面与行情估值的口径差额，资产变化不等同投资收益。历史反推数据已冻结，不随最新股价重算。`+(excluded.size?' 已按选择排除社保公积金等账户；快照段使用各账户当时的余额与汇率。':'')+(estimated?` ${baseline.cutover_date} 前原冻结数据未保存账户拆分，排除部分按最早可用账户快照及账单反推，属于估算；原始总曲线保持不变。`:'') };
+      period:start<=end?{start,end,openingAsOf,opening:opening.balance,closing:closing.balance,change:Number.isFinite(opening.balance)&&Number.isFinite(closing.balance)?round(closing.balance-opening.balance):null,openingSource:opening.source,closingSource:closing.source,closingAsOf:closing.date}:null,
+      note:`${baseline.cutover_date} 前保留账单与余额调整反推的历史账面资产；从该日起按采集时的账户范围、现金及证券最新可用行情记录 CNY 估值，每天北京时间 04:30 采集一次并归入前一日。补录交易后可补算历史估值，缺少可靠资料时显示原快照并标注待补齐。曲线包含范围首日前一日日末的期初基准，首尾差值与范围内资产变化一致。范围覆盖今天时使用当前账户余额、最新可用证券行情及当前汇率显示“今日暂估”，刷新不会改写历史快照。其他未采集日期沿用上一观测，不代表当日实际收盘净值；切换日可能包含账面与行情估值的口径差额，资产变化不等同投资收益。历史反推数据已冻结，不随最新股价重算。`+(excluded.size?' 已按选择排除社保公积金等账户；快照段使用各账户当时的余额与汇率。':'')+(estimated?` ${baseline.cutover_date} 前原冻结数据未保存账户拆分，排除部分按最早可用账户快照及账单反推，属于估算；原始总曲线保持不变。`:'') };
   }
   function returns(userId, filter, today, accounts, entries, rates, excludedAccountIds=[], allowPortfolioHistory=true) {
     const excluded=new Set(excludedAccountIds);
@@ -160,8 +175,8 @@ export function startAssetHistory(db, { clock = Date.now, refresh = refreshBookk
       for (const {user_id:userId} of users) {
         if (clock() >= cutoff + 60000) break;
         try {
-          const saved = db.prepare('SELECT captured_at FROM bookkeeping_asset_snapshots WHERE user_id=? AND date=?').get(userId,assetDate(startedAt));
-          if (saved && Date.parse(saved.captured_at) >= cutoff) continue;
+          const saved = db.prepare('SELECT captured_at FROM bookkeeping_asset_snapshots WHERE user_id=? AND date=?').get(userId,snapshotDay(startedAt));
+          if (saved) continue;
           const original = store.entries(userId);
           const accounts = store.accounts(userId);
           const destinations = original.filter(e=>e.toAccountId).map(e=>({...e,currency:accounts.find(a=>a.id===e.toAccountId)?.currency || e.currency}));
@@ -173,7 +188,7 @@ export function startAssetHistory(db, { clock = Date.now, refresh = refreshBookk
             e.toHistoricalRate = currency ? fx.quote(currency,e.date.slice(0,10))?.rate : null;
             if (e.toAmount!=null && !e.toHistoricalRate) e.toFxMissing=currency;
           }
-          // Leave time to write the observation before the Beijing date rolls over.
+          // Keep the observation close to its scheduled valuation time.
           const budget = Math.max(0, Math.min(40000, cutoff + 55000 - clock()));
           try { await refreshQuotes(db,userId,store.accounts(userId),budget); }
           catch (error) { console.error('[asset-history] quote refresh:', error.message); }

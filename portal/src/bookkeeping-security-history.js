@@ -70,7 +70,7 @@ export function createSecurityHistory(db,{request=fetchQuoteResource,key=polygon
     while(active<2 && queue.length){const job=queue.shift();active++;
       void load(job.symbol,job.start,job.end).then(result=>{
         if(!db.open)return;
-        db.transaction(()=>{const insert=db.prepare('INSERT INTO bookkeeping_security_prices VALUES(?,?,?,?,?) ON CONFLICT(user_id,symbol,date) DO UPDATE SET close=excluded.close,source=excluded.source');for(const p of result.prices)insert.run(job.userId,job.symbol,p.date,p.close,p.source);
+        db.transaction(()=>{const insert=db.prepare("INSERT INTO bookkeeping_security_prices VALUES(?,?,?,?,?) ON CONFLICT(user_id,symbol,date) DO UPDATE SET close=excluded.close,source=excluded.source WHERE bookkeeping_security_prices.source NOT LIKE 'verified-backfill:%'");for(const p of result.prices)insert.run(job.userId,job.symbol,p.date,p.close,p.source);
           db.prepare('INSERT INTO bookkeeping_security_history_meta VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,symbol) DO UPDATE SET start=excluded.start,end=excluded.end,attempted_at=excluded.attempted_at,status=excluded.status,splits=excluded.splits').run(job.userId,job.symbol,job.start,job.end,clock(),'ready',JSON.stringify(result.splits));})();
       }).catch(()=>{if(db.open)db.prepare('INSERT INTO bookkeeping_security_history_meta VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,symbol) DO UPDATE SET attempted_at=excluded.attempted_at,status=excluded.status').run(job.userId,job.symbol,job.start,job.end,clock(),'unavailable','[]');})
         .finally(()=>{active--;pending.delete(job.id);if(db.open)drain();});
@@ -96,3 +96,14 @@ export function createSecurityHistory(db,{request=fetchQuoteResource,key=polygon
 }
 const instances=new WeakMap();
 export function securityHistory(db){if(!instances.has(db))instances.set(db,createSecurityHistory(db));return instances.get(db);}
+
+export function snapshotPriceHistory(history,userId,today) {
+  const prices=history.read(userId);
+  const requests=new Map();
+  return {...prices,request(symbol,date){
+    // Existing verified quotes and executions cover options; don't query every expired contract.
+    if(optionSymbol(symbol)||date<shift(today,-14)||requests.has(symbol)||requests.size>=12)return;
+    requests.set(symbol,true);
+    history.ensure?.(userId,[{symbol,start:shift(date,-7),end:date}]);
+  }};
+}

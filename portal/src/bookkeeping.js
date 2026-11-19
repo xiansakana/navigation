@@ -14,6 +14,7 @@ import { reviewIcostImport } from './bookkeeping-import-review.js';
 import { effectiveBookkeepingFx, refreshBookkeepingFx } from './bookkeeping-fx.js';
 import { analyticsScope, scopedBills } from './bookkeeping-scope.js';
 import { tradeHistoryReturns } from './bookkeeping-trade-history.js';
+import { securityHistory, snapshotPriceHistory } from './bookkeeping-security-history.js';
 
 const imports = new Map();
 const ttl = 15 * 60 * 1000;
@@ -108,7 +109,9 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
         const included=scopedAccounts.filter(a=>a.included);
         const currentBalance=included.every(a=>Number.isFinite(a.balance) && fx.rates[a.currency]>0)
           ? included.reduce((total,a)=>total+a.balance*fx.rates[a.currency],0) : null;
-        calculation.asset=historyStore.read(uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),currentBalance,{excludedAccountIds:scope.excludedAccountIds,accounts,entries:all,rates:fx.rates}) || calculation.asset;
+        const today=assetDate(Date.now());
+        const prices=snapshotPriceHistory(securityHistory(getDatabase()),uid,today);
+        calculation.asset=historyStore.read(uid,Object.fromEntries(url.searchParams),today,currentBalance,{excludedAccountIds:scope.excludedAccountIds,accounts,entries:all,rates:fx.rates,securityHistory:prices}) || calculation.asset;
       }
       if(canBookkeep(session,'analysis:view') && canBookkeep(session,'accounts:returns:view') && accounts && !accounts.some(a=>a.included && a.investment?.permissionMissing))calculation.investmentReturns=createAssetHistory(getDatabase()).returns(uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),accounts,all,fx.rates,scope.excludedAccountIds,portfolioCashAllowed(session));
       if(url.searchParams.get('investmentHistory')==='1' && calculation.investmentReturns && portfolioCashAllowed(session) && hasPermission(session.permissions||[],'service:stock-manage:trades:view'))calculation.investmentReturns.trading=await tradeHistoryReturns(getDatabase(),uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),accounts,scope.excludedAccountIds,{currentRates:fx.rates});

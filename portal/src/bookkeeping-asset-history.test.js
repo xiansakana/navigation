@@ -11,6 +11,7 @@ import { saveInvestmentAccount } from '../../shared/investment-accounts.js';
 import { getDatabase, closeDatabase } from '../../shared/db/index.js';
 import { handleBookkeepingApi } from './bookkeeping.js';
 import { refreshHoldingQuotes } from './bookkeeping-holding-quotes.js';
+import { tradeValuation } from './bookkeeping-trade-valuation.js';
 
 const now = Date.parse('2026-10-15T10:00:00Z');
 const accounts = [{id:'cash',currency:'CNY',balance:100,included:true},
@@ -187,11 +188,11 @@ test('today estimate reconciles period and chart boundaries without modifying fr
   } finally {db.close();}
 });
 
-test('daily collector waits until Beijing 23:59 and saves once per day, including after restarts',async()=>{
+test('daily collector waits until Beijing 04:30 and saves once per day, including after restarts',async()=>{
   const db=new Database(':memory:'),store=createBookkeepingStore(db);
   const aid=store.saveAccount('daily',{name:'证券',currency:'CNY',balance:150});
   const investmentId=saveInvestmentAccount(db,'daily',{name:'证券',currency:'CNY',bookkeepingId:aid,baselineCash:100});
-  let clock=Date.parse('2026-10-15T15:58:00Z'),refreshes=0,delay;
+  let clock=Date.parse('2026-10-15T20:29:00Z'),refreshes=0,delay;
   const config={clock:()=>clock,refresh:async()=>{refreshes++;},schedule:(_,ms)=>{delay=ms;return {unref(){}};},cancel(){}};
   const worker=startAssetHistory(db,config);
   try {
@@ -209,10 +210,10 @@ test('daily collector waits until Beijing 23:59 and saves once per day, includin
     assert.deepEqual(db.prepare('SELECT * FROM bookkeeping_asset_snapshots').get(),first);
     const restarted=startAssetHistory(db,config);
     try {await restarted.collect();assert.equal(refreshes,1);} finally {restarted.stop();}
-    assert.equal(nextAssetCapture(clock),Date.parse('2026-10-16T15:59:00Z'));
+    assert.equal(nextAssetCapture(clock),Date.parse('2026-10-16T20:30:00Z'));
     clock=Date.parse('2026-10-16T10:00:00Z');await worker.collect();
     assert.equal(refreshes,1);
-    clock=Date.parse('2026-10-16T15:59:00Z');await worker.collect();
+    clock=Date.parse('2026-10-16T20:30:00Z');await worker.collect();
     assert.equal(refreshes,2);
     assert.deepEqual(db.prepare('SELECT balance FROM bookkeeping_asset_snapshots ORDER BY date').all().map(r=>r.balance),[100,200]);
   } finally {worker.stop();db.close();}
@@ -222,7 +223,7 @@ test('daily snapshot refreshes linked holdings before valuation and preserves qu
   const db=new Database(':memory:'),store=createBookkeepingStore(db);
   const aid=store.saveAccount('daily',{name:'证券',currency:'CNY',balance:150});
   const accountId=saveInvestmentAccount(db,'daily',{name:'证券',currency:'CNY',bookkeepingId:aid,baselineCash:100});
-  let clock=Date.parse('2026-10-15T15:58:59Z');
+  let clock=Date.parse('2026-10-15T20:29:59Z');
   db.exec('CREATE TABLE portfolio_users (user_id TEXT PRIMARY KEY,data TEXT NOT NULL,updated_at TEXT NOT NULL)');
   const trade=symbol=>({id:symbol,symbol,type:'buy',shares:1,total_amount:10,currency:'CNY',trade_date:'2026-10-01T12:00:00',account_id:accountId});
   const original={trades:['510300','159915'].map(trade),quotes:{'159915':{price:12}}};
@@ -248,4 +249,33 @@ test('daily snapshot refreshes linked holdings before valuation and preserves qu
     assert.equal(updated.quotes['510300'].price,20);
     assert.deepEqual(JSON.parse(portfolio.get('other').data),original);
   } finally {worker.stop();db.close();}
+});
+
+test('a late overnight option trade revises the prior day using its near-cutoff execution, preserving the original',()=>{
+  const db=new Database(':memory:'),store=createBookkeepingStore(db);
+  try {
+    const uid='late',ledgerId=store.saveAccount(uid,{name:'证券',currency:'USD',balance:1000});
+    const id=saveInvestmentAccount(db,uid,{name:'证券',currency:'USD',bookkeepingId:ledgerId,baselineCash:1000});
+    db.prepare('UPDATE investment_accounts SET baseline_at=? WHERE id=?').run('2026-10-15T00:00:00Z',id);
+    const h=createAssetHistory(db),cutoff=Date.parse('2026-10-15T20:30:00Z');
+    assert.equal(h.capture(uid,store.accounts(uid),[],rates,cutoff,{daily:true}),true);
+    const original=db.prepare('SELECT * FROM bookkeeping_asset_snapshots').get();
+    assert.equal(original.date,'2026-10-15');
+    db.exec('CREATE TABLE portfolio_users(user_id TEXT PRIMARY KEY,data TEXT NOT NULL,updated_at TEXT NOT NULL)');
+    const symbol='QQQ261120C665';
+    const late={id:'late',account_id:id,symbol,type:'buy',shares:1,price:2,total_amount:200,commission:1,currency:'USD',trade_date:'2026-10-15T20:28:00Z',created_at:'2026-10-16T01:00:00Z'};
+    const update=db.prepare('INSERT INTO portfolio_users VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data');
+    update.run(uid,JSON.stringify({trades:[late]}),late.created_at);
+    const read=()=>h.read(uid,{start:'2026-10-15',end:'2026-10-15'},'2026-10-16');
+    assert.equal(read().period.closing,6993);
+    assert.equal(read().points.at(-1).revised,true);
+    const valuation=tradeValuation(db,uid,new Set([ledgerId]),'2026-10-16');
+    assert.equal(valuation.day(late),'2026-10-15');
+    assert.equal(valuation.day({...late,trade_date:'2026-10-15T20:31:00Z'}),'2026-10-16');
+    assert.deepEqual(valuation.quote(symbol,'2026-10-15'),{date:'2026-10-15',close:2,source:'backfill'});
+    update.run(uid,JSON.stringify({trades:[{...late,trade_date:'2026-10-15T18:00:00Z'}]}),late.created_at);
+    assert.equal(read().period.closing,7000);
+    assert.equal(read().points.at(-1).revisionPending,true);
+    assert.deepEqual(db.prepare('SELECT * FROM bookkeeping_asset_snapshots').get(),original);
+  } finally {db.close();}
 });

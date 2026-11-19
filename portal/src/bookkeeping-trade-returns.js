@@ -13,13 +13,13 @@ export const tradeDay=t=>{
 };
 export const optionSymbol=s=>/^([A-Z]+)(\d{6})([CP])(\d+(?:\.\d+)?)$/.exec(s);
 
-export function reconstructTradeReturns(trades,{start,end,today,quote,fx,splits=[],hybrid=null,valuationFx=fx}) {
+export function reconstructTradeReturns(trades,{start,end,today,quote,fx,splits=[],hybrid=null,valuationFx=fx,valuationDay=tradeDay}) {
   const booked=new Set();
   for(const action of splits.filter(s=>!s.uncertain)){
     const same=trades.filter(t=>normalizeSymbol(t.symbol)===action.symbol&&tradeDay(t)===action.date);
     for(const sell of same.filter(t=>t.type==='sell'))if(same.some(buy=>buy.type==='buy'&&(buy.account_id||'')===(sell.account_id||'')&&inferCurrency(buy.symbol,buy.currency)===inferCurrency(sell.symbol,sell.currency)&&tradeStamp(buy)===tradeStamp(sell)&&Number(sell.commission||0)===0&&Number(buy.commission||0)===0&&Number(buy.shares)>0&&Number(sell.total_amount)>0&&Math.abs(Number(buy.shares)-Number(sell.shares)*action.ratio)<1&&Math.abs(Number(buy.total_amount)/Number(sell.total_amount)-Number(buy.shares)/(Number(sell.shares)*action.ratio))<0.005))booked.add(JSON.stringify([action.symbol,sell.account_id||'',tradeStamp(sell)]));
   }
-  const sorted=trades.map(t=>({...t,day:tradeDay(t),symbol:normalizeSymbol(t.symbol)})).filter(t=>t.day&&t.day<=end)
+  const sorted=trades.map(t=>({...t,day:valuationDay(t),symbol:normalizeSymbol(t.symbol)})).filter(t=>t.day&&t.day<=end)
     .sort((a,b)=>tradeStamp(a)-tradeStamp(b)||(a.symbol===b.symbol&&(a.account_id||'')===(b.account_id||'')&&booked.has(JSON.stringify([a.symbol,a.account_id||'',tradeStamp(a)]))?(a.type==='sell'?0:1)-(b.type==='sell'?0:1):0)||String(a.id).localeCompare(String(b.id)));
   const note='证券收益按所选范围首日前一日日末归零：范围已实现净收益＝当日已实现净收益－期初已实现净收益；范围浮盈变化＝当日持仓浮盈－期初持仓浮盈；范围证券总收益＝两者相加。范围前的交易继续参与同账户、证券及币种的 FIFO 成本匹配，但不把范围前的收益计入范围总收益。计入佣金、股息、税费及其他证券收支，买卖按交易日汇率折算 CNY；历史持仓按当日可知的最近收盘价及当日汇率估值。美股收盘归北京时间次日，非交易日最多沿用此前七天收盘；不使用未来价格。期初或当日缺行情、成本或汇率处留空，不以零或当前股价代替。不包含历史现金存量汇兑及未记录持仓，与下方全资产快照收益口径不同。';
   if(!sorted.length)return {points:[],note,issues:[],summary:null};
@@ -33,7 +33,7 @@ export function reconstructTradeReturns(trades,{start,end,today,quote,fx,splits=
   for(let date=loopStart;date<=end;date=shift(date,1)) {
     while(action<actions.length&&actions[action].date<=date){const s=actions[action++];for(const [key,lot] of queues)if(lot.symbol===s.symbol){const account=JSON.parse(key)[0];if(sorted.some(t=>t.day===s.date&&t.symbol===s.symbol&&(t.account_id||'')===account&&booked.has(JSON.stringify([s.symbol,account,tradeStamp(t)]))))continue;for(const item of lot.items){if(s.uncertain)item.uncertain=true;else item.shares*=s.ratio;}}}
     while(index<sorted.length&&sorted[index].day<=date){
-      const t=sorted[index++],currency=inferCurrency(t.symbol,t.currency),rate=fx(currency,t.day)?.rate;
+      const t=sorted[index++],currency=inferCurrency(t.symbol,t.currency),rate=fx(currency,tradeDay(t))?.rate;
       const fee=Number(t.commission||0),amount=Number(t.total_amount),shares=Number(t.shares),key=JSON.stringify([t.account_id||'',t.symbol,currency]);
       if(!(rate>0)||!Number.isFinite(amount)||!Number.isFinite(fee)){invalidCost=true;issues.add('交易金额或交易日汇率缺失');continue;}
       realized-=fee*rate;
