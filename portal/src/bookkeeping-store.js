@@ -169,7 +169,12 @@ export function createBookkeepingStore(db) {
       clauses.push(filter.flow==='expense'?expense:filter.flow==='income'?"e.type='收入'":"(e.type='收入' OR "+expense+")");
     }
     if (filter.accountId) { clauses.push('(e.account_id=? OR e.to_account_id=?)'); args.push(filter.accountId, filter.accountId); }
-    if (filter.q) { clauses.push('(e.note LIKE ? OR e.category LIKE ? OR e.subcategory LIKE ? OR e.tags LIKE ? OR e.location LIKE ? OR a.name LIKE ? OR b.name LIKE ?)'); for (let i = 0; i < 7; i++) args.push('%' + text(filter.q) + '%'); }
+    if (filter.q) {
+      const fields = ['e.note', 'e.category', 'e.subcategory', 'e.tags', 'e.location'];
+      if (!filter.hideAccountSearch) fields.push('a.name', 'b.name');
+      clauses.push('(' + fields.map(field => field + ' LIKE ?').join(' OR ') + ')');
+      args.push(...fields.map(() => '%' + text(filter.q) + '%'));
+    }
     return db.prepare(`SELECT e.*,a.name AS account_name,b.name AS to_account_name FROM bookkeeping_entries e
       LEFT JOIN bookkeeping_accounts a ON a.id=e.account_id AND a.user_id=e.user_id
       LEFT JOIN bookkeeping_accounts b ON b.id=e.to_account_id AND b.user_id=e.user_id

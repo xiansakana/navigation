@@ -29,6 +29,7 @@ import {
     canViewService,
     canEditService,
     canTestNotificationSlack,
+    canViewNotificationConfig,
     canManageBusinessNotification,
     canWriteService,
     hasStockManageFeature,
@@ -222,7 +223,7 @@ async function handleApi(req, res, url, session) {
                 visiblePermissions = access.permissions;
                 dataContext = { module: moduleId, scope: access.scope, label: access.label, writable: access.writable };
             }
-        } catch { /* Individual APIs still reject a revoked or unavailable scope. */ }
+        } catch { visiblePermissions = []; }
         return json(res, 200, {
             ok: true,
             username: session.username,
@@ -483,6 +484,15 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
     }
 
     var proxyUrl = new URL(ctx.proxyUrl, 'http://127.0.0.1');
+    if (ctx.service.id === 'notifications' && ['GET', 'HEAD'].includes(req.method)) {
+        const prefix = ctx.service.path.replace(/\/$/, '');
+        const path = proxyUrl.pathname.startsWith(prefix + '/') ? proxyUrl.pathname.slice(prefix.length) : proxyUrl.pathname;
+        const readsConfig = (path.startsWith('/api/') || path === '/health') && path !== '/api/status';
+        if (readsConfig && !canViewNotificationConfig(dataAccess.permissions)) {
+            sendError(req, res, browserUrl, 403, '无权查看通知配置');
+            return true;
+        }
+    }
 
     var napcatCanonical = napcatCanonicalWebuiPath(ctx.service, browserUrl.pathname);
     if (napcatCanonical) {
@@ -569,7 +579,7 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
         req.headers['x-portal-user-id'] = String(dataAccess?.ownerId || proxySession.userId);
         req.headers['x-portal-username'] = String(proxySession.username || '');
         req.headers['x-portal-permissions'] = Buffer
-            .from(JSON.stringify(proxySession.permissions || []), 'utf8')
+            .from(JSON.stringify(dataAccess?.permissions || proxySession.permissions || []), 'utf8')
             .toString('base64url');
     }
     req.url = ctx.proxyUrl;

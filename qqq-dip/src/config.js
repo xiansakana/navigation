@@ -10,7 +10,7 @@ export function resolveRoot() {
 }
 
 export function loadConfig() {
-  const configPath = path.join(ROOT, 'config.json');
+  const configPath = process.env.QQQ_DIP_CONFIG_PATH || path.join(ROOT, 'config.json');
   if (!fs.existsSync(configPath)) {
     throw new Error('缺少 config.json，请复制 config.example.json');
   }

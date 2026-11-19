@@ -229,10 +229,8 @@ export function createStore(config) {
 
   function patchAction(id, patch) {
     const prev = data.actions.find((a) => a.id === id);
-    if (!prev) return null;
-    prev.type = patch.type || prev.type;
+    if (!prev || prev.type !== 'note' || prev.source !== 'user' || prev.payload?.syncedTradeIds?.length) return null;
     if (patch.message != null) prev.message = String(patch.message);
-    prev.payload = { ...(prev.payload || {}), ...(patch.payload || {}) };
     persist();
     return prev;
   }

@@ -125,4 +125,4 @@ byId('business-grid').addEventListener('click', async function(event) {
     finally { button.disabled = false; }
 });
 
-loadAccess().then(bizLoad).catch(function(err) { const error=document.createElement('p');error.className='biz-error';error.textContent='权限读取失败：'+err.message;byId('biz-slot-stock').replaceChildren(error); }).finally(function() { window.navigationSkeleton?.finish('business'); });
+loadAccess().then(function() { if (access.canViewConfig) return bizLoad(); }).catch(function(err) { const error=document.createElement('p');error.className='biz-error';error.textContent='权限读取失败：'+err.message;byId('biz-slot-stock').replaceChildren(error); }).finally(function() { window.navigationSkeleton?.finish('business'); });

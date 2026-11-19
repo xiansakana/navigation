@@ -25,13 +25,25 @@ test('real Portal enforces shared read/write scopes, spoofing protection, policy
     assert.equal(audit.actor_id, f.a.id); assert.equal(audit.owner_id, f.b.id);
     const proxied = await f.request('/stock-manage/api/state', { scope: target, headers: { 'X-Portal-User-Id': 'forged', 'X-Portal-Permissions': 'forged' } });
     assert.equal(proxied.status, 200); assert.equal(proxied.data.owner, f.b.id); assert.notEqual(proxied.data.permissions, 'forged');
+    const scopedPermissions = JSON.parse(Buffer.from(proxied.data.permissions, 'base64url'));
+    assert.ok(scopedPermissions.includes('service:stock-manage:pnl:view'));
+    assert.ok(!scopedPermissions.includes('service:stock-manage:edit'));
     assert.equal((await f.request('/stock-manage/api/state', { scope: target, method: 'POST', body: {} })).status, 403);
+    assert.equal((await f.request('/notifications/api/status')).status, 200);
+    for (const path of ['api/config', 'api/integrations', 'api/monitors/qq-login', 'health']) {
+      assert.equal((await f.request('/notifications/' + path)).status, 403);
+    }
+    f.update(r => { r.roles.find(role => role.id === 'fixture_member').permissions.push('service:notifications:config:view'); });
+    assert.equal((await f.request('/notifications/api/config')).status, 200);
+    assert.equal((await f.request('/notifications/api/config', { method: 'PUT', body: {} })).status, 403);
     const instance = await f.request('/torn-toolbox/company/api/state', { scope: 'instance:company-team' });
     assert.equal(instance.status, 200); assert.equal(instance.data.url, '/team/api/state');
     assert.equal((await f.request('/api/me/data-scopes?module=bookkeeping', { method: 'PUT', body: { scope: target } })).status, 200);
     assert.equal((await f.request('/api/me/data-modules')).status, 200);
     f.update(r => { r.accessPolicy.modules.bookkeeping.grants = []; });
     assert.equal((await f.request('/api/bookkeeping/accounts', { scope: target })).status, 403);
+    const revoked = await f.request('/api/me', { scope: target, headers: { Referer: f.baseUrl + '/bookkeeping/' } });
+    assert.deepEqual(revoked.data.permissions, []);
     f.update(r => { r.accessPolicy.modules.bookkeeping.enabled = false; });
     assert.equal((await f.request('/api/bookkeeping/accounts')).status, 403);
     assert.equal((await f.request('/bookkeeping/')).status, 403);

@@ -48,6 +48,20 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
     return json(res, 403, { ok: false, error: '不允许跨站写入' });
   }
   const store = createBookkeepingStore(getDatabase()), uid = session.userId;
+  const accountsVisible = canBookkeep(session, 'accounts:view');
+  const entryFilter = Object.fromEntries(url.searchParams);
+  entryFilter.hideAccountSearch = !accountsVisible;
+  if (!accountsVisible) delete entryFilter.accountId;
+  const visibleEntry = entry => {
+    const result = { ...entry };
+    delete result.balanceCheckpoint;
+    if (!accountsVisible) {
+      for (const field of ['accountName', 'toAccountName', 'accountId', 'toAccountId', 'balanceAfter', 'balanceCurrency', 'balanceEstimated']) {
+        delete result[field];
+      }
+    }
+    return result;
+  };
   try {
     if(route==='/location' && method==='GET') {
       if(!canBookkeep(session,'entries:edit'))return json(res,403,{ok:false,error:'无权获取记账位置'});
@@ -75,7 +89,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       const settings=store.settings(uid), fx=effectiveBookkeepingFx(settings);
       const scope=analyticsScope(permittedAccounts||[],settings.analysisScope);
       const excluded=new Set(scope.excludedAccountIds);
-      const listed=store.entries(uid,Object.fromEntries(url.searchParams)).map(history.enrich);
+      const listed=store.entries(uid,entryFilter).map(history.enrich);
       const entries=url.searchParams.get('analysisScope')==='1'?scopedBills(listed,excluded):listed;
       const balances=accountLedger(allOriginal,ledgerAccount,history.quote);
       for(const e of entries){if(balances.has(e.id))Object.assign(e,balances.get(e.id));delete e.balanceCheckpoint;}
@@ -98,11 +112,11 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       }
       if(canBookkeep(session,'analysis:view') && canBookkeep(session,'accounts:returns:view') && accounts && !accounts.some(a=>a.included && a.investment?.permissionMissing))calculation.investmentReturns=createAssetHistory(getDatabase()).returns(uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),accounts,all,fx.rates,scope.excludedAccountIds,portfolioCashAllowed(session));
       if(url.searchParams.get('investmentHistory')==='1' && calculation.investmentReturns && portfolioCashAllowed(session) && hasPermission(session.permissions||[],'service:stock-manage:trades:view'))calculation.investmentReturns.trading=await tradeHistoryReturns(getDatabase(),uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),accounts,scope.excludedAccountIds,{currentRates:fx.rates});
-      return json(res, 200, { ok: true, equivalentSummary:ledgerCalculation.equivalentSummary, conversionMissing:ledgerCalculation.billing.missingCurrencies, entries: entries.slice(offset, offset + limit), count: entries.length, summary: summarize(entries),
+      return json(res, 200, { ok: true, equivalentSummary:ledgerCalculation.equivalentSummary, conversionMissing:ledgerCalculation.billing.missingCurrencies, entries: entries.slice(offset, offset + limit).map(visibleEntry), count: entries.length, summary: summarize(entries),
         budgetExpense: budgetData?(budgetData.billing.missingCurrencies.length?null:budgetData.equivalentSummary.totals.CNY?.expense||0):null,
         accounts: accounts || [], settings:permittedAccounts?settings:{...settings,analysisScope:undefined}, fx, analysisScope:scope,
         analysis: canBookkeep(session,'analysis:view') ? calculation : null,
-        categoryTree: store.catalog.list(uid), accountGroups: canBookkeep(session,'accounts:view') ? store.catalog.groupList(uid) : [],
+        categoryTree: canBookkeep(session,'categories:view') ? store.catalog.list(uid) : [], accountGroups: accountsVisible ? store.catalog.groupList(uid) : [],
         books: [...new Set(all.map(e => e.book))], categories: [...new Set(all.map(e => e.category))],
         months: [...new Set(all.map(e => e.date.slice(0, 7)))].sort().reverse() });
     }
@@ -131,7 +145,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       if(!found)return json(res,404,{ok:false,error:'账单不存在'});
       const history=historicalFx(getDatabase());await history.ensure([found]);
       const detail=history.enrich(found);delete detail.balanceCheckpoint;
-      return json(res,200,{ok:true,entry:detail});
+      return json(res,200,{ok:true,entry:visibleEntry(detail)});
     }
     if (entry && method === 'PUT') return json(res, 200, { ok: true, id: store.saveEntry(uid, await body(req), entry[1]) });
     if (entry && method === 'DELETE') { store.removeEntry(uid, entry[1]); return json(res, 200, { ok: true }); }
@@ -172,7 +186,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       return json(res, 200, { ok: true, ...result });
     }
     if (route === '/export' && method === 'GET') {
-      const buffer = await exportIcost(store.entries(uid, Object.fromEntries(url.searchParams)));
+      const buffer = await exportIcost(store.entries(uid, entryFilter).map(visibleEntry));
       res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': 'attachment; filename="bookkeeping.xlsx"', 'Content-Length': buffer.length }); res.end(buffer); return;
     }

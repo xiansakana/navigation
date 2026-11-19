@@ -2,7 +2,7 @@ const QQQ_DIP_SERVICE = 'qqq-dip';
 const STOCK_MANAGE_SERVICE = 'stock-manage';
 
 let ctx = {
-  portal: false,
+  portal: /^\/stock-manage\/dip(?:\/|$)/.test(location.pathname),
   permissions: []
 };
 
@@ -22,7 +22,7 @@ export function can(feature, action = 'view') {
   if (!ctx.portal) return true;
   const perms = ctx.permissions;
   if (perms.includes('*')) return true;
-  if (action === 'edit' && perms.includes(`service:${QQQ_DIP_SERVICE}:edit`)) return true;
+  if (perms.includes(`service:${QQQ_DIP_SERVICE}:edit`)) return true;
   const fid = featurePermId(feature, action);
   if (perms.includes(fid)) return true;
   if (action === 'view' && perms.includes(featurePermId(feature, 'edit'))) return true;

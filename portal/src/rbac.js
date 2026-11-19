@@ -108,6 +108,7 @@ var QQQ_DIP_FEATURES = [
     { feature: 'refresh', name: '刷新行情', action: 'edit', permissionPath: ['抄底监控', '行情与规则'] },
     { feature: 'monitor-control', name: '开始/停止监听', action: 'edit', permissionPath: ['抄底监控', '行情与规则'] },
     { feature: 'cash', name: '弹药现金录入', action: 'edit', permissionPath: ['抄底监控', '资金与仓位'] },
+    { feature: 'cash', name: '查看抄底资金', action: 'view', permissionPath: ['抄底监控', '资金与仓位'] },
     { feature: 'lots', name: '查看抄底仓位金额', action: 'view', permissionPath: ['抄底监控', '资金与仓位'] },
     { feature: 'lots-edit', name: '登记/删除仓位', action: 'edit', permissionPath: ['抄底监控', '资金与仓位'] },
     { feature: 'settings', name: '规则开关', action: 'edit', permissionPath: ['抄底监控', '规则执行'] },
@@ -140,6 +141,7 @@ function buildQqqDipPermissions() {
 }
 
 var NOTIFICATION_FEATURES = [
+    { feature: 'config', name: '查看渠道与业务提醒配置', action: 'view', permissionPath: ['通知配置'] },
     { feature: 'slack-test', name: '发送 Slack 测试', action: 'edit', permissionPath: ['Slack 通知'] },
     { feature: 'business-save', name: '保存业务提醒配置', action: 'edit', permissionPath: ['业务提醒'] },
     { feature: 'business-test', name: '发送业务提醒测试', action: 'edit', permissionPath: ['业务提醒'] }
@@ -712,6 +714,12 @@ export function canEditService(userPerms, serviceId) {
 export function canTestNotificationSlack(userPerms) {
     return canEditService(userPerms, NOTIFICATIONS_SERVICE_ID)
         || hasPermission(userPerms, 'service:notifications:slack-test:edit');
+}
+
+export function canViewNotificationConfig(userPerms) {
+    return canEditService(userPerms, NOTIFICATIONS_SERVICE_ID)
+        || hasPermission(userPerms, 'service:notifications:config:view')
+        || hasPermission(userPerms, 'service:notifications:business-save:edit');
 }
 
 export function canManageBusinessNotification(userPerms, action) {

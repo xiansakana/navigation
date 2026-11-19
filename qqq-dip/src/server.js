@@ -56,11 +56,63 @@ const store = createStore(config);
 }
 const quotes = createQuoteService(config);
 const docs = createDocService(PUBLIC);
-const sseClients = new Set();
+const sseClients = new Map();
+
+function hasDipPermission(req, feature, action = 'view') {
+  let permissions;
+  try { permissions = JSON.parse(Buffer.from(req.headers['x-portal-permissions'] || '', 'base64url').toString()); }
+  catch { return false; }
+  return Array.isArray(permissions) && (
+    permissions.includes('*') || permissions.includes('service:qqq-dip:edit')
+    || permissions.includes(`service:qqq-dip:${feature}:${action}`)
+    || (action === 'view' && permissions.includes(`service:qqq-dip:${feature}:edit`))
+  );
+}
+
+function requireDip(feature, action = 'view') {
+  return (req, res, next) => hasDipPermission(req, feature, action)
+    ? next() : res.status(403).json({ error: '无权使用该抄底监控功能' });
+}
+
+const canViewLots = req => hasDipPermission(req, 'lots') || hasDipPermission(req, 'lots-edit', 'edit');
+const canViewActions = req => hasDipPermission(req, 'actions') || hasDipPermission(req, 'actions-note', 'edit');
+const canViewFunds = req => hasDipPermission(req, 'cash');
+
+function visibleActions(req, page) {
+  if (!page?.items || hasDipPermission(req, 'qq-config')) return page;
+  return {
+    ...page,
+    items: page.items.map(action => {
+      if (action.type !== 'notify') return action;
+      return { id: action.id, ts: action.ts, type: action.type, source: action.source, tier: action.tier, message: '通知事件' };
+    })
+  };
+}
+
+function visibleState(req, data) {
+  const result = { ...data };
+  if (!canViewFunds(req)) delete result.cash;
+  if (!canViewLots(req)) delete result.lots;
+  if (!canViewFunds(req) || !canViewLots(req)) {
+    delete result.evaluation;
+    delete result.round;
+  }
+  if (!canViewActions(req)) delete result.actions;
+  else if (result.actions) result.actions = visibleActions(req, result.actions);
+  if (!hasDipPermission(req, 'qq-config')) {
+    delete result.notify;
+    if (result.monitor) {
+      result.monitor = { ...result.monitor };
+      delete result.monitor.lastPush;
+    }
+  }
+  return result;
+}
 
 function broadcast(event, data) {
-  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  sseClients.forEach((client) => client.write(payload));
+  sseClients.forEach((req, client) => {
+    client.write(`event: ${event}\ndata: ${JSON.stringify(visibleState(req, data))}\n\n`);
+  });
 }
 
 const FX_STALE_MS = 6 * 60 * 60 * 1000;
@@ -111,6 +163,15 @@ app.use((req, res, next) => {
   }
   next();
 });
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/') || req.path === '/api/health') return next();
+  if (!hasDipPermission(req, 'tab-monitor') && !hasDipPermission(req, 'tab-qq')) {
+    return res.status(403).json({ error: '无权进入抄底监控' });
+  }
+  const send = res.json.bind(res);
+  res.json = data => send(data && typeof data === 'object' && !Array.isArray(data) ? visibleState(req, data) : data);
+  return next();
+});
 app.use(express.static(PUBLIC));
 
 function liveEval() {
@@ -160,7 +221,7 @@ function snapshot() {
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'qqq-dip' }));
 
-app.get('/api/notification-settings', (_req, res) => {
+app.get('/api/notification-settings', requireDip('qq-config'), (_req, res) => {
   res.json({ ok: true, notify: maskNotifyForClient(store.getNotify()), monitor: monitor.status() });
 });
 
@@ -177,15 +238,17 @@ app.get('/api/events', async (req, res) => {
   });
   void maybeRefreshFx();
   const initial = snapshot();
-  res.write(`event: state\ndata: ${JSON.stringify(initial)}\n\n`);
-  sseClients.add(res);
-  const stopCash = watchCash({ initialCash: initial.cash, read: () => store.getCash(), send: (cash) => {
-    res.write(`event: cash\ndata: ${JSON.stringify({ cash, evaluation: liveEval() })}\n\n`);
-  } });
-  req.on('close', () => { stopCash(); sseClients.delete(res); });
+  res.write(`event: state\ndata: ${JSON.stringify(visibleState(req, initial))}\n\n`);
+  sseClients.set(res, req);
+  const stopCash = canViewFunds(req) ? watchCash({ initialCash: initial.cash, read: () => store.getCash(), send: (cash) => {
+    res.write(`event: cash\ndata: ${JSON.stringify(visibleState(req, { cash, evaluation: liveEval() }))}\n\n`);
+  } }) : () => {};
+  // Reconnect through Portal so an open stream cannot keep revoked permissions indefinitely.
+  const recheck = setTimeout(() => res.end(), 30000);
+  res.on('close', () => { clearTimeout(recheck); stopCash(); sseClients.delete(res); });
 });
 
-app.put('/api/cash', (req, res) => {
+app.put('/api/cash', requireDip('cash', 'edit'), (req, res) => {
   const prev = store.getCash();
   const body = req.body || {};
   if ('cashUsd' in body || 'cashCny' in body) return res.status(400).json({ error: '抄底现金来自专用预留，请在账户管理中划拨或释放，不能在此改写账户现金' });
@@ -217,7 +280,7 @@ app.put('/api/cash', (req, res) => {
   });
 });
 
-app.put('/api/settings', (req, res) => {
+app.put('/api/settings', requireDip('settings', 'edit'), (req, res) => {
   const settings = store.setSettings(req.body || {});
   res.json({
     ok: true,
@@ -235,15 +298,20 @@ app.post('/api/notify/test', async (_req, res) => {
   res.status(410).json({ ok: false, error: '请在通知管理页面测试提醒' });
 });
 
-app.post('/api/monitor/start', (_req, res) => {
+function requireMonitorControl(req, res, next) {
+  if (hasDipPermission(req, 'monitor-control', 'edit') || hasDipPermission(req, 'qq-monitor', 'edit')) return next();
+  return res.status(403).json({ error: '无权控制抄底监听' });
+}
+
+app.post('/api/monitor/start', requireMonitorControl, (_req, res) => {
   res.json({ ok: true, monitor: monitor.start() });
 });
 
-app.post('/api/monitor/stop', (_req, res) => {
+app.post('/api/monitor/stop', requireMonitorControl, (_req, res) => {
   res.json({ ok: true, monitor: monitor.stop() });
 });
 
-app.post('/api/quotes/refresh', async (_req, res) => {
+app.post('/api/quotes/refresh', requireDip('refresh', 'edit'), async (_req, res) => {
   try {
     const ev = await monitor.tick({ silent: false });
     res.json({ ok: true, evaluation: ev, monitor: monitor.status() });
@@ -261,32 +329,41 @@ app.get('/api/fx', async (_req, res) => {
   }
 });
 
-app.get('/api/docs', (_req, res) => {
+app.get('/api/docs', requireDip('docs'), (_req, res) => {
   res.json({ ok: true, docs: docs.listDocs() });
 });
 
-app.get('/api/docs/:id', (req, res) => {
+app.get('/api/docs/:id', requireDip('docs'), (req, res) => {
   const doc = docs.getDoc(req.params.id);
   if (!doc) return res.status(404).json({ ok: false, error: '文档不存在' });
   res.json({ ok: true, doc });
 });
 
 app.get('/api/actions', (req, res) => {
-  res.json(store.listActionRows({
+  if (!canViewActions(req)) return res.status(403).json({ error: '无权查看操作记录' });
+  res.json(visibleActions(req, store.listActionRows({
     limit: Number(req.query.limit) || 20,
     offset: Number(req.query.offset) || 0,
     source: String(req.query.source || 'all')
-  }));
+  })));
 });
 
-app.get('/api/execution-plans/:tier/defaults', createExecutionDefaultsHandler({ store, quotes }));
+app.get('/api/execution-plans/:tier/defaults', requireDip('tier-exec', 'edit'), (req, res, next) => {
+  if (canViewFunds(req) && canViewLots(req)) return next();
+  return res.status(403).json({ error: '无权查看成交计划的资金与仓位' });
+}, createExecutionDefaultsHandler({ store, quotes }));
 
 app.post('/api/actions', (req, res) => {
   const body = req.body || {};
   let syncedTrades = [];
 
-  if (body.type === 'execute' && !canExecutePlan(req.headers['x-portal-permissions'])) {
+  const executesTrade = ['execute', 'sell'].includes(body.type)
+    || (Array.isArray(body.legs) && body.legs.some(leg => String(leg?.side || '').toLowerCase() === 'sell'));
+  if (executesTrade && !canExecutePlan(req.headers['x-portal-permissions'])) {
     return res.status(403).json({ error: '无档位成交登记权限' });
+  }
+  if (!executesTrade && !hasDipPermission(req, 'actions-note', 'edit')) {
+    return res.status(403).json({ error: '无权添加操作记录' });
   }
   if (body.type === 'execute' && body.operation === 'cancel') {
     const round = store.getRound();
@@ -407,15 +484,16 @@ app.post('/api/actions', (req, res) => {
   });
 });
 
-app.put('/api/actions/:id', (req, res) => {
+app.put('/api/actions/:id', requireDip('actions-note', 'edit'), (req, res) => {
   const row = store.patchAction(req.params.id, req.body || {});
   if (!row) return res.status(404).json({ error: '记录不存在' });
   res.json({ ok: true, action: row });
 });
 
-app.get('/api/lots', (_req, res) => res.json({ lots: store.getLots() }));
+app.get('/api/lots', (req, res) => canViewLots(req)
+  ? res.json({ lots: store.getLots() }) : res.status(403).json({ error: '无权查看仓位' }));
 
-app.post('/api/lots', (req, res) => {
+app.post('/api/lots', requireDip('lots-edit', 'edit'), (req, res) => {
   const lot = store.saveLot(req.body || {});
   store.addAction({
     type: 'note',
@@ -426,17 +504,17 @@ app.post('/api/lots', (req, res) => {
   res.json({ ok: true, lot, evaluation: refreshEvaluation() });
 });
 
-app.put('/api/lots/:id', (req, res) => {
+app.put('/api/lots/:id', requireDip('lots-edit', 'edit'), (req, res) => {
   const lot = store.saveLot({ ...(req.body || {}), id: req.params.id });
   res.json({ ok: true, lot, evaluation: refreshEvaluation() });
 });
 
-app.delete('/api/lots/:id', (req, res) => {
+app.delete('/api/lots/:id', requireDip('lots-edit', 'edit'), (req, res) => {
   store.removeLot(req.params.id);
   res.json({ ok: true, evaluation: refreshEvaluation() });
 });
 
-app.post('/api/round/reset', (_req, res) => {
+app.post('/api/round/reset', requireDip('tier-exec', 'edit'), (_req, res) => {
   const prev = store.getRound();
   store.setRound(resetRound(prev));
   store.addAction({ type: 'note', source: 'user', message: '手动结束本轮，清空档位状态；保留真实持仓、现金和历史操作' });

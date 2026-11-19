@@ -1,4 +1,4 @@
-import { loadPortalContext, can, canStock, isPortalMode } from './js/portal-auth.js';
+import { loadPortalContext, can, canStock, isPortalMode } from './js/portal-auth.js?v=scope-1';
 
 const EVENT_LABELS = {
   T1: 'T1', T2: 'T2', T3: 'T3', T4: 'T4', T5: 'T5', T6: 'T6', T7: 'T7',
@@ -319,7 +319,7 @@ function renderAmmo() {
   const vxnQuote = ev?.vxnQuote;
   const vxnSource = { cboe: 'Cboe', fred: 'FRED', yahoo: 'Yahoo' }[vxnQuote?.source];
   const sentiment = ev?.sentiment;
-  const showMoney = canViewLotMoney();
+  const showMoney = can('cash');
   const cashUsdField = showMoney
     ? `<input type="number" readonly id="cash-usd" value="${c.strategyCashUsd ?? 0}" aria-label="抄底美元现金">`
     : `<div class="value sm-mask">${MONEY_MASK}</div>`;
@@ -1189,7 +1189,7 @@ function bind() {
       <label class="field">类型
         <select id="note-type">
           <option value="note">备注</option>
-          <option value="sell">卖出（同步持仓）</option>
+          ${can('tier-exec', 'edit') ? '<option value="sell">卖出（同步持仓）</option>' : ''}
         </select>
       </label>
       <label class="field">内容<textarea id="note-text" rows="3"></textarea></label>
@@ -1348,8 +1348,10 @@ function connectSse() {
 }
 
 async function init() {
+  applyPermissions();
   bind();
   await loadPortalContext();
+  applyPermissions();
   renderTabs();
   try {
     applyState(await api('/state'));

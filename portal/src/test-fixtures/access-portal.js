@@ -23,9 +23,10 @@ export async function startAccessPortal() {
   const port = reserve.address().port; await new Promise(resolve => reserve.close(resolve));
   const config = { server: { host: '127.0.0.1', port }, auth: { username: 'fixture-admin', password: 'local-fixture-password', sessionSecret: 'local-fixture-session-secret-1234567890' }, runtime: { externalWorkers: true },
     services: [{ id: 'stock-manage', type: 'proxy', title: '股票管理', path: '/stock-manage', internalUrl: endpoint }, { id: 'torn-company', type: 'proxy', title: '公司监听', path: '/torn-toolbox/company', internalUrl: endpoint }, { id: 'company-team', type: 'proxy', title: '团队独立公司实例', path: '/team-company', internalUrl: endpoint, upstreamPathPrefix: '/team' }] };
+  config.services.push({ id: 'notifications', type: 'proxy', title: '通知管理', path: '/notifications', internalUrl: endpoint });
   const configFile = path.join(root, 'config.json'); await fs.writeFile(configFile, JSON.stringify(config));
   let rbac = loadRbac(config);
-  rbac.roles.push({ id: 'fixture_member', name: '测试成员', permissions: ['service:stock-manage:view', 'service:stock-manage:edit', 'service:torn-company:view', 'service:torn-company:edit'] });
+  rbac.roles.push({ id: 'fixture_member', name: '测试成员', permissions: ['service:stock-manage:view', 'service:stock-manage:edit', 'service:torn-company:view', 'service:torn-company:edit', 'service:notifications:view'] });
   const a = upsertUser(rbac, { username: 'fixture-a', password: 'local-fixture-password', roleIds: ['fixture_member'] });
   const b = upsertUser(rbac, { username: 'fixture-b', password: 'local-fixture-password', roleIds: ['fixture_member'] });
   const p = modulePolicy(rbac, 'bookkeeping');

@@ -19,6 +19,7 @@
                 <p>集中配置消息渠道、检查可用状态，并在接入业务前完成发送测试。</p>
             </div>
             <div class="summary" id="summary" aria-live="polite"></div>
+            <p id="notification-monitor-status" aria-live="polite"></p>
         </section>
 
         <div class="notice">
@@ -26,7 +27,7 @@
             <p>业务监控继续由股票管理和 Torn 工具箱执行；其通知开关、目标及测试可在下方统一管理。</p>
         </div>
 
-        <section class="monitor-card">
+        <section class="monitor-card hidden" data-notification-config>
             <div class="monitor-main">
                 <span class="channel-icon x-icon">𝕏</span>
                 <div>
@@ -68,7 +69,7 @@
             <div class="config-actions"><span id="codex-save-state" role="status">正在读取配置…</span><button id="codex-save" class="save-btn" type="button" disabled>保存群聊配置</button></div>
         </section>
 
-        <section class="business-section" aria-labelledby="business-heading">
+        <section class="business-section hidden" aria-labelledby="business-heading" data-notification-config>
             <div class="business-heading"><div><span class="eyebrow">BUSINESS NOTIFICATIONS</span><h2 id="business-heading">业务提醒</h2><p>每项业务可分别启用 QQ / Slack；Torn 还能按监听账号控制。Slack 使用上方渠道配置。</p></div><button id="business-refresh" class="test-btn compact" type="button">刷新状态</button></div>
             <div id="business-grid" data-skeleton="cards" data-skeleton-key="business" aria-live="polite">
               <section class="notification-category" aria-labelledby="notify-stock-heading">
@@ -100,7 +101,7 @@
             </div>
         </section>
 
-        <section class="channel-grid">
+        <section class="channel-grid hidden" data-notification-config>
             <article class="channel-card" data-channel="qq">
                 <div class="channel-head">
                     <div class="channel-identity"><span class="channel-icon qq">Q</span><div><h2>QQ 通知</h2><p>通过 NapCat 发送私聊或群消息</p></div></div>
@@ -151,7 +152,7 @@
             </article>
         </section>
 
-        <section class="send-test">
+        <section class="send-test hidden">
             <div><h2>测试内容</h2><p>测试按钮会使用当前已保存的渠道配置。</p></div>
             <textarea id="test-message" rows="3" placeholder="留空时发送默认测试消息"></textarea>
         </section>
@@ -164,9 +165,9 @@
     <div class="toast" id="toast" hidden></div>
     <script src="/skeleton/skeleton.js?v=1"></script>
     <script src="qq-targets.js?v=multi-mentions1"></script>
-    <script src="app.js?v=datetime-20261110"></script>
+    <script src="app.js?v=scope-1"></script>
     <script src="business-layout.js?v=groups-2"></script>
-    <script src="integrations.js?v=groups-2"></script>
+    <script src="integrations.js?v=scope-1"></script>
     <script src="shopping-notifications.js?v=1"></script>
     <script src="company-alerts-notifications.js?v=account-list-4"></script>
     <script src="users-notifications.js?v=1"></script>

@@ -30,6 +30,7 @@ test('notification channel status loads and saves when Chain controls arrive bef
   const response = data => ({ ok: true, status: 200, json: async () => data });
   w.fetch = async (url, options = {}) => {
     if (url === '/api/me') return response({ permissions: ['*'] });
+    if (url === 'api/status') return response({ ok: true, channels, tiboEnabled: false });
     if (url === '/api/torn-chain/notifications') return response({ ok: true, settings: { qq: { enabled: true }, slack: { enabled: true }, targets: [] }, permissions: { save: true, test: true } });
     if (url === 'api/monitors/tibo-reset') return response({ ok: true, status: null });
     if (url === 'api/monitors/qq-login') return response({ ok: true, status: { online: false, lastCheckedAt: '2026-10-26T11:00:00Z', alertChannels: [{ id: 'slack', ready: true }, { id: 'email', ready: false }] }, bookkeeping: { connected: true } });
@@ -39,7 +40,7 @@ test('notification channel status loads and saves when Chain controls arrive bef
   };
   try {
     w.eval(read('qq-targets.js')); w.eval(read('app.js')); w.eval(read('chain-notifications.js'));
-    await until(() => !d.getElementById('chain-notifications').hidden);
+    await until(() => !d.getElementById('chain-notifications').hidden && typeof releaseConfig === 'function');
     releaseConfig();
     await until(() => d.getElementById('summary').textContent.includes('1 / 2'));
     await until(() => !d.getElementById('save').disabled);
@@ -54,5 +55,25 @@ test('notification channel status loads and saves when Chain controls arrive bef
     d.getElementById('save').click(); await until(() => d.getElementById('save-state').textContent === '渠道配置已保存');
     assert.equal(writes.length, 1); assert.ok(!d.getElementById('toast').textContent.includes('null'));
     assert.ok(d.querySelector('#chain-notifications input[type="checkbox"]').checked);
+  } finally { w.close(); }
+});
+
+test('notification viewers load status without requesting configuration', async () => {
+  const dom = new JSDOM(read('index.html'), { runScripts: 'outside-only', url: 'https://test/notifications/' });
+  const w = dom.window;
+  const requested = [];
+  w.fetch = async url => {
+    requested.push(url);
+    return { ok: true, json: async () => url === '/api/me'
+      ? { permissions: ['service:notifications:view'] }
+      : { ok: true, channels: [], tiboEnabled: true } };
+  };
+  try {
+    w.eval(read('app.js'));
+    w.eval(read('integrations.js'));
+    await until(() => w.document.getElementById('notification-monitor-status').textContent.includes('已启用'));
+    assert.ok(!requested.includes('api/config'));
+    assert.ok(!requested.includes('api/integrations'));
+    assert.ok([...w.document.querySelectorAll('[data-notification-config]')].every(section => section.classList.contains('hidden')));
   } finally { w.close(); }
 });

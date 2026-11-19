@@ -236,6 +236,13 @@ function portfolioForRequest(req, data = store.read()) {
     data = { ...data, trades: data.trades.filter((t) => (t.account_id || 'unassigned') === accountId), cashUsd: selected?.currency === 'USD' ? selected.cash : 0, cashCny: selected?.currency === 'CNY' ? selected.cash : 0, cashHkd: selected?.currency === 'HKD' ? selected.cash : 0 };
   }
   const portfolio = buildPortfolio(data, pnlOptions);
+  if (!hasStockPermission(req, 'pnl')) {
+    delete portfolio.chartSparse;
+    for (const field of ['totalBuy', 'totalSell', 'commission', 'otherAmount', 'realizedPL', 'netPL',
+      'tradeDailyPnl', 'dailyTotalPnl', 'dailyTotalPnlUsd', 'dailyTotalPnlCny', 'dailyTotalPnlHkd']) {
+      delete portfolio.summary[field];
+    }
+  }
   portfolio.investmentAccounts = accountsVisible ? accounts.map(({ id, name, currency }) => ({ id, name, currency })) : [];
   if (!hasStockPermission(req, 'trades')) portfolio.trades = [];
   portfolio.accountCashEnabled = !!data.accountCashEnabled;
@@ -625,6 +632,7 @@ app.post('/api/trades/import', express.raw({
 });
 
 app.get('/api/pnl', (req, res) => {
+  if (!requireStockPermission(req, res, 'pnl')) return;
   const data = store.read();
   res.json(computePnl(tradesForCalculations(req, data.trades), {
     startDate: req.query.start || undefined,

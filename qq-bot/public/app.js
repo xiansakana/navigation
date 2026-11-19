@@ -1,5 +1,5 @@
 var currentConfig = null;
-var access = { canEdit: false, canTestSlack: false, canBusinessSave: false, canBusinessTest: false };
+var access = { canViewConfig: false, canEdit: false, canTestSlack: false, canBusinessSave: false, canBusinessTest: false };
 var byId = function(id) { return document.getElementById(id); };
 
 async function api(path, options) {
@@ -76,7 +76,7 @@ function applyAccess() {
 
 async function loadAccess() {
     if (!location.pathname.startsWith('/notifications')) {
-        access = { canEdit: true, canTestSlack: true, canBusinessSave: true, canBusinessTest: true };
+        access = { canViewConfig: true, canEdit: true, canTestSlack: true, canBusinessSave: true, canBusinessTest: true };
         return;
     }
     var me = await fetch('/api/me').then(function(response) {
@@ -88,6 +88,8 @@ async function loadAccess() {
     access.canTestSlack = access.canEdit || permissions.includes('service:notifications:slack-test:edit');
     access.canBusinessSave = access.canEdit || permissions.includes('service:notifications:business-save:edit');
     access.canBusinessTest = access.canEdit || permissions.includes('service:notifications:business-test:edit');
+    access.canViewConfig = access.canBusinessSave || permissions.includes('service:notifications:config:view');
+    access.canViewNativeBusiness = permissions.some(permission => /^torn-(?:chain|users|shopping|company-alerts):.*notify:(?:view|edit|test:edit)$/.test(permission));
 }
 
 function renderMonitor(status) {
@@ -271,8 +273,16 @@ document.querySelectorAll('[data-test]').forEach(function(button) {
     });
 });
 
-Promise.all([api('api/config'), loadAccess()]).then(function(results) {
-    fill(results[0]);
-    return Promise.all([loadMonitor(), loadQqHealth()]);
+Promise.all([api('api/status'), loadAccess()]).then(async function([status]) {
+    renderStatus(status.channels);
+    byId('notification-monitor-status').textContent = status.tiboEnabled ? 'Tibo 监听已启用' : 'Tibo 监听未启用';
+    for (const section of document.querySelectorAll('[data-notification-config]')) section.classList.toggle('hidden', !access.canViewConfig);
+    if (access.canViewNativeBusiness) document.querySelector('.business-section').classList.remove('hidden');
+    byId('business-refresh').hidden = !access.canViewConfig;
+    document.querySelector('.send-test').classList.toggle('hidden', !access.canEdit && !access.canTestSlack);
+    applyAccess();
+    if (!access.canViewConfig) return;
+    fill(await api('api/config'));
+    await Promise.all([loadMonitor(), loadQqHealth()]);
 }).catch(function(err) { toast('加载失败：' + err.message, true); }).finally(function() { window.navigationSkeleton?.finish(); });
-setInterval(function() { if (!document.hidden) { loadQqHealth(); loadMonitor(); } }, 30000);
+setInterval(function() { if (!document.hidden && access.canViewConfig) { loadQqHealth(); loadMonitor(); } }, 30000);

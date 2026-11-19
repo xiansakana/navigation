@@ -58,6 +58,15 @@ test('default personal access keeps entries, assets and preferences isolated and
     assert.equal(detail.status,200);assert.equal(detail.result.entry.id,entry);
     assert.equal(detail.result.entry.cnyAmount,1);
     assert.equal(detail.result.entry.balanceCheckpoint,undefined);
+    const viewOnly = { userId: 'a', isGuest: false, permissions: ['bookkeeping:view'] };
+    const limitedState = await call('/state', 'GET', null, viewOnly);
+    assert.deepEqual(limitedState.result.categoryTree, []);
+    assert.deepEqual(limitedState.result.accounts, []);
+    assert.equal(limitedState.result.entries[0].accountName, undefined);
+    assert.equal((await call('/state?q=' + encodeURIComponent('私人现金'), 'GET', null, viewOnly)).result.count, 0);
+    const limitedDetail = await call('/entries/'+entry, 'GET', null, viewOnly);
+    assert.equal(limitedDetail.result.entry.accountId, undefined);
+    assert.equal(limitedDetail.result.entry.amount, 1);
     assert.equal((await call('/preferences')).result.period,null);
     const foreign=await call('/state?accountId='+a);assert.deepEqual(foreign.result.entries,[]);
     const edit=await call('/entries/'+entry,'PUT',{date:'2026-10-16T12:00:00',type:'支出',amount:2,accountId:a});assert.notEqual(edit.status,200);

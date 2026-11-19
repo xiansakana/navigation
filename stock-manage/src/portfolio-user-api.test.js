@@ -356,7 +356,11 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.ok(portfolio.holdings.every(holding => !('accountName' in holding)));
     assert.ok(portfolio.fundHoldings.every(fund => !('accountName' in fund)));
     assert.deepEqual(portfolio.trades, []);
-    for (const path of ['/accounts', '/trades/summary', '/trades/export', '/trades/review']) {
+    assert.equal('chartSparse' in portfolio, false);
+    for (const field of ['totalBuy', 'totalSell', 'commission', 'otherAmount', 'realizedPL', 'netPL']) {
+      assert.equal(field in portfolio.summary, false);
+    }
+    for (const path of ['/accounts', '/pnl', '/trades/summary', '/trades/export', '/trades/review']) {
       assert.equal((await fetch(base + path, holdingsOnly)).status, 403, path);
     }
   } finally {

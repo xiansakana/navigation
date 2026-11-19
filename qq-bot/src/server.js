@@ -146,6 +146,9 @@ export function createNotificationServer(initialConfig, options) {
             if (req.method === 'GET' && url.pathname === '/health') {
                 return json(res, 200, { ok: true, channels: channelStatus(config), bookkeeping:receiver.status(), codex:codex.status(), qqLogin: watchdog?.status() || null });
             }
+            if (req.method === 'GET' && url.pathname === '/api/status') {
+                return json(res, 200, { ok: true, channels: channelStatus(config), tiboEnabled: config.monitors?.tiboReset?.enabled === true });
+            }
             if (req.method === 'GET' && url.pathname === '/api/config') {
                 return json(res, 200, { ok: true, config: publicConfig(config), channels: channelStatus(config) });
             }
