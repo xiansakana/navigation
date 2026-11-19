@@ -18,9 +18,6 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, createStore } from './storage.js';
 import { createQuantStore, resetPaper } from './quant-store.js';
 import { createQuantBacktestStore } from './quant-backtest-store.js';
-import { createYoloStore } from './yolo-store.js';
-import { createYoloBacktestJobs } from './yolo-backtest-jobs.js';
-import { createYoloCollector, isUsOptionMarketOpen } from './yolo-collector.js';
 import { createQuoteService } from './quotes.js';
 import { parseImportBuffer } from './import-moomoo.js';
 import { mergeEastmoneyTrades } from './import-eastmoney.js';
@@ -66,9 +63,6 @@ ensureFundHoldings(portfolioDb);
 const quantStore = createQuantStore(config);
 const quantBacktestStore = createQuantBacktestStore(config);
 const quotes = createQuoteService(config);
-const yoloStore = createYoloStore(config);
-const yoloBacktestJobs = createYoloBacktestJobs(yoloStore);
-const yoloCollector = createYoloCollector({ store: yoloStore, quotes });
 const app = express();
 app.use((req, res, next) => { if (!serveUiAsset(req, res)) next(); });
 
@@ -1156,83 +1150,6 @@ app.get('/api/option/:symbol', async (req, res) => {
   }
 });
 
-app.get('/api/yolo/status', (req, res) => {
-  if (!requireQuantPermission(req, res, 'yolo-dashboard')) return;
-  const userId = quantUserId(req);
-  yoloStore.ensure(userId);
-  res.json({ ...yoloStore.status(userId), marketOpen: isUsOptionMarketOpen(), collectorRunning: yoloCollector.isRunning() });
-});
-
-app.get('/api/yolo/captures/:id/quotes', (req, res) => {
-  if (!requireQuantPermission(req, res, 'yolo-dashboard')) return;
-  const result = yoloStore.captureDetails(quantUserId(req), req.params.id);
-  if (!result) return res.status(404).json({ error: '期权快照不存在' });
-  res.json(result);
-});
-
-app.get('/api/yolo/option-chain', (req, res) => {
-  if (!requireQuantPermission(req, res, 'yolo-dashboard')) return;
-  res.json(yoloStore.optionChain(quantUserId(req)));
-});
-
-app.get('/api/yolo/option-history', (req, res) => {
-  if (!requireQuantPermission(req, res, 'yolo-dashboard')) return;
-  const symbol = String(req.query.symbol || '').trim();
-  if (!symbol) return res.status(400).json({ error: '缺少 option symbol' });
-  res.json(yoloStore.optionHistory(quantUserId(req), symbol, req.query.interval));
-});
-
-app.put('/api/yolo/settings', (req, res) => {
-  if (!requireQuantPermission(req, res, 'yolo-control', 'edit')) return;
-  const settings = yoloStore.updateSettings(quantUserId(req), req.body || {});
-  res.json(settings);
-});
-
-app.post('/api/yolo/capture', async (req, res) => {
-  if (!requireQuantPermission(req, res, 'yolo-control', 'edit')) return;
-  try {
-    const snapshot = await yoloCollector.captureNow(quantUserId(req));
-    res.json({ ok: true, capturedAt: snapshot?.capturedAt || null, contracts: snapshot?.savedContracts || 0,
-      collectionStatus: snapshot?.collectionStatus || null,
-      status: yoloStore.status(quantUserId(req)) });
-  } catch (error) {
-    res.status(502).json({ error: error.message || '期权链采集失败', status: yoloStore.status(quantUserId(req)) });
-  }
-});
-
-app.post('/api/yolo/backfill-previous-close', async (req, res) => {
-  if (!requireQuantPermission(req, res, 'yolo-control', 'edit')) return;
-  try {
-    const userId = quantUserId(req);
-    const snapshot = await yoloCollector.backfillPreviousSession(userId);
-    res.json({
-      ok: true,
-      marketDate: snapshot.marketDate,
-      expiration: snapshot.expiration,
-      contracts: snapshot.contracts.length,
-      status: yoloStore.status(userId)
-    });
-  } catch (error) {
-    res.status(502).json({ error: error.message || '昨日收盘摘要回填失败', status: yoloStore.status(quantUserId(req)) });
-  }
-});
-
-app.post('/api/yolo/backtest', (req, res) => {
-  if (!requireQuantPermission(req, res, 'yolo-backtest-run', 'edit')) return;
-  try {
-    res.status(202).json(yoloBacktestJobs.start(quantUserId(req), req.body || {}));
-  } catch (error) {
-    res.status(error.status || 500).json({ error: error.message || '梭哈回测失败' });
-  }
-});
-
-app.get('/api/yolo/backtest/:jobId', (req, res) => {
-  if (!requireQuantPermission(req, res, 'yolo-backtest-run', 'edit')) return;
-  const job = yoloBacktestJobs.get(quantUserId(req), req.params.jobId);
-  if (!job) return res.status(404).json({ error: '回测任务不存在、已过期或服务已重启，请重新运行。' });
-  res.set('Cache-Control', 'no-store').json(job);
-});
-
 app.post('/api/quotes/refresh', async (req, res) => {
   const data = store.read();
   const symbol = req.body?.symbol;
@@ -1284,6 +1201,7 @@ app.get('/vendor/echarts.min.js', (_req, res) => {
 app.get('/js/dividend-tax.js', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', '..', 'shared', 'dividend-tax.js'));
 });
+app.all(/^\/(?:api\/)?yolo(?:\/|$)/i, (_req, res) => res.sendStatus(404));
 app.use(express.static(PUBLIC));
 app.get('*', (_req, res) => {
   res.sendFile(path.join(PUBLIC, 'index.html'));
@@ -1292,5 +1210,4 @@ app.get('*', (_req, res) => {
 const { host, port } = config.server;
 app.listen(port, host, () => {
   console.log(`stock-manage http://${host}:${port}`);
-  yoloCollector.start();
 });

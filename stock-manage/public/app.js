@@ -209,7 +209,6 @@ function applyDipTabs() {
   nav.querySelectorAll('a.sm-feature-tab').forEach((a) => {
     const href = a.getAttribute('href') || '';
     if (href.includes('tab=qq')) a.hidden = !canDip('tab-qq');
-    else if (href.includes('/yolo/')) a.hidden = !can('tab-yolo');
     else if (href.includes('/quant/')) a.hidden = !can('tab-quant');
     else if (href.includes('/dip/')) a.hidden = !canDip('tab-monitor');
   });

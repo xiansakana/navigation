@@ -23,8 +23,7 @@
       var stock = [
         ['持仓', '/stock-manage/', 'service:stock-manage:view'],
         ['抄底监控', '/stock-manage/dip/', 'service:qqq-dip:view'],
-        ['量化分析', '/stock-manage/quant/', 'service:stock-manage:tab-quant:view'],
-        ['梭哈', '/stock-manage/yolo/', 'service:stock-manage:tab-yolo:view']
+        ['量化分析', '/stock-manage/quant/', 'service:stock-manage:tab-quant:view']
       ].filter(function (s) { return can(s[2]); }).map(function (s) { return { title: s[0], href: s[1] }; });
       function close() { if (!active) return; active.panel.remove(); active.button.setAttribute('aria-expanded', 'false'); active = null; }
       function attach(element, name, entries) {

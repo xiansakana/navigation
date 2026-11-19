@@ -439,7 +439,7 @@ body.has-navbar {
 }
 
 /* Keep the page behind any stock-manage modal from scrolling. Modal content
-   owns its own scroll area when it needs one. This also covers quant/yolo
+   owns its own scroll area when it needs one. This also covers quant
    pages, which reuse this stylesheet and the same backdrop class. */
 body:has(.sm-modal-backdrop) {
     overflow: hidden;

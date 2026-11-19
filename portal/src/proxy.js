@@ -302,7 +302,7 @@ function injectNapcatTokenShim(html, token, mountPath) {
 function injectPortalShell(html, service) {
     if (!html.includes('<body')) return html;
     html = ensureViewportMeta(html);
-    if (!html.includes('/data-scope.js')) html = html.replace(/<\/head>/i, '<script defer src="/data-scope.js?v=1"></script><script defer src="/navbar-dropdown.js?v=4"></script></head>');
+    if (!html.includes('/data-scope.js')) html = html.replace(/<\/head>/i, '<script defer src="/data-scope.js?v=1"></script><script defer src="/navbar-dropdown.js?v=5"></script></head>');
     if (!html.includes('/ui/back-to-top.js')) {
         html = html.replace(/<\/head>/i, '<script defer src="/ui/back-to-top.js?v=1"></script></head>');
     }
@@ -362,7 +362,7 @@ function injectPortalShell(html, service) {
     if (service.id === 'notifications') bodyClass += ' notifications-proxied';
     return html
         .replace('<head>', '<head>' + themeBoot + baseTag + portalCss + themeJs + toastJs + dialogJs + layoutJs)
-        .replace(/<\/head>/i, (useExperience ? '<link rel="stylesheet" href="/experience.css?v=mobile-sheets-1">' : '') + '</head>')
+        .replace(/<\/head>/i, (useExperience ? '<link rel="stylesheet" href="/experience.css?v=mobile-sheets-2">' : '') + '</head>')
         .replace(/<body([^>]*)>/, function(match, attrs) {
             var cls = bodyClass;
             if (/class="([^"]*)"/.test(attrs)) {

@@ -78,79 +78,6 @@ export function initSchema(db) {
 
     CREATE INDEX IF NOT EXISTS idx_quant_backtests_user_created
       ON quant_backtest_results (user_id, created_at DESC);
-
-    CREATE TABLE IF NOT EXISTS yolo_settings (
-      user_id TEXT PRIMARY KEY,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      interval_seconds INTEGER NOT NULL DEFAULT 60,
-      last_attempt_at TEXT,
-      last_capture_at TEXT,
-      last_error TEXT,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS yolo_captures (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      captured_at TEXT NOT NULL,
-      market_date TEXT NOT NULL,
-      expiration TEXT NOT NULL,
-      underlying_price REAL,
-      source TEXT,
-      capture_kind TEXT NOT NULL DEFAULT 'intraday',
-      contract_count INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS yolo_option_quotes (
-      capture_id INTEGER NOT NULL,
-      user_id TEXT NOT NULL,
-      option_symbol TEXT NOT NULL,
-      right_type TEXT NOT NULL,
-      strike REAL NOT NULL,
-      expiration TEXT NOT NULL,
-      bid REAL NOT NULL,
-      ask REAL NOT NULL,
-      bid_size REAL,
-      ask_size REAL,
-      last_price REAL,
-      last_trade_at TEXT,
-      open_price REAL,
-      high_price REAL,
-      low_price REAL,
-      prev_close REAL,
-      delta REAL,
-      gamma REAL,
-      theta REAL,
-      vega REAL,
-      iv REAL,
-      volume REAL,
-      open_interest REAL,
-      PRIMARY KEY (capture_id, option_symbol),
-      FOREIGN KEY (capture_id) REFERENCES yolo_captures(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_yolo_captures_user_time
-      ON yolo_captures (user_id, captured_at);
-    CREATE INDEX IF NOT EXISTS idx_yolo_quotes_user_symbol
-      ON yolo_option_quotes (user_id, option_symbol, capture_id);
-
-    CREATE TABLE IF NOT EXISTS yolo_collection_attempts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      requested_at TEXT NOT NULL,
-      finished_at TEXT,
-      trigger_kind TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'running',
-      provider_at TEXT,
-      source TEXT,
-      duration_ms INTEGER,
-      lag_ms INTEGER,
-      new_captures INTEGER NOT NULL DEFAULT 0,
-      duplicate_captures INTEGER NOT NULL DEFAULT 0,
-      contract_count INTEGER NOT NULL DEFAULT 0,
-      error TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_yolo_attempts_user_time ON yolo_collection_attempts (user_id, id DESC);
   `);
   ensureRbacRevision(db);
 
@@ -192,17 +119,6 @@ export function initSchema(db) {
     );
   `);
 
-  ensureColumn('yolo_captures', 'capture_kind', "TEXT NOT NULL DEFAULT 'intraday'");
-  ensureColumn('yolo_captures', 'requested_at', 'TEXT');
-  ensureColumn('yolo_captures', 'received_at', 'TEXT');
-  ensureColumn('yolo_captures', 'timestamp_origin', 'TEXT');
-  ensureColumn('yolo_captures', 'provider_timestamp_raw', 'TEXT');
-  ensureColumn('yolo_captures', 'original_market_date', 'TEXT');
-  ensureColumn('yolo_option_quotes', 'last_trade_at', 'TEXT');
-  ensureColumn('yolo_option_quotes', 'open_price', 'REAL');
-  ensureColumn('yolo_option_quotes', 'high_price', 'REAL');
-  ensureColumn('yolo_option_quotes', 'low_price', 'REAL');
-  ensureColumn('yolo_option_quotes', 'prev_close', 'REAL');
 
   ensureColumn('blog_video_uploads', 'position', 'INTEGER');
   ensureColumn('blog_video_uploads', 'state', "TEXT NOT NULL DEFAULT 'uploading'");

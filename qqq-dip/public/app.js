@@ -133,11 +133,6 @@ function quantHref() {
   return 'http://127.0.0.1:5000/quant/';
 }
 
-function yoloHref() {
-  if (location.pathname.includes('/stock-manage')) return '/stock-manage/yolo/';
-  return 'http://127.0.0.1:5000/yolo/';
-}
-
 function dipHref(tab) {
   const underPortal = location.pathname.includes('/stock-manage/dip');
   const base = underPortal ? '/stock-manage/dip/' : './';
@@ -159,9 +154,6 @@ function renderTabs() {
   }
   if (canStock('tab-quant')) {
     tabsHtml += `<a class="sm-feature-tab" href="${quantHref()}">量化分析</a>`;
-  }
-  if (canStock('tab-yolo')) {
-    tabsHtml += `<a class="sm-feature-tab" href="${yoloHref()}">梭哈</a>`;
   }
   $('#feature-tabs').innerHTML = tabsHtml;
   if (!showMonitor && !showQq) {

@@ -37,11 +37,6 @@ var STOCK_MANAGE_HOLDINGS_COLUMNS = [
 
 var STOCK_MANAGE_FEATURES = [
     { feature: 'tab-quant', name: '进入量化分析', action: 'view', permissionPath: ['量化分析'] },
-    { feature: 'tab-yolo', name: '进入梭哈平台', action: 'view', permissionPath: ['梭哈'] },
-    { feature: 'yolo-dashboard', name: '查看1DTE数据库', action: 'view', permissionPath: ['梭哈', '数据采集'] },
-    { feature: 'yolo-control', name: '控制1DTE数据采集', action: 'edit', permissionPath: ['梭哈', '数据采集'] },
-    { feature: 'yolo-backtest', name: '查看1DTE回测', action: 'view', permissionPath: ['梭哈', '真实报价回测'] },
-    { feature: 'yolo-backtest-run', name: '运行1DTE回测', action: 'edit', permissionPath: ['梭哈', '真实报价回测'] },
     { feature: 'quant-settings', name: '读取用户量化设置', action: 'view', permissionPath: ['量化分析', '通用数据'] },
     { feature: 'quant-history', name: '查看 K 线', action: 'view', permissionPath: ['量化分析', '通用数据'] },
     { feature: 'quant-watchlist', name: '保存分析标的', action: 'edit', permissionPath: ['量化分析', '分析标的'] },
@@ -630,7 +625,7 @@ export function syncRbacPermissions(data, config) {
     var known = {};
     SYSTEM_PERMISSIONS.concat(servicePerms).concat(stockManagePerms).concat(qqqDipPerms).concat(notificationPerms).forEach(function(p) { known[p.id] = p; });
     (data.permissions || []).forEach(function(p) {
-        if (!known[p.id] && !isRetiredStockColumnPermission(p.id)) known[p.id] = p;
+        if (!known[p.id] && !isRetiredStockManagePermission(p.id)) known[p.id] = p;
     });
     data.permissions = Object.keys(known).map(function(id) { return known[id]; });
     data.permissions = data.permissions.filter(function(p) {
@@ -642,7 +637,7 @@ export function syncRbacPermissions(data, config) {
 
     (data.roles || []).forEach(function(role) {
         role.permissions = migrateRolePermissions(role.permissions || []).filter(function(id) {
-            return !isRetiredStockColumnPermission(id);
+            return !isRetiredStockManagePermission(id);
         });
     });
 
@@ -664,8 +659,8 @@ export function syncRbacPermissions(data, config) {
     return data;
 }
 
-function isRetiredStockColumnPermission(id) {
-    return /^service:stock-manage:col-(target|signal):(view|edit)$/.test(id);
+function isRetiredStockManagePermission(id) {
+    return /^service:stock-manage:(?:col-(?:target|signal)|tab-yolo|yolo-(?:dashboard|control|backtest|backtest-run)):(?:view|edit)$/.test(id);
 }
 
 export function findUserByUsername(data, username) {

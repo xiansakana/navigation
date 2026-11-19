@@ -190,17 +190,6 @@ body.portal-experience .login-card .subtitle { font-size: 14px; line-height: 1.8
 body.portal-experience :is(.admin-dialog, .sm-modal, .portal-dialog, .error-card) { border-radius: 20px; box-shadow: 0 8px 40px #00000020; }
 body.portal-experience dialog::backdrop { background: #0810208c; backdrop-filter: blur(4px); }
 /* Option-chain colors follow the selected theme, including sticky headers. */
-body.portal-experience :is(.yolo-chain-scroll, .yolo-expiry-toggle) { background: var(--card); color: var(--text); }
-body.portal-experience .yolo-chain-table { color: var(--text-soft); }
-body.portal-experience .yolo-chain-table th, body.portal-experience .yolo-chain-table .yolo-chain-sides th,
-body.portal-experience .yolo-chain-table td.yolo-strike, body.portal-experience .yolo-chain-table .yolo-strike-head { background: var(--elevated); color: var(--text); }
-body.portal-experience .yolo-spot-row td { background: var(--elevated); color: var(--muted); }
-html[data-theme="light"] body.portal-experience .yolo-chain-table td.chain-bid { color: #047857; background: #05966912; }
-html[data-theme="light"] body.portal-experience .yolo-chain-table td.chain-ask { color: #be185d; background: #be185d10; }
-html[data-theme="light"] body.portal-experience .yolo-chain-table td :is(small) { color: var(--muted); }
-html[data-theme="light"] body.portal-experience .yolo-chain-table td.chain-up { color: #be123c; }
-html[data-theme="light"] body.portal-experience .yolo-chain-table td.chain-down { color: #047857; }
-body.portal-experience .yolo-expiry-toggle :is(small, span) { color: var(--muted); }
 @media (max-width: 760px) {
   body.portal-experience { --navbar-height: 64px; }
   body.portal-experience .navbar-inner { padding: 0 14px; }

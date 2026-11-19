@@ -11,7 +11,6 @@
 | 股票持仓 | `/stock-manage/` |
 | 抄底监控 | `/stock-manage/dip/` |
 | 量化分析 | `/stock-manage/quant/` |
-| 梭哈 | `/stock-manage/yolo/` |
 | Torn 工具箱 | `/torn-toolbox/` |
 | 压价助手 | `/torn-toolbox/undercut/` |
 | 公司监听 | `/torn-toolbox/company/` |

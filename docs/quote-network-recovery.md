@@ -8,6 +8,6 @@ stock-manage 与 qqq-dip 在进程启动时调用 shared/quote-network.js：DNS�
 
 qqq-dip已有阶段及整轮超时保护继续保留。连接策略不能替代该保护，也不能解决供应商限流、真实响应迟滞或行情授权问题。没有增频、购买订阅或切换行情源。
 
-部署：按DEPLOY-ECS.md和AGENTS.md的精确SHA流程，仅更新stock-manage、qqq-dip。没有数据库结构迁移。检查两服务启动日志中的“行情网络策略”，以及梭哈请求审计和抄底monitor的lastCompletedAt/checks持续推进。一次成功不等于彻底消除网络波动。
+部署：按DEPLOY-ECS.md和AGENTS.md的精确SHA流程，仅更新stock-manage、qqq-dip。没有数据库结构迁移。检查两服务启动日志中的“行情网络策略”，以及抄底monitor的lastCompletedAt/checks持续推进。一次成功不等于彻底消除网络波动。
 
 参考：[Node20 net API](https://nodejs.org/download/release/latest-v20.x/docs/api/net.html)。
