@@ -35,6 +35,78 @@ test('US holding quotes use the same-day premarket price against the prior regul
   assert.equal((await service.getQuote('TSM',new Date('2026-11-18T14:31:00Z'))).source,'finnhub');
 });
 
+test('after-hours stocks and ETFs distinguish the prior close and the current close', async context => {
+  const original = global.fetch; context.after(() => { global.fetch = original; });
+  let reportDay = 18;
+  let yahooAvailable = true;
+  global.fetch = async url => {
+    if (String(url).includes('finnhub')) return response({c:105,d:5,dp:5,pc:100});
+    if (String(url).includes('yahoo')) return response(yahooAvailable ? closeFixture : {});
+    assert.match(String(url), /extended-trading.*markettype=post/);
+    return response(String(url).includes('assetclass=stocks') ? { data: null } : afterHoursFixture(reportDay));
+  };
+  const service = createQuoteService({ finnhubApiKey: 'fixture' });
+  const now = new Date('2026-11-18T23:00:00Z');
+  const quote = await service.getQuote('QQQ', now);
+  assert.equal(quote.session, 'afterhours');
+  assert.equal(quote.asOf, '2026-11-18 17:50:00 ET');
+  assert.equal(quote.changePercent, 3);
+  assert.ok(Math.abs(quote.sessionChangePercent - (-2 / 105 * 100)) < 1e-10);
+  const [row] = enrichHoldings([{symbol:'QQQ', shares:2, avgCost:100}], { QQQ:quote }, 0).rows;
+  assert.equal(row.dailyPnl, 6);
+  assert.equal(row.quoteSessionChangePct, quote.sessionChangePercent);
+  yahooAvailable = false;
+  assert.equal((await service.getQuote('QQQ', now)).changePercent, null);
+  reportDay = 17;
+  const fallback = await service.getQuote('QQQ', now);
+  assert.equal(fallback.session, 'no-afterhours');
+  assert.equal(fallback.price, 105);
+  assert.equal(fallback.changePercent, null);
+});
+
+const closeFixture = { chart: { result: [{
+  meta: { currency: 'USD' },
+  timestamp: ['2026-11-17T14:30:00Z', '2026-11-18T14:30:00Z'].map(value => Date.parse(value) / 1000),
+  indicators: { quote: [{ close: [100, 105] }] }
+}] } };
+
+const afterHoursFixture = day => ({ data: {
+  previousInfo: ' Market Close: $105.00',
+  lastUpdateInfo: [`Data last updated Nov ${day}, 2026 05:55 PM ET.`],
+  tradeDetailTable: { rows: [{ time: '17:50:00', price: '$103.00' }] }
+} });
+
+test('overnight uses the current overnight session across midnight and labels fallback prices', async context => {
+  const original = global.fetch; context.after(() => { global.fetch = original; });
+  let time = '2026-11-19T04:30:00Z';
+  let alpacaRequests = 0;
+  global.fetch = async (url, options) => {
+    if (String(url).includes('nasdaq')) return response(afterHoursFixture(18));
+    if (String(url).includes('yahoo')) return response(closeFixture);
+    alpacaRequests++;
+    assert.match(String(url), /alpaca\.markets.*symbols=TSM&feed=overnight/);
+    assert.equal(options.headers['APCA-API-KEY-ID'], 'fixture');
+    return response({ trades: { TSM: { p: 107, t: time } } });
+  };
+  const service = createQuoteService({ alpacaApiKeyId:'fixture', alpacaApiSecretKey:'fixture' });
+  const now = new Date('2026-11-19T05:20:00Z');
+  const quote = await service.getQuote('TSM', now);
+  assert.equal(quote.session, 'overnight');
+  assert.equal(quote.asOf, '2026-11-18 23:30 ET');
+  assert.equal(quote.delayed, true);
+  assert.equal(quote.change, 2);
+  time = '2026-11-19T05:01:00Z';
+  assert.equal((await service.getQuote('TSM', now)).asOf, '2026-11-19 00:01 ET');
+  time = '2026-11-19T00:30:00Z'; // Same evening, still after-hours.
+  assert.equal((await service.getQuote('TSM', now)).session, 'no-overnight-afterhours');
+  time = '2026-11-18T05:01:00Z'; // Previous overnight session.
+  assert.equal((await service.getQuote('TSM', now)).session, 'no-overnight-afterhours');
+  const fallback = await createQuoteService({}).getQuote('TSM', now);
+  assert.equal(alpacaRequests, 4);
+  assert.equal(fallback.price, 103);
+  assert.equal(fallback.change, null);
+});
+
 test('USD/CNY uses the shared Finnhub/FRED fallback and caches observation metadata', async context => {
   const original = global.fetch; context.after(() => { global.fetch = original; });
   let requests = 0;

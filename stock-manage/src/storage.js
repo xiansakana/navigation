@@ -28,7 +28,10 @@ export function loadConfig() {
     dbPath: raw.dbPath || 'data/navigation.db',
     dataFile: raw.dataFile || 'data/portfolio.json',
     finnhubApiKey: raw.finnhubApiKey || process.env.FINNHUB_API_KEY || '',
-    polygonApiKey: raw.polygonApiKey || process.env.POLYGON_API_KEY || ''
+    polygonApiKey: raw.polygonApiKey || process.env.POLYGON_API_KEY || '',
+    alpacaApiKeyId: raw.alpacaApiKeyId || process.env.ALPACA_API_KEY_ID || '',
+    alpacaApiSecretKey: raw.alpacaApiSecretKey || process.env.ALPACA_API_SECRET_KEY || '',
+    alpacaOvernightFeed: raw.alpacaOvernightFeed || process.env.ALPACA_OVERNIGHT_FEED || 'overnight'
   };
 }
 

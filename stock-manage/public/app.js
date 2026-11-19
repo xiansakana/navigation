@@ -416,9 +416,15 @@ function holdingsCellContent(h, key, ctx) {
       const delayHint = h.delayed
         ? ` <span class="hint" title="${escapeHtml(sourceLabel + (h.quoteAsOf ? `（截至 ${h.quoteAsOf}）` : ''))}">延时</span>`
         : '';
-      const sessionHint = h.quoteSession === 'premarket'
-        ? `<div class="sm-lots-hint" title="${escapeHtml(h.quoteAsOf)}">盘前${h.delayed ? '延时' : ''}</div>`
-        : h.quoteSession === 'no-premarket' ? '<div class="sm-lots-hint">盘前暂无报价</div>' : '';
+      const sessionLabel = {
+        premarket: '盘前', afterhours: '盘后', overnight: '夜盘',
+        'no-premarket': '盘前暂无报价', 'no-afterhours': '盘后暂无报价',
+        'no-overnight': '夜盘暂无报价', 'no-overnight-afterhours': '夜盘暂无报价 · 显示盘后价'
+      }[h.quoteSession];
+      const sessionMove = h.quoteSession === 'afterhours' && h.quoteSessionChangePct != null
+        ? ` · 较今收 ${fmtPct(h.quoteSessionChangePct)}` : '';
+      const sessionHint = sessionLabel
+        ? `<div class="sm-lots-hint" title="${escapeHtml(h.quoteAsOf || '')}">${sessionLabel}${h.delayed && !h.quoteSession.startsWith('no-') ? '延时' : ''}${sessionMove}</div>` : '';
       return maskCol('price', `<span>${formatPrice(h.price, cur)}</span>${sessionHint ? '' : delayHint}${refresh}${sessionHint}`);
     }
     case 'pnl':

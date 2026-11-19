@@ -33,11 +33,41 @@ const newYorkClock = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
 });
 
-function usPremarket(now) {
+function easternClock(now) {
   const clock = Object.fromEntries(newYorkClock.formatToParts(now).map(part => [part.type, part.value]));
-  const minute = Number(clock.hour) * 60 + Number(clock.minute);
-  if (clock.weekday === 'Sat' || clock.weekday === 'Sun' || minute < 240 || minute >= 570) return null;
-  return { date: yoloMarketDate(now), minute };
+  return { weekday: clock.weekday, minute: Number(clock.hour) * 60 + Number(clock.minute), date: yoloMarketDate(now) };
+}
+
+function usExtendedSession(now) {
+  const { weekday, minute, date } = easternClock(now);
+  const workday = weekday !== 'Sat' && weekday !== 'Sun';
+  if (workday && minute >= 960 && minute < 1200) return { date, minute, kind: 'afterhours' };
+  if ((minute >= 1200 && weekday !== 'Fri' && weekday !== 'Sat') || (minute < 240 && workday)) {
+    const evening = minute >= 1200 ? date : ymdUTC(Date.parse(date) - 86400000);
+    return { date: evening, minute, kind: 'overnight' };
+  }
+  return workday && minute >= 240 && minute < 570 ? { date, minute, kind: 'premarket' } : null;
+}
+
+const nasdaqHeaders = {
+  Accept: 'application/json, text/plain, */*',
+  Origin: 'https://www.nasdaq.com',
+  Referer: 'https://www.nasdaq.com/',
+  'User-Agent': 'Mozilla/5.0'
+};
+const extendedRequest = { retries: 0, timeoutMs: 5000 };
+const quoteNumber = value => {
+  const raw = String(value ?? '').replace(/[$,%+,]/g, '').trim();
+  return raw ? Number(raw) : NaN;
+};
+
+function extendedMovement(quote, baseline, sessionClose = baseline) {
+  const change = baseline > 0 ? quote.price - baseline : null;
+  return {
+    ...quote, change, changePercent: change == null ? null : change / baseline * 100,
+    prevClose: baseline ?? null,
+    sessionChangePercent: sessionClose > 0 ? (quote.price / sessionClose - 1) * 100 : null
+  };
 }
 
 function validPremarketTimestamp(timestamp, session) {
@@ -342,20 +372,12 @@ export function createQuoteService(config) {
   async function getNasdaqQuote(symbol, premarket, assetClass = 'stocks') {
     const sym = String(symbol).toUpperCase();
     const url = `https://api.nasdaq.com/api/quote/${encodeURIComponent(sym)}/info?assetclass=${assetClass}`;
-    const data = await fetchJson(url, {
-      Accept: 'application/json, text/plain, */*',
-      Origin: 'https://www.nasdaq.com',
-      Referer: 'https://www.nasdaq.com/',
-      'User-Agent': 'Mozilla/5.0'
-    }, premarket ? { retries: 0, timeoutMs: 5000 } : {});
+    const data = await fetchJson(url, nasdaqHeaders, premarket ? extendedRequest : {});
     if (assetClass === 'stocks' && data?.status?.bCodeMessage?.some?.(entry => Number(entry.code) === 1001)) {
       return getNasdaqQuote(sym, premarket, 'etf');
     }
     const quote = data?.data?.primaryData;
-    const parseNumber = (value) => {
-      const raw = String(value ?? '').replace(/[$,%+,]/g, '').trim();
-      return raw ? Number(raw) : NaN;
-    };
+    const parseNumber = quoteNumber;
     const price = parseNumber(quote?.lastSalePrice);
     const change = parseNumber(quote?.netChange);
     if (!Number.isFinite(price) || price <= 0) throw new Error('Nasdaq 无有效价');
@@ -376,6 +398,57 @@ export function createQuoteService(config) {
       delayed: premarket ? quote.isRealTime !== true : true,
       ...(premarket ? { session: 'premarket', asOf: quote.lastTradeTimestamp } : {})
     };
+  }
+
+  async function getNasdaqAfterHours(symbol, session, assetClass = 'stocks') {
+    const url = `https://api.nasdaq.com/api/quote/${encodeURIComponent(symbol)}/extended-trading?assetclass=${assetClass}&markettype=post`;
+    const result = await fetchJson(url, nasdaqHeaders, extendedRequest);
+    const data = result?.data;
+    if (!data?.tradeDetailTable?.rows?.length && assetClass === 'stocks') {
+      return getNasdaqAfterHours(symbol, session, 'etf');
+    }
+    const stamp = data?.lastUpdateInfo?.[0]?.match(/([A-Za-z]{3} \d{1,2}, \d{4}) \d{1,2}:\d{2} [AP]M ET/);
+    const date = stamp ? Date.parse(stamp[1] + ' GMT') : NaN;
+    const trade = data?.tradeDetailTable?.rows?.[0];
+    const time = String(trade?.time || '').match(/^(\d{2}):([0-5]\d):([0-5]\d)$/);
+    const minute = time ? Number(time[1]) * 60 + Number(time[2]) : NaN;
+    const price = quoteNumber(trade?.price);
+    const close = quoteNumber(data?.previousInfo?.match(/Market Close:\s*([$\d.,]+)/i)?.[1]);
+    if (!Number.isFinite(date) || ymdUTC(date) !== session.date || !(minute >= 960 && minute < 1200 && minute <= session.minute)
+      || !(price > 0) || !(close > 0)) throw new Error('Nasdaq 暂无当天盘后成交');
+    return { symbol, price, close, currency: 'USD', source: 'nasdaq', delayed: true,
+      session: 'afterhours', asOf: `${session.date} ${trade.time} ET` };
+  }
+
+  async function getRegularCloses(symbol, throughDate) {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d&includePrePost=false`;
+    const data = await fetchJson(url, { 'User-Agent': 'Mozilla/5.0' }, extendedRequest);
+    const chart = data?.chart?.result?.[0];
+    if (chart?.meta?.currency !== 'USD') return [];
+    return (chart?.timestamp || []).map((time, i) => ({
+      date: yoloMarketDate(new Date(time * 1000)), price: Number(chart?.indicators?.quote?.[0]?.close?.[i])
+    })).filter(row => row.date <= throughDate && row.price > 0)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }
+
+  async function getAlpacaOvernight(symbol, session, now) {
+    const feed = config.alpacaOvernightFeed === 'boats' ? 'boats' : 'overnight';
+    const params = new URLSearchParams({ symbols: symbol, feed });
+    const data = await fetchJson(`https://data.alpaca.markets/v2/stocks/trades/latest?${params}`, {
+      'APCA-API-KEY-ID': config.alpacaApiKeyId,
+      'APCA-API-SECRET-KEY': config.alpacaApiSecretKey
+    }, extendedRequest);
+    const trade = data?.trades?.[symbol];
+    const when = new Date(trade?.t);
+    const price = Number(trade?.p);
+    const tradeSession = Number.isFinite(when.getTime()) ? usExtendedSession(when) : null;
+    if (!(price > 0) || when > now || tradeSession?.kind !== 'overnight' || tradeSession.date !== session.date) {
+      throw new Error('Alpaca 暂无当前夜盘成交');
+    }
+    const { date, minute } = easternClock(when);
+    const hhmm = [Math.floor(minute / 60), minute % 60].map(part => String(part).padStart(2, '0')).join(':');
+    return { symbol, price, currency: 'USD', source: 'alpaca', delayed: feed !== 'boats',
+      session: 'overnight', asOf: `${date} ${hhmm} ET` };
   }
 
   async function getUsStockQuote(symbol) {
@@ -992,8 +1065,29 @@ export function createQuoteService(config) {
       return { symbol: sym, price: nav, asOf: date, ...movement, currency: 'CNY', source: 'eastmoney-fund-nav' };
     }
     if (/^[A-Z]+\d{6}[CP]\d/i.test(sym)) return getOption(sym);
-    const session = !isAShareSymbol(sym) && !hkCode(sym) ? usPremarket(now) : null;
+    const session = !isAShareSymbol(sym) && !hkCode(sym) ? usExtendedSession(now) : null;
     if (!session) return getStock(sym);
+    if (session.kind === 'afterhours') {
+      try {
+        const quote = await getNasdaqAfterHours(sym, session);
+        const closes = await getRegularCloses(sym, session.date).catch(() => []);
+        return extendedMovement(quote, closes.find(row => row.date < session.date)?.price, quote.close);
+      } catch {
+        return { ...await getStock(sym), change: null, changePercent: null, session: 'no-afterhours' };
+      }
+    }
+    if (session.kind === 'overnight') {
+      if (config.alpacaApiKeyId && config.alpacaApiSecretKey) {
+        try {
+          const quote = await getAlpacaOvernight(sym, session, now);
+          const closes = await getRegularCloses(sym, session.date).catch(() => []);
+          return extendedMovement(quote, closes[0]?.price);
+        } catch { /* Fall back to the previous session without labeling it as overnight. */ }
+      }
+      const post = await getNasdaqAfterHours(sym, { ...session, minute: 1200 }).catch(() => null);
+      return { ...(post || await getStock(sym)), change: null, changePercent: null,
+        session: post ? 'no-overnight-afterhours' : 'no-overnight' };
+    }
     try {
       return await getNasdaqQuote(sym, session);
     } catch {

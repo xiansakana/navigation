@@ -6,5 +6,8 @@
   "dbPath": "data/navigation.db",
   "dataFile": "data/portfolio.json",
   "finnhubApiKey": "",
-  "polygonApiKey": ""
+  "polygonApiKey": "",
+  "alpacaApiKeyId": "",
+  "alpacaApiSecretKey": "",
+  "alpacaOvernightFeed": "overnight"
 }
