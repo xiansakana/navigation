@@ -1075,6 +1075,7 @@ select:focus {
 }
 
 .hidden { display: none !important; }
+.sm-panel-head-actions > [hidden] { display: none !important; }
 
 .sm-error {
     padding: 32px 24px;

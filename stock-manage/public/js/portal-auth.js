@@ -2,7 +2,7 @@ const STOCK_MANAGE_SERVICE = 'stock-manage';
 const QQQ_DIP_SERVICE = 'qqq-dip';
 
 let ctx = {
-  portal: false,
+  portal: /^\/stock-manage(?:\/|$)/.test(location.pathname),
   permissions: [],
   prefs: { stockManage: {} }
 };

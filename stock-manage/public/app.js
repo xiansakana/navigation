@@ -7,7 +7,7 @@ import { bindTradeInstrument } from './js/trade-instrument.js?v=reinvest-nav-aut
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=20261004-full-history';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js?v=fund-groups-1';
-import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js';
+import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js?v=access-1';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -221,6 +221,8 @@ function applyPermissions() {
   document.querySelector('.sm-dashboard-toggle')?.classList.toggle('hidden', !can('dashboard'));
   document.querySelector('.sm-pnl-visible-toggle')?.classList.toggle('hidden', !can('pnl-toggle'));
   $('#btn-trades').hidden = !can('trades');
+  $('#btn-accounts').hidden = !can('accounts');
+  $('#account-filter').hidden = !can('accounts');
   $('#btn-import').hidden = !can('import', 'edit');
   $('#btn-add').hidden = !can('trade', 'edit');
   $('#btn-refresh').hidden = !can('refresh', 'edit');
@@ -449,12 +451,13 @@ function holdingsCellContent(h, key, ctx) {
         const account = escapeHtml(h.accountId);
         const tradeActions = can('row-trade', 'edit') ? `
           <button type="button" class="btn link" data-trade="buy" data-symbol="${symbol}" data-account="${account}">买</button>
-          <button type="button" class="btn link" data-trade="sell" data-symbol="${symbol}" data-account="${account}">卖</button>
-          <button type="button" class="btn link" data-history="${symbol}">记录</button>` : '';
+          <button type="button" class="btn link" data-trade="sell" data-symbol="${symbol}" data-account="${account}">卖</button>` : '';
+        const historyAction = can('row-trade', 'edit') && can('trades') ?
+          `<button type="button" class="btn link" data-history="${symbol}">记录</button>` : '';
         const snapshotActions = h.type === 'fund' && h.editableSnapshot && can('fund-holdings', 'edit') ? `
           <button type="button" class="btn link" data-fund-edit="${h.fundIndex}">编辑期初</button>
           <button type="button" class="btn link" data-fund-delete="${h.fundIndex}">移除</button>` : '';
-        return maskCol('actions', (tradeActions + snapshotActions).trim() || '—');
+        return maskCol('actions', (tradeActions + historyAction + snapshotActions).trim() || '—');
       }
     default:
       return MASK;
@@ -1244,6 +1247,7 @@ async function renderTradeReviewTab() {
 }
 
 async function openTradeHistoryModal(symbol = '') {
+  if (!can('trades')) return;
   if (symbol) ui.tradeFilter.symbol = symbol;
   ui.tradeFilterOpen = false;
   ui.tradePage = 1;
@@ -1481,7 +1485,7 @@ $('#btn-add').addEventListener('click', () => {
   if (can('trade', 'edit')) openTradeModal();
 });
 $('#account-filter')?.addEventListener('change', (e) => { selectedAccountId = e.target.value; loadPortfolio().catch((error) => toastErr(error.message)); });
-const openAccounts = () => openInvestmentAccounts({ api, openModal, closeModal, reload: loadPortfolio, can, toastErr, toastOk });
+const openAccounts = () => can('accounts') && openInvestmentAccounts({ api, openModal, closeModal, reload: loadPortfolio, can, toastErr, toastOk });
 $('#btn-accounts')?.addEventListener('click', openAccounts);
 $('#btn-import').addEventListener('click', openImportModal);
 $('#btn-trades').addEventListener('click', () => openTradeHistoryModal());
@@ -1575,7 +1579,6 @@ $('#holdings-body').addEventListener('click', async (e) => {
 
 async function init() {
   await loadPortalContext();
-  if ($('#btn-accounts')) $('#btn-accounts').hidden = !can('accounts');
   applyPortalPrefs();
   applyPermissions();
   applyDipTabs();

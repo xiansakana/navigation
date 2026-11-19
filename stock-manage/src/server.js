@@ -227,14 +227,19 @@ function pnlOptsFromReq(req) {
 
 function portfolioForRequest(req, data = store.read()) {
   const accounts = data.investmentAccounts || [];
-  if (req.query.accountId) {
-    const selected = accounts.find((a) => a.id === req.query.accountId);
-    data = { ...data, trades: data.trades.filter((t) => (t.account_id || 'unassigned') === req.query.accountId), cashUsd: selected?.currency === 'USD' ? selected.cash : 0, cashCny: selected?.currency === 'CNY' ? selected.cash : 0, cashHkd: selected?.currency === 'HKD' ? selected.cash : 0 };
+  const accountsVisible = hasStockPermission(req, 'accounts');
+  const pnlOptions = pnlOptsFromReq(req);
+  if (!accountsVisible) delete pnlOptions.accountId;
+  const { accountId } = pnlOptions;
+  if (accountId) {
+    const selected = accounts.find((a) => a.id === accountId);
+    data = { ...data, trades: data.trades.filter((t) => (t.account_id || 'unassigned') === accountId), cashUsd: selected?.currency === 'USD' ? selected.cash : 0, cashCny: selected?.currency === 'CNY' ? selected.cash : 0, cashHkd: selected?.currency === 'HKD' ? selected.cash : 0 };
   }
-  const portfolio = buildPortfolio(data, pnlOptsFromReq(req));
-  portfolio.investmentAccounts = accounts.map(({ id, name, currency }) => ({ id, name, currency }));
+  const portfolio = buildPortfolio(data, pnlOptions);
+  portfolio.investmentAccounts = accountsVisible ? accounts.map(({ id, name, currency }) => ({ id, name, currency })) : [];
+  if (!hasStockPermission(req, 'trades')) portfolio.trades = [];
   portfolio.accountCashEnabled = !!data.accountCashEnabled;
-  const incomplete = accounts.filter((a) => (!req.query.accountId || req.query.accountId === a.id) && a.missingQuotes.length);
+  const incomplete = accounts.filter((a) => (!accountId || accountId === a.id) && a.missingQuotes.length);
   portfolio.missingQuotes = [...new Set(incomplete.flatMap(a => a.missingQuotes))];
   if (incomplete.length) {
     portfolio.summary.totalAssets = null; portfolio.summary.totalAssetsCny = null; portfolio.summary.totalMv = null;
@@ -242,7 +247,11 @@ function portfolioForRequest(req, data = store.read()) {
     if (incomplete.some((a) => a.currency === 'CNY')) portfolio.summary.assetsCny = null;
     if (incomplete.some((a) => a.currency === 'HKD')) portfolio.summary.assetsHkd = null;
   }
-  for (const holding of portfolio.holdings) holding.accountName = accounts.find((a) => a.id === holding.accountId)?.name || '待归属';
+  for (const holding of portfolio.holdings) {
+    if (accountsVisible) holding.accountName = accounts.find(a => a.id === holding.accountId)?.name || '待归属';
+    else delete holding.accountName;
+  }
+  if (!accountsVisible) for (const fund of portfolio.fundHoldings) delete fund.accountName;
   return hasStockPermission(req, 'cash') ? { ...portfolio, cashVisible: true } : redactPortfolioCash(portfolio);
 }
 
@@ -639,6 +648,7 @@ app.get('/api/trades/review', (req, res) => {
 });
 
 app.get('/api/trades/summary', (req, res) => {
+  if (!requireStockPermission(req, res, 'trades')) return;
   const data = store.read();
   res.json(computeSymbolSummaries(tradesForCalculations(req, data.trades), {
     startDate: req.query.start || undefined,
@@ -653,6 +663,7 @@ app.get('/api/trades/summary', (req, res) => {
 });
 
 app.get('/api/trades/export', (req, res) => {
+  if (!requireStockPermission(req, res, 'trades') || !requireStockPermission(req, res, 'export')) return;
   const data = store.read();
   let trades = [...scopedTrades(req, data.trades)].sort((a, b) => new Date(b.trade_date) - new Date(a.trade_date));
   const sym = String(req.query.symbol || '').trim().toUpperCase();

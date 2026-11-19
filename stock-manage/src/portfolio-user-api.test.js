@@ -344,6 +344,21 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     const readonly = await fetch(base + '/accounts', { headers: { 'x-portal-user-id': 'a', 'x-portal-permissions': Buffer.from('["service:stock-manage:accounts:view"]').toString('base64url') } });
     const masked = await readonly.json();
     assert.equal('cash' in masked.accounts[0], false);
+    const holdingsOnly = {
+      headers: {
+        'x-portal-user-id': 'a',
+        'x-portal-permissions': Buffer.from('["service:stock-manage:view"]').toString('base64url')
+      }
+    };
+    const portfolio = await (await fetch(base + '/portfolio', holdingsOnly)).json();
+    assert.ok(portfolio.holdings.length > 0);
+    assert.deepEqual(portfolio.investmentAccounts, []);
+    assert.ok(portfolio.holdings.every(holding => !('accountName' in holding)));
+    assert.ok(portfolio.fundHoldings.every(fund => !('accountName' in fund)));
+    assert.deepEqual(portfolio.trades, []);
+    for (const path of ['/accounts', '/trades/summary', '/trades/export', '/trades/review']) {
+      assert.equal((await fetch(base + path, holdingsOnly)).status, 403, path);
+    }
   } finally {
     child.kill();
     await new Promise((resolve) => child.exitCode != null ? resolve() : child.once('exit', resolve));
