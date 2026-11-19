@@ -38,10 +38,10 @@ test('US holding quotes use the same-day premarket price against the prior regul
 test('after-hours stocks and ETFs distinguish the prior close and the current close', async context => {
   const original = global.fetch; context.after(() => { global.fetch = original; });
   let reportDay = 18;
-  let yahooAvailable = true;
+  let closeHistoryAvailable = true;
   global.fetch = async url => {
     if (String(url).includes('finnhub')) return response({c:105,d:5,dp:5,pc:100});
-    if (String(url).includes('yahoo')) return response(yahooAvailable ? closeFixture : {});
+    if (String(url).includes('/historical?')) return response(closeHistoryAvailable ? closeFixture : {});
     assert.match(String(url), /extended-trading.*markettype=post/);
     return response(String(url).includes('assetclass=stocks') ? { data: null } : afterHoursFixture(reportDay));
   };
@@ -55,7 +55,7 @@ test('after-hours stocks and ETFs distinguish the prior close and the current cl
   const [row] = enrichHoldings([{symbol:'QQQ', shares:2, avgCost:100}], { QQQ:quote }, 0).rows;
   assert.equal(row.dailyPnl, 6);
   assert.equal(row.quoteSessionChangePct, quote.sessionChangePercent);
-  yahooAvailable = false;
+  closeHistoryAvailable = false;
   assert.equal((await service.getQuote('QQQ', now)).changePercent, null);
   reportDay = 17;
   const fallback = await service.getQuote('QQQ', now);
@@ -64,14 +64,12 @@ test('after-hours stocks and ETFs distinguish the prior close and the current cl
   assert.equal(fallback.changePercent, null);
 });
 
-const closeFixture = { chart: { result: [{
-  meta: { currency: 'USD' },
-  timestamp: ['2026-11-17T14:30:00Z', '2026-11-18T14:30:00Z'].map(value => Date.parse(value) / 1000),
-  indicators: { quote: [{ close: [100, 105] }] }
-}] } };
+const closeFixture = { data: { tradesTable: { rows: [
+  { date: '11/18/2026', close: '$105.00' }, { date: '11/17/2026', close: '$100.00' }
+] } } };
 
 const afterHoursFixture = day => ({ data: {
-  previousInfo: ' Market Close: $105.00',
+  previousInfo: ' Market Close: $100.00',
   lastUpdateInfo: [`Data last updated Nov ${day}, 2026 05:55 PM ET.`],
   tradeDetailTable: { rows: [{ time: '17:50:00', price: '$103.00' }] }
 } });
@@ -81,8 +79,8 @@ test('overnight uses the current overnight session across midnight and labels fa
   let time = '2026-11-19T04:30:00Z';
   let alpacaRequests = 0;
   global.fetch = async (url, options) => {
+    if (String(url).includes('/historical?')) return response(closeFixture);
     if (String(url).includes('nasdaq')) return response(afterHoursFixture(18));
-    if (String(url).includes('yahoo')) return response(closeFixture);
     alpacaRequests++;
     assert.match(String(url), /alpaca\.markets.*symbols=TSM&feed=overnight/);
     assert.equal(options.headers['APCA-API-KEY-ID'], 'fixture');

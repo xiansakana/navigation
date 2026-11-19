@@ -413,21 +413,22 @@ export function createQuoteService(config) {
     const time = String(trade?.time || '').match(/^(\d{2}):([0-5]\d):([0-5]\d)$/);
     const minute = time ? Number(time[1]) * 60 + Number(time[2]) : NaN;
     const price = quoteNumber(trade?.price);
-    const close = quoteNumber(data?.previousInfo?.match(/Market Close:\s*([$\d.,]+)/i)?.[1]);
     if (!Number.isFinite(date) || ymdUTC(date) !== session.date || !(minute >= 960 && minute < 1200 && minute <= session.minute)
-      || !(price > 0) || !(close > 0)) throw new Error('Nasdaq 暂无当天盘后成交');
-    return { symbol, price, close, currency: 'USD', source: 'nasdaq', delayed: true,
+      || !(price > 0)) throw new Error('Nasdaq 暂无当天盘后成交');
+    return { symbol, price, assetClass, currency: 'USD', source: 'nasdaq', delayed: true,
       session: 'afterhours', asOf: `${session.date} ${trade.time} ET` };
   }
 
-  async function getRegularCloses(symbol, throughDate) {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d&includePrePost=false`;
-    const data = await fetchJson(url, { 'User-Agent': 'Mozilla/5.0' }, extendedRequest);
-    const chart = data?.chart?.result?.[0];
-    if (chart?.meta?.currency !== 'USD') return [];
-    return (chart?.timestamp || []).map((time, i) => ({
-      date: yoloMarketDate(new Date(time * 1000)), price: Number(chart?.indicators?.quote?.[0]?.close?.[i])
-    })).filter(row => row.date <= throughDate && row.price > 0)
+  async function getRegularCloses(symbol, throughDate, assetClass = 'stocks') {
+    const fromDate = ymdUTC(Date.parse(throughDate) - 10 * 86400000);
+    const url = `https://api.nasdaq.com/api/quote/${encodeURIComponent(symbol)}/historical?assetclass=${assetClass}&fromdate=${fromDate}&todate=${throughDate}&limit=10`;
+    const data = await fetchJson(url, nasdaqHeaders, extendedRequest);
+    const rows = data?.data?.tradesTable?.rows;
+    if (!rows?.length && assetClass === 'stocks') return getRegularCloses(symbol, throughDate, 'etf');
+    return (rows || []).flatMap(row => {
+      const date = String(row.date || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      return date ? [{ date: `${date[3]}-${date[1]}-${date[2]}`, price: quoteNumber(row.close) }] : [];
+    }).filter(row => row.date >= fromDate && row.date <= throughDate && row.price > 0)
       .sort((a, b) => b.date.localeCompare(a.date));
   }
 
@@ -1070,8 +1071,11 @@ export function createQuoteService(config) {
     if (session.kind === 'afterhours') {
       try {
         const quote = await getNasdaqAfterHours(sym, session);
-        const closes = await getRegularCloses(sym, session.date).catch(() => []);
-        return extendedMovement(quote, closes.find(row => row.date < session.date)?.price, quote.close);
+        // The extended-trading "Market Close" caption can lag by one session.
+        const { assetClass, ...publicQuote } = quote;
+        const closes = await getRegularCloses(sym, session.date, assetClass).catch(() => []);
+        return extendedMovement(publicQuote, closes.find(row => row.date < session.date)?.price,
+          closes.find(row => row.date === session.date)?.price ?? null);
       } catch {
         return { ...await getStock(sym), change: null, changePercent: null, session: 'no-afterhours' };
       }
