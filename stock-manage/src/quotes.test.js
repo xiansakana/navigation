@@ -77,9 +77,10 @@ const afterHoursFixture = day => ({ data: {
 test('overnight uses the current overnight session across midnight and labels fallback prices', async context => {
   const original = global.fetch; context.after(() => { global.fetch = original; });
   let time = '2026-11-19T04:30:00Z';
+  let closeHistory = closeFixture;
   let alpacaRequests = 0;
   global.fetch = async (url, options) => {
-    if (String(url).includes('/historical?')) return response(closeFixture);
+    if (String(url).includes('/historical?')) return response(closeHistory);
     if (String(url).includes('nasdaq')) return response(afterHoursFixture(18));
     alpacaRequests++;
     assert.match(String(url), /alpaca\.markets.*symbols=TSM&feed=overnight/);
@@ -99,10 +100,19 @@ test('overnight uses the current overnight session across midnight and labels fa
   assert.equal((await service.getQuote('TSM', now)).session, 'no-overnight-afterhours');
   time = '2026-11-18T05:01:00Z'; // Previous overnight session.
   assert.equal((await service.getQuote('TSM', now)).session, 'no-overnight-afterhours');
-  const fallback = await createQuoteService({}).getQuote('TSM', now);
+  const noAlpaca = createQuoteService({});
+  const fallback = await noAlpaca.getQuote('TSM', now);
   assert.equal(alpacaRequests, 4);
-  assert.equal(fallback.price, 103);
-  assert.equal(fallback.change, null);
+  assert.equal(fallback.asOf, '2026-11-18 17:50:00 ET');
+  assert.equal(fallback.prevClose, 100);
+  const rows = quote => enrichHoldings([{symbol:'TSM', shares:2, avgCost:100}], { TSM:quote }, 0).rows;
+  assert.equal(rows(fallback)[0].dailyPnl, 6);
+  assert.equal(rows(fallback)[0].dailyPnlPct, 3);
+  closeHistory = {};
+  const withoutClose = await noAlpaca.getQuote('TSM', now);
+  assert.equal(withoutClose.price, 103);
+  assert.equal(rows(withoutClose)[0].dailyPnl, null);
+  assert.equal(rows(withoutClose)[0].dailyPnlPct, null);
 });
 
 test('USD/CNY uses the shared Finnhub/FRED fallback and caches observation metadata', async context => {

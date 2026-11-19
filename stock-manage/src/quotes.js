@@ -432,6 +432,14 @@ export function createQuoteService(config) {
       .sort((a, b) => b.date.localeCompare(a.date));
   }
 
+  async function getAfterHoursWithMovement(symbol, session) {
+    const { assetClass, ...quote } = await getNasdaqAfterHours(symbol, session);
+    // The extended-trading "Market Close" caption can lag by one session.
+    const closes = await getRegularCloses(symbol, session.date, assetClass).catch(() => []);
+    return extendedMovement(quote, closes.find(row => row.date < session.date)?.price,
+      closes.find(row => row.date === session.date)?.price ?? null);
+  }
+
   async function getAlpacaOvernight(symbol, session, now) {
     const feed = config.alpacaOvernightFeed === 'boats' ? 'boats' : 'overnight';
     const params = new URLSearchParams({ symbols: symbol, feed });
@@ -1070,12 +1078,7 @@ export function createQuoteService(config) {
     if (!session) return getStock(sym);
     if (session.kind === 'afterhours') {
       try {
-        const quote = await getNasdaqAfterHours(sym, session);
-        // The extended-trading "Market Close" caption can lag by one session.
-        const { assetClass, ...publicQuote } = quote;
-        const closes = await getRegularCloses(sym, session.date, assetClass).catch(() => []);
-        return extendedMovement(publicQuote, closes.find(row => row.date < session.date)?.price,
-          closes.find(row => row.date === session.date)?.price ?? null);
+        return await getAfterHoursWithMovement(sym, session);
       } catch {
         return { ...await getStock(sym), change: null, changePercent: null, session: 'no-afterhours' };
       }
@@ -1088,9 +1091,9 @@ export function createQuoteService(config) {
           return extendedMovement(quote, closes[0]?.price);
         } catch { /* Fall back to the previous session without labeling it as overnight. */ }
       }
-      const post = await getNasdaqAfterHours(sym, { ...session, minute: 1200 }).catch(() => null);
-      return { ...(post || await getStock(sym)), change: null, changePercent: null,
-        session: post ? 'no-overnight-afterhours' : 'no-overnight' };
+      const post = await getAfterHoursWithMovement(sym, { ...session, minute: 1200 }).catch(() => null);
+      if (post) return { ...post, session: 'no-overnight-afterhours' };
+      return { ...await getStock(sym), change: null, changePercent: null, session: 'no-overnight' };
     }
     try {
       return await getNasdaqQuote(sym, session);
