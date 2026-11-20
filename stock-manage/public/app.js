@@ -25,6 +25,7 @@ const fmtMoneySigned = (n, currency = 'USD') => {
   if (!Number.isFinite(n)) return '—';
   return (n >= 0 ? '+' : '-') + fmtMoney(Math.abs(n), currency);
 };
+const fmtMoneyPair = (usd, cny, format = fmtMoney) => `${format(usd, 'USD')}（${format(cny, 'CNY')}）`;
 const fmtCommission = (n, currency = 'USD') => {
   if (!Number.isFinite(n) || !(n > 0)) return '—';
   return '-' + fmtMoney(n, currency);
@@ -301,7 +302,7 @@ function renderDashboard() {
     });
     return `<div class="sm-summary-card ${classes}">
       <div class="label">${label}</div>
-      <div class="value ${color(total.USD)}">${mask(`${format(total.USD, 'USD')}（${format(total.CNY, 'CNY')}）`)}</div>
+      <div class="value ${color(total.USD)}">${mask(fmtMoneyPair(total.USD, total.CNY, format))}</div>
       ${notice && !hidden ? `<div class="hint">${notice}</div>` : ''}
       <div class="sm-asset-split">${split.join('')}</div>
       ${hint && !hidden ? `<div class="hint">${hint}</div>` : ''}
@@ -479,6 +480,7 @@ function renderHoldingsGroupSummary(group, expanded, cols) {
   const control = ['symbol', 'name', 'type', 'actions'].find(shown) || cols.find(c => colVis[c.key] !== false)?.key || cols[0]?.key;
   const symbol = shown('symbol') ? `${escapeHtml(group.key)} · ` : '';
   const first = group.items[0];
+  const usdCnyRate = Number(state.usdCnyRate);
   const dropTarget = shown('symbol') && can('meta', 'edit')
     ? ` data-group-drop="${escapeHtml(first.tradeSymbol || first.symbol)}"` : '';
   const toggle = `<button type="button" class="btn link sm-group-toggle" data-toggle-holding-group="${escapeHtml(group.key)}"
@@ -491,11 +493,13 @@ function renderHoldingsGroupSummary(group, expanded, cols) {
     if (!metric && !meta && key !== control) return '<td class="sm-group-empty" aria-hidden="true"></td>';
     let value = meta;
     if (metric) {
+      const cny = Number.isFinite(metric.value) && Number.isFinite(usdCnyRate) && usdCnyRate > 0
+        ? metric.value * usdCnyRate : null;
       const formatted = key.endsWith('Pct') ? fmtPct(metric.value)
-        : key === 'position' ? fmtMoney(metric.value) : fmtMoneySigned(metric.value);
+        : fmtMoneyPair(metric.value, cny, key === 'position' ? fmtMoney : fmtMoneySigned);
       const partial = metric.count > 0 && metric.count < group.items.length
         ? `<div class="sm-lots-hint" title="仅统计有可用数据的持仓">部分统计 ${metric.count}/${group.items.length}</div>` : '';
-      value = `<span class="${key === 'position' ? '' : cls(metric.value)}"${key.endsWith('Pct') ? '' : ' title="合计折算为美元"'}>${formatted}</span>${partial}`;
+      value = `<span class="${key === 'position' ? '' : cls(metric.value)}">${formatted}</span>${partial}`;
     }
     return `<td data-label="${label}"${key === control ? ' class="sm-group-control"' : ''}>${key === control ? toggle : ''}${value ? maskCol(key, value) : ''}</td>`;
   }).join('');
