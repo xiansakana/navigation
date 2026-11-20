@@ -5,13 +5,32 @@ import { initSchema } from '../../shared/db/schema.js';
 import { createPortfolioStore } from '../../shared/db/portfolio-store.js';
 import { createBookkeepingStore } from '../../portal/src/bookkeeping-store.js';
 import { saveInvestmentAccount, projectInvestments, unlinkInvestmentAccount } from '../../shared/investment-accounts.js';
-import { deriveHoldings, computePnl, computeSymbolSummaries, buildDailyCumulativeSeries } from './trades.js';
+import { deriveHoldings, computePnl, computeSymbolSummaries, buildDailyCumulativeSeries, normalizeTrade } from './trades.js';
 import { computeTradeReview } from './trade-review.js';
 import { assetTrends } from '../../portal/src/bookkeeping-analysis.js';
 const require = createRequire(import.meta.url);
 const Database = require('../../portal/node_modules/better-sqlite3');
 const setup = () => { const db = new Database(':memory:'); initSchema(db); return { db, ledger: createBookkeepingStore(db), stock: createPortfolioStore(db, 'u') }; };
 const trade = (id, type, account, amount, date = '2090-01-01T00:00:00Z') => ({ id, type, account_id: account, symbol: 'AAPL', name: 'Apple', currency: 'USD', shares: 1, price: amount, total_amount: amount, commission: 1, trade_date: date });
+
+test('Hong Kong fund trades keep native currency, reconcile cash and prevent overselling', () => {
+  const { db, stock } = setup();
+  try {
+    const account_id = saveInvestmentAccount(db, 'u', { name: '港币账户', currency: 'HKD', baselineCash: 1000 });
+    const symbol = 'HK0000478872';
+    const buy = normalizeTrade({ type: 'buy', symbol, account_id, shares: 100, price: 8.01234, currency: 'CNY', trade_date: '2090-01-01T00:00:00Z' });
+    assert.equal(buy.price, 8.01234);
+    assert.equal(buy.currency, 'HKD');
+    stock.write({ trades: [buy], quotes: { [symbol]: { price: 8.2, asOf: '2090-01-01' } } });
+    const [account] = projectInvestments(db, 'u', stock.read());
+    assert.equal(account.cash, 198.77);
+    assert.equal(account.equity, 1018.77);
+    assert.equal(account.positions[0].type, 'fund');
+    assert.equal(deriveHoldings([buy])[0].currency, 'HKD');
+    const sell = normalizeTrade({ type: 'sell', symbol, account_id, shares: 101, price: 8.2, trade_date: '2090-01-02T00:00:00Z' });
+    assert.throws(() => stock.write({ ...stock.read(), trades: [buy, sell] }), /卖出份额超过/);
+  } finally { db.close(); }
+});
 
 test('stale total assets never initialize cash; historical trades do not replay after binding', () => {
   const { db, ledger, stock } = setup();

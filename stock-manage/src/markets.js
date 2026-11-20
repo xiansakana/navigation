@@ -1,5 +1,6 @@
 /** A-share / mainland ETF symbol helpers (CNY). */
-import { fundCode } from '../../shared/fund-holdings.js';
+import { fundCode, fundIdentifier, hongKongFundIsin } from '../../shared/fund-holdings.js';
+import { hkFundInfo } from './hk-fund-nav.js';
 
 export function stripAShareDecorators(raw) {
   let s = String(raw || '').trim();
@@ -50,7 +51,7 @@ export function normalizeSymbol(symbol) {
 /** @returns {'CN'|'HK'|'US'|'OPTION'|'FUND'} */
 export function inferMarket(symbol) {
   const sym = String(symbol || '').trim();
-  if (fundCode(sym)) return 'FUND';
+  if (fundIdentifier(sym)) return 'FUND';
   if (/^[A-Z]+\d{6}[CP]\d+(?:\.\d+)?$/i.test(sym)) return 'OPTION';
   if (isAShareSymbol(sym)) return 'CN';
   if (hkCode(sym)) return 'HK';
@@ -61,6 +62,8 @@ export function inferCurrency(symbol, explicit) {
   const e = String(explicit || '').trim().toUpperCase();
   if (hkCode(symbol)) return 'HKD';
   if (fundCode(symbol)) return 'CNY';
+  const fund = hkFundInfo(hongKongFundIsin(symbol));
+  if (fund) return fund.currency;
   if (['CNY', 'USD', 'HKD'].includes(e)) return e;
   return inferMarket(symbol) === 'CN' ? 'CNY' : 'USD';
 }

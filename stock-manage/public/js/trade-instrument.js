@@ -1,4 +1,5 @@
-const isFund = symbol => /^\d{6}\.OF$/i.test(symbol);
+const isHkFund = symbol => /^HK\d{10}$/i.test(symbol);
+const isFund = symbol => /^\d{6}\.OF$/i.test(symbol) || isHkFund(symbol);
 
 export function bindTradeInstrument(form, { resolve, assetTypes, accounts }) {
   const { symbol, name, currency, account_id: account, price } = form.elements;
@@ -16,13 +17,13 @@ export function bindTradeInstrument(form, { resolve, assetTypes, accounts }) {
     const hk = /^(?:HK\.?)?\d{1,5}(?:\.HK)?$/.test(code);
     const cn = /^(?:SH\.?|SZ\.?|SS\.?)?\d{6}(?:\.(?:SH|SZ|SS))?$/.test(code);
     if (form.elements.type.value !== 'other' && code) {
-      currency.value = suggestedCurrency || (hk ? 'HKD' : cn || fund ? 'CNY' : 'USD');
+      currency.value = suggestedCurrency || (isHkFund(code) ? currency.value : hk ? 'HKD' : cn || fund ? 'CNY' : 'USD');
       if (account && accounts.find(a => a.id === account.value)?.currency !== currency.value) {
         const matching = accounts.filter(a => a.currency === currency.value);
         account.value = matching.length === 1 ? matching[0].id : '';
       }
     }
-    price.step = fund ? '0.0001' : '0.001';
+    price.step = isHkFund(code) ? '0.00001' : fund ? '0.0001' : '0.001';
     priceLabel.textContent = fund ? '成交净值' : '价格';
     form.querySelector('[data-trade-shares-label]').textContent = fund ? '确认份额' : '数量';
   }
@@ -64,11 +65,11 @@ export function bindTradeInstrument(form, { resolve, assetTypes, accounts }) {
         }
         return false;
       }
-      status.textContent = /^\d{6}$/.test(code) && form.elements.type.value !== 'other'
+      status.textContent = isHkFund(code) ? '暂未接入此香港基金份额' : /^\d{6}$/.test(code) && form.elements.type.value !== 'other'
         ? '未识别标的，请核对代码，或加上 .SH、.SZ、.OF 后重试'
         : '未查到名称，请核对代码或手动填写';
       lookup = null;
-      return !/^\d{6}$/.test(code) || form.elements.type.value === 'other';
+      return (!isHkFund(code) && !/^\d{6}$/.test(code)) || form.elements.type.value === 'other';
     }).catch(error => {
       if (!stillCurrent()) return false;
       status.textContent = error.message;

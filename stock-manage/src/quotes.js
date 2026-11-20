@@ -8,7 +8,8 @@ import {
 import { dateTimeFormatter } from './date-formatters.js';
 import { fetchQuoteResource } from '../../shared/quote-network.js';
 import { createForeignExchangeService } from '../../shared/foreign-exchange.js';
-import { fundCode } from '../../shared/fund-holdings.js';
+import { fundCode, hongKongFundIsin } from '../../shared/fund-holdings.js';
+import { getHkFundQuote, hkFundInfo } from './hk-fund-nav.js';
 import { findMainlandInstruments, getFundNav } from './fund-nav.js';
 
 function parseOptionSymbol(symbol) {
@@ -852,6 +853,7 @@ export function createQuoteService(config) {
 
   async function getQuote(symbol, now = new Date()) {
     const sym = normalizeSymbol(symbol);
+    if (hongKongFundIsin(sym)) return getHkFundQuote(sym);
     const code = fundCode(sym);
     if (code) {
       const { nav, date, ...movement } = await getFundNav(code);
@@ -889,6 +891,7 @@ export function createQuoteService(config) {
 
   async function getInstrumentName(symbol) {
     const sym = normalizeSymbol(symbol);
+    if (hongKongFundIsin(sym)) return hkFundInfo(sym)?.name || '';
     const code = fundCode(sym);
     if (code) return (await findMainlandInstruments(code)).fund?.name || '';
     const realName = (value) => {

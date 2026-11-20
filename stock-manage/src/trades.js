@@ -1,7 +1,8 @@
 import { tradeAssetType } from '../public/js/trade-asset-type.js';
 import { dateTimeFormatter } from './date-formatters.js';
 import { normalizeOtherAmount } from '../../shared/dividend-tax.js';
-import { fundCode, fundTradeOrder } from '../../shared/fund-holdings.js';
+import { fundCode, fundIdentifier, hongKongFundIsin, fundTradeOrder } from '../../shared/fund-holdings.js';
+import { hkFundInfo } from './hk-fund-nav.js';
 import { Decimal, roundDecimal, tradeCashAmount } from '../../shared/portfolio-decimal.js';
 import { parseReinvestmentNav, REINVESTMENT_INCOME_CATEGORY } from '../../shared/fund-reinvestment.js';
 import {
@@ -29,7 +30,7 @@ export function roundPrice(n) {
 }
 
 export function roundTradePrice(value, symbol) {
-  return roundDecimal(value, fundCode(symbol) ? 4 : 3);
+  return roundDecimal(value, hongKongFundIsin(symbol) ? 5 : fundCode(symbol) ? 4 : 3);
 }
 
 export function tradeCurrency(trade) {
@@ -147,7 +148,7 @@ function dateKey(t) {
 }
 
 function unitCost(trade) {
-  if (fundCode(trade.symbol) && Number.isFinite(trade.total_amount) && trade.shares > 0) {
+  if (fundIdentifier(trade.symbol) && Number.isFinite(trade.total_amount) && trade.shares > 0) {
     return new Decimal(trade.total_amount).div(trade.shares);
   }
   return new Decimal(Number(trade.price));
@@ -271,7 +272,7 @@ export function computePnl(trades, options = {}) {
   let realized = new Decimal(0);
   for (const [, list] of bySym) {
     const symbol = normalizeSymbol(list[0].symbol);
-    list.sort((a, b) => fundCode(symbol) ? compareTrades(a, b) : tradeTime(a.trade_date) - tradeTime(b.trade_date));
+    list.sort((a, b) => fundIdentifier(symbol) ? compareTrades(a, b) : tradeTime(a.trade_date) - tradeTime(b.trade_date));
     const queue = [];
     const cur = isAShareSymbol(symbol) ? 'CNY' : 'USD';
     for (const tr of list) {
@@ -733,7 +734,8 @@ export function normalizeTrade(input) {
       created_at: input.created_at || new Date().toISOString()
     };
   }
-  if (currency === 'HKD' && holdingTypeForSymbol(symbol) !== 'hkstock') throw new Error('港股代码请填写 00700 或 00700.HK');
+  if (hongKongFundIsin(symbol) && !hkFundInfo(symbol)) throw new Error('暂未接入此香港基金份额');
+  if (currency === 'HKD' && !['hkstock', 'fund'].includes(holdingTypeForSymbol(symbol))) throw new Error('港股代码请填写 00700 或 00700.HK');
   const shares = Number(input.shares);
   const reinvestmentNav = reinvest ? parseReinvestmentNav(input.reinvestmentNav) : undefined;
   const price = reinvest ? 0 : roundTradePrice(input.price, symbol);

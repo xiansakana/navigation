@@ -2,9 +2,18 @@ export function fundCode(symbol) {
   return /^(\d{6})\.OF$/i.exec(String(symbol || '').trim())?.[1] || '';
 }
 
+export function hongKongFundIsin(symbol) {
+  const code = String(symbol || '').trim().toUpperCase();
+  return /^HK\d{10}$/.test(code) ? code : '';
+}
+
+export function fundIdentifier(symbol) {
+  return fundCode(symbol) || hongKongFundIsin(symbol);
+}
+
 export function fundTradeOrder(t) {
   if (t.openingFund) return -1;
-  if (!fundCode(t.symbol)) return 0;
+  if (!fundIdentifier(t.symbol)) return 0;
   return t.type === 'sell' ? 2 : 1;
 }
 

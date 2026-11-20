@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { requirePortfolioUserId } from './portfolio-user.js';
-import { fundCode, fundHoldings, fundTradeOrder, fundValuation, openingFundTrades } from './fund-holdings.js';
+import { fundCode, fundHoldings, fundIdentifier, hongKongFundIsin, fundTradeOrder, fundValuation, openingFundTrades } from './fund-holdings.js';
 import { Decimal, roundDecimal, tradeCashAmount } from './portfolio-decimal.js';
 
 const round = (n) => roundDecimal(n, 2);
@@ -110,14 +110,14 @@ export function projectInvestments(db, userId, input) {
       if (!['buy', 'sell'].includes(t.type)) continue;
       const q = quantities.get(t.symbol) || { shares: new Decimal(0), name: t.name || t.symbol };
       q.shares = t.type === 'buy' ? q.shares.plus(Number(t.shares)) : Decimal.max(0, q.shares.minus(Number(t.shares)));
-      if (fundCode(t.symbol) && t.name) q.name = t.name;
+      if (fundIdentifier(t.symbol) && t.name) q.name = t.name;
       quantities.set(t.symbol, q);
     }
     const missing = [], positions = [];
     let marketValue = new Decimal(0);
     for (const [symbol, q] of quantities) {
       if (!q.shares.gt(0)) continue;
-      const code = fundCode(symbol);
+      const code = fundIdentifier(symbol);
       const quote = code ? fundValuation(raw.quotes?.[symbol], openingFunds.get(symbol)) : raw.quotes?.[symbol];
       const price = quote?.price == null || quote.price === '' ? NaN : Number(quote.price);
       if (!Number.isFinite(price) || price < 0) missing.push(symbol);
@@ -181,6 +181,7 @@ export function prepareInvestmentTrades(db, userId, next, before) {
   const accounts = investmentRows(db, userId);
   if (!accounts.length) {
     if (next.some(t => currency(t) === 'HKD')) throw new Error('请先创建港币证券账户');
+    if (next.some(t => t.type !== 'other' && hongKongFundIsin(t.symbol))) throw new Error('请先创建同币种的证券账户');
     if (next.some(t => t.type !== 'other' && fundCode(t.symbol))) throw new Error('请先创建人民币证券账户');
     return next;
   }
@@ -194,14 +195,14 @@ export function prepareInvestmentTrades(db, userId, next, before) {
     if (!trade.account_id && previous && financial(previous) === financial(trade)) return trade;
     if (!Number.isFinite(time(trade.trade_date))) throw new Error('交易时间无效，无法确定现金基准');
     const cur = currency(trade);
-    if (cur === 'HKD' && trade.type !== 'other' && !isHk(trade.symbol)) throw new Error('港股代码请填写 00700 或 00700.HK');
+    if (cur === 'HKD' && trade.type !== 'other' && !isHk(trade.symbol) && !hongKongFundIsin(trade.symbol)) throw new Error('港股代码请填写 00700 或 00700.HK');
     const candidates = accounts.filter((a) => a.currency === cur);
     const accountId = trade.account_id || (candidates.length === 1 ? candidates[0].id : '');
     const account = accounts.find((a) => a.id === accountId);
     if (!account || account.currency !== cur) throw new Error('请选择本人名下、同币种的证券账户');
-    return { ...trade, account_id: accountId, ...(cur === 'HKD' || fundCode(trade.symbol) ? { currency: cur } : {}) };
+    return { ...trade, account_id: accountId, ...(cur === 'HKD' || fundIdentifier(trade.symbol) ? { currency: cur } : {}) };
   });
-  const fundTrades = prepared.filter(t => ['buy', 'sell'].includes(t.type) && fundCode(t.symbol));
+  const fundTrades = prepared.filter(t => ['buy', 'sell'].includes(t.type) && fundIdentifier(t.symbol));
   if (fundTrades.length) {
     const balances = new Map();
     const ordered = fundTrades.sort(compareTrades);

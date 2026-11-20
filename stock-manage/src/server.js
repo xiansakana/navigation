@@ -1,4 +1,5 @@
-import { ensureFundHoldings, fundCode, fundHoldings, fundValuation, openingFundTrades } from '../../shared/fund-holdings.js';
+import { ensureFundHoldings, fundCode, fundIdentifier, hongKongFundIsin, fundHoldings, fundValuation, openingFundTrades } from '../../shared/fund-holdings.js';
+import { hkFundInfo } from './hk-fund-nav.js';
 import { Decimal } from '../../shared/portfolio-decimal.js';
 import { estimatedReinvestmentIncome, tradesWithReinvestmentIncome } from '../../shared/fund-reinvestment.js';
 import { findInternationalStockName, findMainlandInstruments, findReinvestmentNav, getFundNav } from './fund-nav.js';
@@ -142,12 +143,12 @@ function buildPortfolio(data, pnlOpts = {}) {
     usdCnyRate: rate
   };
   const openingByKey = new Map(openings.map(fund => [JSON.stringify([fund.account_id, fund.code]), fund]));
-  const fundTrades = new Set(data.trades.filter(t => t.type !== 'other' && fundCode(t.symbol))
-    .map(t => JSON.stringify([t.account_id, fundCode(t.symbol)])));
+  const fundTrades = new Set(data.trades.filter(t => t.type !== 'other' && fundIdentifier(t.symbol))
+    .map(t => JSON.stringify([t.account_id, fundIdentifier(t.symbol)])));
   // Each account can have a different legacy NAV for the same fund.
   const fundQuotes = {};
   const fundRows = holdings.filter(h => h.type === 'fund').map(holding => {
-    const code = fundCode(holding.symbol);
+    const code = fundIdentifier(holding.symbol);
     const key = JSON.stringify([holding.accountId, code]);
     const opening = openingByKey.get(key);
     const quote = fundValuation(data.quotes[holding.symbol], opening);
@@ -184,6 +185,7 @@ function buildPortfolio(data, pnlOpts = {}) {
     holdingsMeta: data.holdingsMeta,
     holdings: enriched.rows.filter(row => row.type !== 'fund'),
     fundHoldings: fundRows.map((fund, index) => ({ ...fund,
+      marketValueUsd: fund.marketValue == null ? null : enrichedFunds[index].marketValue,
       dailyPnl: enrichedFunds[index].dailyPnl,
       dailyPnlPct: enrichedFunds[index].dailyPnlPct,
       groupWith: enrichedFunds[index].groupWith,
@@ -475,9 +477,16 @@ app.put('/api/holdings-meta/:symbol', (req, res) => {
 
 async function recordNamedTrade(input) {
   const symbol = normalizeSymbol(input.symbol);
-  const code = input.type !== 'other' && fundCode(symbol);
+  const code = input.type !== 'other' && fundIdentifier(symbol);
   if (!code) return { trade: await normalizeNamedTrade(input, async sym => ({ name: await quotes.getInstrumentName(sym) })) };
   const data = store.read();
+  if (hongKongFundIsin(symbol)) {
+    const info = hkFundInfo(symbol);
+    if (!info) throw new Error('暂未接入此香港基金份额');
+    const trade = await normalizeNamedTrade({ ...input, name: info.name, currency: info.currency });
+    const quote = data.quotes[symbol] ? null : await quotes.getQuote(symbol).catch(() => null);
+    return { trade, quote };
+  }
   const opening = openingFundsForAccount().find(fund => fund.code === code);
   const existing = data.trades.find(t => t.symbol === symbol && t.type !== 'other');
   let name = opening?.name || existing?.name;
@@ -704,7 +713,7 @@ app.get('/api/trades/export', (req, res) => {
   const sheet = XLSX.utils.json_to_sheet(rows);
   rows.forEach((_, index) => {
     const cell = sheet[XLSX.utils.encode_cell({ r: index + 1, c: 10 })];
-    if (cell?.t === 'n') cell.z = fundCode(trades[index].symbol) ? '0.0000' : '0.000';
+    if (cell?.t === 'n') cell.z = hongKongFundIsin(trades[index].symbol) ? '0.00000' : fundCode(trades[index].symbol) ? '0.0000' : '0.000';
   });
   XLSX.utils.book_append_sheet(wb, sheet, '交易记录');
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
@@ -758,6 +767,10 @@ app.get('/api/instruments/resolve', async (req, res) => {
   };
   const listedName = async () => storedName(symbol) || await quotes.getInstrumentName(symbol).catch(() => '');
   try {
+    if (hongKongFundIsin(symbol)) {
+      const info = hkFundInfo(symbol);
+      return res.json(info ? [candidate(symbol, info.name)] : []);
+    }
     if (market === 'FUND') {
       const known = storedName(symbol);
       if (known) return res.json([candidate(symbol, known)]);
@@ -1203,7 +1216,7 @@ app.post('/api/quotes/refresh', async (req, res) => {
   }
   const latest = store.read();
   for (const [sym, quote] of Object.entries(updated)) {
-    if (fundCode(sym) && latest.quotes[sym]?.asOf > quote.asOf) delete updated[sym];
+    if (fundIdentifier(sym) && latest.quotes[sym]?.asOf > quote.asOf) delete updated[sym];
   }
   const saved = store.write({ ...latest, ...rates, quotes: { ...latest.quotes, ...updated } });
   const payload = portfolioForRequest(req, saved);

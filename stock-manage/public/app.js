@@ -1,9 +1,9 @@
-import { TRADE_ASSET_TYPES, tradeAssetType } from './js/trade-asset-type.js?v=fund-trades-1';
+import { TRADE_ASSET_TYPES, tradeAssetType } from './js/trade-asset-type.js?v=hk-fund-1';
 import { openInvestmentAccounts } from './js/investment-accounts.js?v=quantity-1';
 import { isDividendTax, normalizeOtherAmount } from './js/dividend-tax.js';
-import { renderTradeReview } from './js/trade-review.js?v=fund-trades-1';
+import { renderTradeReview } from './js/trade-review.js?v=hk-fund-1';
 import { formatPrice, formatQuantity, priceInputValue } from './js/price-format.js?v=quantity-1';
-import { bindTradeInstrument } from './js/trade-instrument.js?v=reinvest-nav-auto-1';
+import { bindTradeInstrument } from './js/trade-instrument.js?v=hk-fund-1';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=20261004-full-history';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js?v=fund-groups-1';
@@ -14,6 +14,7 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => 
 const fmt = (n) => Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
 const fmtUsd = (n) => Number.isFinite(n) ? '$' + fmt(n) : '—';
 const fmtCny = (n) => Number.isFinite(n) ? '¥' + fmt(n) : '—';
+const fundPriceDigits = symbol => /^HK\d{10}$/i.test(symbol || '') ? 5 : 4;
 const fmtMoney = (n, currency = 'USD') => {
   if (!Number.isFinite(n)) return '—';
   const prefix = { USD: '$', CNY: '¥', HKD: 'HK$' };
@@ -400,7 +401,7 @@ function holdingsCellContent(h, key, ctx) {
     case 'shares':
       return maskCol('shares', formatQuantity(h.shares));
     case 'cost':
-      return maskCol('cost', formatPrice(h.avgCost, cur, h.type === 'fund' ? 4 : 3) + lots);
+      return maskCol('cost', formatPrice(h.avgCost, cur, h.type === 'fund' ? fundPriceDigits(h.tradeSymbol || h.symbol) : 3) + lots);
     case 'price': {
       const isFund = h.type === 'fund';
       const refreshTarget = can('refresh', 'edit') ? `data-refresh="${escapeHtml(h.tradeSymbol || h.symbol)}"`
@@ -408,7 +409,7 @@ function holdingsCellContent(h, key, ctx) {
       const label = isFund ? '更新净值' : '刷新价格';
       const refresh = refreshTarget ? ` <button type="button" class="btn link" ${refreshTarget} title="${label}" aria-label="${label}">↻</button>` : '';
       if (isFund) {
-        const nav = h.price == null ? '待更新净值' : formatPrice(h.price, cur, 4);
+        const nav = h.price == null ? '待更新净值' : formatPrice(h.price, cur, fundPriceDigits(h.tradeSymbol || h.symbol));
         const date = h.quoteAsOf ? `<div class="sm-lots-hint">净值 ${escapeHtml(h.quoteAsOf)}</div>` : '';
         return maskCol('price', `<span>${nav}</span>${refresh}${date}`);
       }
@@ -517,9 +518,9 @@ function renderHoldings() {
   renderHoldingsHead();
   const cols = visibleHoldingsColumns();
   const funds = (state.fundHoldings || []).map((fund, fundIndex) => ({
-    ...fund, type: 'fund', currency: 'CNY', fundIndex,
+    ...fund, type: 'fund', fundIndex,
     avgCost: fund.cost / fund.shares, marketValueNative: fund.marketValue,
-    marketValue: fund.marketValue == null ? null : fund.marketValue / state.usdCnyRate,
+    marketValue: fund.marketValueUsd,
     pnlPct: fund.cost > 0 && fund.pnl != null ? fund.pnl / fund.cost * 100 : null
   }));
   const groups = buildHoldingsGroups([...(state.holdings || []), ...funds], tableSort.key, tableSort.dir);
@@ -779,7 +780,7 @@ function tradeFormFields(trade = {}) {
         <option value="HKD" ${currency === 'HKD' ? 'selected' : ''}>HKD 港币</option>
       </select></label>
       <label class="field-trade ${type === 'other' ? 'hidden' : ''}"><span data-trade-shares-label>数量</span><input name="shares" type="number" step="any" value="${trade.shares ?? ''}"></label>
-      <label class="field-trade field-price"><span data-trade-price-label>价格</span><input name="price" type="number" step="${fund ? '0.0001' : '0.001'}" value="${priceInputValue(trade.price, fund ? 4 : 3)}"></label>
+      <label class="field-trade field-price"><span data-trade-price-label>价格</span><input name="price" type="number" step="${fund ? (fundPriceDigits(trade.symbol) === 5 ? '0.00001' : '0.0001') : '0.001'}" value="${priceInputValue(trade.price, fund ? fundPriceDigits(trade.symbol) : 3)}"></label>
       <label class="field-reinvestment hidden">折算净值（选填）<input name="reinvestmentNav" type="number" step="any" min="0" value="${escapeHtml(trade.reinvestmentNav ?? '')}"><small class="hint" data-reinvestment-status aria-live="polite">可按确认日期自动查找，也可填写基金公告指定日期的单位净值。</small></label>
       <label class="field-other-amt ${type !== 'other' ? 'hidden' : ''}">金额<input name="total_amount" type="number" step="any" value="${trade.total_amount ?? ''}"></label>
       <label>手续费<input name="commission" type="number" step="any" value="${trade.commission ?? 0}"></label>
@@ -935,7 +936,7 @@ function renderImportPreviewSection() {
       <td data-label="代码">${escapeHtml(t.symbol)}</td>
       <td data-label="名称">${escapeHtml(t.name || '')}</td>
       <td data-label="数量">${t.type === 'other' ? '—' : formatQuantity(t.shares)}</td>
-      <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.reinvestedDividend ? t.reinvestmentNav : t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? 4 : 3)}</td>
+      <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.reinvestedDividend ? t.reinvestmentNav : t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? fundPriceDigits(t.symbol) : 3)}</td>
       <td data-label="本金">${tradeAmountLabel(t)}</td><td data-label="总费用">${fmtMoney(t.commission, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
       <td data-label="处理">${({ added: '新增', updated: '更新（需确认）', skipped: '重复跳过', needsAssignment: '先核对未归属历史' })[t.importAction] || '新增'}</td>
     </tr>`).join('');
@@ -1142,7 +1143,7 @@ function renderTradeListTab() {
               <td data-label="名称" class="sm-trade-name">${escapeHtml(t.name || '')}</td>
               <td data-label="币种">${escapeHtml(t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
               <td data-label="股数">${t.type === 'other' ? '—' : formatQuantity(t.shares)}</td>
-              <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.reinvestedDividend ? t.reinvestmentNav : t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? 4 : 3)}</td>
+              <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.reinvestedDividend ? t.reinvestmentNav : t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? fundPriceDigits(t.symbol) : 3)}</td>
               <td data-label="金额">${tradeAmountLabel(t)}</td>
               <td data-label="手续费">${fmtCommission(t.commission, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
               <td data-label="操作">${can('trade', 'edit') ? `
