@@ -6,7 +6,7 @@ import { formatPrice, formatQuantity, priceInputValue } from './js/price-format.
 import { bindTradeInstrument } from './js/trade-instrument.js?v=keep-trade-account-1';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=20261004-full-history';
-import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey, isHoldingsSortable } from './js/holdings-table.js?v=holding-sorts-1';
+import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey, isHoldingsSortable } from './js/holdings-table.js?v=group-summary-1';
 import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js?v=access-1';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -471,7 +471,36 @@ function pnlCellClass(key, h) {
   return '';
 }
 
-function renderHoldingsRowCells(h, group, i) {
+const expandedHoldingGroups = new Set();
+
+function renderHoldingsGroupSummary(group, expanded, cols) {
+  const shown = key => cols.some(c => c.key === key) && colVis[key] !== false;
+  const control = ['symbol', 'name', 'type', 'actions'].find(shown) || cols.find(c => colVis[c.key] !== false)?.key || cols[0]?.key;
+  const symbol = shown('symbol') ? `${escapeHtml(group.key)} · ` : '';
+  const first = group.items[0];
+  const dropTarget = shown('symbol') && can('meta', 'edit')
+    ? ` data-group-drop="${escapeHtml(first.tradeSymbol || first.symbol)}"` : '';
+  const toggle = `<button type="button" class="btn link sm-group-toggle" data-toggle-holding-group="${escapeHtml(group.key)}"
+    aria-expanded="${expanded}"${dropTarget}><span aria-hidden="true">${expanded ? '▾' : '▸'}</span> ${symbol}合计 <small>（${group.items.length} 项）</small></button>`;
+  return cols.map(c => {
+    const metric = group.summary[c.key];
+    const label = escapeHtml(c.label);
+    const key = c.key;
+    const meta = key === 'weight' ? fmtPct(first.weight) : '';
+    if (!metric && !meta && key !== control) return '<td class="sm-group-empty" aria-hidden="true"></td>';
+    let value = meta;
+    if (metric) {
+      const formatted = key.endsWith('Pct') ? fmtPct(metric.value)
+        : key === 'position' ? fmtMoney(metric.value) : fmtMoneySigned(metric.value);
+      const partial = metric.count > 0 && metric.count < group.items.length
+        ? `<div class="sm-lots-hint" title="仅统计有可用数据的持仓">部分统计 ${metric.count}/${group.items.length}</div>` : '';
+      value = `<span class="${key === 'position' ? '' : cls(metric.value)}"${key.endsWith('Pct') ? '' : ' title="合计折算为美元"'}>${formatted}</span>${partial}`;
+    }
+    return `<td data-label="${label}"${key === control ? ' class="sm-group-control"' : ''}>${key === control ? toggle : ''}${value ? maskCol(key, value) : ''}</td>`;
+  }).join('');
+}
+
+function renderHoldingsRowCells(h, group) {
   const groupSymbol = escapeHtml(h.tradeSymbol || h.symbol);
   return visibleHoldingsColumns().map((c) => {
     if (c.key === 'weight') {
@@ -482,9 +511,8 @@ function renderHoldingsRowCells(h, group, i) {
       if (group.items.length === 1) {
         return `<td data-label="${c.label}" class="sm-weight-cell">${holdingsCellContent(h, 'weight', {})}</td>`;
       }
-      const total = i === 0 ? `<div>合计 ${fmtPct(h.weight)}</div>` : '';
       const item = `<div class="sm-lots-hint">单项 ${fmtPct(individual)}</div>`;
-      return `<td data-label="${c.label}" class="sm-weight-cell">${maskCol('weight', `<div>${total}${item}</div>`)}</td>`;
+      return `<td data-label="${c.label}" class="sm-weight-cell">${maskCol('weight', item)}</td>`;
     }
     const tdCls = [pnlCellClass(c.key, h), c.key === 'name' ? 'sm-holding-name' : ''].filter(Boolean).join(' ');
     const opt = h.optionInfo;
@@ -528,14 +556,21 @@ function renderHoldings() {
   const groups = buildHoldingsGroups([...(state.holdings || []), ...funds], sort.key, sort.dir, state);
   let html = '';
   groups.forEach((group, gi) => {
+    const merged = group.items.length > 1;
+    if (merged) {
+      const expanded = expandedHoldingGroups.has(group.key);
+      html += `<tr class="sm-holding-group-summary${gi > 0 ? ' sm-holding-group-start' : ''}">${renderHoldingsGroupSummary(group, expanded, cols)}</tr>`;
+      if (!expanded) return;
+    }
     group.items.forEach((h, i) => {
       const rowCls = [
-        gi > 0 && i === 0 ? 'sm-holding-group-start' : '',
+        !merged && gi > 0 && i === 0 ? 'sm-holding-group-start' : '',
+        merged ? 'sm-holding-group-detail' : '',
         h.type === 'option' ? 'sm-holding-option' : '',
         (h.type === 'ashare' || h.currency === 'CNY') ? 'sm-holding-ashare' : ''
       ].filter(Boolean).join(' ');
       const symbolAttr = h.type === 'fund' ? 'data-fund-holding' : `data-symbol="${h.symbol}"`;
-      html += `<tr ${symbolAttr} class="${rowCls}">${renderHoldingsRowCells(h, group, i)}</tr>`;
+      html += `<tr ${symbolAttr} class="${rowCls}">${renderHoldingsRowCells(h, group)}</tr>`;
     });
   });
 
@@ -1612,7 +1647,7 @@ $('#holdings-body').addEventListener('dragstart', (e) => {
 });
 
 $('#holdings-body').addEventListener('dragover', (e) => {
-  if (e.target.closest('[data-drag]')) {
+  if (e.target.closest('[data-drag], [data-group-drop]')) {
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
   }
@@ -1622,11 +1657,11 @@ $('#holdings-body').addEventListener('dragend', () => { dragSourceSymbol = null;
 
 $('#holdings-body').addEventListener('drop', async (e) => {
   if (!can('meta', 'edit')) return;
-  const targetEl = e.target.closest('[data-drag]');
+  const targetEl = e.target.closest('[data-drag], [data-group-drop]');
   if (!targetEl) return;
   e.preventDefault();
   const src = (e.dataTransfer?.getData('text/plain') || dragSourceSymbol || '').trim();
-  const dst = targetEl.dataset.drag;
+  const dst = targetEl.dataset.drag || targetEl.dataset.groupDrop;
   if (!src || !dst || src === dst) return;
   const anchor = state.holdings.find(h => h.symbol === dst)
     || state.fundHoldings?.find(h => h.tradeSymbol === dst);
@@ -1640,6 +1675,16 @@ $('#holdings-body').addEventListener('drop', async (e) => {
 });
 
 $('#holdings-body').addEventListener('click', async (e) => {
+  const toggle = e.target.closest('[data-toggle-holding-group]');
+  if (toggle) {
+    const groupKey = toggle.dataset.toggleHoldingGroup;
+    if (expandedHoldingGroups.has(groupKey)) expandedHoldingGroups.delete(groupKey);
+    else expandedHoldingGroups.add(groupKey);
+    renderHoldings();
+    [...$('#holdings-body').querySelectorAll('[data-toggle-holding-group]')]
+      .find(btn => btn.dataset.toggleHoldingGroup === groupKey)?.focus({ preventScroll: true });
+    return;
+  }
   const clearSym = e.target.closest('[data-clear-group]')?.dataset.clearGroup;
   if (clearSym) {
     if (!can('meta', 'edit')) return;

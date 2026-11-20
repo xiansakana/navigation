@@ -55,7 +55,7 @@ function comparable(a, b, dir, compare = (x, y) => x - y) {
 }
 
 function groupMetric(items, key, rates) {
-  let total = 0, basis = 0;
+  let total = 0, basis = 0, count = 0;
   const isRate = key.endsWith('Pct');
   const daily = key === 'dailyPnlPct' || key === 'dailyPnl';
   for (const h of items) {
@@ -63,20 +63,27 @@ function groupMetric(items, key, rates) {
     const fx = h.currency === 'HKD' ? rates.usdHkdRate : h.currency === 'CNY' ? rates.usdCnyRate : 1;
     const amount = daily ? h.dailyPnl : h.pnl;
     if (isRate) {
-      if (!Number.isFinite(h[key])) return null;
-      if (items.length === 1) return h[key];
+      if (!Number.isFinite(h[key])) continue;
+      if (items.length === 1) return { value: h[key], count: 1 };
       const nativeBasis = daily ? h.marketValueNative - amount : h.costBasisNative ?? h.cost;
       if (!Number.isFinite(nativeBasis) || nativeBasis <= 0 || !Number.isFinite(amount) || !(fx > 0)
-        || (daily && !Number.isFinite(h.marketValueNative))) return null;
+        || (daily && !Number.isFinite(h.marketValueNative))) continue;
       basis += nativeBasis / fx;
       total += amount / fx;
     } else {
       const value = key === 'position' ? position : fx > 0 && Number.isFinite(amount) ? amount / fx : null;
-      if (!Number.isFinite(value)) return null;
+      if (!Number.isFinite(value)) continue;
       total += value;
     }
+    count++;
   }
-  return isRate ? total / basis * 100 : total;
+  const value = count ? (isRate ? total / basis * 100 : total) : null;
+  return { value, count };
+}
+
+export function summarizeHoldingsGroup(items, rates = {}, sortKey) {
+  const keys = items.length > 1 ? numericSorts : numericSorts.has(sortKey) ? [sortKey] : [];
+  return Object.fromEntries([...keys].map(key => [key, groupMetric(items, key, rates)]));
 }
 
 export function buildHoldingsGroups(rows, sortKey, sortDir, rates = {}) {
@@ -92,8 +99,7 @@ export function buildHoldingsGroups(rows, sortKey, sortDir, rates = {}) {
     if (!groupMap.has(key)) groupMap.set(key, []);
     groupMap.get(key).push(h);
   }
-  const metrics = numericSorts.has(sortKey)
-    ? new Map([...groupMap].map(([key, items]) => [key, groupMetric(items, sortKey, rates)])) : null;
+  const summaries = new Map([...groupMap].map(([key, items]) => [key, summarizeHoldingsGroup(items, rates, sortKey)]));
   const keys = [...groupMap.keys()].sort((a, b) => {
     const itemsA = groupMap.get(a);
     const itemsB = groupMap.get(b);
@@ -102,7 +108,9 @@ export function buildHoldingsGroups(rows, sortKey, sortDir, rates = {}) {
     const ta = typeRank(groupPrimaryType(itemsA));
     const tb = typeRank(groupPrimaryType(itemsB));
 
-    if (metrics) return comparable(metrics.get(a), metrics.get(b), sortDir) || a.localeCompare(b);
+    if (numericSorts.has(sortKey)) {
+      return comparable(summaries.get(a)[sortKey].value, summaries.get(b)[sortKey].value, sortDir) || a.localeCompare(b);
+    }
     if (sortKey === 'symbol') {
       return a.localeCompare(b) * sortDir;
     }
@@ -117,7 +125,7 @@ export function buildHoldingsGroups(rows, sortKey, sortDir, rates = {}) {
     if (ta !== tb) return ta - tb;
     return a.localeCompare(b);
   });
-  return keys.map((key) => ({ key, items: groupMap.get(key) }));
+  return keys.map((key) => ({ key, items: groupMap.get(key), summary: summaries.get(key) }));
 }
 
 export function toggleTableSort(current, key) {

@@ -204,6 +204,9 @@ body.has-navbar {
 .sm-lots-hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .sm-holdings-hint { margin: 0; padding: 0 20px 12px; }
 .sm-holding-group-start td { border-top: 2px solid var(--border); }
+.sm-holding-group-summary td { background: rgba(91, 156, 255, 0.09); font-weight: 600; }
+.sm-group-toggle small { font-weight: 400; color: var(--muted); display: inline-block; }
+#holdings-table .sm-holding-group-detail td[data-label="代码"] { padding-inline-start: 14px; }
 .sm-holding-option td { background: rgba(91, 156, 255, 0.04); }
 .sm-sort-th { cursor: pointer; user-select: none; white-space: nowrap; }
 .sm-sort-th:hover { color: var(--accent); }
@@ -1282,6 +1285,9 @@ select:focus {
     font-weight: 400;
   }
   #holdings-table .sm-holding-name, #holdings-table td.empty { grid-column: 1 / -1; }
+  #holdings-table .sm-group-control { grid-column: 1 / -1; }
+  #holdings-table td.sm-group-empty { display: none; }
+  #holdings-table .sm-holding-group-detail { border-inline-start: 3px solid var(--border); }
   #holdings-table td.empty::before { display: none; }
 }
 

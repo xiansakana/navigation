@@ -29,3 +29,20 @@ test('account sorting orders individual rows even when one ticker spans accounts
   assert.deepEqual(ordered(1), [rows[2], rows[1], rows[0], rows[3]]);
   assert.deepEqual(ordered(-1), [rows[0], rows[2], rows[1], rows[3]]);
 });
+
+test('merged totals use weighted ratios and sort by the same partial total shown in the table', () => {
+  const rows = [
+    { symbol: 'A', currency: 'USD', marketValue: 110, marketValueNative: 110, pnl: 10, pnlPct: 10, costBasisNative: 100, dailyPnl: 2, dailyPnlPct: 1.85 },
+    { symbol: 'B', groupWith: 'A', currency: 'CNY', marketValue: 918, marketValueNative: 6426, pnl: 126, pnlPct: 2, costBasisNative: 6300 },
+    { symbol: 'C', currency: 'USD', marketValue: 100, dailyPnl: 1 },
+  ];
+  const [group, next] = buildHoldingsGroups(rows, 'dailyPnl', -1, { usdCnyRate: 7 });
+  assert.equal(group.key, 'A');
+  assert.equal(next.key, 'C');
+  assert.deepEqual(group.summary.pnl, { value: 28, count: 2 });
+  assert.deepEqual(group.summary.position, { value: 1028, count: 2 });
+  assert.equal(group.summary.pnlPct.value.toFixed(2), '2.80');
+  assert.deepEqual(group.summary.dailyPnl, { value: 2, count: 1 });
+  assert.equal(group.summary.dailyPnlPct.value.toFixed(2), '1.85');
+  assert.equal(group.summary.dailyPnlPct.count, 1);
+});
