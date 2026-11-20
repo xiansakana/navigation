@@ -64,3 +64,25 @@ export async function getFundNav(code) {
   const change = new Decimal(nav).minus(prevClose);
   return { nav, date, prevClose, change: change.toNumber(), changePercent: change.div(prevClose).times(100).toNumber() };
 }
+
+export async function getFundNavHistory(code, start, end, request = fetchQuoteResource) {
+  const prices = [];
+  const pageSize = 200;
+  for (let pageIndex = 1; ; pageIndex++) {
+    const query = new URLSearchParams({ fundCode: code, pageIndex, pageSize, startDate: start, endDate: end });
+    const data = await request('https://api.fund.eastmoney.com/f10/lsjz?' + query, {
+      headers: { Referer: 'https://fundf10.eastmoney.com/' }, retries: 0, timeoutMs: 6000
+    });
+    if (data?.ErrCode !== 0 || data.Data?.FundType === '005' || /万份|七日/.test(data.Data?.SYType || '')) {
+      throw new Error('没有可用于估值的基金单位净值');
+    }
+    const rows = data.Data?.LSJZList || [];
+    for (const row of rows) {
+      const close = Number(row.DWJZ);
+      if (Number.isFinite(close) && close > 0 && /^\d{4}-\d{2}-\d{2}$/.test(row.FSRQ)
+        && row.FSRQ >= start && row.FSRQ <= end) prices.push({ date: row.FSRQ, close, source: 'eastmoney-fund-nav' });
+    }
+    const count = Number(data.PageSize) || pageSize;
+    if (!rows.length || pageIndex * count >= Number(data.TotalCount) || rows.length < count) return prices;
+  }
+}

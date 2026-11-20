@@ -11,6 +11,7 @@ import { getDatabase } from '../../shared/db/index.js';
 import { investmentRows, saveInvestmentAccount, unlinkInvestmentAccount } from '../../shared/investment-accounts.js';
 import { dipCashFunds, setDipCashReserve } from '../../shared/dip-cash-funds.js';
 import { createBookkeepingStore } from '../../portal/src/bookkeeping-store.js';
+import { queueSavedTradeHistory } from '../../portal/src/bookkeeping-security-history.js';
 import { configureQuoteNetwork } from '../../shared/quote-network.js';
 import express from 'express';
 import path from 'node:path';
@@ -507,6 +508,14 @@ async function recordNamedTrade(input) {
   return { trade, quote };
 }
 
+function backfillSavedTrades(trades) {
+  try {
+    queueSavedTradeHistory(portfolioDb, currentPortfolioUserId(), trades, tradeCalendarDate(new Date().toISOString()));
+  } catch (error) {
+    console.warn('历史估值补查排队失败:', error.message);
+  }
+}
+
 app.post('/api/trades', async (req, res) => {
   if (!hasStockPermission(req, 'trade', 'edit') && !requireStockPermission(req, res, 'row-trade', 'edit')) return;
   try {
@@ -522,6 +531,7 @@ app.post('/api/trades', async (req, res) => {
     data.trades.push(trade);
     Object.assign(data, applyCashDelta(data, trade));
     store.write(data, { strategyFundId });
+    backfillSavedTrades([trade]);
     sendPortfolio(res, req);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -541,6 +551,7 @@ app.put('/api/trades/:id', async (req, res) => {
     data.trades[i] = { ...trade, ...(old.broker_order_key ? { broker: old.broker, broker_order_key: old.broker_order_key, broker_net: old.broker_net, cash_effective_at: old.cash_effective_at, repo_principal: old.repo_principal, broker_category: old.broker_category, source_trade_date: old.source_trade_date, settlement_date: old.settlement_date, security_received_at: old.security_received_at } : {}), id: req.params.id, created_at: old.created_at || trade.created_at };
     Object.assign(data, applyCashDelta(undoCashDelta(data, old), trade));
     store.write(data);
+    backfillSavedTrades([old, data.trades[i]]);
     sendPortfolio(res, req);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -663,6 +674,11 @@ app.post('/api/trades/import', express.raw({
       for (const [symbol, quote] of fetched) if (quote?.price > 0 && !(result.data.quotes[symbol]?.price > 0)) result.data.quotes[symbol] = quote;
     }
     const { data, trades, selected, importSummary } = result;
+    const previous = new Map(data.trades.map(trade => [trade.id, trade]));
+    const changed = trades.filter(trade => {
+      const old = previous.get(trade.id);
+      return !old || ['symbol', 'trade_date', 'account_id', 'type', 'shares', 'historicalBackfill'].some(field => trade[field] !== old[field]);
+    });
     data.trades = trades;
     const recalc = recalcCashFromTrades(data.trades, {
       cashUsd: 0,
@@ -672,6 +688,7 @@ app.post('/api/trades/import', express.raw({
     });
     Object.assign(data, recalc);
     store.write(data, { externalSync: true });
+    backfillSavedTrades(changed);
     res.json({ ...portfolioForRequest(req), importSummary, historicalBackfillCount: selected.length });
   } catch (e) {
     res.status(400).json({ error: e.message });

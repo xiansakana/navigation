@@ -48,7 +48,7 @@ export function createSnapshotReplay(db, userId, history) {
           const exact=storedPrice?.get(userId,symbol,row.date);
           const cached=history?.quote?.(symbol,row.date);
           const uncertain=history?.splits?.some(s=>s.symbol===symbol&&s.uncertain&&s.date===row.date);
-          const close=exact?.close ?? (['sina','yahoo'].includes(cached?.source)&&!uncertain&&!optionSymbol(symbol)&&cached.date===row.date?cached.close:undefined);
+          const close=exact?.close ?? (['sina','yahoo','gaoteng-fund-nav','chinaamc-hk-fund-nav','eastmoney-fund-nav'].includes(cached?.source)&&!uncertain&&!optionSymbol(symbol)&&cached.date===row.date?cached.close:undefined);
           const recent=owned.filter(t=>t.symbol===symbol&&['buy','sell'].includes(t.type)&&usable(Number(t.price))&&Number(t.price)>0&&tradeStamp(t)<=cutoff&&tradeStamp(t)>=cutoff-300000).sort((a,b)=>tradeStamp(b)-tradeStamp(a))[0];
           if(usable(close))quote={symbol,price:close,asOf:row.date,backfilled:true};
           else if(recent)quote={symbol,price:Number(recent.price),asOf:new Date(tradeStamp(recent)).toISOString(),backfilled:true};

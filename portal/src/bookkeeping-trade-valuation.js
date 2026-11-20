@@ -1,5 +1,6 @@
 import { createSnapshotReplay, isOvernightSnapshot } from './bookkeeping-snapshot-replay.js';
-import { tradeDay, tradeStamp } from './bookkeeping-trade-returns.js';
+import { optionSymbol, tradeDay, tradeStamp } from './bookkeeping-trade-returns.js';
+import { fundIdentifier } from '../../shared/fund-holdings.js';
 
 // Read-only securities valuation frames from the existing asset observations.
 // A live quote is only used today and only after a saved baseline exists.
@@ -20,8 +21,19 @@ export function tradeValuation(db,userId,includedIds,today,currentQuotes={},curr
   const at=date=>{let low=0,high=frames.length;while(low<high){const mid=(low+high)>>1;if(frames[mid].date<=date)low=mid+1;else high=mid;}return frames[low-1]||null;};
   const snapshotQuote=(frame,symbol)=>{
     const quote=frame?.prices.get(symbol);
-    return quote?{date:frame.date,close:Number(quote.price),source:quote.backfilled?'backfill':'valuation'}:null;
+    const navDate=fundIdentifier(symbol)&&/^\d{4}-\d{2}-\d{2}$/.test(quote?.asOf||'')?quote.asOf:null;
+    return quote&&(!navDate||navDate<=frame.date)?{date:navDate||frame.date,close:Number(quote.price),source:quote.backfilled?'backfill':'valuation'}:null;
   };
+  function historicalQuote(symbol,date,saved) {
+    const verified=backfill?.get(userId,symbol,date);
+    if(verified&&saved?.date!==date)return {...verified,source:'backfill'};
+    const cached=optionSymbol(symbol)?null:history?.quote?.(symbol,date);
+    const split=history?.splits?.filter(s=>s.symbol===symbol&&s.date<=date).at(-1);
+    if(cached&&cached.date<=date&&(!split||cached.date>split.date)&&(!saved||cached.date>saved.date)){
+      return {date:cached.date,close:cached.close,source:'backfill'};
+    }
+    return saved;
+  }
   return {
     first,
     day(trade){
@@ -34,16 +46,13 @@ export function tradeValuation(db,userId,includedIds,today,currentQuotes={},curr
       const cutoff=Date.parse(frame?.capturedAt||day+'T04:30:00+08:00');
       return tradeStamp(trade)<=cutoff?previous:day;
     },
-    baselineQuote:symbol=>snapshotQuote(first,symbol),
+    baselineQuote:symbol=>first?historicalQuote(symbol,first.date,snapshotQuote(first,symbol)):null,
     baselineFx:currency=>first?.rates.has(currency)?{rate:first.rates.get(currency)}:null,
     quote(symbol,date){
       if(!first||date<first.date)return null;
       const q=currentQuotes[symbol],price=q?.price,asOf=q?Date.parse(q.asOf||q.updatedAt||q.date||''):NaN;
       if(date===today&&price!=null&&Number.isFinite(Number(price))&&Number(price)>=0&&(!Number.isFinite(asOf)||asOf<=Date.now()))return {date,close:Number(price),source:'current'};
-      const saved=snapshotQuote(at(date),symbol);
-      if(saved)return saved;
-      const verified=backfill?.get(userId,symbol,date);
-      return verified?{...verified,source:'backfill'}:null;
+      return historicalQuote(symbol,date,snapshotQuote(at(date),symbol));
     },
     fx(currency,date){
       if(!first||date<first.date)return null;

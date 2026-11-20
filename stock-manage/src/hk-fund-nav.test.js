@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createQuoteService } from './quotes.js';
+import { getHkFundNavHistory } from './hk-fund-nav.js';
 
 test('Hong Kong NAV sources select the exact ISIN or share class and preserve the dealing date', async t => {
   const original = globalThis.fetch;
@@ -27,4 +28,18 @@ test('Hong Kong NAV sources select the exact ISIN or share class and preserve th
   const b = await service.getQuote('HK0000489952');
   assert.deepEqual([b.price, b.prevClose, b.currency, b.asOf], [11.143, 11.1421, 'HKD', '2026-11-20']);
   await assert.rejects(service.getQuote('HK0000000000'), /暂未接入/);
+});
+
+test('ChinaAMC historical NAV selects the exact currency and share class', async () => {
+  const rows = await getHkFundNavHistory('HK0000489952', async url => {
+    assert.match(url, /fullNavHistory\?fundId=HKSELMMF/);
+    return { result: [
+      { ssShareClassId: 'A-HKD', currencyEn: 'HKD', navHistoryList: [{ shareClassId: 'A-HKD', nav: 99, date: '20261119' }] },
+      { ssShareClassId: 'B-HKD', currencyEn: 'HKD', navHistoryList: [
+        { shareClassId: 'B-HKD', nav: 11.1421, date: '20261119' },
+        { shareClassId: 'A-HKD', nav: 99, date: '20261119' }
+      ] }
+    ] };
+  });
+  assert.deepEqual(rows, [{ date: '2026-11-19', close: 11.1421, source: 'chinaamc-hk-fund-nav' }]);
 });

@@ -130,12 +130,11 @@ test('price backfill is bounded, deduplicated, cached per user and does not fabr
   try{
     const request={symbol:'AAPL',start:'2026-10-01',end:'2026-10-28'};
     history.ensure('one',[request,request]);history.ensure('one',[request]);assert.equal(calls,1);assert.equal(history.read('one').pending,1);
+    history.ensure('one',[{...request,start:'2026-09-01'}]);
     release();const deadline=Date.now()+2000;while(history.read('one').pending && Date.now()<deadline)await new Promise(r=>setTimeout(r,5));
     assert.equal(history.read('one').quote('AAPL','2026-10-27').close,12);assert.equal(history.read('two').quote('AAPL','2026-10-27'),null);
-    history.ensure('one',[request]);assert.equal(calls,1);
-    history.ensure('one',[{...request,start:'2026-09-01'}]);
-    while(history.read('one').pending && Date.now()<deadline)await new Promise(r=>setTimeout(r,5));
-    assert.equal(calls,2); // Successful short caches may expand immediately when the user changes range.
+    history.ensure('one',[request]);assert.equal(calls,2);
+    assert.equal(db.prepare('SELECT start FROM bookkeeping_security_history_meta WHERE user_id=? AND symbol=?').get('one','AAPL').start,'2026-09-01');
     history.ensure('one',[{...request,symbol:'QQQ250221P500'}]);
     while(history.read('one').pending && Date.now()<deadline)await new Promise(r=>setTimeout(r,5));
     assert.equal(history.read('one').quote('QQQ250221P500','2026-10-27'),null);assert.ok(history.read('one').unavailable.includes('QQQ250221P500'));
@@ -161,5 +160,45 @@ test('trade service isolates owners, retains a distinct legacy pool and respects
     assert.equal(observed.points.find(p=>p.date==='2026-10-26').unrealized,0);assert.deepEqual(db.prepare('SELECT * FROM bookkeeping_asset_snapshots').all(),frozen);
     assert.equal((await tradeHistoryReturns(db,'two',{},'2026-10-28',[{id:'ledger',included:true}],[],{history,fx})).tradeCount,0);
     assert.equal((await tradeHistoryReturns(db,'one',{},'2026-10-28',[{id:'ledger',included:true}],['ledger'],{history,fx})).tradeCount,0);
+  }finally{db.close();}
+});
+
+test('a late fund trade queues official daily NAV and restores a range with a missing opening value',async()=>{
+  const db=new Database(':memory:');
+  const symbol='HK0000478872',today='2026-11-20';
+  db.exec('CREATE TABLE portfolio_users(user_id TEXT PRIMARY KEY,data TEXT);CREATE TABLE investment_accounts(id TEXT,user_id TEXT,bookkeeping_id TEXT);CREATE TABLE bookkeeping_asset_snapshots(user_id TEXT,date TEXT,captured_at TEXT,details TEXT)');
+  const trades=[t('late','buy','2026-11-17',1,10,{symbol,currency:'HKD',account_id:'broker',created_at:'2026-11-20T10:00:00Z',historicalBackfill:true})];
+  db.prepare('INSERT INTO portfolio_users VALUES(?,?)').run('one',JSON.stringify({trades,quotes:{[symbol]:{price:13,asOf:today}}}));
+  db.prepare('INSERT INTO investment_accounts VALUES(?,?,?)').run('broker','one','ledger');
+  const snapshot=JSON.stringify([{id:'ledger',currency:'HKD',rate:1,source:'portfolio',quotes:[]}]);
+  const insert=db.prepare('INSERT INTO bookkeeping_asset_snapshots VALUES(?,?,?,?)');
+  for(const date of ['2026-11-16','2026-11-17','2026-11-18','2026-11-19']) insert.run('one',date,date+'T15:59:00Z',snapshot);
+  const requests=[];
+  const history=createSecurityHistory(db,{key:'',request:async url=>{
+    requests.push(url);
+    return {data:{sectionList:[
+      {fund_class_id:'10008004',nav_date:'2026-11-17',fund_nav:99},
+      {fund_class_id:'10008003',nav_date:'2026-11-17',fund_nav:10},
+      {fund_class_id:'10008003',nav_date:'2026-11-18',fund_nav:11},
+      {fund_class_id:'10008003',nav_date:'2026-11-19',fund_nav:12},
+      {fund_class_id:'10008003',nav_date:'2026-11-21',fund_nav:99}
+    ]}};
+  }});
+  const fx={ensure:async()=>{},quote:()=>({rate:1})};
+  const compute=()=>tradeHistoryReturns(db,'one',{start:'2026-11-18'},today,[{id:'ledger',included:true}],[],{history,fx,currentRates:{HKD:1}});
+  try{
+    const frozen=db.prepare('SELECT * FROM bookkeeping_asset_snapshots').all();
+    const first=await compute();
+    assert.equal(first.pending,1);
+    assert.equal(first.summary.total,null);
+    const deadline=Date.now()+2000;
+    while(history.read('one').pending&&Date.now()<deadline)await new Promise(r=>setTimeout(r,5));
+    const restored=await compute();
+    assert.deepEqual(restored.points.map(p=>p.total),[0,1,2,3]);
+    assert.deepEqual(restored.missingSymbols,[]);
+    assert.equal(history.read('one').quote(symbol,'2026-11-16'),null);
+    assert.match(requests[0],/api\.gaotengasset\.com.*shareClassID=10008003/);
+    assert.equal(requests.length,1);
+    assert.deepEqual(db.prepare('SELECT * FROM bookkeeping_asset_snapshots').all(),frozen);
   }finally{db.close();}
 });

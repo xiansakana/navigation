@@ -4,7 +4,7 @@ const gaoteng = 'https://www.gaotengasset.com/en-US/product-services';
 const chinaamc = 'https://www.chinaamc.com.hk/jeecg-boot';
 const request = { retries: 0, timeoutMs: 6000 };
 const products = {
-  HK0000478872: { name: '高腾微财货币基金 A 类港元累积', currency: 'HKD' },
+  HK0000478872: { name: '高腾微财货币基金 A 类港元累积', currency: 'HKD', gaotengClassId: '10008003' },
   HK0000478930: { name: '高腾微财货币基金 P 类港元累积', currency: 'HKD' },
   HK0000478914: { name: '高腾微财货币基金 I 类港元累积', currency: 'HKD' },
   HK0000584737: { name: '高腾微值美元货币基金 A 类美元累积', currency: 'USD' },
@@ -23,6 +23,30 @@ const positive = raw => Number.isFinite(Number(raw)) && Number(raw) > 0;
 const changeFrom = (price, previous) => positive(previous)
   ? { change: price - previous, changePercent: (price - previous) / previous * 100, prevClose: previous }
   : {};
+
+async function chinaAmcHistory(shareClassId, currency, fetcher) {
+  const data = await fetcher(chinaamc + '/mainFundShareClass/tMainFundShareClass/fullNavHistory?fundId=HKSELMMF', request);
+  return data?.result?.find(item => item.ssShareClassId === shareClassId && item.currencyEn === currency)?.navHistoryList || [];
+}
+
+export async function getHkFundNavHistory(isin, fetcher = fetchQuoteResource) {
+  const info = hkFundInfo(isin);
+  if (!info) throw new Error('暂未接入此香港基金份额');
+  if (info.shareClassId) {
+    const rows = await chinaAmcHistory(info.shareClassId, info.currency, fetcher);
+    return rows.filter(row => row.shareClassId === info.shareClassId && positive(row.nav) && dateOf(row.date))
+      .map(row => ({ date: dateOf(row.date), close: Number(row.nav), source: 'chinaamc-hk-fund-nav' }));
+  }
+  let id = info.gaotengClassId;
+  if (!id) {
+    const html = await fetcher(gaoteng, { ...request, json: false });
+    id = [...html.matchAll(/"fundClassId":"(\d+)"[^{}]*"isinCode":"([A-Z0-9]+)"/g)].find(match => match[2] === isin)?.[1];
+  }
+  if (!id) throw new Error('未找到对应的高腾基金份额');
+  const result = await fetcher('https://api.gaotengasset.com/gt/website/sectionList?shareClassID=' + id + '&section=3', request);
+  return (result?.data?.sectionList || []).filter(row => String(row.fund_class_id) === id && positive(row.fund_nav) && dateOf(row.nav_date))
+    .map(row => ({ date: dateOf(row.nav_date), close: Number(row.fund_nav), source: 'gaoteng-fund-nav' }));
+}
 
 export async function getHkFundQuote(isin) {
   const info = hkFundInfo(isin);
@@ -48,9 +72,8 @@ export async function getHkFundQuote(isin) {
     const asOf = dateOf(row?.tradingDate);
     if (asOf && positive(row.nav)) {
       const price = Number(row.nav);
-      const history = await fetchQuoteResource(chinaamc + '/mainFundShareClass/tMainFundShareClass/fullNavHistory' + query, request).catch(() => null);
-      const rows = history?.result?.find(item => item.ssShareClassId === shareClassId && item.currencyEn === currency)?.navHistoryList;
-      const previous = (rows || []).find(item => dateOf(item.date) < asOf && positive(item.nav));
+      const rows = await chinaAmcHistory(shareClassId, currency, fetchQuoteResource).catch(() => []);
+      const previous = rows.find(item => dateOf(item.date) < asOf && positive(item.nav));
       return { ...base, price, asOf, source: 'chinaamc-hk-fund-nav', ...changeFrom(price, Number(previous?.nav)) };
     }
   }
