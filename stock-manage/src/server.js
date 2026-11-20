@@ -615,8 +615,12 @@ function stillHeldSymbols(data, candidates) {
 const importQuoteQueue = new Map();
 let importQuoteWorkerRunning = false;
 
-function queueImportedHoldingQuotes(symbols) {
-  if (!symbols.length) return;
+const missingHkdRate = data => !(data.usdHkdRate > 0)
+  && (data.cashHkd || data.investmentAccounts?.some(account => account.currency === 'HKD')
+    || data.trades.some(trade => inferCurrency(trade.symbol, trade.currency) === 'HKD'));
+
+function queueImportedHoldingQuotes(symbols, refreshHkdRate) {
+  if (!symbols.length && !refreshHkdRate) return;
   const userId = currentPortfolioUserId();
   const pending = importQuoteQueue.get(userId) || new Set();
   symbols.forEach(symbol => pending.add(symbol));
@@ -632,17 +636,26 @@ function queueImportedHoldingQuotes(symbols) {
           try {
             const before = store.read();
             const started = stillHeldSymbols(before, candidates);
-            const fetched = await mapWithConcurrency(started, 3, async symbol => {
-              try { return [symbol, await quotes.getQuote(symbol)]; }
-              catch (error) { console.warn('导入后行情刷新失败:', symbol, error.message); return [symbol, null]; }
-            });
-            if (!fetched.some(([, quote]) => quote?.price > 0)) return;
+            const [fetched, hkdRate] = await Promise.all([
+              mapWithConcurrency(started, 3, async symbol => {
+                try { return [symbol, await quotes.getQuote(symbol)]; }
+                catch (error) { console.warn('导入后行情刷新失败:', symbol, error.message); return [symbol, null]; }
+              }),
+              missingHkdRate(before) ? quotes.getUsdHkd().then(({ rate }) => rate).catch(error => {
+                console.warn('导入后港币汇率补查失败:', error.message);
+                return null;
+              }) : null
+            ]);
+            if (!fetched.some(([, quote]) => quote?.price > 0) && !(hkdRate > 0)) return;
             const latest = store.read();
             const held = new Set(stillHeldSymbols(latest, candidates));
             const updated = fetched.filter(([symbol, quote]) => held.has(symbol) && quote?.price > 0
               && JSON.stringify(latest.quotes[symbol]) === JSON.stringify(before.quotes[symbol])
               && !(fundIdentifier(symbol) && latest.quotes[symbol]?.asOf > quote.asOf));
-            if (updated.length) store.write({ ...latest, quotes: { ...latest.quotes, ...Object.fromEntries(updated) } }, { externalSync: true });
+            const rates = missingHkdRate(latest) && Number.isFinite(hkdRate) && hkdRate > 0 ? { usdHkdRate: hkdRate } : {};
+            if (updated.length || rates.usdHkdRate) {
+              store.write({ ...latest, ...rates, quotes: { ...latest.quotes, ...Object.fromEntries(updated) } }, { externalSync: true });
+            }
           } catch (error) {
             console.warn('导入后行情更新失败:', error.message);
           }
@@ -739,9 +752,14 @@ app.post('/api/trades/import', express.raw({
     Object.assign(data, recalc);
     const saved = store.write(data, { externalSync: true });
     backfillSavedTrades(changed);
+    for (const account of saved.investmentAccounts || []) {
+      for (const symbol of account.missingQuotes) quoteCandidates.add(symbol);
+    }
     const refreshSymbols = stillHeldSymbols(saved, quoteCandidates);
-    queueImportedHoldingQuotes(refreshSymbols);
-    res.json({ ...portfolioForRequest(req, saved), importSummary, historicalBackfillCount: selected.length, importQuoteRefreshCount: refreshSymbols.length });
+    const importHkdRatePending = Boolean(missingHkdRate(saved));
+    queueImportedHoldingQuotes(refreshSymbols, importHkdRatePending);
+    res.json({ ...portfolioForRequest(req, saved), importSummary, historicalBackfillCount: selected.length,
+      importQuoteRefreshCount: refreshSymbols.length, importHkdRatePending });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

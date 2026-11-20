@@ -316,18 +316,19 @@ function renderDashboard() {
     : s.tradeDailyPnl
       ? `含今日交易净变动 ${fmtUsdSigned(s.tradeDailyPnl)}`
       : '持仓当日涨跌';
-  const cashHint = rate > 0 ? `美元兑人民币 ${rate.toFixed(4)}${cashPct == null ? '' : ` · 占组合 ${fmtPct(cashPct)}`}` : '';
+  const cashHint = rate > 0 ? `美元兑人民币 ${rate.toFixed(4)}${hkdRate > 0 && hasHkd ? ` · 美元兑港币 ${hkdRate.toFixed(4)}` : ''}${cashPct == null ? '' : ` · 占组合 ${fmtPct(cashPct)}`}` : '';
+  const fxNotice = hasHkd && !(hkdRate > 0) ? '缺少美元兑港币汇率，暂不能折算含港币的合计。' : '';
   el.innerHTML = `
     <div class="sm-summary-grid">
       ${cashVisible ? card('总资产', { USD: s.assetsUsd, CNY: s.assetsCny, HKD: s.assetsHkd }, {
         total: { USD: s.totalAssets, CNY: s.totalAssetsCny }, classes: 'sm-summary-card--accent', assets: true,
-        notice: quoteNotice, hint: '分币种资产为持仓市值与现金的本币合计'
+        notice: [fxNotice, quoteNotice].filter(Boolean).join(' '), hint: '分币种资产为持仓市值与现金的本币合计'
       }) : ''}
       ${card('股票市值', stock, { hint: state.fundHoldings?.length ? '含场外基金' : '' })}
       ${card('期权市值', option)}
       ${card('总盈亏', pnl, { signed: true, classes: 'sm-summary-card--green', hint: '持仓未实现盈亏' })}
       ${card('当日总盈亏', daily, { total: convert(daily, true), signed: true, classes: 'sm-summary-card--amber', hint: dailyHint })}
-      ${cashVisible ? card('现金', cash, { editCash: can('cash', 'edit') && !state.accountCashEnabled, hint: cashHint }) : ''}
+      ${cashVisible ? card('现金', cash, { editCash: can('cash', 'edit') && !state.accountCashEnabled, notice: fxNotice, hint: cashHint }) : ''}
     </div>`;
   bindCashInput();
 }
@@ -1177,9 +1178,10 @@ function openImportModal() {
       closeModal(layer);
       applyPortfolio(data);
       const outcome = data.importSummary ? `新增 ${data.importSummary.added}，更新 ${data.importSummary.updated}，跳过重复 ${data.importSummary.skipped}` : `已导入 ${importState.count} 条交易`;
-      if (data.importQuoteRefreshCount) importQuoteSyncUntil = Date.now() + 120_000;
+      if (data.importQuoteRefreshCount || data.importHkdRatePending) importQuoteSyncUntil = Date.now() + 120_000;
       toastOk(outcome + (data.historicalBackfillCount ? `，历史补录 ${data.historicalBackfillCount} 笔` : '')
-        + (data.importQuoteRefreshCount ? `；正在刷新 ${data.importQuoteRefreshCount} 个标的的行情` : ''));
+        + (data.importQuoteRefreshCount ? `；正在刷新 ${data.importQuoteRefreshCount} 个标的的行情` : '')
+        + (data.importHkdRatePending ? '；正在补查港币汇率' : ''));
       window._refreshTradeModal?.();
     } catch (err) {
       setModalBusy(layer, false);
