@@ -24,8 +24,8 @@ const changeFrom = (price, previous) => positive(previous)
   ? { change: price - previous, changePercent: (price - previous) / previous * 100, prevClose: previous }
   : {};
 
-async function chinaAmcHistory(shareClassId, currency, fetcher) {
-  const data = await fetcher(chinaamc + '/mainFundShareClass/tMainFundShareClass/fullNavHistory?fundId=HKSELMMF', request);
+async function chinaAmcHistory(shareClassId, currency, fetcher, options = request) {
+  const data = await fetcher(chinaamc + '/mainFundShareClass/tMainFundShareClass/fullNavHistory?fundId=HKSELMMF', options);
   return data?.result?.find(item => item.ssShareClassId === shareClassId && item.currencyEn === currency)?.navHistoryList || [];
 }
 
@@ -33,7 +33,7 @@ export async function getHkFundNavHistory(isin, fetcher = fetchQuoteResource) {
   const info = hkFundInfo(isin);
   if (!info) throw new Error('暂未接入此香港基金份额');
   if (info.shareClassId) {
-    const rows = await chinaAmcHistory(info.shareClassId, info.currency, fetcher);
+    const rows = await chinaAmcHistory(info.shareClassId, info.currency, fetcher, { timeoutMs: 18000, retries: 1 });
     return rows.filter(row => row.shareClassId === info.shareClassId && positive(row.nav) && dateOf(row.date))
       .map(row => ({ date: dateOf(row.date), close: Number(row.nav), source: 'chinaamc-hk-fund-nav' }));
   }

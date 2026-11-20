@@ -106,7 +106,8 @@ export function createSecurityHistory(db,{request=fetchQuoteResource,key=polygon
       }
       const meta=db.prepare('SELECT * FROM bookkeeping_security_history_meta WHERE user_id=? AND symbol=?').get(userId,r.symbol);
       const covered=meta?.status==='ready'&&meta.start<=r.start&&meta.end>=r.end;
-      if(covered || (meta && meta.status!=='ready' && clock()-meta.attempted_at<6*3600000))continue;
+      const retryDelay=hongKongFundIsin(r.symbol)?5*60000:6*3600000;
+      if(covered || (meta && meta.status!=='ready' && clock()-meta.attempted_at<retryDelay))continue;
       const range=meta?.status==='ready'?{start:meta.start<r.start?meta.start:r.start,end:meta.end>r.end?meta.end:r.end}:r;
       const job={...r,...range,userId,id};
       pending.set(id,job);queue.push(job);
