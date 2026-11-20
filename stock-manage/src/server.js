@@ -6,7 +6,7 @@ import { findInternationalStockName, findMainlandInstruments, findReinvestmentNa
 import { TRADE_ASSET_TYPES, tradeAssetType } from '../public/js/trade-asset-type.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
 import { portfolioIdentityMiddleware } from '../../shared/portfolio-user.js';
-import { currentPortfolioUserId } from '../../shared/portfolio-user.js';
+import { currentPortfolioUserId, runWithPortfolioUser } from '../../shared/portfolio-user.js';
 import { getDatabase } from '../../shared/db/index.js';
 import { investmentRows, saveInvestmentAccount, unlinkInvestmentAccount } from '../../shared/investment-accounts.js';
 import { dipCashFunds, setDipCashReserve } from '../../shared/dip-cash-funds.js';
@@ -23,6 +23,7 @@ import { createQuantBacktestStore } from './quant-backtest-store.js';
 import { createQuoteService } from './quotes.js';
 import { parseImportBuffer } from './import-moomoo.js';
 import { decodeImportHistory, importHistoryMetaLimit, importHistoryPlan, selectHistoricalImports } from './import-history.js';
+import { changedHoldingSymbols } from './import-quote-targets.js';
 import { mergeEastmoneyTrades } from './import-eastmoney.js';
 import { mergeBbaeTrades } from './import-bbae.js';
 import { backfillTradeName, knownTradeNames, needsTradeName, normalizeNamedTrade } from './trade-name.js';
@@ -605,6 +606,54 @@ const importAccount = req => investmentRows(portfolioDb, currentPortfolioUserId(
 const importFileLimit = 20 * 1024 * 1024;
 const isBrokerImport = trades => !!(trades.importInfo || trades.fundImportInfo || trades[0]?.broker === 'bbae');
 
+function stillHeldSymbols(data, candidates) {
+  if (!candidates.size) return [];
+  const trades = [...openingFundTrades(openingFundsForAccount()), ...data.trades].filter(t => candidates.has(t.symbol));
+  return [...new Set(deriveHoldings(trades).map(h => h.symbol))];
+}
+
+const importQuoteQueue = new Map();
+let importQuoteWorkerRunning = false;
+
+function queueImportedHoldingQuotes(symbols) {
+  if (!symbols.length) return;
+  const userId = currentPortfolioUserId();
+  const pending = importQuoteQueue.get(userId) || new Set();
+  symbols.forEach(symbol => pending.add(symbol));
+  importQuoteQueue.set(userId, pending);
+  if (importQuoteWorkerRunning) return;
+  importQuoteWorkerRunning = true;
+  setImmediate(async () => {
+    try {
+      while (importQuoteQueue.size) {
+        const [user, candidates] = importQuoteQueue.entries().next().value;
+        importQuoteQueue.delete(user);
+        await runWithPortfolioUser(user, async () => {
+          try {
+            const before = store.read();
+            const started = stillHeldSymbols(before, candidates);
+            const fetched = await mapWithConcurrency(started, 3, async symbol => {
+              try { return [symbol, await quotes.getQuote(symbol)]; }
+              catch (error) { console.warn('导入后行情刷新失败:', symbol, error.message); return [symbol, null]; }
+            });
+            if (!fetched.some(([, quote]) => quote?.price > 0)) return;
+            const latest = store.read();
+            const held = new Set(stillHeldSymbols(latest, candidates));
+            const updated = fetched.filter(([symbol, quote]) => held.has(symbol) && quote?.price > 0
+              && JSON.stringify(latest.quotes[symbol]) === JSON.stringify(before.quotes[symbol])
+              && !(fundIdentifier(symbol) && latest.quotes[symbol]?.asOf > quote.asOf));
+            if (updated.length) store.write({ ...latest, quotes: { ...latest.quotes, ...Object.fromEntries(updated) } }, { externalSync: true });
+          } catch (error) {
+            console.warn('导入后行情更新失败:', error.message);
+          }
+        });
+      }
+    } finally {
+      importQuoteWorkerRunning = false;
+    }
+  });
+}
+
 app.post('/api/trades/import/preview', express.raw({
   type: ['application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
   limit: '20mb'
@@ -674,6 +723,7 @@ app.post('/api/trades/import', express.raw({
       for (const [symbol, quote] of fetched) if (quote?.price > 0 && !(result.data.quotes[symbol]?.price > 0)) result.data.quotes[symbol] = quote;
     }
     const { data, trades, selected, importSummary } = result;
+    const quoteCandidates = changedHoldingSymbols(data.trades, trades);
     const previous = new Map(data.trades.map(trade => [trade.id, trade]));
     const changed = trades.filter(trade => {
       const old = previous.get(trade.id);
@@ -687,9 +737,11 @@ app.post('/api/trades/import', express.raw({
       usdHkdRate: data.usdHkdRate
     });
     Object.assign(data, recalc);
-    store.write(data, { externalSync: true });
+    const saved = store.write(data, { externalSync: true });
     backfillSavedTrades(changed);
-    res.json({ ...portfolioForRequest(req), importSummary, historicalBackfillCount: selected.length });
+    const refreshSymbols = stillHeldSymbols(saved, quoteCandidates);
+    queueImportedHoldingQuotes(refreshSymbols);
+    res.json({ ...portfolioForRequest(req, saved), importSummary, historicalBackfillCount: selected.length, importQuoteRefreshCount: refreshSymbols.length });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

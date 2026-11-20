@@ -976,6 +976,7 @@ function openTradeModal(trade = {}) {
 
 const importState = { buffer: null, count: 0, preview: [], error: null, mode: 'merge', accountId: '', summary: null, format: '',
   page: 1, pages: 1, history: null, historicalAll: false, historicalIndexes: new Set() };
+let importQuoteSyncUntil = 0;
 
 const historicalImportCount = () => importState.historicalAll
   ? (importState.history?.count || 0) - importState.historicalIndexes.size : importState.historicalIndexes.size;
@@ -1176,7 +1177,9 @@ function openImportModal() {
       closeModal(layer);
       applyPortfolio(data);
       const outcome = data.importSummary ? `新增 ${data.importSummary.added}，更新 ${data.importSummary.updated}，跳过重复 ${data.importSummary.skipped}` : `已导入 ${importState.count} 条交易`;
-      toastOk(outcome + (data.historicalBackfillCount ? `，历史补录 ${data.historicalBackfillCount} 笔` : ''));
+      if (data.importQuoteRefreshCount) importQuoteSyncUntil = Date.now() + 120_000;
+      toastOk(outcome + (data.historicalBackfillCount ? `，历史补录 ${data.historicalBackfillCount} 笔` : '')
+        + (data.importQuoteRefreshCount ? `；正在刷新 ${data.importQuoteRefreshCount} 个标的的行情` : ''));
       window._refreshTradeModal?.();
     } catch (err) {
       setModalBusy(layer, false);
@@ -1732,7 +1735,8 @@ async function init() {
 init().catch((error) => { toastErr(`加载失败: ${error.message}`); }).finally(() => window.navigationSkeleton?.finish());
 let accountSyncBusy = false;
 const syncAccountView = async () => {
-  if (document.hidden || !state.accountCashEnabled || accountSyncBusy || $('#modal-root')?.children.length) return;
+  if (document.hidden || (!state.accountCashEnabled && Date.now() >= importQuoteSyncUntil)
+    || accountSyncBusy || $('#modal-root')?.children.length) return;
   accountSyncBusy = true;
   try { await loadPortfolio(); } catch { /* The next visible refresh retries; do not flood toasts. */ }
   finally { accountSyncBusy = false; }
