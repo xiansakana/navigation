@@ -45,14 +45,55 @@ function groupWeight(items) {
   return items[0]?.weight ?? 0;
 }
 
-export function buildHoldingsGroups(rows, sortKey, sortDir) {
+const numericSorts = new Set(['pnl', 'pnlPct', 'dailyPnl', 'dailyPnlPct', 'position']);
+const accountCollator = new Intl.Collator('zh-CN', { numeric: true });
+export const isHoldingsSortable = key => numericSorts.has(key) || ['account', 'symbol', 'type', 'weight'].includes(key);
+
+function comparable(a, b, dir, compare = (x, y) => x - y) {
+  if (a == null || b == null) return a == null ? (b == null ? 0 : 1) : -1;
+  return compare(a, b) * dir;
+}
+
+function groupMetric(items, key, rates) {
+  let total = 0, basis = 0;
+  const isRate = key.endsWith('Pct');
+  const daily = key === 'dailyPnlPct' || key === 'dailyPnl';
+  for (const h of items) {
+    const position = h.price === 0 ? null : h.marketValue;
+    const fx = h.currency === 'HKD' ? rates.usdHkdRate : h.currency === 'CNY' ? rates.usdCnyRate : 1;
+    const amount = daily ? h.dailyPnl : h.pnl;
+    if (isRate) {
+      if (!Number.isFinite(h[key])) return null;
+      if (items.length === 1) return h[key];
+      const nativeBasis = daily ? h.marketValueNative - amount : h.costBasisNative ?? h.cost;
+      if (!Number.isFinite(nativeBasis) || nativeBasis <= 0 || !Number.isFinite(amount) || !(fx > 0)
+        || (daily && !Number.isFinite(h.marketValueNative))) return null;
+      basis += nativeBasis / fx;
+      total += amount / fx;
+    } else {
+      const value = key === 'position' ? position : fx > 0 && Number.isFinite(amount) ? amount / fx : null;
+      if (!Number.isFinite(value)) return null;
+      total += value;
+    }
+  }
+  return isRate ? total / basis * 100 : total;
+}
+
+export function buildHoldingsGroups(rows, sortKey, sortDir, rates = {}) {
   const sorted = [...rows].sort(compareHoldingsRows);
+  if (sortKey === 'account') {
+    return sorted.sort((a, b) => comparable(a.accountName || null, b.accountName || null, sortDir,
+      (x, y) => accountCollator.compare(x, y)) || String(a.accountId || '').localeCompare(String(b.accountId || ''))
+      || compareHoldingsRows(a, b)).map(h => ({ key: effectiveGroupKey(h), items: [h], individualWeight: true }));
+  }
   const groupMap = new Map();
   for (const h of sorted) {
     const key = effectiveGroupKey(h);
     if (!groupMap.has(key)) groupMap.set(key, []);
     groupMap.get(key).push(h);
   }
+  const metrics = numericSorts.has(sortKey)
+    ? new Map([...groupMap].map(([key, items]) => [key, groupMetric(items, sortKey, rates)])) : null;
   const keys = [...groupMap.keys()].sort((a, b) => {
     const itemsA = groupMap.get(a);
     const itemsB = groupMap.get(b);
@@ -61,6 +102,7 @@ export function buildHoldingsGroups(rows, sortKey, sortDir) {
     const ta = typeRank(groupPrimaryType(itemsA));
     const tb = typeRank(groupPrimaryType(itemsB));
 
+    if (metrics) return comparable(metrics.get(a), metrics.get(b), sortDir) || a.localeCompare(b);
     if (sortKey === 'symbol') {
       return a.localeCompare(b) * sortDir;
     }
@@ -80,8 +122,7 @@ export function buildHoldingsGroups(rows, sortKey, sortDir) {
 
 export function toggleTableSort(current, key) {
   if (current.key === key) return { key, dir: current.dir === 1 ? -1 : 1 };
-  // 仓位默认从高到低；类型/代码默认正序
-  if (key === 'weight') return { key, dir: -1 };
+  if (key === 'weight' || numericSorts.has(key)) return { key, dir: -1 };
   return { key, dir: 1 };
 }
 

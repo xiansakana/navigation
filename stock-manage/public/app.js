@@ -6,7 +6,7 @@ import { formatPrice, formatQuantity, priceInputValue } from './js/price-format.
 import { bindTradeInstrument } from './js/trade-instrument.js?v=keep-trade-account-1';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=20261004-full-history';
-import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js?v=fund-groups-1';
+import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey, isHoldingsSortable } from './js/holdings-table.js?v=holding-sorts-1';
 import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js?v=access-1';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -364,19 +364,17 @@ function renderColToggle() {
   `).join('');
 }
 
-function renderHoldingsHead() {
+function activeHoldingsSort() {
+  return isHoldingsSortable(tableSort?.key) && canCol(tableSort.key) && colVis[tableSort.key] !== false
+    ? tableSort : canCol('weight') && colVis.weight !== false ? defaultTableSort() : { key: 'symbol', dir: 1 };
+}
+
+function renderHoldingsHead(sort) {
   const cols = visibleHoldingsColumns();
   $('#holdings-head').innerHTML = `<tr>${cols.map((c) => {
-    if (c.key === 'type') {
-      return `<th class="sm-sort-th" data-sort="type" title="按类型排序（同类型内按仓位）">类型${sortMark(tableSort, 'type')}</th>`;
-    }
-    if (c.key === 'symbol') {
-      return `<th class="sm-sort-th" data-sort="symbol" title="按标的代码排序">代码${sortMark(tableSort, 'symbol')}</th>`;
-    }
-    if (c.key === 'weight') {
-      return `<th class="sm-sort-th" data-sort="weight" title="按同标的合计占总资产比例排序（同仓位按类型）">仓位 / 占比${sortMark(tableSort, 'weight')}</th>`;
-    }
-    return `<th>${c.label}</th>`;
+    if (!isHoldingsSortable(c.key) || colVis[c.key] === false) return `<th>${c.label}</th>`;
+    const aria = sort.key === c.key ? ` aria-sort="${sort.dir === 1 ? 'ascending' : 'descending'}"` : '';
+    return `<th class="sm-sort-th" data-sort="${c.key}" title="按${c.label}排序"${aria}>${c.label}${sortMark(sort, c.key)}</th>`;
   }).join('')}</tr>`;
 }
 
@@ -477,10 +475,13 @@ function renderHoldingsRowCells(h, group, i) {
   const groupSymbol = escapeHtml(h.tradeSymbol || h.symbol);
   return visibleHoldingsColumns().map((c) => {
     if (c.key === 'weight') {
+      const individual = h.marketValue == null ? null : h.groupMarketValue === 0 ? h.weight : h.weight * h.marketValue / h.groupMarketValue;
+      if (group.individualWeight) {
+        return `<td data-label="${c.label}" class="sm-weight-cell">${maskCol('weight', fmtPct(individual))}</td>`;
+      }
       if (group.items.length === 1) {
         return `<td data-label="${c.label}" class="sm-weight-cell">${holdingsCellContent(h, 'weight', {})}</td>`;
       }
-      const individual = h.marketValue == null ? null : h.groupMarketValue === 0 ? h.weight : h.weight * h.marketValue / h.groupMarketValue;
       const total = i === 0 ? `<div>合计 ${fmtPct(h.weight)}</div>` : '';
       const item = `<div class="sm-lots-hint">单项 ${fmtPct(individual)}</div>`;
       return `<td data-label="${c.label}" class="sm-weight-cell">${maskCol('weight', `<div>${total}${item}</div>`)}</td>`;
@@ -515,7 +516,8 @@ function renderCashRowCells(cashPct) {
 }
 
 function renderHoldings() {
-  renderHoldingsHead();
+  const sort = activeHoldingsSort();
+  renderHoldingsHead(sort);
   const cols = visibleHoldingsColumns();
   const funds = (state.fundHoldings || []).map((fund, fundIndex) => ({
     ...fund, type: 'fund', fundIndex,
@@ -523,7 +525,7 @@ function renderHoldings() {
     marketValue: fund.marketValueUsd,
     pnlPct: fund.cost > 0 && fund.pnl != null ? fund.pnl / fund.cost * 100 : null
   }));
-  const groups = buildHoldingsGroups([...(state.holdings || []), ...funds], tableSort.key, tableSort.dir);
+  const groups = buildHoldingsGroups([...(state.holdings || []), ...funds], sort.key, sort.dir, state);
   let html = '';
   groups.forEach((group, gi) => {
     group.items.forEach((h, i) => {
@@ -1511,7 +1513,7 @@ $('#btn-pnl-reset').addEventListener('click', () => {
 $('#holdings-head').addEventListener('click', (e) => {
   const key = e.target.closest('[data-sort]')?.dataset.sort;
   if (!key) return;
-  tableSort = toggleTableSort(tableSort, key);
+  tableSort = toggleTableSort(activeHoldingsSort(), key);
   saveJson(LS_TABLE_SORT, tableSort);
   renderHoldings();
 });
