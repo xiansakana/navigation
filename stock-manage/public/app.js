@@ -939,7 +939,27 @@ function openTradeModal(trade = {}) {
   });
 }
 
-const importState = { buffer: null, count: 0, preview: [], error: null, mode: 'merge', accountId: '', summary: null, format: '' };
+const importState = { buffer: null, count: 0, preview: [], error: null, mode: 'merge', accountId: '', summary: null, format: '',
+  page: 1, pages: 1, history: null, historicalAll: false, historicalIndexes: new Set() };
+
+const historicalImportCount = () => importState.historicalAll
+  ? (importState.history?.count || 0) - importState.historicalIndexes.size : importState.historicalIndexes.size;
+const historicalImportChecked = index => importState.historicalAll !== importState.historicalIndexes.has(index);
+function resetHistoricalImport() {
+  importState.history = null;
+  importState.historicalAll = false;
+  importState.historicalIndexes.clear();
+}
+
+function buildImportBody() {
+  if (!historicalImportCount()) return importState.buffer;
+  const metadata = new TextEncoder().encode(JSON.stringify({
+    snapshot: importState.history.snapshot, all: importState.historicalAll, indexes: [...importState.historicalIndexes]
+  }));
+  const length = new ArrayBuffer(4);
+  new DataView(length).setUint32(0, metadata.length);
+  return new Blob([length, metadata, importState.buffer]);
+}
 
 function renderImportPreviewSection() {
   if (importState.error) return `<div class="sm-error-box">${escapeHtml(importState.error)}</div>`;
@@ -954,6 +974,8 @@ function renderImportPreviewSection() {
       <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.reinvestedDividend ? t.reinvestmentNav : t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? fundPriceDigits(t.symbol) : 3)}</td>
       <td data-label="本金">${tradeAmountLabel(t)}</td><td data-label="总费用">${fmtMoney(t.commission, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
       <td data-label="处理">${({ added: '新增', updated: '更新（需确认）', skipped: '重复跳过', needsAssignment: '先核对未归属历史' })[t.importAction] || '新增'}</td>
+      ${importState.history?.count ? `<td data-label="历史补录">${Number.isInteger(t.historicalIndex)
+        ? `<input type="checkbox" data-import-history-index="${t.historicalIndex}" aria-label="补录 ${escapeHtml(t.symbol)} 这笔历史交易" ${historicalImportChecked(t.historicalIndex) ? 'checked' : ''}>` : '—'}</td>` : ''}
     </tr>`).join('');
   return `
     <div class="sm-import-preview">
@@ -962,29 +984,52 @@ function renderImportPreviewSection() {
       ${importState.summary?.excluded?.length ? `<details><summary>未单独导入 ${importState.summary.excluded.reduce((s,x) => s + x.count, 0)} 条来源记录（含新债合并入账），展开查看原因</summary>${importState.summary.excluded.map(x => `<p class="hint">${escapeHtml(x.reason)}：${x.count} 条</p>`).join('')}</details>` : ''}
       ${(importState.summary?.warnings || []).map(x => `<p class="hint">${escapeHtml(x)}</p>`).join('')}
       ${importState.summary?.unassigned ? `<p class="sm-error-box">${importState.summary.unassigned} 笔可能与未归属历史重复。请先核对原记录的账户归属，再重新预览；本次不会导入。</p>` : ''}
+      ${importState.history?.count ? `<div class="sm-import-preview-head">
+        <label><input type="checkbox" id="import-history-all"> 将全部 ${importState.history.count} 笔可选新增记录标记为历史补录</label>
+        <p class="hint" id="import-history-count" aria-live="polite"></p>
+        <p class="hint">只勾选已经计入账户余额的交易。持仓和盈亏照常记录，已绑定的记账账户不会重复计入这部分市值。</p>
+      </div>` : !importState.accountId ? '<p class="hint">如需标记历史补录，请先选择实际所属证券账户，并使用合并模式。</p>' : ''}
       <div class="sm-table-wrap">
         <table class="sm-table">
           <thead><tr>
-            <th>时间</th><th>类型</th><th>代码</th><th>名称</th><th>数量</th><th>价格</th><th>本金</th><th>总费用</th><th>处理</th>
+            <th>时间</th><th>类型</th><th>代码</th><th>名称</th><th>数量</th><th>价格</th><th>本金</th><th>总费用</th><th>处理</th>${importState.history?.count ? '<th>历史补录</th>' : ''}
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
-      ${importState.count > importState.preview.length ? `<p class="hint">... 还有 ${importState.count - importState.preview.length} 条记录</p>` : ''}
+      ${importState.pages > 1 ? `<div class="sm-import-preview-head">
+        <button type="button" class="btn ghost sm-btn-sm" data-import-preview-page="${importState.page - 1}" ${importState.page <= 1 ? 'disabled' : ''}>上一页</button>
+        <span>第 ${importState.page} / ${importState.pages} 页</span>
+        <button type="button" class="btn ghost sm-btn-sm" data-import-preview-page="${importState.page + 1}" ${importState.page >= importState.pages ? 'disabled' : ''}>下一页</button>
+      </div>` : ''}
     </div>`;
 }
 
 function bindImportModal(layer) {
-  $('#import-mode', layer)?.addEventListener('change', (e) => { importState.mode = e.target.value; });
+  const area = $('#import-preview-area', layer);
+  const syncHistory = () => {
+    const all = $('#import-history-all', layer);
+    if (!all) return;
+    const count = historicalImportCount();
+    all.checked = count === importState.history.count;
+    all.indeterminate = count > 0 && !all.checked;
+    $('#import-history-count', layer).textContent = `已选 ${count} 笔历史补录`;
+  };
   let revision = 0;
   const repoQuery = () => '&repoInterestStart=' + encodeURIComponent($('#import-repo-start', layer).value) + ($('#import-repo-baseline', layer).checked ? '&repoInterestBaselineExcluded=1' : '');
-  const previewFile = async () => {
+  const previewFile = async (page = 1, keepSelection = false) => {
     if (!importState.buffer) return;
     const current = ++revision;
-    $('#import-allow-updates', layer).checked = false;
+    if (!keepSelection) {
+      resetHistoricalImport();
+      $('#import-allow-updates', layer).checked = false;
+    }
     $('#import-confirm', layer).disabled = true;
+    area.inert = true;
     try {
-      const res = await fetch('./api/trades/import/preview' + (importState.accountId ? '?accountId=' + encodeURIComponent(importState.accountId) + repoQuery() : ''), {
+      const params = new URLSearchParams({ page, mode: importState.mode });
+      if (importState.accountId) params.set('accountId', importState.accountId);
+      const res = await fetch('./api/trades/import/preview?' + params + repoQuery(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
         body: importState.buffer
@@ -996,6 +1041,13 @@ function bindImportModal(layer) {
       importState.preview = data.preview || data.trades || [];
       importState.summary = data.summary || null;
       importState.format = data.format || '';
+      if (importState.history?.snapshot !== data.history?.snapshot) {
+        resetHistoricalImport();
+        $('#import-allow-updates', layer).checked = false;
+      }
+      importState.history = data.history;
+      importState.page = data.page || 1;
+      importState.pages = data.pages || 1;
       const modeEl = $('#import-mode', layer);
       modeEl.disabled = ['bbae', 'eastmoney', 'fund'].includes(importState.format);
       if (modeEl.disabled) { modeEl.value = 'merge'; importState.mode = 'merge'; }
@@ -1007,16 +1059,34 @@ function bindImportModal(layer) {
       importState.error = err.message;
       toastErr(err.message);
     }
-    const area = $('#import-preview-area', layer);
-    if (area) area.innerHTML = renderImportPreviewSection();
+    area.innerHTML = renderImportPreviewSection();
+    area.inert = false;
+    syncHistory();
     const btn = $('#import-confirm', layer);
     if (btn) {
       btn.disabled = importState.count === 0 || !!importState.summary?.unassigned;
       btn.textContent = importState.count > 0 ? `导入 (${importState.count} 条)` : '导入';
     }
   };
-  $('#import-repo-start', layer).addEventListener('change', previewFile);
-  $('#import-repo-baseline', layer).addEventListener('change', previewFile);
+  area.addEventListener('change', ({ target }) => {
+    if (target.id === 'import-history-all') {
+      importState.historicalAll = target.checked;
+      importState.historicalIndexes.clear();
+      for (const row of area.querySelectorAll('[data-import-history-index]')) row.checked = target.checked;
+    } else if (target.dataset.importHistoryIndex != null) {
+      const index = Number(target.dataset.importHistoryIndex);
+      if (target.checked !== importState.historicalAll) importState.historicalIndexes.add(index);
+      else importState.historicalIndexes.delete(index);
+    } else return;
+    syncHistory();
+  });
+  area.addEventListener('click', event => {
+    const page = event.target.closest('[data-import-preview-page]');
+    if (page) previewFile(Number(page.dataset.importPreviewPage), true);
+  });
+  $('#import-mode', layer).addEventListener('change', e => { importState.mode = e.target.value; previewFile(); });
+  $('#import-repo-start', layer).addEventListener('change', () => previewFile());
+  $('#import-repo-baseline', layer).addEventListener('change', () => previewFile());
   $('#import-account', layer)?.addEventListener('change', async e => { importState.accountId = e.target.value; await previewFile(); });
   $('#import-file', layer)?.addEventListener('change', async e => {
     const file = e.target.files?.[0];
@@ -1034,6 +1104,8 @@ function openImportModal() {
   importState.mode = 'merge';
   importState.accountId = selectedAccountId === 'unassigned' ? '' : selectedAccountId;
   importState.summary = null;
+  importState.page = importState.pages = 1;
+  resetHistoricalImport();
   const layer = openModal('导入交易', `
     <p class="hint">支持场外基金交割单、东方财富交割单、BBAE 股票／期权订单、Moomoo 历史及本应用备份。请选择对应币种的账户；券商文件只合并，重复记录跳过，更新已有记录须勾选确认。</p>
     <form id="import-form" class="sm-form-grid">
@@ -1058,16 +1130,18 @@ function openImportModal() {
     if (layer.dataset.busy === '1') return;
     setModalBusy(layer, true, '导入中…');
     try {
-      const res = await fetch('./api/trades/import?mode=' + encodeURIComponent(importState.mode) + (importState.accountId ? '&accountId=' + encodeURIComponent(importState.accountId) : '') + '&repoInterestStart=' + encodeURIComponent($('#import-repo-start', layer).value) + ($('#import-repo-baseline', layer).checked ? '&repoInterestBaselineExcluded=1' : '') + ($('#import-allow-updates', layer)?.checked ? '&allowUpdates=1' : ''), {
+      const history = historicalImportCount() > 0;
+      const res = await fetch('./api/trades/import?mode=' + encodeURIComponent(importState.mode) + (importState.accountId ? '&accountId=' + encodeURIComponent(importState.accountId) : '') + '&repoInterestStart=' + encodeURIComponent($('#import-repo-start', layer).value) + ($('#import-repo-baseline', layer).checked ? '&repoInterestBaselineExcluded=1' : '') + ($('#import-allow-updates', layer)?.checked ? '&allowUpdates=1' : '') + (history ? '&historicalSelection=1' : ''), {
         method: 'POST',
         headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
-        body: importState.buffer
+        body: buildImportBody()
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '导入失败');
       closeModal(layer);
       applyPortfolio(data);
-      toastOk(data.importSummary ? `新增 ${data.importSummary.added}，更新 ${data.importSummary.updated}，跳过重复 ${data.importSummary.skipped}` : `已导入 ${importState.count} 条交易`);
+      const outcome = data.importSummary ? `新增 ${data.importSummary.added}，更新 ${data.importSummary.updated}，跳过重复 ${data.importSummary.skipped}` : `已导入 ${importState.count} 条交易`;
+      toastOk(outcome + (data.historicalBackfillCount ? `，历史补录 ${data.historicalBackfillCount} 笔` : ''));
       window._refreshTradeModal?.();
     } catch (err) {
       setModalBusy(layer, false);

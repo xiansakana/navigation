@@ -21,6 +21,7 @@ import { createQuantStore, resetPaper } from './quant-store.js';
 import { createQuantBacktestStore } from './quant-backtest-store.js';
 import { createQuoteService } from './quotes.js';
 import { parseImportBuffer } from './import-moomoo.js';
+import { decodeImportHistory, importHistoryMetaLimit, importHistoryPlan, selectHistoricalImports } from './import-history.js';
 import { mergeEastmoneyTrades } from './import-eastmoney.js';
 import { mergeBbaeTrades } from './import-bbae.js';
 import { backfillTradeName, knownTradeNames, needsTradeName, normalizeNamedTrade } from './trade-name.js';
@@ -589,6 +590,10 @@ async function fillImportedNames(trades, data) {
   for (let i = 0; i < trades.length; i++) trades[i] = backfillTradeName(trades[i], names);
 }
 
+const importAccount = req => investmentRows(portfolioDb, currentPortfolioUserId()).find(a => a.id === req.query.accountId);
+const importFileLimit = 20 * 1024 * 1024;
+const isBrokerImport = trades => !!(trades.importInfo || trades.fundImportInfo || trades[0]?.broker === 'bbae');
+
 app.post('/api/trades/import/preview', express.raw({
   type: ['application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
   limit: '20mb'
@@ -600,8 +605,19 @@ app.post('/api/trades/import/preview', express.raw({
     if (!trades.length && !trades.importInfo && !trades.fundImportInfo) return res.status(400).json({ error: '未解析到有效记录' });
     const data = store.read();
     await fillImportedNames(trades, data);
-    const plan = (trades.importInfo || trades.fundImportInfo || trades[0]?.broker === 'bbae') ? brokerImportPlan(req, trades, data) : null;
-    res.json({ count: plan ? plan.preview.length : trades.length, format: trades.fundImportInfo ? 'fund' : trades.importInfo ? 'eastmoney' : plan ? 'bbae' : 'other', summary: plan?.summary, trades: trades.slice(0, 5).map(describeReinvestment), preview: (plan?.preview || trades).slice(0, plan ? 50 : 5).map(describeReinvestment) });
+    const plan = isBrokerImport(trades) ? brokerImportPlan(req, trades, data) : null;
+    const rows = plan?.preview || trades;
+    const history = importHistoryPlan(buf, rows, importAccount(req), plan ? 'merge' : String(req.query.mode || 'merge'));
+    const pageSize = 50;
+    const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+    const page = Math.min(pages, Math.max(1, Math.trunc(Number(req.query.page) || 1)));
+    const start = (page - 1) * pageSize;
+    const preview = rows.slice(start, start + pageSize).map((row, i) => ({
+      ...describeReinvestment(row), ...(history.eligible.has(start + i) ? { historicalIndex: start + i } : {})
+    }));
+    res.json({ count: rows.length, format: trades.fundImportInfo ? 'fund' : trades.importInfo ? 'eastmoney' : plan ? 'bbae' : 'other',
+      summary: plan?.summary, trades: trades.slice(0, 5).map(describeReinvestment), preview, page, pages,
+      history: { snapshot: history.snapshot, count: history.eligible.size } });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
@@ -609,28 +625,45 @@ app.post('/api/trades/import/preview', express.raw({
 
 app.post('/api/trades/import', express.raw({
   type: ['application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-  limit: '20mb'
+  limit: importFileLimit + importHistoryMetaLimit + 4
 }), async (req, res) => {
   const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
   if (!buf.length) return res.status(400).json({ error: '空文件' });
   try {
-    const imported = parseImportBuffer(buf);
+    const { file, selection } = decodeImportHistory(buf, req.query.historicalSelection === '1');
+    if (file.length > importFileLimit) throw new Error('文件不能超过 20 MB');
+    const imported = parseImportBuffer(file);
     if (!imported.length) return res.status(400).json({ error: imported.importInfo ? '此交割单没有本次支持的可导入交易，请查看预览中的未导入原因' : '未解析到有效记录' });
     await fillImportedNames(imported, store.read());
-    const data = store.read();
     const mode = String(req.query.mode || 'merge');
-    let importSummary;
-    if (['bbae','eastmoney','fund-settlement'].includes(imported[0]?.broker)) {
-      if (mode !== 'merge') throw new Error('券商导出可能只含部分日期，请使用合并模式，避免删除其他交易');
-      const plan = brokerImportPlan(req, imported, data);
-      if (plan.summary.unassigned) throw new Error('存在可能重复的未归属历史，请先核对并设置账户归属，未导入');
-      if (plan.summary.updated && req.query.allowUpdates !== '1') throw new Error('存在待更新记录，请先预览并明确勾选允许更新匹配记录');
-      data.trades = plan.trades; importSummary = plan.summary;
-    } else {
-      if (req.query.accountId) for (const t of imported) t.account_id = req.query.accountId;
-      if (mode === 'replace') data.trades = req.query.accountId ? data.trades.filter((t) => t.account_id !== req.query.accountId).concat(imported) : imported;
-      else data.trades = data.trades.concat(imported);
+    const build = () => {
+      const data = store.read();
+      const account = importAccount(req);
+      const broker = isBrokerImport(imported);
+      if (broker && mode !== 'merge') throw new Error('券商导出可能只含部分日期，请使用合并模式，避免删除其他交易');
+      const plan = broker ? brokerImportPlan(req, imported, data) : null;
+      if (plan?.summary.unassigned) throw new Error('存在可能重复的未归属历史，请先核对并设置账户归属，未导入');
+      if (plan?.summary.updated && req.query.allowUpdates !== '1') throw new Error('存在待更新记录，请先预览并明确勾选允许更新匹配记录');
+      const rows = plan?.preview || imported;
+      const indexes = selection ? selectHistoricalImports(importHistoryPlan(file, rows, account, mode), selection) : new Set();
+      const selected = [...indexes].map(i => rows[i]);
+      const ids = new Set(selected.map(row => row.id));
+      const next = imported.map(t => req.query.accountId ? { ...t, account_id: req.query.accountId } : t);
+      const base = mode === 'replace' ? req.query.accountId ? data.trades.filter(t => t.account_id !== req.query.accountId) : [] : data.trades;
+      const merged = plan?.trades || base.concat(next);
+      const trades = ids.size ? merged.map(t => ids.has(t.id) ? { ...t, historicalBackfill: true } : t) : merged;
+      return { data, trades, selected, account, importSummary: plan?.summary };
+    };
+    let result = build();
+    const needed = result.account?.bookkeeping_id ? [...new Set(result.selected.filter(t => t.type !== 'other')
+      .map(t => t.symbol).filter(s => !(result.data.quotes[s]?.price > 0)))] : [];
+    if (needed.length) {
+      const fetched = await mapWithConcurrency(needed, 4, async symbol => [symbol, await quotes.getQuote(symbol).catch(() => null)]);
+      result = build();
+      for (const [symbol, quote] of fetched) if (quote?.price > 0 && !(result.data.quotes[symbol]?.price > 0)) result.data.quotes[symbol] = quote;
     }
+    const { data, trades, selected, importSummary } = result;
+    data.trades = trades;
     const recalc = recalcCashFromTrades(data.trades, {
       cashUsd: 0,
       cashCny: 0,
@@ -639,7 +672,7 @@ app.post('/api/trades/import', express.raw({
     });
     Object.assign(data, recalc);
     store.write(data, { externalSync: true });
-    res.json({ ...portfolioForRequest(req), importSummary });
+    res.json({ ...portfolioForRequest(req), importSummary, historicalBackfillCount: selected.length });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
