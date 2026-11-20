@@ -471,7 +471,7 @@ function pnlCellClass(key, h) {
   return '';
 }
 
-const expandedHoldingGroups = new Set();
+const collapsedHoldingGroups = new Set();
 
 function renderHoldingsGroupSummary(group, expanded, cols) {
   const shown = key => cols.some(c => c.key === key) && colVis[key] !== false;
@@ -558,7 +558,7 @@ function renderHoldings() {
   groups.forEach((group, gi) => {
     const merged = group.items.length > 1;
     if (merged) {
-      const expanded = expandedHoldingGroups.has(group.key);
+      const expanded = !collapsedHoldingGroups.has(group.key);
       html += `<tr class="sm-holding-group-summary${gi > 0 ? ' sm-holding-group-start' : ''}">${renderHoldingsGroupSummary(group, expanded, cols)}</tr>`;
       if (!expanded) return;
     }
@@ -1681,8 +1681,8 @@ $('#holdings-body').addEventListener('click', async (e) => {
   const toggle = e.target.closest('[data-toggle-holding-group]');
   if (toggle) {
     const groupKey = toggle.dataset.toggleHoldingGroup;
-    if (expandedHoldingGroups.has(groupKey)) expandedHoldingGroups.delete(groupKey);
-    else expandedHoldingGroups.add(groupKey);
+    if (collapsedHoldingGroups.has(groupKey)) collapsedHoldingGroups.delete(groupKey);
+    else collapsedHoldingGroups.add(groupKey);
     renderHoldings();
     [...$('#holdings-body').querySelectorAll('[data-toggle-holding-group]')]
       .find(btn => btn.dataset.toggleHoldingGroup === groupKey)?.focus({ preventScroll: true });
