@@ -24,6 +24,19 @@ const changeFrom = (price, previous) => positive(previous)
   ? { change: price - previous, changePercent: (price - previous) / previous * 100, prevClose: previous }
   : {};
 
+export function completeChinaAmcMovement(quote, lookup, saved) {
+  if (quote?.source !== 'chinaamc-hk-fund-nav' || !positive(quote.price)
+    || (Number.isFinite(quote.change) && Number.isFinite(quote.changePercent))) return quote;
+  const date = new Date(`${quote.asOf}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime())) return quote;
+  const sameNavDay = saved?.source === quote.source && saved.symbol === quote.symbol && saved.asOf === quote.asOf;
+  // On provider failure only reuse an exact preceding weekday, not any older NAV.
+  do { date.setUTCDate(date.getUTCDate() - 1); } while ([0, 6].includes(date.getUTCDay()));
+  const prior = sameNavDay && positive(saved.prevClose) ? saved.prevClose
+    : lookup(quote.symbol, date.toISOString().slice(0, 10));
+  return positive(prior) ? { ...quote, ...changeFrom(quote.price, prior) } : quote;
+}
+
 async function chinaAmcHistory(shareClassId, currency, fetcher, options = request) {
   const data = await fetcher(chinaamc + '/mainFundShareClass/tMainFundShareClass/fullNavHistory?fundId=HKSELMMF', options);
   return data?.result?.find(item => item.ssShareClassId === shareClassId && item.currencyEn === currency)?.navHistoryList || [];
@@ -73,7 +86,8 @@ export async function getHkFundQuote(isin) {
     if (asOf && positive(row.nav)) {
       const price = Number(row.nav);
       const rows = await chinaAmcHistory(shareClassId, currency, fetchQuoteResource).catch(() => []);
-      const previous = rows.find(item => dateOf(item.date) < asOf && positive(item.nav));
+      const previous = rows.filter(item => (!item.shareClassId || item.shareClassId === shareClassId)
+        && dateOf(item.date) < asOf && positive(item.nav)).sort((a, b) => dateOf(b.date).localeCompare(dateOf(a.date)))[0];
       return { ...base, price, asOf, source: 'chinaamc-hk-fund-nav', ...changeFrom(price, Number(previous?.nav)) };
     }
   }

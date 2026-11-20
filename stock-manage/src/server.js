@@ -1,5 +1,5 @@
 import { ensureFundHoldings, fundCode, fundIdentifier, hongKongFundIsin, fundHoldings, fundValuation, openingFundTrades } from '../../shared/fund-holdings.js';
-import { hkFundInfo } from './hk-fund-nav.js';
+import { completeChinaAmcMovement, hkFundInfo } from './hk-fund-nav.js';
 import { Decimal } from '../../shared/portfolio-decimal.js';
 import { estimatedReinvestmentIncome, tradesWithReinvestmentIncome } from '../../shared/fund-reinvestment.js';
 import { findInternationalStockName, findMainlandInstruments, findReinvestmentNav, getFundNav } from './fund-nav.js';
@@ -132,6 +132,15 @@ function describeReinvestment(trade) {
     ? { ...trade, estimatedReinvestmentIncome: estimatedReinvestmentIncome(trade) } : trade;
 }
 
+function completePortfolioFundQuote(quote, saved) {
+  return completeChinaAmcMovement(quote, (symbol, date) => {
+    if (!portfolioDb.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bookkeeping_security_prices'").get()) return null;
+    return portfolioDb.prepare(`SELECT close FROM bookkeeping_security_prices
+      WHERE user_id=? AND symbol=? AND date=? AND source='chinaamc-hk-fund-nav'`)
+      .get(currentPortfolioUserId(), symbol, date)?.close;
+  }, saved);
+}
+
 function buildPortfolio(data, pnlOpts = {}) {
   const rate = Number(data.usdCnyRate) > 0 ? Number(data.usdCnyRate) : DEFAULT_USD_CNY_RATE;
   const fxOpts = { ...pnlOpts, usdCnyRate: rate, usdHkdRate: data.usdHkdRate };
@@ -154,7 +163,7 @@ function buildPortfolio(data, pnlOpts = {}) {
     const code = fundIdentifier(holding.symbol);
     const key = JSON.stringify([holding.accountId, code]);
     const opening = openingByKey.get(key);
-    const quote = fundValuation(data.quotes[holding.symbol], opening);
+    const quote = completePortfolioFundQuote(fundValuation(data.quotes[holding.symbol], opening));
     const valuationSymbol = `FUND:${holding.accountId}:${code}`;
     if (quote) fundQuotes[valuationSymbol] = quote;
     const accountName = data.investmentAccounts?.find(a => a.id === holding.accountId)?.name || '待归属';
@@ -653,6 +662,7 @@ function queueImportedHoldingQuotes(symbols, refreshHkdRate) {
               && JSON.stringify(latest.quotes[symbol]) === JSON.stringify(before.quotes[symbol])
               && !(fundIdentifier(symbol) && latest.quotes[symbol]?.asOf > quote.asOf));
             const rates = missingHkdRate(latest) && Number.isFinite(hkdRate) && hkdRate > 0 ? { usdHkdRate: hkdRate } : {};
+            for (const entry of updated) entry[1] = completePortfolioFundQuote(entry[1], latest.quotes[entry[0]]);
             if (updated.length || rates.usdHkdRate) {
               store.write({ ...latest, ...rates, quotes: { ...latest.quotes, ...Object.fromEntries(updated) } }, { externalSync: true });
             }
@@ -1342,6 +1352,7 @@ app.post('/api/quotes/refresh', async (req, res) => {
   const latest = store.read();
   for (const [sym, quote] of Object.entries(updated)) {
     if (fundIdentifier(sym) && latest.quotes[sym]?.asOf > quote.asOf) delete updated[sym];
+    else updated[sym] = completePortfolioFundQuote(quote, latest.quotes[sym]);
   }
   const saved = store.write({ ...latest, ...rates, quotes: { ...latest.quotes, ...updated } });
   const payload = portfolioForRequest(req, saved);

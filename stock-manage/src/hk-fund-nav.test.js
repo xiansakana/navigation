@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createQuoteService } from './quotes.js';
-import { getHkFundNavHistory } from './hk-fund-nav.js';
+import { completeChinaAmcMovement, getHkFundNavHistory } from './hk-fund-nav.js';
 
 test('Hong Kong NAV sources select the exact ISIN or share class and preserve the dealing date', async t => {
   const original = globalThis.fetch;
@@ -42,4 +42,19 @@ test('ChinaAMC historical NAV selects the exact currency and share class', async
     ] };
   });
   assert.deepEqual(rows, [{ date: '2026-11-19', close: 11.1421, source: 'chinaamc-hk-fund-nav' }]);
+});
+
+test('partial ChinaAMC refresh uses the exact previous dated NAV or retains the same-day baseline', () => {
+  const symbol = 'HK0000489952';
+  const quote = { symbol, source: 'chinaamc-hk-fund-nav', price: 11.143, asOf: '2026-11-20' };
+  const result = completeChinaAmcMovement(quote, (code, date) => {
+    assert.equal(code, symbol);
+    assert.equal(date, '2026-11-19');
+    return 11.1421;
+  });
+  assert.equal((result.change * 897.4969).toFixed(2), '0.81');
+  assert.equal(result.changePercent.toFixed(2), '0.01');
+  assert.deepEqual(completeChinaAmcMovement(quote, () => null), quote);
+  assert.equal(completeChinaAmcMovement({ ...quote, price: 11.144 }, () => null, result).prevClose, 11.1421);
+  completeChinaAmcMovement({ ...quote, asOf: '2026-11-23' }, (_, date) => assert.equal(date, '2026-11-20'));
 });
