@@ -202,3 +202,36 @@ test('a late fund trade queues official daily NAV and restores a range with a mi
     assert.deepEqual(db.prepare('SELECT * FROM bookkeeping_asset_snapshots').all(),frozen);
   }finally{db.close();}
 });
+
+test('expired option history uses the exact external contract close without carrying it into missing days',async()=>{
+  const db=new Database(':memory:');
+  const symbol='SPY261023C670',today='2026-10-27';
+  db.exec('CREATE TABLE portfolio_users(user_id TEXT PRIMARY KEY,data TEXT);CREATE TABLE investment_accounts(id TEXT,user_id TEXT,bookkeeping_id TEXT);CREATE TABLE bookkeeping_asset_snapshots(user_id TEXT,date TEXT,captured_at TEXT,details TEXT)');
+  const trades=[t('buy','buy','2026-10-22',1,100,{symbol,account_id:'broker'})];
+  db.prepare('INSERT INTO portfolio_users VALUES(?,?)').run('one',JSON.stringify({trades}));
+  db.prepare('INSERT INTO investment_accounts VALUES(?,?,?)').run('broker','one','ledger');
+  const snapshot=JSON.stringify([{id:'ledger',currency:'USD',rate:7,source:'portfolio',quotes:[]}]);
+  db.prepare('INSERT INTO bookkeeping_asset_snapshots VALUES(?,?,?,?)').run('one','2026-10-21','2026-10-21T15:59:00Z',snapshot);
+  const requests=[];
+  const history=createSecurityHistory(db,{key:'test-key',clock:()=>Date.parse(today),request:async url=>{
+    requests.push(decodeURIComponent(new URL(url).pathname));
+    return {results:[{t:Date.parse('2026-10-22T04:00:00Z'),c:1.5}]};
+  }});
+  const fx={ensure:async()=>{},quote:()=>({rate:7})};
+  const compute=()=>tradeHistoryReturns(db,'one',{start:'2026-10-22'},today,[{id:'ledger',included:true}],[],{history,fx});
+  try{
+    const first=await compute();
+    assert.equal(first.pending,1);
+    assert.equal(first.points.find(p=>p.date==='2026-10-23').total,null);
+    const deadline=Date.now()+2000;
+    while(history.read('one').pending&&Date.now()<deadline)await new Promise(r=>setTimeout(r,5));
+    const restored=await compute();
+    const day=date=>restored.points.find(p=>p.date===date);
+    assert.equal(day('2026-10-23').total,350);
+    assert.equal(day('2026-10-23').backfilled,true);
+    assert.equal(day('2026-10-22').total,null);
+    assert.equal(day('2026-10-24').total,null);
+    assert.equal(restored.summary.total,null);
+    assert.deepEqual(requests,['/v2/aggs/ticker/O:SPY261023C00670000/range/1/day/2026-10-15/2026-10-24']);
+  }finally{db.close();}
+});

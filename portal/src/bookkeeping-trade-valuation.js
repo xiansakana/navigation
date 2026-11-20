@@ -27,7 +27,12 @@ export function tradeValuation(db,userId,includedIds,today,currentQuotes={},curr
   function historicalQuote(symbol,date,saved) {
     const verified=backfill?.get(userId,symbol,date);
     if(verified&&saved?.date!==date)return {...verified,source:'backfill'};
-    const cached=optionSymbol(symbol)?null:history?.quote?.(symbol,date);
+    const cached=history?.quote?.(symbol,date);
+    if(optionSymbol(symbol)){
+      if(saved?.date===date)return saved;
+      return cached?.date===date&&['polygon','yahoo'].includes(cached.source)
+        ?{date,close:cached.close,source:'backfill'}:saved;
+    }
     const split=history?.splits?.filter(s=>s.symbol===symbol&&s.date<=date).at(-1);
     if(cached&&cached.date<=date&&(!split||cached.date>split.date)&&(!saved||cached.date>saved.date)){
       return {date:cached.date,close:cached.close,source:'backfill'};

@@ -26,7 +26,12 @@ export async function tradeHistoryReturns(db,userId,filter,today,accounts,exclud
   const requests=new Map();
   const withBackfill=(lookup)=>(symbol,date)=>{
     const quote=lookup(symbol,date);
-    if(optionSymbol(symbol)||quote&&Date.parse(date)-Date.parse(quote.date)<=7*86400000)return quote;
+    const option=optionSymbol(symbol);
+    if(option){
+      // A US session's close is cached on the next Beijing calendar day.
+      const expiry='20'+option[2].slice(0,2)+'-'+option[2].slice(2,4)+'-'+option[2].slice(4);
+      if(Date.parse(date)>Date.parse(expiry)+86400000||quote?.date===date)return quote;
+    }else if(quote&&Date.parse(date)-Date.parse(quote.date)<=7*86400000)return quote;
     const previous=requests.get(symbol);
     if(previous)previous.end=date>previous.end?date:previous.end;
     else requests.set(symbol,{symbol,start:new Date(Date.parse(date)-7*86400000).toISOString().slice(0,10),end:date});
