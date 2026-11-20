@@ -1156,7 +1156,7 @@ function openImportModal() {
     </form>
     <div id="import-preview-area"></div>`, `
     <button type="button" class="btn ghost" data-close>取消</button>
-    <button type="button" class="btn primary" id="import-confirm" disabled>导入</button>`, null, { size: 'wide' });
+    <button type="button" class="btn primary" id="import-confirm" disabled>导入</button>`, null, { size: 'xl' });
   layer.querySelector('[role="dialog"]').classList.add('sm-modal--import');
   bindImportModal(layer);
   $('#import-confirm', layer)?.addEventListener('click', async () => {
