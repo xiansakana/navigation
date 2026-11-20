@@ -13,6 +13,42 @@ const Database = require('../../portal/node_modules/better-sqlite3');
 const setup = () => { const db = new Database(':memory:'); initSchema(db); return { db, ledger: createBookkeepingStore(db), stock: createPortfolioStore(db, 'u') }; };
 const trade = (id, type, account, amount, date = '2090-01-01T00:00:00Z') => ({ id, type, account_id: account, symbol: 'AAPL', name: 'Apple', currency: 'USD', shares: 1, price: amount, total_amount: amount, commission: 1, trade_date: date });
 
+test('historical holdings split a linked balance without booking cash flows and later price changes still sync', () => {
+  const { db, ledger, stock } = setup();
+  try {
+    const lid = ledger.saveAccount('u', { name: '历史补录', currency: 'USD', balance: 1000 });
+    const a = saveInvestmentAccount(db, 'u', { name: '证券', currency: 'USD', bookkeepingId: lid, baselineCash: 1000 });
+    const backfill = { ...trade('past', 'buy', a, 100), historicalBackfill: true };
+    stock.write({ trades: [backfill], quotes: { AAPL: { price: 120 } } });
+    assert.equal(stock.read().cashUsd, 880);
+    assert.equal(ledger.accounts('u')[0].balance, 1000);
+    assert.deepEqual(stock.read().investmentAccounts[0].movements, []);
+    stock.write({ ...stock.read(), quotes: { AAPL: { price: 125 } } });
+    const data = stock.read();
+    assert.equal(data.cashUsd, 880);
+    assert.equal(ledger.accounts('u')[0].balance, 1005);
+    stock.write({ ...data, trades: [{ ...backfill, total_amount: 101, commission: 2 }] });
+    assert.equal(stock.read().cashUsd, 880);
+    stock.write({ ...stock.read(), trades: [] });
+    assert.equal(ledger.accounts('u')[0].balance, 1005);
+  } finally { db.close(); }
+});
+
+test('marking already stored historical trades corrects linked balance; standalone backfills leave cash intact', () => {
+  const { db, ledger, stock } = setup();
+  try {
+    const lid = ledger.saveAccount('u', { name: '历史补录', currency: 'USD', balance: 1000 });
+    const a = saveInvestmentAccount(db, 'u', { name: '证券', currency: 'USD', bookkeepingId: lid, baselineCash: 1000 });
+    const b = saveInvestmentAccount(db, 'u', { name: '独立证券', currency: 'USD', baselineCash: 300 });
+    const past = trade('past', 'buy', a, 100, '2020-01-01T00:00:00Z');
+    stock.write({ trades: [past], quotes: { AAPL: { price: 120 } } });
+    assert.equal(ledger.accounts('u')[0].balance, 1120);
+    stock.write({ ...stock.read(), trades: [{ ...past, historicalBackfill: true }, { ...trade('standalone', 'buy', b, 100), historicalBackfill: true }] });
+    assert.equal(ledger.accounts('u')[0].balance, 1000);
+    assert.equal(stock.read().investmentAccounts.find(x => x.id === b).cash, 300);
+  } finally { db.close(); }
+});
+
 test('Hong Kong fund trades keep native currency, reconcile cash and prevent overselling', () => {
   const { db, stock } = setup();
   try {

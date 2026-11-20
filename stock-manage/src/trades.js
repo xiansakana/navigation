@@ -713,6 +713,8 @@ export function normalizeTrade(input) {
   const symbol = normalizeSymbol(input.symbol);
   const currency = inferCurrency(symbol, input.currency);
   const reinvest = input.reinvestedDividend === true;
+  const historical = typeof input.historicalBackfill === 'boolean'
+    ? { historicalBackfill: input.historicalBackfill && !reinvest } : {};
   if (reinvest && (type !== 'buy' || !fundCode(symbol))) throw new Error('红利再投资请选择场外基金并填写确认份额');
   if (type === 'other') {
     const cat = String(input.other_category || '').trim();
@@ -724,6 +726,7 @@ export function normalizeTrade(input) {
       symbol: symbol || 'OTHER',
       name: String(input.name || cat),
       type: 'other',
+      ...historical,
       other_category: cat,
       currency,
       shares: 1,
@@ -748,6 +751,7 @@ export function normalizeTrade(input) {
     symbol,
     name: String(input.name || symbol),
     type: type === 'sell' ? 'sell' : 'buy',
+    ...historical,
     ...(reinvest ? { reinvestedDividend: true, ...(reinvestmentNav == null ? {} : { reinvestmentNav }) } : {}),
     currency,
     shares,

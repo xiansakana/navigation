@@ -787,6 +787,9 @@ function tradeFormFields(trade = {}) {
       <label class="field-other-amt ${type !== 'other' ? 'hidden' : ''}">金额<input name="total_amount" type="number" step="any" value="${trade.total_amount ?? ''}"></label>
       <label>手续费<input name="commission" type="number" step="any" value="${trade.commission ?? 0}"></label>
       <label>时间<input name="trade_date" type="datetime-local" value="${dt}"></label>
+      <label class="field-historical"><span><input name="historicalBackfill" type="checkbox" ${trade.historicalBackfill ? 'checked' : ''}> 补录历史交易</span>
+        <small class="hint">仅勾选已计入账户余额的交易。补录会更新持仓和盈亏，不重记资金流水；若已绑定记账账户，会按当前估值拆分现金与持仓，保持记账总额不变。</small>
+      </label>
     </form>`;
 }
 
@@ -796,6 +799,12 @@ function bindTradeForm(root) {
     const syncFields = () => {
       const other = typeEl.value === 'other';
       const reinvest = typeEl.value === 'reinvest';
+      const historical = root.querySelector('[name="historicalBackfill"]');
+      const funding = root.querySelector('[name="funding"]');
+      historical.disabled = reinvest;
+      historical.closest('label').classList.toggle('hidden', reinvest);
+      if (historical.checked && !reinvest && funding) funding.value = 'ordinary';
+      if (funding) funding.disabled = historical.checked && !reinvest;
       root.querySelectorAll('.field-other,.field-other-amt').forEach((el) => el.classList.toggle('hidden', !other));
       root.querySelectorAll('.field-trade').forEach((el) => el.classList.toggle('hidden', other));
       root.querySelector('.field-price').classList.toggle('hidden', other || reinvest);
@@ -805,6 +814,7 @@ function bindTradeForm(root) {
       }
     };
     typeEl.addEventListener('change', syncFields);
+    root.querySelector('[name="historicalBackfill"]').addEventListener('change', syncFields);
     syncFields();
   }
 }
@@ -817,6 +827,7 @@ function formToTrade(fd, existing = {}) {
     ...(reinvest ? { reinvestedDividend: true, reinvestmentNav: fd.get('reinvestmentNav') } : {}),
     ...(fd.get('account_id') ? { account_id: fd.get('account_id') } : {}),
     funding: reinvest ? 'ordinary' : fd.get('funding') || 'ordinary',
+    historicalBackfill: !reinvest && fd.has('historicalBackfill'),
     symbol: String(fd.get('symbol') || '').trim(),
     name: String(fd.get('name') || '').trim(),
     currency: String(fd.get('currency') || 'USD').toUpperCase(),
@@ -936,7 +947,7 @@ function renderImportPreviewSection() {
   const rows = importState.preview.map((t) => `
     <tr>
       <td data-label="时间">${formatLocalDateTime(t.trade_date)}</td>
-      <td data-label="类型">${typeLabel(t)}</td>
+      <td data-label="类型">${escapeHtml(typeLabel(t))}${t.historicalBackfill ? '<div class="hint">历史补录</div>' : ''}</td>
       <td data-label="代码">${escapeHtml(t.symbol)}</td>
       <td data-label="名称">${escapeHtml(t.name || '')}</td>
       <td data-label="数量">${t.type === 'other' ? '—' : formatQuantity(t.shares)}</td>
@@ -1141,7 +1152,7 @@ function renderTradeListTab() {
           <tbody>${pageRows.length ? pageRows.map((t) => `
             <tr>
               <td data-label="时间">${formatLocalDateTime(t.trade_date)}</td>
-              <td data-label="交易方向">${typeLabel(t)}</td>
+              <td data-label="交易方向">${escapeHtml(typeLabel(t))}${t.historicalBackfill ? '<div class="hint">历史补录</div>' : ''}</td>
               <td data-label="类型">${TRADE_ASSET_TYPES[tradeAssetType(t)]}</td>
               <td data-label="代码">${escapeHtml(t.symbol)}</td>
               <td data-label="名称" class="sm-trade-name">${escapeHtml(t.name || '')}</td>

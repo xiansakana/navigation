@@ -478,7 +478,12 @@ app.put('/api/holdings-meta/:symbol', (req, res) => {
 async function recordNamedTrade(input) {
   const symbol = normalizeSymbol(input.symbol);
   const code = input.type !== 'other' && fundIdentifier(symbol);
-  if (!code) return { trade: await normalizeNamedTrade(input, async sym => ({ name: await quotes.getInstrumentName(sym) })) };
+  if (!code) {
+    const trade = await normalizeNamedTrade(input, async sym => ({ name: await quotes.getInstrumentName(sym) }));
+    const quote = trade.historicalBackfill && trade.type !== 'other' && !store.read().quotes[symbol]?.price
+      ? await quotes.getQuote(symbol).catch(() => null) : null;
+    return { trade, quote };
+  }
   const data = store.read();
   if (hongKongFundIsin(symbol)) {
     const info = hkFundInfo(symbol);

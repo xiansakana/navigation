@@ -1,6 +1,6 @@
 import { correctDividendTaxPortfolio } from '../dividend-tax.js';
 import { requirePortfolioUserId } from '../portfolio-user.js';
-import { applyHistoricalTradeCashCorrections, projectInvestments, prepareInvestmentTrades, investmentRows } from '../investment-accounts.js';
+import { allocateHistoricalPositions, applyHistoricalTradeCashCorrections, projectInvestments, prepareInvestmentTrades, investmentRows } from '../investment-accounts.js';
 import { applyDipCashRules } from '../dip-cash-funds.js';
 import { Decimal, roundDecimal } from '../portfolio-decimal.js';
 
@@ -174,6 +174,7 @@ export function createPortfolioStore(db, userId) {
           payload.cashUsd = before.cashUsd; payload.cashCny = before.cashCny; payload.cash = before.cash;
         }
         const historicalCashCorrections = applyHistoricalTradeCashCorrections(db, userId, before.trades, payload.trades, accounts, updatedAt);
+        historicalCashCorrections.push(...allocateHistoricalPositions(db, userId, before, payload, accounts, updatedAt));
         applyDipCashRules(db, userId, payload, before, { ...options, historicalCashCorrections });
         upsert.run(userId, JSON.stringify(payload), updatedAt);
         return { ...this.read(), updatedAt };

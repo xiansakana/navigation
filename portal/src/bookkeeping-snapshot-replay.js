@@ -25,7 +25,7 @@ export function createSnapshotReplay(db, userId, history) {
       const binding=account.investmentId ? accounts.find(a=>a.id===account.investmentId) : byLedgerId.get(account.id);
       if(!binding)return account;
       const owned=byAccount.get(binding.id)||[];
-      const late=owned.filter(t=>Date.parse(t.created_at)>cutoff && (tradeStamp(t)<=cutoff || investmentRecordTime(t.cash_effective_at||t.trade_date)<=cutoff));
+      const late=owned.filter(t=>!t.historicalBackfill && Date.parse(t.created_at)>cutoff && (tradeStamp(t)<=cutoff || investmentRecordTime(t.cash_effective_at||t.trade_date)<=cutoff));
       if(!late.length)return account;
       const cashBasis=account.cashBaseline || (investmentRecordTime(binding.baseline_at)<=cutoff ? binding : null);
       const baseline=cashBasis?tradeCashBaseline(cashBasis):null;

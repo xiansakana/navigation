@@ -58,6 +58,7 @@ export function applyDipCashRules(db, userId, payload, before, options = {}) {
     const old = existing.get(trade.id);
     const fund = old?.dip_fund_account || (!old ? options.strategyFundId : null);
     if (fund) {
+      if (trade.historicalBackfill) throw new Error('补录历史交易不能使用抄底专用资金');
       if (trade.account_id !== fund || !reserveRows.some((r) => r.account_id === fund)) throw new Error('策略资金来源与证券账户不匹配');
       trade.dip_fund_account = fund;
       if (trade.type === 'buy' && trade.symbol === '159509' && Number(trade.shares) % 100 !== 0) throw new Error('159509 抄底买入须为100份整数倍');

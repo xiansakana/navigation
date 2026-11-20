@@ -20,6 +20,7 @@ export function roundDecimal(value, places) {
 }
 
 export function tradeCashAmount(trade) {
+  if (trade.historicalBackfill) return new Decimal(0);
   const amount = new Decimal(Number(trade.total_amount || 0));
   return (trade.type === 'buy' ? amount.negated() : amount).minus(Number(trade.commission || 0));
 }

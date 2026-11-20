@@ -26,7 +26,37 @@ export function tradeCashBaseline(account) {
 }
 
 export function tradeAfterCashBaseline(trade, baseline) {
-  return baseline && !baseline.ids.has(trade.id) && time(trade.cash_effective_at || trade.trade_date) >= baseline.at;
+  return baseline && !trade.historicalBackfill && !baseline.ids.has(trade.id) && time(trade.cash_effective_at || trade.trade_date) >= baseline.at;
+}
+
+// Linked bookkeeping balances already included these positions. Allocate their
+// value between cash and securities once, using the same marks as the account.
+export function allocateHistoricalPositions(db, userId, before, next, accounts, at) {
+  const linked = new Set(accounts.filter(a => a.bookkeeping_id).map(a => a.id));
+  const changes = new Map();
+  for (const [trades, direction] of [[before.trades, -1], [next.trades, 1]]) {
+    for (const t of trades) {
+      if (!t.historicalBackfill || t.reinvestedDividend || !linked.has(t.account_id) || !['buy', 'sell'].includes(t.type)) continue;
+      const key = JSON.stringify([t.account_id, t.symbol]);
+      const shares = new Decimal(t.shares).times(t.type === 'buy' ? direction : -direction);
+      changes.set(key, (changes.get(key) || new Decimal(0)).plus(shares));
+    }
+  }
+  const corrections = [];
+  const update = db.prepare('UPDATE investment_accounts SET baseline_cash=baseline_cash+? WHERE user_id=? AND id=?');
+  const audit = db.prepare("INSERT INTO investment_account_audit(user_id,account_id,action,data,at) VALUES(?,?,'historical-position-allocation',?,?)");
+  for (const [key, shares] of changes) {
+    if (shares.isZero()) continue;
+    const [accountId, symbol] = JSON.parse(key);
+    const price = Number(next.quotes[symbol]?.price ?? before.quotes[symbol]?.price);
+    if (!(price > 0) || !Number.isFinite(price)) throw new Error(`${symbol} 缺少有效行情，暂不能从记账余额拆出历史持仓，请先刷新价格`);
+    const adjustment = roundDecimal(shares.times(price).times(/^[A-Z]+\d{6}[CP]/.test(symbol) ? -10000 : -100), 0);
+    if (!adjustment) continue;
+    update.run(adjustment, userId, accountId);
+    audit.run(userId, accountId, JSON.stringify({ symbol, shares: shares.toNumber(), price, adjustment }), at);
+    corrections.push({ accountId, adjustment, strategy: false });
+  }
+  return corrections;
 }
 
 export function applyHistoricalTradeCashCorrections(db, userId, previousTrades, nextTrades, accounts, at) {
@@ -36,7 +66,7 @@ export function applyHistoricalTradeCashCorrections(db, userId, previousTrades, 
   for (const trade of nextTrades) {
     const old = previous.get(trade.id);
     const baseline = baselines.get(trade.account_id);
-    if (!old || !baseline || old.account_id !== trade.account_id
+    if (!old || !baseline || old.account_id !== trade.account_id || old.historicalBackfill || trade.historicalBackfill
       || tradeAfterCashBaseline(old, baseline) || tradeAfterCashBaseline(trade, baseline)) continue;
     const adjustment = roundDecimal(tradeCashAmount(trade).minus(tradeCashAmount(old)).times(100), 0);
     if (adjustment) corrections.push({ tradeId: trade.id, accountId: trade.account_id, adjustment, strategy: !!old.dip_fund_account });
@@ -186,12 +216,13 @@ export function prepareInvestmentTrades(db, userId, next, before) {
     return next;
   }
   const old = new Map((before.trades || []).map((t) => [t.id, t]));
-  const financial = (t) => JSON.stringify([t.type, t.symbol, t.shares, t.price, t.total_amount, t.commission, t.currency, t.trade_date, t.account_id]);
+  const financial = (t) => JSON.stringify([t.type, t.symbol, t.shares, t.price, t.total_amount, t.commission, t.currency, t.trade_date, t.account_id, !!t.historicalBackfill]);
   const ids = new Set();
-  const prepared = next.map((trade) => {
+  const prepared = next.map((input) => {
+    const previous = old.get(input.id);
+    const trade = previous?.historicalBackfill && input.historicalBackfill == null ? { ...input, historicalBackfill: true } : input;
     if (ids.has(trade.id)) throw new Error('同一用户交易ID重复，导入已取消');
     ids.add(trade.id);
-    const previous = old.get(trade.id);
     if (!trade.account_id && previous && financial(previous) === financial(trade)) return trade;
     if (!Number.isFinite(time(trade.trade_date))) throw new Error('交易时间无效，无法确定现金基准');
     const cur = currency(trade);
