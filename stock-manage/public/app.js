@@ -3,7 +3,7 @@ import { openInvestmentAccounts } from './js/investment-accounts.js?v=quantity-1
 import { isDividendTax, normalizeOtherAmount } from './js/dividend-tax.js';
 import { renderTradeReview } from './js/trade-review.js?v=hk-fund-1';
 import { formatPrice, formatQuantity, priceInputValue } from './js/price-format.js?v=quantity-1';
-import { bindTradeInstrument } from './js/trade-instrument.js?v=hk-fund-1';
+import { bindTradeInstrument } from './js/trade-instrument.js?v=keep-trade-account-1';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=20261004-full-history';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey } from './js/holdings-table.js?v=fund-groups-1';
@@ -765,7 +765,7 @@ function tradeFormFields(trade = {}) {
         <option value="reinvest" ${type === 'reinvest' ? 'selected' : ''}>红利再投资</option>
         <option value="other" ${type === 'other' ? 'selected' : ''}>其它收支</option>
       </select></label>
-      ${(state.investmentAccounts || []).length ? `<label>证券账户<select name="account_id" required><option value="">请选择实际归属账户</option>${state.investmentAccounts.map((a) => `<option value="${a.id}" ${a.id === (trade.account_id || selectedAccountId) ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></label>` : ''}
+      ${(state.investmentAccounts || []).length ? `<label>证券账户<select name="account_id" required aria-describedby="trade-account-hint"><option value="">请选择实际归属账户</option>${state.investmentAccounts.map((a) => `<option value="${a.id}" ${a.id === (trade.account_id || selectedAccountId) ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select><small class="hint" id="trade-account-hint" data-trade-account-hint aria-live="polite"></small></label>` : ''}
       <label class="field-other ${type !== 'other' ? 'hidden' : ''}">其它类别<input name="other_category" value="${escapeHtml(trade.other_category)}"></label>
       ${!trade.id && can('dip-spend', 'edit') ? '<label>资金用途<select name="funding"><option value="ordinary">普通可用现金</option><option value="dip">抄底专用资金（卖出则回补资金池）</option></select></label>' : ''}
       <div>
@@ -886,6 +886,8 @@ function openTradeModal(trade = {}) {
   const layer = openModal(trade.id ? '编辑交易' : '记一笔', tradeFormFields(trade), null, async (modal) => {
     const form = modal.querySelector('#trade-form');
     if (!await resolveInstrument()) throw new Error('请先确认代码对应的标的');
+    const account = form.elements.account_id;
+    if (account && !account.checkValidity()) throw new Error(account.value ? account.validationMessage : '请选择实际归属的证券账户');
     await resolveReinvestmentNav();
     const fd = new FormData(form);
     if (form.dataset.resolvedSymbol) fd.set('symbol', form.dataset.resolvedSymbol);
@@ -1571,7 +1573,7 @@ $('#holdings-body').addEventListener('click', async (e) => {
     const accountId = e.target.closest('[data-trade]')?.dataset.account || '';
     const holding = state.fundHoldings?.find(h => h.tradeSymbol === tradeSym && h.accountId === accountId)
       || state.holdings.find(h => h.symbol === tradeSym && h.accountId === accountId);
-    openTradeModal({ prefillType: tradeType, symbol: tradeSym, account_id: accountId, name: holding?.name || '' });
+    openTradeModal({ prefillType: tradeType, symbol: tradeSym, account_id: accountId, name: holding?.name || '', currency: holding?.currency });
     return;
   }
   const histSym = e.target.closest('[data-history]')?.dataset.history;

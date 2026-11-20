@@ -6,32 +6,55 @@ export function bindTradeInstrument(form, { resolve, assetTypes, accounts }) {
   const status = form.querySelector('[data-instrument-status]');
   const choices = form.querySelector('[data-instrument-choices]');
   const priceLabel = form.querySelector('[data-trade-price-label]');
+  const accountHint = form.querySelector('[data-trade-account-hint]');
+  const type = form.elements.type;
   const key = () => symbol.value.trim().toUpperCase();
   let current = key();
   let manual = !!name.value.trim() && name.value.trim().toUpperCase() !== current;
   let lookup = manual ? { code: current, promise: Promise.resolve(true) } : null;
   let timer;
+  let resolvedCurrency = '';
 
-  function syncInstrument(code, suggestedCurrency) {
+  function updateAccountHint() {
+    if (!account) return;
+    const selected = accounts.find(a => String(a.id) === account.value);
+    const expected = type.value === 'other' ? currency.value : resolvedCurrency;
+    const message = selected && expected && selected.currency !== expected
+      ? `所选证券账户币种为 ${selected.currency}，请选择 ${expected} 证券账户。` : '';
+    account.setCustomValidity(message);
+    if (accountHint) accountHint.textContent = message;
+  }
+
+  function syncInstrument(code) {
     const fund = isFund(code);
-    const hk = /^(?:HK\.?)?\d{1,5}(?:\.HK)?$/.test(code);
-    const cn = /^(?:SH\.?|SZ\.?|SS\.?)?\d{6}(?:\.(?:SH|SZ|SS))?$/.test(code);
-    if (form.elements.type.value !== 'other' && code) {
-      currency.value = suggestedCurrency || (isHkFund(code) ? currency.value : hk ? 'HKD' : cn || fund ? 'CNY' : 'USD');
-      if (account && accounts.find(a => a.id === account.value)?.currency !== currency.value) {
-        const matching = accounts.filter(a => a.currency === currency.value);
-        account.value = matching.length === 1 ? matching[0].id : '';
-      }
-    }
     price.step = isHkFund(code) ? '0.00001' : fund ? '0.0001' : '0.001';
     priceLabel.textContent = fund ? '成交净值' : '价格';
     form.querySelector('[data-trade-shares-label]').textContent = fund ? '确认份额' : '数量';
   }
 
+  function setResolvedCurrency(value) {
+    resolvedCurrency = value;
+    if (type.value !== 'other' && value) {
+      currency.value = value;
+      if (account && !account.value) {
+        const matching = accounts.filter(a => a.currency === value);
+        if (matching.length === 1) account.value = String(matching[0].id);
+      }
+    }
+    updateAccountHint();
+  }
+
+  function inferUnresolvedCurrency(code) {
+    if (/^(?:HK\.?)?\d{1,5}(?:\.HK)?$/.test(code)) return 'HKD';
+    if (isFund(code) && !isHkFund(code) || /^(?:SH\.?|SZ\.?|SS\.?)?\d{6}(?:\.(?:SH|SZ|SS))?$/.test(code)) return 'CNY';
+    return 'USD';
+  }
+
   function apply(item) {
     form.dataset.resolvedSymbol = item.symbol;
     if (!manual) name.value = item.name;
-    syncInstrument(item.symbol, item.currency);
+    syncInstrument(item.symbol);
+    setResolvedCurrency(item.currency);
     choices.replaceChildren();
     status.textContent = assetTypes[item.assetType] || '';
     lookup = { code: key(), promise: Promise.resolve(true) };
@@ -69,13 +92,17 @@ export function bindTradeInstrument(form, { resolve, assetTypes, accounts }) {
         ? '未识别标的，请核对代码，或加上 .SH、.SZ、.OF 后重试'
         : '未查到名称，请核对代码或手动填写';
       lookup = null;
-      return (!isHkFund(code) && !/^\d{6}$/.test(code)) || form.elements.type.value === 'other';
+      const canContinue = (!isHkFund(code) && !/^\d{6}$/.test(code)) || type.value === 'other';
+      if (canContinue && type.value !== 'other') setResolvedCurrency(inferUnresolvedCurrency(code));
+      return canContinue;
     }).catch(error => {
       if (!stillCurrent()) return false;
       status.textContent = error.message;
       lookup = null;
       if (/万份收益/.test(error.message)) return false;
-      return !/^\d{6}$/.test(code) || form.elements.type.value === 'other';
+      const canContinue = (!isHkFund(code) && !/^\d{6}$/.test(code)) || type.value === 'other';
+      if (canContinue && type.value !== 'other') setResolvedCurrency(inferUnresolvedCurrency(code));
+      return canContinue;
     });
     return request.promise;
   }
@@ -91,13 +118,18 @@ export function bindTradeInstrument(form, { resolve, assetTypes, accounts }) {
     name.value = '';
     choices.replaceChildren();
     status.textContent = '';
+    resolvedCurrency = '';
+    updateAccountHint();
     syncInstrument(code);
     clearTimeout(timer);
     timer = setTimeout(lookUp, 350);
   });
   symbol.addEventListener('blur', lookUp);
-  form.elements.type.addEventListener('change', () => syncInstrument(form.dataset.resolvedSymbol || key()));
+  type.addEventListener('change', () => setResolvedCurrency(resolvedCurrency));
+  account?.addEventListener('change', updateAccountHint);
+  currency.addEventListener('change', updateAccountHint);
   syncInstrument(current);
+  if (current && manual) setResolvedCurrency(currency.value);
   if (current && !manual) lookUp();
   return lookUp;
 }
