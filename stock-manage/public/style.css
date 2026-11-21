@@ -652,6 +652,15 @@ body:has(.sm-modal-backdrop) {
 }
 
 .sm-pagination select { width: auto; }
+.sm-pagination-position { white-space: nowrap; }
+.sm-pagination [aria-current="page"] { color: var(--accent); border-color: var(--accent); }
+.sm-pagination-jump, .sm-pagination-jump label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+.sm-pagination-jump input { width: 4.5em; }
 .sm-total-row td { font-weight: 600; background: rgba(255, 255, 255, 0.03); }
 .sm-form-grid { display: grid; gap: 12px; }
 .sm-form-grid label { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
@@ -1238,7 +1247,7 @@ select:focus {
     .sm-modal--trade .sm-pagination {
         gap: 6px;
     }
-    .sm-modal--trade .sm-pagination [data-page]:not([data-page="prev"]):not([data-page="next"]) {
+    .sm-pagination [data-pagination-number] {
         display: none;
     }
 }

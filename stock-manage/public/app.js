@@ -1027,6 +1027,32 @@ function renderImportAction(trade) {
   </details></div>`;
 }
 
+function renderPagination({ page, pages, label, pageNumbers = false, extra = '' }) {
+  const button = (target, text, options = '') =>
+    `<button type="button" class="btn ghost sm-btn-sm" data-pagination-page="${target}" ${options}>${text}</button>`;
+  const first = Math.max(1, Math.min(page - 3, pages - 6));
+  const numbers = pageNumbers ? Array.from({ length: Math.min(pages, 7) }, (_, i) => {
+    const number = first + i;
+    return button(number, number, `data-pagination-number aria-label="第 ${number} 页"${number === page ? ' aria-current="page"' : ''}`);
+  }).join('') : '';
+  return `<nav class="sm-pagination" aria-label="${label}">
+    ${button(page - 1, '上一页', page <= 1 ? 'disabled' : '')}
+    <span class="sm-pagination-position" aria-live="polite">第 ${page} / ${pages} 页</span>
+    ${numbers}
+    ${button(page + 1, '下一页', page >= pages ? 'disabled' : '')}
+    ${pages > 1 ? `<form class="sm-pagination-jump">
+      <label>页码 <input name="page" type="number" inputmode="numeric" min="1" max="${pages}" step="1" required placeholder="${page}"></label>
+      <button type="submit" class="btn ghost sm-btn-sm">跳转</button>
+    </form>` : ''}
+    ${extra}
+  </nav>`;
+}
+
+function paginationTarget(form) {
+  if (!form.reportValidity()) return null;
+  return form.elements.page.valueAsNumber;
+}
+
 function renderImportPreviewSection() {
   if (importState.error) return `<div class="sm-error-box">${escapeHtml(importState.error)}</div>`;
   if (!importState.count && !importState.summary) return '';
@@ -1063,11 +1089,7 @@ function renderImportPreviewSection() {
           <tbody>${rows}</tbody>
         </table>
       </div>
-      ${importState.pages > 1 ? `<div class="sm-import-preview-head">
-        <button type="button" class="btn ghost sm-btn-sm" data-import-preview-page="${importState.page - 1}" ${importState.page <= 1 ? 'disabled' : ''}>上一页</button>
-        <span>第 ${importState.page} / ${importState.pages} 页</span>
-        <button type="button" class="btn ghost sm-btn-sm" data-import-preview-page="${importState.page + 1}" ${importState.page >= importState.pages ? 'disabled' : ''}>下一页</button>
-      </div>` : ''}
+      ${renderPagination({ page: importState.page, pages: importState.pages, label: '导入预览分页' })}
     </div>`;
 }
 
@@ -1147,8 +1169,16 @@ function bindImportModal(layer) {
     syncHistory();
   });
   area.addEventListener('click', event => {
-    const page = event.target.closest('[data-import-preview-page]');
-    if (page) previewFile(Number(page.dataset.importPreviewPage), true);
+    const button = event.target.closest('[data-pagination-page]');
+    if (button) previewFile(Number(button.dataset.paginationPage), true);
+  });
+  area.addEventListener('submit', async event => {
+    if (!event.target.matches('.sm-pagination-jump')) return;
+    event.preventDefault();
+    const page = paginationTarget(event.target);
+    if (page == null || page === importState.page) return;
+    await previewFile(page, true);
+    $('.sm-pagination-jump input', area)?.focus({ preventScroll: true });
   });
   $('#import-mode', layer).addEventListener('change', e => { importState.mode = e.target.value; previewFile(); });
   $('#import-repo-start', layer).addEventListener('change', () => previewFile());
@@ -1279,11 +1309,6 @@ function renderTradeListTab() {
   const start = (ui.tradePage - 1) * ui.tradePageSize;
   const pageRows = all.slice(start, start + ui.tradePageSize);
 
-  let pageBtns = '';
-  for (let p = 1; p <= pages && p <= 7; p++) {
-    pageBtns += `<button type="button" class="btn ghost sm-btn-sm ${p === ui.tradePage ? 'active' : ''}" data-page="${p}">${p}</button>`;
-  }
-
   return `
     ${renderTradeFilters()}
     <div class="sm-trade-modal-scroll">
@@ -1313,15 +1338,11 @@ function renderTradeListTab() {
         </table>
       </div>
     </div>
-    <div class="sm-pagination">
-      <button type="button" class="btn ghost sm-btn-sm" data-page="prev" ${ui.tradePage <= 1 ? 'disabled' : ''}>上一页</button>
-      ${pageBtns}
-      <button type="button" class="btn ghost sm-btn-sm" data-page="next" ${ui.tradePage >= pages ? 'disabled' : ''}>下一页</button>
-      <select id="page-size">
+    ${renderPagination({ page: ui.tradePage, pages, label: '交易记录分页', pageNumbers: true, extra: `
+      <select id="page-size" aria-label="每页条数">
         ${[10, 20, 50, 100].map((n) => `<option value="${n}" ${ui.tradePageSize === n ? 'selected' : ''}>${n} 条/页</option>`).join('')}
       </select>
-      <span class="sm-muted">共 ${total} 条</span>
-    </div>`;
+      <span class="sm-muted">共 ${total} 条</span>` })}`;
 }
 
 async function renderTradeSummaryTab() {
@@ -1512,15 +1533,20 @@ function bindTradeModalEvents(layer) {
     ui.tradePage = 1;
     window._refreshTradeModal?.();
   });
-  unbound('[data-page]').forEach((btn) => btn.addEventListener('click', () => {
-    const v = btn.dataset.page;
-    const all = filteredTrades();
-    const pages = Math.max(1, Math.ceil(all.length / ui.tradePageSize));
-    if (v === 'prev') ui.tradePage = Math.max(1, ui.tradePage - 1);
-    else if (v === 'next') ui.tradePage = Math.min(pages, ui.tradePage + 1);
-    else ui.tradePage = Number(v);
+  unbound('[data-pagination-page]').forEach((btn) => btn.addEventListener('click', () => {
+    const page = Number(btn.dataset.paginationPage);
+    if (page === ui.tradePage) return;
+    ui.tradePage = page;
     window._refreshTradeModal?.();
   }));
+  unbound('.sm-pagination-jump')[0]?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const page = paginationTarget(event.currentTarget);
+    if (page == null || page === ui.tradePage) return;
+    ui.tradePage = page;
+    await window._refreshTradeModal?.();
+    $('.sm-pagination-jump input', root)?.focus({ preventScroll: true });
+  });
   unbound('#page-size')[0]?.addEventListener('change', (e) => {
     ui.tradePageSize = Number(e.target.value);
     ui.tradePage = 1;
