@@ -1,5 +1,5 @@
 import { TRADE_ASSET_TYPES, tradeAssetType } from './js/trade-asset-type.js?v=hk-fund-1';
-import { openInvestmentAccounts } from './js/investment-accounts.js?v=quantity-1';
+import { openInvestmentAccounts } from './js/investment-accounts.js?v=account-layout-1';
 import { isDividendTax, normalizeOtherAmount } from './js/dividend-tax.js';
 import { renderTradeReview } from './js/trade-review.js?v=hk-fund-1';
 import { formatPrice, formatQuantity, priceInputValue } from './js/price-format.js?v=quantity-1';
@@ -129,6 +129,8 @@ const ui = {
   tradeTab: 'list',
   tradePage: 1,
   tradePageSize: 10,
+  tradeAccountId: '',
+  tradeAccountSort: '',
   tradeSummarySort: { key: '', dir: -1 },
   tradeFilter: { symbol: '', type: 'all', assetType: 'all', otherCategory: '', start: '', end: '' },
   tradeFilterOpen: false
@@ -1249,9 +1251,10 @@ function openImportModal() {
   });
 }
 
-function filteredTrades() {
+function filteredTrades(trades, accountNames) {
   const f = ui.tradeFilter;
-  return [...(state.trades || [])].filter((t) => {
+  return trades.filter((t) => {
+    if (ui.tradeAccountId && (t.account_id || 'unassigned') !== ui.tradeAccountId) return false;
     if (f.symbol && !t.symbol.toUpperCase().includes(f.symbol.toUpperCase())) return false;
     if (f.type !== 'all' && t.type !== f.type) return false;
     if (f.assetType !== 'all' && tradeAssetType(t) !== f.assetType) return false;
@@ -1260,7 +1263,16 @@ function filteredTrades() {
     if (f.start && d < f.start) return false;
     if (f.end && d > f.end) return false;
     return true;
-  }).sort((a, b) => new Date(b.trade_date) - new Date(a.trade_date));
+  }).sort((a, b) => {
+    if (ui.tradeAccountSort) {
+      const left = accountNames.get(a.account_id);
+      const right = accountNames.get(b.account_id);
+      if (Boolean(left) !== Boolean(right)) return left ? -1 : 1;
+      const byName = left && right ? left.localeCompare(right, 'zh-CN', { numeric: true }) : 0;
+      if (byName) return ui.tradeAccountSort === 'asc' ? byName : -byName;
+    }
+    return new Date(b.trade_date) - new Date(a.trade_date);
+  });
 }
 
 function renderTradeFilters(summary = false) {
@@ -1268,6 +1280,16 @@ function renderTradeFilters(summary = false) {
   return `<div class="sm-trade-filters ${ui.tradeFilterOpen ? 'is-open' : ''}">
       <button type="button" class="btn ghost sm-btn-sm sm-trade-filter-toggle" data-filter-toggle aria-expanded="${ui.tradeFilterOpen ? 'true' : 'false'}">筛选条件${activeCount ? `（${activeCount}）` : ''}</button>
       <div class="sm-trade-filter-fields">
+      ${!summary && can('accounts') && state.investmentAccounts?.length ? `<select id="trade-account-filter" aria-label="证券账户">
+        <option value="">全部账户</option>
+        <option value="unassigned">待归属交易</option>
+        ${state.investmentAccounts.map((a) => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)} · ${escapeHtml(a.currency)}</option>`).join('')}
+      </select>
+      <select id="trade-account-sort" aria-label="明细排序">
+        <option value="">时间从新到旧</option>
+        <option value="asc">账户名称升序</option>
+        <option value="desc">账户名称降序</option>
+      </select>` : ''}
       <input placeholder="代码" data-filter="symbol" value="${escapeHtml(ui.tradeFilter.symbol)}">
       ${summary ? '' : `<select data-filter="type" aria-label="交易方向">
         <option value="all">全部方向</option>
@@ -1289,9 +1311,10 @@ function renderTradeFilters(summary = false) {
 }
 
 function activeTradeFilterCount(summary = ui.tradeTab !== 'list') {
-  return Object.entries(ui.tradeFilter)
+  const fields = Object.entries(ui.tradeFilter)
     .filter(([key]) => key !== 'type' || !summary)
     .filter(([, value]) => value && value !== 'all').length;
+  return fields + Number(!summary && Boolean(ui.tradeAccountId));
 }
 
 function updateTradeFilterToggle(root) {
@@ -1301,8 +1324,10 @@ function updateTradeFilterToggle(root) {
   button.textContent = `筛选条件${count ? `（${count}）` : ''}`;
 }
 
-function renderTradeListTab() {
-  const all = filteredTrades();
+function renderTradeListTab(trades, loadError) {
+  const showAccounts = can('accounts') && state.investmentAccounts?.length;
+  const accountNames = new Map(showAccounts ? state.investmentAccounts.map((a) => [a.id, a.name]) : []);
+  const all = filteredTrades(trades, accountNames);
   const total = all.length;
   const pages = Math.max(1, Math.ceil(total / ui.tradePageSize));
   ui.tradePage = Math.min(ui.tradePage, pages);
@@ -1323,7 +1348,7 @@ function renderTradeListTab() {
               <td data-label="交易方向">${escapeHtml(typeLabel(t))}${t.historicalBackfill ? '<div class="hint">历史补录</div>' : ''}</td>
               <td data-label="类型">${TRADE_ASSET_TYPES[tradeAssetType(t)]}</td>
               <td data-label="代码">${escapeHtml(t.symbol)}</td>
-              <td data-label="名称" class="sm-trade-name">${escapeHtml(t.name || '')}</td>
+              <td data-label="名称" class="sm-trade-name">${escapeHtml(t.name || '')}${showAccounts ? `<div class="sm-trade-account-name">${escapeHtml(accountNames.get(t.account_id) || '待归属')}</div>` : ''}</td>
               <td data-label="币种">${escapeHtml(t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
               <td data-label="股数">${t.type === 'other' ? '—' : formatQuantity(t.shares)}</td>
               <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.reinvestedDividend ? t.reinvestmentNav : t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? fundPriceDigits(t.symbol) : 3)}</td>
@@ -1333,7 +1358,7 @@ function renderTradeListTab() {
                 <button type="button" class="btn link" data-edit="${t.id}">编辑</button>
                 <button type="button" class="btn link" data-del="${t.id}">删除</button>` : '—'}
               </td>
-            </tr>`).join('') : `<tr><td colspan="11" class="empty">暂无记录</td></tr>`}
+            </tr>`).join('') : `<tr><td colspan="11" class="empty">${loadError ? `<span role="alert">${escapeHtml(loadError)}</span>` : '暂无记录'}</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -1395,7 +1420,7 @@ async function renderTradeSummaryTab() {
     </div>`;
 }
 
-async function renderTradeModalBody() {
+async function renderTradeModalBody(trades, loadError) {
   const tabs = `
     <div class="sm-tabs">
       <button type="button" class="sm-tab ${ui.tradeTab === 'list' ? 'active' : ''}" data-tab="list">明细</button>
@@ -1407,7 +1432,7 @@ async function renderTradeModalBody() {
       ${can('import', 'edit') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-import">导入</button>' : ''}
       ${can('export') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-export">导出 xlsx</button>' : ''}
     </div>`;
-  const content = ui.tradeTab === 'review' && can('trade-review') ? await renderTradeReviewTab() : ui.tradeTab === 'summary' ? await renderTradeSummaryTab() : renderTradeListTab();
+  const content = ui.tradeTab === 'review' && can('trade-review') ? await renderTradeReviewTab() : ui.tradeTab === 'summary' ? await renderTradeSummaryTab() : renderTradeListTab(trades, loadError);
   return `<div class="sm-trade-modal-content">${tabs}${content}</div>`;
 }
 
@@ -1429,15 +1454,34 @@ async function renderTradeReviewTab() {
 async function openTradeHistoryModal(symbol = '') {
   if (!can('trades')) return;
   if (symbol) ui.tradeFilter.symbol = symbol;
+  ui.tradeAccountId = can('accounts') ? selectedAccountId : '';
   ui.tradeFilterOpen = false;
   ui.tradePage = 1;
   const layer = openModal('交易记录', '<div id="trade-modal-content">加载中…</div>', '<button type="button" class="btn ghost" data-close>关闭</button>', null, { size: 'trade' });
   let refreshRevision = 0;
+  let alternateTrades;
+  let listTrades = [];
   const refresh = async () => {
     const revision = ++refreshRevision;
     const box = $('#trade-modal-content', layer);
     if (!box) return;
-    const html = await renderTradeModalBody();
+    let trades = state.trades || [];
+    let loadError;
+    if (ui.tradeTab === 'list' && ui.tradeAccountId !== selectedAccountId && can('accounts')) {
+      if (alternateTrades?.portfolio !== state) {
+        alternateTrades = { portfolio: state, request: api('/portfolio') };
+      }
+      const request = alternateTrades;
+      try {
+        trades = (await request.request).trades || [];
+      } catch (error) {
+        if (alternateTrades === request) alternateTrades = undefined;
+        trades = [];
+        loadError = error.message;
+      }
+    }
+    if (revision !== refreshRevision || !box.isConnected) return;
+    const html = await renderTradeModalBody(trades, loadError);
     if (revision !== refreshRevision || !box.isConnected) return;
     if ($('[data-tab].active', box)?.dataset.tab === ui.tradeTab) {
       const template = document.createElement('template');
@@ -1455,7 +1499,12 @@ async function openTradeHistoryModal(symbol = '') {
     } else {
       box.innerHTML = html;
     }
-    bindTradeModalEvents(layer);
+    listTrades = trades;
+    const accountFilter = $('#trade-account-filter', box);
+    if (accountFilter) accountFilter.value = ui.tradeAccountId;
+    const accountSort = $('#trade-account-sort', box);
+    if (accountSort) accountSort.value = ui.tradeAccountSort;
+    bindTradeModalEvents(layer, () => listTrades);
   };
   window._tradeHistoryLayer = layer;
   window._refreshTradeModal = refresh;
@@ -1468,7 +1517,7 @@ function openTradeHistoryForRange(start, end) {
   openTradeHistoryModal();
 }
 
-function bindTradeModalEvents(layer) {
+function bindTradeModalEvents(layer, getListTrades) {
   const root = $('#trade-modal-content', layer);
   if (!root) return;
   const unbound = (selector) => [...root.querySelectorAll(selector)].filter((el) => {
@@ -1527,8 +1576,23 @@ function bindTradeModalEvents(layer) {
       }
     });
   });
+  unbound('#trade-account-filter')[0]?.addEventListener('change', (event) => {
+    ui.tradeAccountId = event.target.value;
+    updateTradeFilterToggle(root);
+    ui.tradePage = 1;
+    window._refreshTradeModal?.();
+  });
+  unbound('#trade-account-sort')[0]?.addEventListener('change', (event) => {
+    ui.tradeAccountSort = event.target.value;
+    ui.tradePage = 1;
+    window._refreshTradeModal?.();
+  });
   unbound('#filter-reset')[0]?.addEventListener('click', () => {
     ui.tradeFilter = { symbol: '', type: 'all', assetType: 'all', otherCategory: '', start: '', end: '' };
+    if (ui.tradeTab === 'list') {
+      ui.tradeAccountId = '';
+      ui.tradeAccountSort = '';
+    }
     updateTradeFilterToggle(root);
     ui.tradePage = 1;
     window._refreshTradeModal?.();
@@ -1553,7 +1617,7 @@ function bindTradeModalEvents(layer) {
     window._refreshTradeModal?.();
   });
   unbound('[data-edit]').forEach((btn) => btn.addEventListener('click', () => {
-    const trade = state.trades.find((t) => t.id === btn.dataset.edit);
+    const trade = getListTrades().find((t) => t.id === btn.dataset.edit);
     if (trade) openTradeModal(trade);
   }));
   unbound('[data-del]').forEach((btn) => btn.addEventListener('click', async () => {
@@ -1573,7 +1637,8 @@ function bindTradeModalEvents(layer) {
   unbound('#modal-import')[0]?.addEventListener('click', () => { openImportModal(); });
   unbound('#modal-export')[0]?.addEventListener('click', () => {
     const q = new URLSearchParams();
-    if (selectedAccountId) q.set('accountId', selectedAccountId);
+    const accountId = ui.tradeTab === 'list' ? ui.tradeAccountId : selectedAccountId;
+    if (accountId) q.set('accountId', accountId);
     for (const [k, v] of Object.entries(ui.tradeFilter)) {
       if (ui.tradeTab !== 'list' && k === 'type') continue;
       if (v && v !== 'all') q.set(k, v);
@@ -1670,7 +1735,7 @@ $('#btn-add').addEventListener('click', () => {
   if (can('trade', 'edit')) openTradeModal();
 });
 $('#account-filter')?.addEventListener('change', (e) => { selectedAccountId = e.target.value; loadPortfolio().catch((error) => toastErr(error.message)); });
-const openAccounts = () => can('accounts') && openInvestmentAccounts({ api, openModal, closeModal, reload: loadPortfolio, can, toastErr, toastOk });
+const openAccounts = () => can('accounts') && openInvestmentAccounts({ api, openModal, reload: loadPortfolio, can, toastErr, toastOk, usdCnyRate: state.usdCnyRate, usdHkdRate: state.usdHkdRate });
 $('#btn-accounts')?.addEventListener('click', openAccounts);
 $('#btn-import').addEventListener('click', openImportModal);
 $('#btn-trades').addEventListener('click', () => openTradeHistoryModal());
