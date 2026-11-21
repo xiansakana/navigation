@@ -19,6 +19,16 @@ import { securityHistory, snapshotPriceHistory } from './bookkeeping-security-hi
 const imports = new Map();
 const ttl = 15 * 60 * 1000;
 const portfolioCashAllowed = session => (session?.permissions||[]).some(p=>['*','service:stock-manage:edit','service:stock-manage:cash:view','service:stock-manage:cash:edit'].includes(p));
+function ledgerForAccount(db, uid, entries, account, quote, session) {
+  let trades;
+  if (account?.balanceSource === 'portfolio' && portfolioCashAllowed(session) &&
+    hasPermission(session.permissions || [], 'service:stock-manage:trades:view')) {
+    const portfolio = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='portfolio_users'").get()
+      ?db.prepare('SELECT data FROM portfolio_users WHERE user_id=?').get(uid):null;
+    trades = JSON.parse(portfolio?.data || '{}').trades || [];
+  }
+  return accountLedger(entries, account, quote, { trades });
+}
 export const publicAccounts = (accounts, session) => accounts.map((a) => {
   if (!a.investment) return a;
   const cashAllowed = portfolioCashAllowed(session);
@@ -57,7 +67,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
     const result = { ...entry };
     delete result.balanceCheckpoint;
     if (!accountsVisible) {
-      for (const field of ['accountName', 'toAccountName', 'accountId', 'toAccountId', 'balanceAfter', 'balanceCurrency', 'balanceEstimated']) {
+      for (const field of ['accountName', 'toAccountName', 'accountId', 'toAccountId', 'balanceAfter', 'balanceCurrency', 'balanceEstimated', 'balanceKind', 'balanceIssue', 'balanceNote']) {
         delete result[field];
       }
     }
@@ -92,7 +102,7 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       const excluded=new Set(scope.excludedAccountIds);
       const listed=store.entries(uid,entryFilter).map(history.enrich);
       const entries=url.searchParams.get('analysisScope')==='1'?scopedBills(listed,excluded):listed;
-      const balances=accountLedger(allOriginal,ledgerAccount,history.quote);
+      const balances=ledgerForAccount(getDatabase(),uid,allOriginal,ledgerAccount,history.quote,session);
       for(const e of entries){if(balances.has(e.id))Object.assign(e,balances.get(e.id));delete e.balanceCheckpoint;}
       const offset = Math.max(0, Math.min(50000, Number(url.searchParams.get('offset')) || 0));
       const limit = Math.max(1, Math.min(200, Number(url.searchParams.get('limit')) || 100));
@@ -144,10 +154,15 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
     if (route === '/entries' && method === 'POST') return json(res, 201, { ok: true, id: store.saveEntry(uid, await body(req)) });
     const entry = /^\/entries\/([a-f0-9]{32})$/.exec(route);
     if (entry && method === 'GET') {
-      const found=store.entries(uid).find(e=>e.id===entry[1]);
+      const entries=store.entries(uid),found=entries.find(e=>e.id===entry[1]);
       if(!found)return json(res,404,{ok:false,error:'账单不存在'});
-      const history=historicalFx(getDatabase());await history.ensure([found]);
+      const accountId=url.searchParams.get('accountId');
+      const account=accountsVisible&&accountId&&(found.accountId===accountId||found.toAccountId===accountId)
+        ?publicAccounts(store.accounts(uid),session).find(a=>a.id===accountId):null;
+      const ledgerEntries=account?entries.filter(e=>e.accountId===accountId||e.toAccountId===accountId):[];
+      const history=historicalFx(getDatabase());await history.ensure([found,...ledgerEntries.flatMap(e=>[e,{...e,currency:account.currency}])]);
       const detail=history.enrich(found);delete detail.balanceCheckpoint;
+      if(account)Object.assign(detail,ledgerForAccount(getDatabase(),uid,ledgerEntries,account,history.quote,session).get(found.id));
       return json(res,200,{ok:true,entry:visibleEntry(detail)});
     }
     if (entry && method === 'PUT') return json(res, 200, { ok: true, id: store.saveEntry(uid, await body(req), entry[1]) });

@@ -50,7 +50,7 @@
     $('stats-summary').innerHTML=state.analysis?.billing.missingCurrencies.length?'<p class="bk-muted">统计范围历史汇率待补齐。</p>':summaryHtml(statistics,true);
     $('count').textContent = state.count + ' 笔';
     let lastDay = '';
-    const ledgerNote=can('accounts:view') && $('account').value && state.entries.some(e=>e.balanceEstimated)?(state.accounts.find(a=>a.id===$('account').value)?.investment?'<p class="bk-muted bk-ledger-note">本页展示记账流水；证券账户总资产包含持仓估值，不由这些流水反推历史余额。现金和持仓详情请打开资产页的证券明细。</p>':'<p class="bk-muted bk-ledger-note">历史余额按当前余额、账单及余额调整反推；截图核对的调整余额按原币显示，其他反推或跨币种估算值标注 ≈。</p>'):'';
+    const ledgerNote=can('accounts:view') && $('account').value && state.entries.some(e=>e.balanceEstimated)?(state.accounts.find(a=>a.id===$('account').value)?.investment?'<p class="bk-muted bk-ledger-note">证券现金按当前现金、记账流水和证券交收反推。持仓市值见资产页。</p>':'<p class="bk-muted bk-ledger-note">历史余额按当前余额、账单及余额调整反推；截图核对的调整余额按原币显示，其他反推或跨币种估算值标注 ≈。</p>'):'';
     const openEntryId=revealedRow?.querySelector('[data-entry]')?.dataset.entry;
     const openDirection=revealedRow?.classList.contains('bk-copy-revealed')?'copy':'edit';
     $('entry-list').innerHTML = ledgerNote + (state.entries.map(e => {
@@ -65,7 +65,7 @@
       const expense = ['支出','已报销'].includes(e.type), transfer = transferTypes.includes(e.type) || e.type === '余额调整';
       const account = [e.accountName, e.toAccountName].filter(Boolean).join(' → ');
       const subtitle = [e.date.slice(11,16), account, e.note || e.tags].filter(Boolean).join(' · ');
-      const balance=can('accounts:view') && $('account').value && e.balanceCurrency?'<small class="bk-ledger-balance">本笔后余额 '+(e.balanceAfter==null?'待核对':(e.balanceEstimated?'≈ ':'')+m(e.balanceAfter,e.balanceCurrency))+'</small>':'';
+      const balance=can('accounts:view') && $('account').value && e.balanceCurrency?'<small class="bk-ledger-balance">'+window.bookkeepingBalanceText(e,m,esc)+'</small>':'';
       const copyable = can('entries:edit') && e.type !== '余额调整';
       const copyAction = copyable ? '<button type="button" class="btn ghost bk-copy-action" data-copy-entry="'+esc(e.id)+'">复制</button>' : '';
       const editActions = can('entries:edit') ? '<div class="bk-swipe-edit-actions"><button type="button" class="btn ghost" data-swipe-action="edit">编辑</button><button type="button" class="btn ghost bk-detail-delete" data-swipe-action="delete">删除</button></div>' : '';
@@ -142,7 +142,7 @@
   }
   const analysis = window.createBookkeepingAnalysis({ $, esc, m, money, can, load, tab, getState:()=>state, periods });
   const management = window.createBookkeepingManagement({ $, esc, can, api, write, load, field, select, options, getState:()=>state, openEditor });
-  const details = window.createBookkeepingDetails({ $, esc, m, can, api, getState:()=>state, tab, openEditor, copyEntry, remove:removeEntry });
+  const details = window.createBookkeepingDetails({ $, esc, m, can, api, getState:()=>state, getAccountId:()=>$('account').value, tab, openEditor, copyEntry, remove:removeEntry });
   async function removeEntry(item) {
     if(!item || !can('entries:edit'))return false;
     if(!window.confirm('删除这条账单？新账单会撤销对账户余额的影响。'))return false;

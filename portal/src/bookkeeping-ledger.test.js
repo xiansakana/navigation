@@ -8,6 +8,7 @@ import { accountLedger } from './bookkeeping-ledger.js';
 import { createBookkeepingStore } from './bookkeeping-store.js';
 import { handleBookkeepingApi } from './bookkeeping.js';
 import { getDatabase, closeDatabase } from '../../shared/db/index.js';
+import { saveInvestmentAccount } from '../../shared/investment-accounts.js';
 
 const date='2026-10-11T12:00:00';
 test('observed credit balances carry forward across later bills despite a different current snapshot',()=>{
@@ -71,6 +72,36 @@ test('historical snapshots reverse complete account history and cross-currency a
   assert.equal(accountLedger(entries,null,quotes).size,0);
 });
 
+test('securities cash reverses settlements, matches duplicate interest, and identifies missing actual receipts',()=>{
+  const account={id:'ledger',currency:'USD',balance:2000,balanceSource:'portfolio',investment:{id:'broker',cash:600}};
+  const rows=[
+    {id:'interest',date:'2026-10-06T12:00:00',type:'收入',category:'利息',currency:'USD',accountId:'ledger',amount:25},
+    {id:'beforeSettle',date:'2026-10-04T12:00:00',type:'收入',currency:'USD',accountId:'ledger',amount:10},
+    {id:'nonCash',date:'2026-10-03T12:00:00',type:'余额调整',currency:'USD',accountId:'ledger',amount:900},
+    {id:'unknown',date:'2026-10-02T12:00:00',type:'转账',currency:'CNY',toAccountId:'ledger',amount:300},
+    {id:'earliest',date:'2026-10-01T12:00:00',type:'收入',currency:'USD',accountId:'ledger',amount:10}
+  ];
+  const trade={account_id:'broker',symbol:'SPY',currency:'USD'};
+  const trades=[
+    {...trade,type:'buy',total_amount:200,commission:2,trade_date:'2026-10-01T13:00:00Z',cash_effective_at:'2026-10-05T13:00:00Z',historicalBackfill:true},
+    {...trade,type:'other',total_amount:25,other_category:'利息',trade_date:'2026-10-06T13:00:00Z'},
+    {...trade,type:'sell',total_amount:300,trade_date:'2026-10-08T13:00:00Z'}
+  ];
+  const balances=accountLedger(rows,account,()=>null,{trades,now:Date.parse('2026-10-07T00:00:00Z')});
+  assert.deepEqual(rows.map(e=>balances.get(e.id).balanceAfter),[600,777,767,767,null]);
+  assert.equal(balances.get('earliest').balanceIssue,'缺实际到账金额及历史汇率');
+  assert.equal(balances.get('interest').balanceKind,'cash');
+  assert.equal(balances.get('interest').balanceEstimated,true);
+  const fx=(currency,date)=>{ assert.equal(date,'2026-10-02'); return {rate:currency==='CNY'?1:6}; };
+  const estimated=accountLedger(rows,account,fx,{trades,now:Date.parse('2026-10-07T00:00:00Z')});
+  assert.equal(estimated.get('earliest').balanceAfter,717);
+  assert.equal(estimated.get('earliest').balanceNote,'到账额按历史汇率估算');
+  assert.equal(estimated.get('beforeSettle').balanceNote,undefined);
+  const actual=accountLedger(rows.map(e=>e.id==='unknown'?{...e,toAmount:45}:e),account,()=>{throw Error('actual receipt must win');},{trades,now:Date.parse('2026-10-07T00:00:00Z')});
+  assert.equal(actual.get('earliest').balanceAfter,722);
+  assert.equal(accountLedger(rows,account,()=>null).get('interest').balanceAfter,null);
+});
+
 test('state API balances survive date/type filters and pagination and require owned account plus accounts permission',async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'bookkeeping-ledger-')), previous=process.env.NAVIGATION_DB_PATH;
   process.env.NAVIGATION_DB_PATH=path.join(dir,'test.db');
@@ -81,9 +112,9 @@ test('state API balances survive date/type filters and pagination and require ow
     s.importBalanceAdjustments('ledger-a',[{accountName:'现金',currency:'CNY',date:'2026-09-01T12:00:00',beforeBalance:80,afterBalance:100,source:'screenshot.png'}],{apply:true});
     const foreign=s.saveAccount('ledger-b',{name:'其他人',balance:999});
     s.saveEntry('ledger-b',{date,type:'收入',amount:1,accountId:foreign});
-    const get=async(query,permissions=['bookkeeping:view','bookkeeping:accounts:view'])=>{
+    const get=async(query,permissions=['bookkeeping:view','bookkeeping:accounts:view'],route='state')=>{
       let data,code;
-      await handleBookkeepingApi({method:'GET',headers:{}},{setHeader(){}},new URL('http://localhost/api/bookkeeping/state?'+query),{userId:'ledger-a',permissions},(_,status,body)=>{code=status;data=body;});
+      await handleBookkeepingApi({method:'GET',headers:{}},{setHeader(){}},new URL('http://localhost/api/bookkeeping/'+route+'?'+query),{userId:'ledger-a',permissions},(_,status,body)=>{code=status;data=body;});
       assert.equal(code,200);return data;
     };
     const filtered=await get('accountId='+a+'&start=2026-10-01&end=2026-10-01&type=支出');
@@ -94,6 +125,16 @@ test('state API balances survive date/type filters and pagination and require ow
       assert.ok(data.entries.every(e=>!Object.hasOwn(e,'balanceAfter') && !Object.hasOwn(e,'balanceCurrency') && !Object.hasOwn(e,'balanceCheckpoint')));
     }
     assert.deepEqual((await get('accountId='+foreign)).entries,[]);
+    const b=s.saveAccount('ledger-a',{name:'证券',balance:2000});
+    const cashBill=s.saveEntry('ledger-a',{date,type:'收入',amount:20,accountId:b});
+    saveInvestmentAccount(getDatabase(),'ledger-a',{name:'券商',currency:'CNY',baselineCash:100,bookkeepingId:b});
+    const authorized=['bookkeeping:view','bookkeeping:accounts:view','service:stock-manage:cash:view','service:stock-manage:trades:view'];
+    const securities=await get('accountId='+b,authorized);
+    assert.equal(securities.entries[0].balanceKind,'cash');
+    assert.equal(securities.entries[0].balanceAfter,100);
+    assert.equal((await get('accountId='+b,authorized,'entries/'+cashBill)).entry.balanceAfter,100);
+    assert.equal((await get('accountId='+b)).entries[0].balanceAfter,null);
+    assert.equal((await get('accountId='+b,['bookkeeping:view'],'entries/'+cashBill)).entry.balanceKind,undefined);
   } finally {
     closeDatabase();if(previous==null)delete process.env.NAVIGATION_DB_PATH;else process.env.NAVIGATION_DB_PATH=previous;
     fs.rmSync(dir,{recursive:true,force:true});
