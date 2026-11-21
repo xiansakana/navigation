@@ -421,6 +421,8 @@ body.has-navbar {
 }
 .sm-cal-year-cell.sm-cal-cell--pos { border-color: rgba(61, 220, 132, 0.22); }
 .sm-cal-year-cell.sm-cal-cell--neg { border-color: rgba(255, 123, 123, 0.22); }
+.sm-cal-annual-cell { display: grid; align-content: start; gap: 4px; text-align: start; font: inherit; overflow-wrap: anywhere; }
+.sm-cal-annual-cell .sm-cal-ret { font-size: 12px; }
 .sm-cal-year-mo { font-size: 14px; font-weight: 700; color: var(--text); }
 .sm-cal-year-amt { font-size: 14px; font-weight: 700; margin-top: 4px; color: var(--text); }
 .sm-cal-year-amt.pos { color: var(--green); }

@@ -267,6 +267,32 @@ function buildYearCal(y, dayNet, expanded, totalAssets, pnlStart, pnlEnd) {
   return `<div class="sm-cal-year-grid">${cells.join('')}</div>`;
 }
 
+function buildAnnualCalendar(range, dayNet) {
+  if (!range.length) return '<p class="sm-pnl-empty">当前查询区间没有盈亏数据。</p>';
+  const years = [];
+  for (const point of range) {
+    const year = point.date.slice(0, 4);
+    let row = years.at(-1);
+    if (!row || row.year !== year) {
+      row = { year, opening: point.cumulativeNet - (dayNet.get(point.date) ?? 0) };
+      years.push(row);
+    }
+    row.closing = point.cumulativeNet;
+  }
+  const maxAbs = years.reduce((max, row) => Math.max(max, Math.abs(row.closing - row.opening)), 0);
+  const cards = years.reverse().map(({ year, opening, closing }) => {
+    const net = Math.round((closing - opening) * 100) / 100;
+    const tone = calTone(net, true);
+    const bg = calBg(net, maxAbs);
+    return `<button type="button" class="sm-cal-year-cell sm-cal-annual-cell sm-cal-cell--btn sm-cal-cell--${tone}" data-cal-annual-year="${year}"${bg ? ` style="background:${bg}"` : ''}>
+      <span class="sm-cal-year-mo">${year}年</span>
+      <span class="sm-cal-year-amt ${tone}">净盈亏 ${fmtUsdSigned(net)}</span>
+      <span class="sm-cal-ret">期末累计 ${fmtUsdSigned(closing)}</span>
+    </button>`;
+  });
+  return `<div class="sm-cal-year-grid">${cards.join('')}</div>`;
+}
+
 function scheduleRender() {
   if (!lastContainer || !lastGetData) return;
   renderPnlVisualization(lastContainer, lastGetData, lastCallbacks);
@@ -533,6 +559,8 @@ function bindShell(container) {
       const [yy, mo] = moEl.dataset.calMonth.split('-').map(Number);
       lastCallbacks?.onCalendarMonth?.(yy, mo);
     }
+    const annualEl = e.target.closest('[data-cal-annual-year]');
+    if (annualEl) lastCallbacks?.onCalendarYear?.(annualEl.dataset.calAnnualYear);
   });
   container.addEventListener('change', (e) => {
     if (e.target.id === 'pnl-cal-year') {
@@ -696,7 +724,7 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
         <button type="button" class="btn ghost sm-btn-sm" data-cal-reset>回到当月</button>
       </div>
       ${buildMonthCal(dispY, dispM, dayNet, chartExpandedFull, totalAssets, pnlStart, pnlEnd)}`;
-  } else {
+  } else if (calGranularity === 'year') {
     const yearNet = sumYearNet(dayNet, yEff, pnlStart, pnlEnd);
     calGranNetHtml = fmtNetBadge(yearNet, `${yEff}年`);
     calHtml = `
@@ -707,6 +735,8 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
         </label>
       </div>
       ${buildYearCal(yEff, dayNet, chartExpandedFull, totalAssets, pnlStart, pnlEnd)}`;
+  } else {
+    calHtml = buildAnnualCalendar(rangeSlice, dayNet);
   }
 
   calBlock.innerHTML = `
@@ -716,6 +746,7 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
         <div class="sm-seg">
           <button type="button" class="sm-seg-btn ${calGranularity === 'month' ? 'active' : ''}" data-cal-gran="month">按月</button>
           <button type="button" class="sm-seg-btn ${calGranularity === 'year' ? 'active' : ''}" data-cal-gran="year">按年</button>
+          <button type="button" class="sm-seg-btn ${calGranularity === 'annual' ? 'active' : ''}" data-cal-gran="annual">年度汇总</button>
         </div>
       </div>
       ${calGranNetHtml}
