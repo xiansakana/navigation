@@ -326,29 +326,62 @@
   function renderImportReview() {
     const task=pendingImport;
     if(!task?.review)return;
-    const {candidates,balances,unresolved,duplicates,inserted}=task.review;
+    const {candidates,balances,duplicates,inserted}=task.review;
     const amount=(value,currency)=>Number.isFinite(value)?m(value,currency):'待核对';
     const pageSize=30, lastPage=Math.max(0,Math.ceil(candidates.length/pageSize)-1);
     task.page=Math.min(task.page,lastPage);
+    const decision=r=>task.decisions[r.index]??r.defaultDecision;
     const cards=balances.map(a=>'<li><strong>'+esc(a.name)+'</strong> · 当前 '+amount(a.current,a.currency)+' · 变动 '+amount(a.change,a.currency)+' · 导入后 '+amount(a.after,a.currency)+(a.latest===null?'':' · 明细末笔 '+amount(a.latest,a.currency))+(a.mismatch?' <span class="bk-error">余额与明细不一致</span>':'')+'</li>').join('');
     const rows=candidates.slice(task.page*pageSize,(task.page+1)*pageSize).map(r=>{
-      const options=[['','请选择'],...(r.historyAllowed?[['history','已计入余额，仅补明细']]:[]),...(r.postAllowed?[['post','尚未计入，更新余额']]:[]),['skip','跳过此笔']];
       const sides=r.sides.map(a=>esc(a.name+'（基准 '+(a.baseline||'未知')+(a.reconciled?'，核对 '+a.reconciled:'')+'）')).join(' → ');
-      return '<label class="bk-import-choice"><span>'+esc(r.date.replace('T',' ')+' · '+r.type)+' '+m(r.amount,r.currency)+' · '+sides+'</span>'+(r.note?'<small>'+esc(r.note)+'</small>':'')+(r.flags.length?'<small>'+esc(r.flags.join('；'))+'</small>':'')+'<select data-import-choice="'+r.index+'" aria-label="选择账单入账方式">'+options.map(([value,label])=>'<option value="'+value+'"'+((task.decisions[r.index]||'')===value?' selected':'')+'>'+label+'</option>').join('')+'</select></label>';
+      const choice=decision(r), skipped=choice==='skip';
+      const status=skipped?'已跳过':choice==='post'?'计入账户余额':choice==='history'?'仅补明细':'待选择';
+      const disabled=skipped||!r.historyAllowed||choice==='history'&&!r.postAllowed;
+      return '<div class="bk-import-choice"><span>'+esc(r.date.replace('T',' ')+' · '+r.type)+' '+m(r.amount,r.currency)+(sides?' · '+sides:'')+'</span>'+(r.note?'<small>'+esc(r.note)+'</small>':'')+(r.flags.length?'<small>'+esc(r.flags.join('；'))+'</small>':'')+
+        '<div class="bk-import-actions"><label class="bk-check"><input type="checkbox" data-import-choice="'+r.index+'"'+(choice==='history'?' checked':'')+(disabled?' disabled':'')+(!choice&&r.historyAllowed?' data-undecided':'')+'> 历史补录</label>'+
+        '<small>'+status+'</small>'+(!choice&&r.postAllowed?'<button type="button" class="btn ghost" data-import-post="'+r.index+'">计入余额</button>':'')+
+        '<button type="button" class="btn ghost" data-import-skip="'+r.index+'">'+(skipped?'恢复此笔':'跳过此笔')+'</button></div></div>';
     }).join('');
     const pages=lastPage?'<p><button type="button" class="btn ghost" data-import-page="-1" '+(!task.page?'disabled':'')+'>上一页</button> '+(task.page+1)+' / '+(lastPage+1)+' <button type="button" class="btn ghost" data-import-page="1" '+(task.page===lastPage?'disabled':'')+'>下一页</button></p>':'';
-    $('import-review').innerHTML='<p>预计新增 '+inserted+' 笔，跳过已导入 '+duplicates+' 笔。</p>'+(cards?'<ul class="bk-import-balances">'+cards+'</ul>':'')+(unresolved?'<p class="bk-muted">还有 '+unresolved+' 笔需要选择入账方式。</p>':'')+rows+pages;
+    const historyCount=candidates.filter(r=>decision(r)==='history').length;
+    const remaining=candidates.filter(r=>!decision(r)).length;
+    const bulk=candidates.some(r=>r.historyAllowed&&!['history','skip'].includes(decision(r)))?'<button type="button" class="btn ghost" data-import-all-history>勾选全部可补录记录</button>':'';
+    $('import-review').innerHTML=(task.revision?'<p>预计新增 '+inserted+' 笔，跳过已导入 '+duplicates+' 笔。</p>'+(cards?'<ul class="bk-import-balances">'+cards+'</ul>':''):'')+
+      (candidates.length?'<p class="bk-muted">勾选历史补录只补明细，取消勾选将计入账户余额。余额基准前的记录默认勾选。</p><div class="bk-import-actions">'+bulk+'<span>已选 '+historyCount+' 笔历史补录'+(remaining?' · '+remaining+' 笔待选择':'')+'</span></div>':'')+rows+pages;
+    $('import-review').querySelectorAll('[data-undecided]').forEach(input=>{input.indeterminate=true;});
+  }
+  function importChoiceChanged() {
+    invalidateImportReview();
+    renderImportReview();
+    $('import-review-status').textContent='选择已修改，请重新计算余额预览。';
   }
   $('import-review').addEventListener('change',event=>{
     if(event.target.matches('[data-import-choice]')&&pendingImport){
-      pendingImport.decisions[event.target.dataset.importChoice]=event.target.value;
-      invalidateImportReview();
-      $('import-review-status').textContent='选择已修改，请重新计算余额预览。';
+      const {checked,dataset}=event.target;
+      pendingImport.decisions[dataset.importChoice]=checked?'history':'post';
+      importChoiceChanged();
+      $('import-review').querySelector('[data-import-choice="'+dataset.importChoice+'"]')?.focus();
     }
   });
   $('import-review').addEventListener('click',event=>{
-    const button=event.target.closest('[data-import-page]');
-    if(button&&pendingImport){pendingImport.page+=Number(button.dataset.importPage);renderImportReview();}
+    const task=pendingImport,button=event.target.closest('button');
+    if(!task||!button)return;
+    if(button.hasAttribute('data-import-page')){
+      task.page+=Number(button.dataset.importPage);
+      renderImportReview();
+      return;
+    }
+    if(button.hasAttribute('data-import-all-history')){
+      for(const row of task.review.candidates){
+        if(row.historyAllowed&&task.decisions[row.index]!=='skip')task.decisions[row.index]='history';
+      }
+    }else if(button.hasAttribute('data-import-post'))task.decisions[button.dataset.importPost]='post';
+    else if(button.hasAttribute('data-import-skip')){
+      const index=button.dataset.importSkip;
+      if(task.decisions[index]==='skip')delete task.decisions[index];
+      else task.decisions[index]='skip';
+    }else return;
+    importChoiceChanged();
   });
   async function reviewImport() {
     const task=pendingImport;

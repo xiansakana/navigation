@@ -49,15 +49,15 @@ export function reviewIcostImport(db, store, uid, rows, snapshots, selected, { v
       const postAllowed=!!canPost&&!mixed&&row.amount>0&&!!row.accountName&&(!transfer||!!row.toAccountName)&&sides.every(canPostSide);
       if(transfer&&sides.some(a=>a.currency!==row.currency))flags.push('跨币种转账缺少确认的到账金额');
       const review=similar||sides.some(a=>!a.baseline||date>=a.baseline);
-      if(review) {
-        const decision=selected?.[index];
-        const valid=decision==='skip'||(!mixed&&decision==='history')||(decision==='post'&&postAllowed);
-        candidates.push({index,date:row.date,type:row.type,amount:row.amount,currency:row.currency,note:row.note,sides,flags,postAllowed,historyAllowed:!mixed});
-        if(!valid){unresolved++;decisions[index]='skip';continue;}
-        decisions[index]=decision;
-        if(decision!=='skip')names.forEach(name=>reviewedAccounts.add(name));
-      }
-      if(decisions[index]!=='skip')names.forEach(name=>touched.add(name));
+      const defaultDecision=review?'':'history';
+      const decision=selected?.[index]??defaultDecision;
+      const valid=decision==='skip'||(!mixed&&decision==='history')||(decision==='post'&&postAllowed);
+      candidates.push({index,date:row.date,type:row.type,amount:row.amount,currency:row.currency,note:row.note,sides,flags,postAllowed,historyAllowed:!mixed,defaultDecision});
+      if(!valid){unresolved++;decisions[index]='skip';continue;}
+      decisions[index]=decision;
+      if(decision==='skip')continue;
+      names.forEach(name=>touched.add(name));
+      if(review)names.forEach(name=>reviewedAccounts.add(name));
     }
     for(const snapshot of snapshots)touched.add(snapshot.name);
     const trial=db.transaction(()=>{

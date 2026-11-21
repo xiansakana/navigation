@@ -35,7 +35,11 @@ test('reviewed iCost import projects and posts only explicitly selected balance 
     const review=(decisions,extra={})=>reviewIcostImport(db,store,'a',rows,[],decisions,{...options,...extra});
     const initial=review({});
     assert.equal(initial.unresolved,2);
-    assert.deepEqual(initial.candidates.map(row=>[row.index,row.postAllowed,row.historyAllowed]),[[0,true,true],[2,false,false]]);
+    assert.deepEqual(initial.candidates.map(row=>[row.index,row.postAllowed,row.historyAllowed,row.defaultDecision]),[[0,true,true,''],[1,false,true,'history'],[2,false,false,'']]);
+    const historical=review({0:'history',1:'skip',2:'skip'});
+    assert.equal(historical.unresolved,0);
+    assert.equal(historical.inserted,1);
+    assert.equal(historical.balances[0].after,-61.83);
     const choices={0:'post',2:'skip'}, ready=review(choices);
     assert.equal(ready.unresolved,0);
     assert.deepEqual(ready.balances.map(a=>[a.current,a.change,a.after,a.latest]),[[-61.83,-7.14,-68.97,-68.97]]);
