@@ -1266,9 +1266,7 @@ function filteredTrades(trades) {
 }
 
 function renderTradeFilters(summary = false) {
-  const activeCount = activeTradeFilterCount(summary);
   return `<div class="sm-trade-filters ${ui.tradeFilterOpen ? 'is-open' : ''}">
-      <button type="button" class="btn ghost sm-btn-sm sm-trade-filter-toggle" data-filter-toggle aria-expanded="${ui.tradeFilterOpen ? 'true' : 'false'}">筛选条件${activeCount ? `（${activeCount}）` : ''}</button>
       <div class="sm-trade-filter-fields">
       ${!summary && can('accounts') && state.investmentAccounts?.length ? `<select id="trade-account-filter" aria-label="证券账户">
         <option value="">全部账户</option>
@@ -1416,6 +1414,7 @@ async function renderTradeModalBody(trades, loadError) {
       ${can('trade', 'edit') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-add-other">＋ 其它收支</button>' : ''}
       ${can('import', 'edit') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-import">导入</button>' : ''}
       ${can('export') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-export">导出 xlsx</button>' : ''}
+      <button type="button" class="btn ghost sm-btn-sm sm-trade-filter-toggle" data-filter-toggle aria-expanded="${ui.tradeFilterOpen ? 'true' : 'false'}">筛选条件${activeTradeFilterCount() ? `（${activeTradeFilterCount()}）` : ''}</button>
     </div>`;
   const content = ui.tradeTab === 'review' && can('trade-review') ? await renderTradeReviewTab() : ui.tradeTab === 'summary' ? await renderTradeSummaryTab() : renderTradeListTab(trades, loadError);
   return `<div class="sm-trade-modal-content">${tabs}${content}</div>`;
@@ -1510,7 +1509,7 @@ function bindTradeModalEvents(layer, getListTrades) {
   });
   unbound('[data-filter-toggle]').forEach((button) => button.addEventListener('click', () => {
     ui.tradeFilterOpen = !ui.tradeFilterOpen;
-    const filters = button.closest('.sm-trade-filters');
+    const filters = root.querySelector('.sm-trade-filters');
     filters?.classList.toggle('is-open', ui.tradeFilterOpen);
     button.setAttribute('aria-expanded', ui.tradeFilterOpen ? 'true' : 'false');
   }));
