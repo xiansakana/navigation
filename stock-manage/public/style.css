@@ -492,7 +492,7 @@ body:has(.sm-modal-backdrop) {
 
 .sm-trade-filters input,
 .sm-trade-filters select { width: auto; min-width: 100px; }
-#trade-account-filter, #trade-account-sort { max-width: 100%; }
+#trade-account-filter { max-width: 100%; }
 .sm-trade-account-name { color: var(--muted); font-size: 12px; margin-top: 4px; }
 
 .sm-trade-filter-fields {
@@ -515,7 +515,10 @@ body:has(.sm-modal-backdrop) {
 .sm-account-manager { overflow: auto; min-width: 0; min-height: 0; }
 .sm-account-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
 .sm-account-toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.sm-account-toolbar-actions select { width: auto; max-width: 100%; }
+.sm-account-toolbar-actions [hidden] { display: none; }
+.sm-account-order-actions:not([hidden]) { display: flex; flex-wrap: wrap; gap: 8px; }
+.sm-account-manager.is-arranging .sm-account-actions,
+.sm-account-manager.is-arranging [data-dip-reserve] { display: none; }
 .sm-account-help { margin: 12px 0 16px; font-size: 14px; }
 .sm-account-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); align-items: start; gap: 16px; }
 .sm-account-card {

@@ -1,5 +1,5 @@
 import { TRADE_ASSET_TYPES, tradeAssetType } from './js/trade-asset-type.js?v=hk-fund-1';
-import { openInvestmentAccounts } from './js/investment-accounts.js?v=account-layout-1';
+import { openInvestmentAccounts } from './js/investment-accounts.js?v=account-order-1';
 import { isDividendTax, normalizeOtherAmount } from './js/dividend-tax.js';
 import { renderTradeReview } from './js/trade-review.js?v=hk-fund-1';
 import { formatPrice, formatQuantity, priceInputValue } from './js/price-format.js?v=quantity-1';
@@ -130,7 +130,6 @@ const ui = {
   tradePage: 1,
   tradePageSize: 10,
   tradeAccountId: '',
-  tradeAccountSort: '',
   tradeSummarySort: { key: '', dir: -1 },
   tradeFilter: { symbol: '', type: 'all', assetType: 'all', otherCategory: '', start: '', end: '' },
   tradeFilterOpen: false
@@ -1251,7 +1250,7 @@ function openImportModal() {
   });
 }
 
-function filteredTrades(trades, accountNames) {
+function filteredTrades(trades) {
   const f = ui.tradeFilter;
   return trades.filter((t) => {
     if (ui.tradeAccountId && (t.account_id || 'unassigned') !== ui.tradeAccountId) return false;
@@ -1263,16 +1262,7 @@ function filteredTrades(trades, accountNames) {
     if (f.start && d < f.start) return false;
     if (f.end && d > f.end) return false;
     return true;
-  }).sort((a, b) => {
-    if (ui.tradeAccountSort) {
-      const left = accountNames.get(a.account_id);
-      const right = accountNames.get(b.account_id);
-      if (Boolean(left) !== Boolean(right)) return left ? -1 : 1;
-      const byName = left && right ? left.localeCompare(right, 'zh-CN', { numeric: true }) : 0;
-      if (byName) return ui.tradeAccountSort === 'asc' ? byName : -byName;
-    }
-    return new Date(b.trade_date) - new Date(a.trade_date);
-  });
+  }).sort((a, b) => new Date(b.trade_date) - new Date(a.trade_date));
 }
 
 function renderTradeFilters(summary = false) {
@@ -1284,11 +1274,6 @@ function renderTradeFilters(summary = false) {
         <option value="">全部账户</option>
         <option value="unassigned">待归属交易</option>
         ${state.investmentAccounts.map((a) => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)} · ${escapeHtml(a.currency)}</option>`).join('')}
-      </select>
-      <select id="trade-account-sort" aria-label="明细排序">
-        <option value="">时间从新到旧</option>
-        <option value="asc">账户名称升序</option>
-        <option value="desc">账户名称降序</option>
       </select>` : ''}
       <input placeholder="代码" data-filter="symbol" value="${escapeHtml(ui.tradeFilter.symbol)}">
       ${summary ? '' : `<select data-filter="type" aria-label="交易方向">
@@ -1327,7 +1312,7 @@ function updateTradeFilterToggle(root) {
 function renderTradeListTab(trades, loadError) {
   const showAccounts = can('accounts') && state.investmentAccounts?.length;
   const accountNames = new Map(showAccounts ? state.investmentAccounts.map((a) => [a.id, a.name]) : []);
-  const all = filteredTrades(trades, accountNames);
+  const all = filteredTrades(trades);
   const total = all.length;
   const pages = Math.max(1, Math.ceil(total / ui.tradePageSize));
   ui.tradePage = Math.min(ui.tradePage, pages);
@@ -1502,8 +1487,6 @@ async function openTradeHistoryModal(symbol = '') {
     listTrades = trades;
     const accountFilter = $('#trade-account-filter', box);
     if (accountFilter) accountFilter.value = ui.tradeAccountId;
-    const accountSort = $('#trade-account-sort', box);
-    if (accountSort) accountSort.value = ui.tradeAccountSort;
     bindTradeModalEvents(layer, () => listTrades);
   };
   window._tradeHistoryLayer = layer;
@@ -1582,17 +1565,9 @@ function bindTradeModalEvents(layer, getListTrades) {
     ui.tradePage = 1;
     window._refreshTradeModal?.();
   });
-  unbound('#trade-account-sort')[0]?.addEventListener('change', (event) => {
-    ui.tradeAccountSort = event.target.value;
-    ui.tradePage = 1;
-    window._refreshTradeModal?.();
-  });
   unbound('#filter-reset')[0]?.addEventListener('click', () => {
     ui.tradeFilter = { symbol: '', type: 'all', assetType: 'all', otherCategory: '', start: '', end: '' };
-    if (ui.tradeTab === 'list') {
-      ui.tradeAccountId = '';
-      ui.tradeAccountSort = '';
-    }
+    if (ui.tradeTab === 'list') ui.tradeAccountId = '';
     updateTradeFilterToggle(root);
     ui.tradePage = 1;
     window._refreshTradeModal?.();
@@ -1735,7 +1710,7 @@ $('#btn-add').addEventListener('click', () => {
   if (can('trade', 'edit')) openTradeModal();
 });
 $('#account-filter')?.addEventListener('change', (e) => { selectedAccountId = e.target.value; loadPortfolio().catch((error) => toastErr(error.message)); });
-const openAccounts = () => can('accounts') && openInvestmentAccounts({ api, openModal, reload: loadPortfolio, can, toastErr, toastOk, usdCnyRate: state.usdCnyRate, usdHkdRate: state.usdHkdRate });
+const openAccounts = () => can('accounts') && openInvestmentAccounts({ api, openModal, reload: loadPortfolio, can, toastErr, toastOk });
 $('#btn-accounts')?.addEventListener('click', openAccounts);
 $('#btn-import').addEventListener('click', openImportModal);
 $('#btn-trades').addEventListener('click', () => openTradeHistoryModal());

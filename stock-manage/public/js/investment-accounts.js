@@ -8,28 +8,10 @@ function accountMetrics(currency, entries) {
     `<div><dt>${label}</dt><dd>${amount(value, currency)}</dd></div>`).join('')}</dl>`;
 }
 
-export async function openInvestmentAccounts({ api, openModal, reload, can, toastErr, toastOk, usdCnyRate, usdHkdRate }) {
+export async function openInvestmentAccounts({ api, openModal, reload, can, toastErr, toastOk }) {
   const layer = openModal('证券账户与记账绑定', '<div class="sm-account-manager">加载中…</div>', '<button type="button" class="btn ghost" data-close>关闭</button>', null, { size: 'trade' });
   const editable = can('accounts', 'edit') && can('cash', 'edit');
   const showAmounts = can('cash');
-  const rates = { USD: 1, CNY: usdCnyRate, HKD: usdHkdRate };
-  let sortKey = '';
-  let sortDirection = 1;
-
-  const sortAccounts = (accounts) => {
-    if (!sortKey) return accounts;
-    return [...accounts].sort((left, right) => {
-      const byName = left.name.localeCompare(right.name, 'zh-CN', { numeric: true });
-      if (sortKey === 'name') return sortDirection * byName;
-      if (sortKey === 'currency') return sortDirection * left.currency.localeCompare(right.currency) || byName;
-      const inUsd = (account) => Number.isFinite(account[sortKey]) && rates[account.currency] > 0
-        ? account[sortKey] / rates[account.currency] : null;
-      const a = inUsd(left);
-      const b = inUsd(right);
-      if (a === null || b === null) return Number(a === null) - Number(b === null) || byName;
-      return sortDirection * (a - b) || byName;
-    });
-  };
   const confirm = async (message) => window.portalDialog?.confirm ? window.portalDialog.confirm(message, { title: '账户核对', okText: '确认' }) : window.confirm(message);
   const refresh = async () => {
     try {
@@ -39,13 +21,9 @@ export async function openInvestmentAccounts({ api, openModal, reload, can, toas
       root.innerHTML = `<div class="sm-account-toolbar">
           <span class="hint">未归属交易 ${data.unassigned} 条</span>
           <div class="sm-account-toolbar-actions">
-            <select data-account-sort aria-label="证券账户排序">
-              <option value="">默认顺序</option>
-              <option value="name">账户名称</option>
-              <option value="currency">币种</option>
-              ${showAmounts ? '<option value="cash">现金（折美元）</option><option value="marketValue">持仓市值（折美元）</option><option value="equity">总资产（折美元）</option>' : ''}
-            </select>
-            <button type="button" class="btn ghost" data-account-sort-direction>升序</button>
+            ${data.accounts.length > 1 ? `<button type="button" class="btn ghost" data-account-order-start>调整账户顺序</button>
+              <button type="button" class="btn ghost" data-account-order-cancel hidden>取消</button>
+              <button type="button" class="btn primary" data-account-order-save hidden>保存顺序</button>` : ''}
             ${editable ? '<button type="button" class="btn primary" data-account-new>＋ 新增证券资金账户</button>' : ''}
           </div>
         </div>
@@ -58,6 +36,10 @@ export async function openInvestmentAccounts({ api, openModal, reload, can, toas
             <h3>${esc(a.name)} · ${esc(a.currency)}</h3>
             <div class="sm-account-binding">记账绑定：${esc(a.bookkeepingName || '未绑定')} ${a.bookkeepingName ? '<a href="/bookkeeping/" target="_blank" rel="noopener">打开记账</a>' : ''}</div>
           </header>
+          <div class="sm-account-order-actions" hidden>
+            <button type="button" class="btn ghost sm-btn-sm" data-account-move="-1" aria-label="前移 ${esc(a.name)}">前移</button>
+            <button type="button" class="btn ghost sm-btn-sm" data-account-move="1" aria-label="后移 ${esc(a.name)}">后移</button>
+          </div>
           ${showAmounts ? accountMetrics(a.currency, [['现金', a.cash], ['持仓市值', a.marketValue], ['总资产', a.equity]]) : ''}
           ${a.reserved != null ? `${accountMetrics(a.currency, [['抄底预留', a.reserved], ['普通可用', a.ordinaryAvailable], ['策略缺口', a.deficit]])}${can('dip-funds', 'edit') && can('cash', 'edit') ? `<div><button type="button" class="btn ghost" data-dip-reserve="${a.id}">划拨／释放抄底资金</button></div>` : ''}` : ''}
           ${showAmounts ? `<p class="hint">现金基准：${amount(a.baselineCash, a.currency)}（${esc(a.baselineAt ? new Date(a.baselineAt).toLocaleString('sv-SE') : '—')}）。${a.oldLedgerBalance != null ? `绑定时旧记账余额 ${amount(a.oldLedgerBalance, a.currency)}，仅供核对。` : ''}${a.missingQuotes?.length ? `缺少行情：${esc(a.missingQuotes.join('、'))}，不显示不完整的总资产。` : ''}</p>` : ''}
@@ -65,26 +47,65 @@ export async function openInvestmentAccounts({ api, openModal, reload, can, toas
           <details><summary>持仓与行情时间</summary>${(a.positions || []).map((p) => `<p>${esc(p.symbol)} ${esc(p.name)} · ${formatQuantity(p.shares)} · ${amount(p.marketValue, a.currency)}<br><small class="hint">报价时间：${esc(p.quoteAsOf || '供应商未提供')} ${p.delayed ? '延时行情' : ''}</small></p>`).join('') || '<p class="hint">暂无已归属持仓</p>'}</details>
           <details><summary>基准后的资金变动（最近50条）</summary>${(a.movements || []).slice(0, 50).map((m) => `<p>${esc(m.date)} · ${esc(m.kind === 'stock' ? '股票' : '记账')} ${esc(m.symbol || m.type)} · ${amount(m.delta, a.currency)}</p>`).join('') || '<p class="hint">暂无变动</p>'}</details></section>`).join('') || '<p class="hint">尚未建立证券账户，旧持仓和现金保持原样。</p>'}
         </div>`;
-      const grid = root.querySelector('.sm-account-grid');
-      const cards = new Map([...grid.querySelectorAll('[data-account-card]')].map(card => [card.dataset.accountCard, card]));
-      const sortSelect = root.querySelector('[data-account-sort]');
-      const directionButton = root.querySelector('[data-account-sort-direction]');
-      const reorderCards = () => {
-        directionButton.textContent = sortDirection === 1 ? '↑ 升序' : '↓ 降序';
-        directionButton.disabled = !sortKey;
-        sortAccounts(data.accounts).forEach(account => grid.append(cards.get(account.id)));
-      };
-      sortSelect.value = sortKey;
-      sortSelect.addEventListener('change', () => {
-        sortKey = sortSelect.value;
-        sortDirection = ['', 'name', 'currency'].includes(sortKey) ? 1 : -1;
-        reorderCards();
-      });
-      directionButton.addEventListener('click', () => {
-        sortDirection *= -1;
-        reorderCards();
-      });
-      reorderCards();
+      const startOrder = root.querySelector('[data-account-order-start]');
+      if (startOrder) {
+        const grid = root.querySelector('.sm-account-grid');
+        const cancelOrder = root.querySelector('[data-account-order-cancel]');
+        const saveOrder = root.querySelector('[data-account-order-save]');
+        const addAccount = root.querySelector('[data-account-new]');
+        let savedCards = [...grid.children];
+        let arranging = false;
+        let saving = false;
+        const updateControls = () => {
+          root.classList.toggle('is-arranging', arranging);
+          startOrder.hidden = arranging;
+          if (addAccount) addAccount.hidden = arranging;
+          cancelOrder.hidden = saveOrder.hidden = !arranging;
+          cancelOrder.disabled = saving;
+          saveOrder.disabled = saving || savedCards.every((card, index) => card === grid.children[index]);
+          [...grid.children].forEach((card, index) => {
+            card.querySelector('.sm-account-order-actions').hidden = !arranging;
+            card.querySelector('[data-account-move="-1"]').disabled = saving || index === 0;
+            card.querySelector('[data-account-move="1"]').disabled = saving || index === grid.children.length - 1;
+          });
+        };
+        startOrder.addEventListener('click', () => {
+          arranging = true;
+          updateControls();
+          grid.querySelector('[data-account-move]:not(:disabled)')?.focus({ preventScroll: true });
+        });
+        cancelOrder.addEventListener('click', () => {
+          grid.append(...savedCards);
+          arranging = false;
+          updateControls();
+          startOrder.focus({ preventScroll: true });
+        });
+        grid.querySelectorAll('[data-account-move]').forEach(button => button.addEventListener('click', () => {
+          const card = button.closest('[data-account-card]');
+          if (button.dataset.accountMove === '-1') card.previousElementSibling.before(card);
+          else card.nextElementSibling.after(card);
+          updateControls();
+          (button.disabled ? card.querySelector('[data-account-move]:not(:disabled)') : button)?.focus({ preventScroll: true });
+        }));
+        saveOrder.addEventListener('click', async () => {
+          saving = true;
+          updateControls();
+          try {
+            const ids = [...grid.children].map(card => card.dataset.accountCard);
+            await api('/accounts/order', { method: 'PUT', body: { ids } });
+            savedCards = [...grid.children];
+            arranging = false;
+            await reload();
+            toastOk('账户顺序已保存');
+          } catch (error) {
+            toastErr(error.message);
+          } finally {
+            saving = false;
+            updateControls();
+            (arranging ? saveOrder : startOrder).focus({ preventScroll: true });
+          }
+        });
+      }
       root.querySelector('[data-account-new]')?.addEventListener('click', () => edit());
       root.querySelectorAll('[data-dip-reserve]').forEach((button) => button.addEventListener('click', () => {
         const a = data.accounts.find((row) => row.id === button.dataset.dipReserve);

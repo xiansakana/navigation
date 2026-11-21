@@ -45,7 +45,7 @@ import {
   formatZonedDateTime
 } from './trades.js';
 import { holdingTypeForSymbol, inferCurrency, inferMarket, normalizeSymbol } from './markets.js';
-import { DEFAULT_USD_CNY_RATE } from '../../shared/db/portfolio-store.js';
+import { DEFAULT_USD_CNY_RATE, ensureUserPortfolioSchema } from '../../shared/db/portfolio-store.js';
 import { analyzeCandles, backtestCandles, DEFAULT_QUANT_CONFIG, normalizeQuantConfig } from './quant-analysis.js';
 import { redactPortfolioCash } from './portfolio-visibility.js';
 
@@ -63,6 +63,7 @@ try {
 
 const store = createStore(config);
 const portfolioDb = getDatabase({ dbPath: config.dbPath });
+ensureUserPortfolioSchema(portfolioDb);
 ensureFundHoldings(portfolioDb);
 const quantStore = createQuantStore(config);
 const quantBacktestStore = createQuantBacktestStore(config);
@@ -239,6 +240,21 @@ function pnlOptsFromReq(req) {
   };
 }
 
+function orderedInvestmentAccounts(accounts) {
+  const row = portfolioDb.prepare('SELECT value FROM portfolio_user_meta WHERE user_id=? AND key=?')
+    .get(currentPortfolioUserId(), 'investment_account_order');
+  if (!row) return accounts;
+  const byId = new Map(accounts.map(account => [account.id, account]));
+  const ordered = [];
+  for (const id of JSON.parse(row.value)) {
+    if (byId.has(id)) {
+      ordered.push(byId.get(id));
+      byId.delete(id);
+    }
+  }
+  return [...ordered, ...byId.values()];
+}
+
 function portfolioForRequest(req, data = store.read()) {
   const accounts = data.investmentAccounts || [];
   const accountsVisible = hasStockPermission(req, 'accounts');
@@ -257,7 +273,7 @@ function portfolioForRequest(req, data = store.read()) {
       delete portfolio.summary[field];
     }
   }
-  portfolio.investmentAccounts = accountsVisible ? accounts.map(({ id, name, currency }) => ({ id, name, currency })) : [];
+  portfolio.investmentAccounts = accountsVisible ? orderedInvestmentAccounts(accounts).map(({ id, name, currency }) => ({ id, name, currency })) : [];
   if (!hasStockPermission(req, 'trades')) portfolio.trades = [];
   portfolio.accountCashEnabled = !!data.accountCashEnabled;
   const incomplete = accounts.filter((a) => (!accountId || accountId === a.id) && a.missingQuotes.length);
@@ -365,7 +381,24 @@ app.get('/api/accounts', (req, res) => {
   }
   const permissions = portalPermissions(req) || [];
   const ledgerDetails = permissions.includes('*') || (permissions.includes('bookkeeping:view') && permissions.includes('bookkeeping:accounts:view'));
-  res.json({ accounts: (data.investmentAccounts || []).map((a) => full ? { ...a, movements: a.movements.filter((m) => m.kind === 'stock' || ledgerDetails), ...(!ledgerDetails ? { bookkeepingName: a.bookkeepingId ? '已绑定记账账户' : null, oldLedgerBalance: null } : {}) } : { id: a.id, name: a.name, currency: a.currency }), unassigned: data.trades.filter((t) => !t.account_id).length });
+  res.json({ accounts: orderedInvestmentAccounts(data.investmentAccounts || []).map((a) => full ? { ...a, movements: a.movements.filter((m) => m.kind === 'stock' || ledgerDetails), ...(!ledgerDetails ? { bookkeepingName: a.bookkeepingId ? '已绑定记账账户' : null, oldLedgerBalance: null } : {}) } : { id: a.id, name: a.name, currency: a.currency }), unassigned: data.trades.filter((t) => !t.account_id).length });
+});
+app.put('/api/accounts/order', (req, res) => {
+  if (!requireStockPermission(req, res, 'accounts')) return;
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || new Set(ids).size !== ids.length || ids.some(id => typeof id !== 'string')) {
+    return res.status(400).json({ error: '账户顺序格式无效' });
+  }
+  const userId = currentPortfolioUserId();
+  const saved = portfolioDb.transaction(() => {
+    const owned = new Set(investmentRows(portfolioDb, userId).map(account => account.id));
+    if (owned.size !== ids.length || ids.some(id => !owned.has(id))) return false;
+    portfolioDb.prepare('INSERT OR REPLACE INTO portfolio_user_meta(user_id,key,value) VALUES(?,?,?)')
+      .run(userId, 'investment_account_order', JSON.stringify(ids));
+    return true;
+  }).immediate();
+  if (!saved) return res.status(409).json({ error: '账户列表已变化，请重新打开账户管理后再调整顺序' });
+  res.json({ ok: true });
 });
 app.put('/api/accounts/:id/dip-reserve', (req, res) => {
   if (!requireStockPermission(req, res, 'dip-funds', 'edit') || !requireStockPermission(req, res, 'cash', 'edit')) return;

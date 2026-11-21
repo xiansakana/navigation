@@ -148,6 +148,13 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     const cnCreated = await call('/accounts','a','POST',{name:'东方财富',currency:'CNY',baselineCash:2000});
     assert.equal(cnCreated.status,200);
     const cnId = (await (await call('/accounts','a')).json()).accounts.find(a=>a.currency==='CNY').id;
+    const accountOrder = [cnId, investment.id];
+    assert.equal((await call('/accounts/order', '', 'PUT', { ids: accountOrder })).status, 401);
+    assert.equal((await call('/accounts/order', 'a', 'PUT', { ids: [cnId, cnId] })).status, 400);
+    assert.equal((await call('/accounts/order', 'b', 'PUT', { ids: accountOrder })).status, 409);
+    assert.equal((await call('/accounts/order', 'a', 'PUT', { ids: accountOrder })).status, 200);
+    assert.deepEqual((await (await call('/accounts','a')).json()).accounts.map(account => account.id), accountOrder);
+    assert.deepEqual((await (await call('/portfolio?accountId='+investment.id,'a')).json()).investmentAccounts.map(account => account.id), accountOrder);
     const cnBook=XLSX.utils.book_new();
     const cnColumns=['交收日期','发生日期','发生时间','证券代码','证券名称','交易类别','成交数量','成交均价','成交金额','发生金额','佣金','其他费用','印花税','过户费','成交编号','流水号','股东账号','币种'];
     const cnRow=['2099-01-02','2099-01-01','13:00:00','501225','全球芯片LOF','证券买入',200,3.554,710.8,-710.98,0.15,0.03,0,0,'0001','0002','A','人民币'];
@@ -344,6 +351,7 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     const readonly = await fetch(base + '/accounts', { headers: { 'x-portal-user-id': 'a', 'x-portal-permissions': Buffer.from('["service:stock-manage:accounts:view"]').toString('base64url') } });
     const masked = await readonly.json();
     assert.equal('cash' in masked.accounts[0], false);
+    assert.deepEqual(masked.accounts.slice(0, 2).map(account => account.id), accountOrder);
     const holdingsOnly = {
       headers: {
         'x-portal-user-id': 'a',
