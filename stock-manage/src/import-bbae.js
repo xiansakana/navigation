@@ -52,11 +52,26 @@ export function parseBbaeBuffer(buffer) {
   return recognized ? trades : null;
 }
 
+const normalizeNumber = value => Number.isFinite(Number(value)) ? Number(value) : null;
+const importFinancialFields = [
+  ['symbol'], ['type'], ['shares', normalizeNumber], ['price', normalizeNumber],
+  ['total_amount', normalizeNumber], ['commission', normalizeNumber], ['trade_date'],
+  ['other_category', value => value || ''], ['cash_effective_at', value => value || ''], ['reinvestmentNav']
+];
+
+function importTradeChanges(old, trade) {
+  if (!old) return [];
+  return importFinancialFields.flatMap(([field, normalize = value => value ?? null]) => {
+    const before = normalize(old[field]);
+    const after = normalize(trade[field]);
+    return before === after ? [] : [{ field, before, after }];
+  });
+}
+
 export function mergeBbaeTrades(existing, incoming, accountId) {
   if (!accountId || accountId === 'unassigned') throw new Error('导入券商文件前请选择实际所属证券账户');
   const next = [...existing], preview = [], used = new Set();
   const summary = { added: 0, updated: 0, skipped: 0 };
-  const financial = t => JSON.stringify([t.symbol, t.type, Number(t.shares), Number(t.price), Number(t.total_amount), Number(t.commission), t.trade_date, t.other_category || '', t.cash_effective_at || '', t.reinvestmentNav ?? null]);
   for (const t of incoming) {
     const owned = next.filter(x => x.account_id === accountId);
     let matches = owned.filter(x => x.broker_order_key === t.broker_order_key);
@@ -75,11 +90,12 @@ export function mergeBbaeTrades(existing, incoming, accountId) {
       continue;
     }
     const trade = { ...old, ...t, account_id: accountId, id: old?.id || `${t.broker || 'bbae'}-${hash([accountId, t.broker_order_key])}`, name: old && !needsTradeName(old) ? old.name : t.name, created_at: old?.created_at || t.created_at };
-    const action = !old ? 'added' : financial(old) === financial(trade) ? 'skipped' : 'updated';
+    const changes = importTradeChanges(old, trade);
+    const action = !old ? 'added' : changes.length ? 'updated' : 'skipped';
     summary[action]++;
     if (old) { used.add(old.id); next[next.indexOf(old)] = trade; }
     else next.push(trade);
-    preview.push({ ...trade, importAction: action });
+    preview.push({ ...trade, importAction: action, ...(changes.length ? { importChanges: changes } : {}) });
   }
   return { trades: next, summary, preview };
 }

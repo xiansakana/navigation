@@ -36,6 +36,13 @@ test('BBAE duplicate imports are idempotent and cumulative fills update within t
   const started=mergeBbaeTrades([], [partial], 'a');
   const complete=mergeBbaeTrades(started.trades,[t],'a');
   assert.equal(complete.summary.updated,1);assert.equal(complete.trades.length,1);assert.equal(complete.trades[0].id,started.trades[0].id);
+  assert.deepEqual(complete.preview[0].importChanges, [
+    { field:'shares',before:1,after:2 },
+    { field:'total_amount',before:388,after:776 },
+    { field:'commission',before:1.02,after:2.04 }
+  ]);
+  assert.equal(complete.trades[0].importChanges, undefined);
+  assert.equal(second.preview[0].importChanges, undefined);
   const other=mergeBbaeTrades(first.trades,[t],'b');
   assert.equal(other.summary.added,1);assert.notEqual(other.trades[0].id,other.trades[1].id);
 });

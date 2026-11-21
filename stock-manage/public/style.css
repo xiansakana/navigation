@@ -1295,6 +1295,8 @@ select:focus {
 .sm-modal--import .sm-modal-body { grid-template-columns: minmax(0, 1fr); }
 .sm-modal--import .sm-modal-body > *, .sm-modal--import .sm-form-grid label { min-width: 0; }
 .sm-import-preview .sm-table-wrap { margin: 0; }
+.sm-import-changes { white-space: normal; overflow-wrap: anywhere; margin-top: 4px; }
+.sm-import-changes summary { cursor: pointer; color: var(--accent); }
 @media (max-width: 640px) {
   .sm-import-preview .sm-table thead { display: none; }
   .sm-import-preview .sm-table tbody, .sm-import-preview .sm-table tr { display: block; }

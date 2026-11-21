@@ -1002,6 +1002,31 @@ function buildImportBody() {
   return new Blob([length, metadata, importState.buffer]);
 }
 
+const importChangeFields = {
+  symbol: '代码', type: '交易方向', shares: '数量', price: '价格', total_amount: '金额', commission: '手续费',
+  trade_date: '成交时间', other_category: '其它类别', cash_effective_at: '现金入账时间', reinvestmentNav: '折算净值'
+};
+
+function renderImportAction(trade) {
+  const action = ({ added: '新增', updated: '更新（需确认）', skipped: '重复跳过', needsAssignment: '先核对未归属历史' })[trade.importAction] || '新增';
+  const changes = (trade.importChanges || []).filter(change => Object.hasOwn(importChangeFields, change.field));
+  if (!changes.length) return action;
+  const currency = trade.currency || (looksLikeAShare(trade.symbol) ? 'CNY' : 'USD');
+  const format = (key, value) => {
+    if (value == null || value === '') return '—';
+    if (key === 'commission' || key === 'total_amount') return fmtMoney(value, currency);
+    if (key === 'shares') return formatQuantity(value);
+    if (key === 'price' || key === 'reinvestmentNav') return formatPrice(value, currency, tradeAssetType(trade) === 'fund' ? fundPriceDigits(trade.symbol) : 3);
+    if (key === 'trade_date' || key === 'cash_effective_at') return formatLocalDateTime(value);
+    if (key === 'type') return typeLabel({ type: value });
+    return value;
+  };
+  return `<div class="sm-import-action">${action}<details class="sm-import-changes">
+    <summary>${changes.map(change => importChangeFields[change.field]).join('、')}</summary>
+    ${changes.map(({ field, before, after }) => `<div class="sm-lots-hint"><strong>${importChangeFields[field]}</strong><br>原值：${escapeHtml(format(field, before))}<br>导入值：${escapeHtml(format(field, after))}</div>`).join('')}
+  </details></div>`;
+}
+
 function renderImportPreviewSection() {
   if (importState.error) return `<div class="sm-error-box">${escapeHtml(importState.error)}</div>`;
   if (!importState.count && !importState.summary) return '';
@@ -1014,7 +1039,7 @@ function renderImportPreviewSection() {
       <td data-label="数量">${t.type === 'other' ? '—' : formatQuantity(t.shares)}</td>
       <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.reinvestedDividend ? t.reinvestmentNav : t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? fundPriceDigits(t.symbol) : 3)}</td>
       <td data-label="本金">${tradeAmountLabel(t)}</td><td data-label="总费用">${fmtMoney(t.commission, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
-      <td data-label="处理">${({ added: '新增', updated: '更新（需确认）', skipped: '重复跳过', needsAssignment: '先核对未归属历史' })[t.importAction] || '新增'}</td>
+      <td data-label="处理">${renderImportAction(t)}</td>
       ${importState.history?.count ? `<td data-label="历史补录">${Number.isInteger(t.historicalIndex)
         ? `<input type="checkbox" data-import-history-index="${t.historicalIndex}" aria-label="补录 ${escapeHtml(t.symbol)} 这笔历史交易" ${historicalImportChecked(t.historicalIndex) ? 'checked' : ''}>` : '—'}</td>` : ''}
     </tr>`).join('');
