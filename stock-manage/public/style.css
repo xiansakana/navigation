@@ -653,7 +653,7 @@ body:has(.sm-modal-backdrop) {
 
 .sm-pagination select { width: auto; }
 .sm-pagination-position { white-space: nowrap; }
-.sm-pagination [aria-current="page"] { color: var(--accent); border-color: var(--accent); }
+.sm-pagination .btn.ghost[aria-current="page"] { color: var(--accent); border-color: var(--accent); }
 .sm-pagination-jump, .sm-pagination-jump label {
     display: inline-flex;
     align-items: center;
@@ -1247,7 +1247,7 @@ select:focus {
     .sm-modal--trade .sm-pagination {
         gap: 6px;
     }
-    .sm-pagination [data-pagination-number] {
+    .sm-pagination .btn[data-pagination-number] {
         display: none;
     }
 }
