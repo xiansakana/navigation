@@ -487,7 +487,8 @@ function legRow(leg) {
       <td>${escapeHtml(leg.note || '')}</td>
     </tr>`;
   }
-  if (leg.skipped) return `<tr><td>Call·USD</td><td>暂不推荐</td><td>跳过</td><td>${leg.pct}%</td><td>${fmtUsd(leg.usd)}（保留）</td><td>0 张</td><td>${leg.minimumCost != null ? `最低一张 ${fmtUsd(leg.minimumCost)}` : '报价不可用'}</td><td>${escapeHtml(leg.reason)}</td></tr>`;
+  const carry = leg.carryInfo ? `<div class="hint">${escapeHtml(leg.carryInfo)}</div>` : '';
+  if (leg.skipped) return `<tr><td>Call·USD</td><td>暂不推荐</td><td>跳过</td><td>${leg.pct}%</td><td>${fmtUsd(leg.usd)}（保留）</td><td>0 张</td><td>${leg.minimumCost != null ? `最低一张 ${fmtUsd(leg.minimumCost)}` : '报价不可用'}</td><td>${escapeHtml(leg.reason)}${carry}</td></tr>`;
   return `<tr>
     <td>Call·USD</td>
     <td>${escapeHtml(leg.occSymbol || leg.symbol)}</td>
@@ -496,7 +497,7 @@ function legRow(leg) {
     <td>${fmtUsd(leg.usd)}</td>
     <td>${leg.shares ?? 0} 张 · ${fmtPrice(leg.strike)} / ${escapeHtml(leg.expiry || '—')}</td>
     <td>${leg.otmPct != null ? leg.otmPct.toFixed(1) + '% 虚值' : '—'} · 卖价 ${fmtPrice(leg.price)} × 100 = ${fmtUsd(leg.oneContractCost)} / 张（手续费另计）</td>
-    <td>${escapeHtml(leg.note || '')}</td>
+    <td>${escapeHtml(leg.note || '')}${carry}</td>
   </tr>`;
 }
 

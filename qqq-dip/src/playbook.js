@@ -1286,6 +1286,23 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
       band, expiries: (leaps.expiries || []).map((e) => e.expiry), budget: Math.min(leg.usd, optionCash)
     });
     Object.assign(leg, selection);
+    const plan = ev.round?.executionPlans?.[id];
+    const saved = plan?.legs?.find((row) => row.kind === 'call' && row.otmClass === leg.otmClass);
+    const carried = saved?.budgetCarryIns || [];
+    const sources = carried.length ? carried : TIER_ORDER.slice(0, TIER_ORDER.indexOf(id)).flatMap((sourceId) => {
+      const sourcePlan = ev.round?.executionPlans?.[sourceId];
+      if (!sourcePlan || sourcePlan.cancelled || sourcePlan.inFlight || TIER_DEFS[sourceId].bag !== tier.bag) return [];
+      return (sourcePlan.legs || []).filter((row) => row.kind === 'call' && row.currency === 'USD'
+        && row.otmClass === leg.otmClass && row.pendingOption && !row.complete
+        && !row.spent && row.usd > 0).map((row) => ({ tier: sourceId, usd: row.usd }));
+    });
+    if (sources.length && !plan?.cancelled && !saved?.complete && !saved?.spent) {
+      const total = carried.length ? saved.usd : roundMoney((saved?.usd ?? leg.usd) + sources.reduce((sum, row) => sum + row.usd, 0));
+      const sourceText = sources.map((row) => `${row.tier} $${row.usd.toFixed(2)}`).join('、');
+      const gap = selection.minimumCost != null ? roundMoney(Math.max(0, selection.minimumCost - total)) : null;
+      leg.carryInfo = `${carried.length ? '已顺延至本计划' : '待顺延（尚未划转）'}：${sourceText}；${carried.length ? '计划合计' : '含本档参考合计'} $${total.toFixed(2)}${gap > 0 ? `，距最低一张还差 $${gap.toFixed(2)}（未含费用）` : ''}。${carried.length ? '请以成交/计划中的合并预算为准。' : '满足同袋同类期权条件且合并能增加可买张数后，才正式划转；报价、信号及资金须重新校验。'}`;
+      notes.push(leg.carryInfo);
+    }
     if (selection.contract) {
       const c = selection.contract;
       Object.assign(leg, { occSymbol: c.ticker, expiry: c.expiry, strike: c.strike,

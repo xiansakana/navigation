@@ -15,6 +15,30 @@ const ev = { primary: { tier: 'T2' }, tiers: [{ id: 'T2', status: 'confirmed', u
   B: 20000, cashUsd: 20000, cashCny: 0, usdCnyRate: 7, qqq: { price: 700, H: 800 },
   remaining: { left: 8000, crisis: 6000, right: 6000 }, leaps: { expiries: [{ expiry }] } };
 
+test('T3 preview shows pending carry and gap without transferring funds or mixing deep calls', () => {
+  const input = { ...ev, primary: { tier: 'T3' }, tiers: [
+    { id: 'T3', status: 'confirmed', usd: 2449.43, pctB: .1, bag: 'left' }
+  ], round: { executionPlans: { T2: { legs: [
+    { kind: 'call', currency: 'USD', otmClass: 'medium', usd: 349.92, pendingOption: true }
+  ] } } } };
+  const before = JSON.stringify(input);
+  const preview = buildBuyPreview(input, [option(900, 12.22)]);
+  const medium = preview.legs.find((leg) => leg.otmClass === 'medium');
+  const deep = preview.legs.find((leg) => leg.otmClass === 'deep');
+  assert.match(medium.carryInfo, /待顺延（尚未划转）.*T2 \$349.92.*\$1207.22.*还差 \$14.78/);
+  assert.equal(medium.usd, 857.3);
+  assert.equal(deep.carryInfo, undefined);
+  assert.equal(JSON.stringify(input), before);
+  input.round.executionPlans.T2.cancelled = true;
+  assert.equal(buildBuyPreview(input, []).legs.find((leg) => leg.otmClass === 'medium').carryInfo, undefined);
+  delete input.round.executionPlans.T2.cancelled;
+  input.round.executionPlans.T3 = { legs: [
+    { kind: 'call', otmClass: 'medium', usd: 1207.22, budgetCarryIns: [{ tier: 'T2', usd: 349.92 }] }
+  ] };
+  assert.match(buildBuyPreview(input, []).legs.find((leg) => leg.otmClass === 'medium').carryInfo,
+    /已顺延至本计划.*计划合计 \$1207.22/);
+});
+
 test('T2 16.51 premium needs $1651; a $400 budget must skip instead of sizing fractions', () => {
   const selection = selectAffordableCall([option(875, 16.51)], config);
   assert.equal(selection.skipped, true);
