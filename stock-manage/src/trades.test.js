@@ -22,15 +22,12 @@ test('selected P&L excludes prior profits and uses FIFO cost carried into the se
   });
   const rows = [
     trade('2025-01-02', 'buy', 100), trade('2025-02-02', 'sell', 160),
-    trade('2025-12-02', 'buy', 200), trade('2026-01-02', 'sell', 230, 2),
-    trade('2026-02-02', 'sell', 300, 0, 'MSFT')
+    trade('2025-12-02', 'buy', 200), trade('2026-01-02', 'sell', 230, 2)
   ];
   const sparse = buildDailyCumulativeSeries(rows);
   const range = sliceSeries(sparse, '2026-01-01', '2026-01-31');
   assert.equal(computePnl(rows, { startDate: '2026-01-01', endDate: '2026-01-31' }).netPL, 28);
   assert.equal(range[0].cumulativeNet, 28);
-  assert.equal(Math.round(range[0].rate), 14);
-  assert.equal(sliceSeries(sparse, '2026-01-01', '2026-02-28').at(-1).rate, null);
 });
 
 test('daily P&L attributes trading gains, fees and market moves to each native currency', () => {

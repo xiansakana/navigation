@@ -2,7 +2,6 @@ let vizMode = 'line';
 let calGranularity = 'month';
 let calYM = '';
 let calYearFocus = '';
-let lastQuery = '';
 let viewFingerprint = '';
 let zoomRange = null;
 let lastContainer = null;
@@ -20,10 +19,6 @@ function fmt(n) {
 function fmtUsdSigned(n) {
   if (!Number.isFinite(n)) return '—';
   return `${n >= 0 ? '+' : ''}$${fmt(n)}`;
-}
-
-function fmtPct(rate) {
-  return Number.isFinite(rate) ? `${rate >= 0 ? '+' : ''}${fmt(rate)}%` : '—';
 }
 
 function fmtUsdTiny(net) {
@@ -121,25 +116,19 @@ function pointAtDate(d, expanded) {
   return ans;
 }
 
-function inQuery(d, start, end) {
-  if (start && d < start) return false;
-  if (end && d > end) return false;
-  return true;
-}
-
-function sumMonthNet(dayNet, y, mo, pnlStart, pnlEnd) {
+function sumMonthNet(dayNet, y, mo) {
   let sum = 0;
   const dim = daysInMonth(y, mo);
   for (let d = 1; d <= dim; d++) {
     const key = ymKey(y, mo, d);
-    if (inQuery(key, pnlStart, pnlEnd)) sum += dayNet.get(key) ?? 0;
+    sum += dayNet.get(key) ?? 0;
   }
   return sum;
 }
 
-function sumYearNet(dayNet, y, pnlStart, pnlEnd) {
+function sumYearNet(dayNet, y) {
   let sum = 0;
-  for (let mo = 1; mo <= 12; mo++) sum += sumMonthNet(dayNet, y, mo, pnlStart, pnlEnd);
+  for (let mo = 1; mo <= 12; mo++) sum += sumMonthNet(dayNet, y, mo);
   return sum;
 }
 
@@ -160,12 +149,11 @@ function calTone(net, has) {
   return net > 0 ? 'pos' : 'neg';
 }
 
-function buildMonthCal(y, mo, dayNet, range, pnlStart, pnlEnd) {
+function buildMonthCal(y, mo, dayNet) {
   const dim = daysInMonth(y, mo);
   let maxAbs = 0;
   for (let d = 1; d <= dim; d++) {
     const key = ymKey(y, mo, d);
-    if (!inQuery(key, pnlStart, pnlEnd)) continue;
     maxAbs = Math.max(maxAbs, Math.abs(dayNet.get(key) ?? 0));
   }
   if (maxAbs === 0) maxAbs = 1;
@@ -179,19 +167,15 @@ function buildMonthCal(y, mo, dayNet, range, pnlStart, pnlEnd) {
   for (let r = 0; r < cells.length; r += 7) {
     const tds = cells.slice(r, r + 7).map((c) => {
       if (!c.key) return '<div class="sm-cal-cell sm-cal-cell--ph" aria-hidden="true"></div>';
-      const ok = inQuery(c.key, pnlStart, pnlEnd);
       const has = dayNet.has(c.key);
       const net = dayNet.get(c.key) ?? 0;
-      const tone = ok ? calTone(net, has) : 'out';
-      const bg = ok && has && net !== 0 ? calBg(net, maxAbs) : '';
-      const retS = ok ? fmtPct(pointAtDate(c.key, range)?.rate) : '—';
-      const amt = !ok ? '—' : has ? fmtUsdTiny(net) : '$0';
-      const retHtml = ok ? `<span class="sm-cal-ret" title="区间盈亏率">率 ${retS}</span>` : '—';
+      const tone = calTone(net, has);
+      const bg = calBg(net, maxAbs);
+      const amt = has ? fmtUsdTiny(net) : '$0';
       const bgStyle = bg ? `background:${bg};` : '';
       return `<div class="sm-cal-cell sm-cal-cell--btn sm-cal-cell--${tone}" style="${bgStyle}" role="button" tabindex="0" data-cal-day="${c.key}" title="${c.key}">
         <span class="sm-cal-day">${c.d}</span>
         <span class="sm-cal-amt ${has && net !== 0 ? (net > 0 ? 'pos' : 'neg') : ''}">${amt}</span>
-        <span class="sm-cal-pct">${retHtml}</span>
       </div>`;
     }).join('');
     rows.push(`<div class="sm-cal-row">${tds}</div>`);
@@ -201,16 +185,10 @@ function buildMonthCal(y, mo, dayNet, range, pnlStart, pnlEnd) {
     <div class="sm-cal-grid">${rows.join('')}</div>`;
 }
 
-function buildYearCal(y, dayNet, range, pnlStart, pnlEnd) {
+function buildYearCal(y, dayNet) {
   const monthSums = new Map();
   for (let mo = 1; mo <= 12; mo++) {
-    let sm = 0;
-    const dim = daysInMonth(y, mo);
-    for (let d = 1; d <= dim; d++) {
-      const key = ymKey(y, mo, d);
-      if (inQuery(key, pnlStart, pnlEnd)) sm += dayNet.get(key) ?? 0;
-    }
-    monthSums.set(mo, sm);
+    monthSums.set(mo, sumMonthNet(dayNet, y, mo));
   }
   let maxAbs = 1;
   for (const v of monthSums.values()) maxAbs = Math.max(maxAbs, Math.abs(v));
@@ -218,26 +196,20 @@ function buildYearCal(y, dayNet, range, pnlStart, pnlEnd) {
   const cells = [];
   for (let mo = 1; mo <= 12; mo++) {
     const sm = monthSums.get(mo) ?? 0;
-    const end = ymKey(y, mo, daysInMonth(y, mo));
-    const intersects = (!pnlStart || end >= pnlStart) && (!pnlEnd || ymKey(y, mo, 1) <= pnlEnd);
-    const retEom = fmtPct(intersects ? pointAtDate(end, range)?.rate : null);
     const tone = calTone(sm, sm !== 0);
     const bg = sm !== 0 ? calBg(sm, maxAbs) : '';
     const bgStyle = bg ? `background:${bg};` : '';
     cells.push(`
       <div class="sm-cal-year-cell sm-cal-cell--btn sm-cal-cell--${tone}" style="${bgStyle}" role="button" tabindex="0" data-cal-month="${y}-${mo}">
         <div class="sm-cal-year-mo">${mo}月</div>
-        <div class="sm-cal-year-amt ${sm !== 0 ? (sm > 0 ? 'pos' : 'neg') : ''}">${intersects ? fmtUsdTiny(sm) : '—'}</div>
-        <div class="sm-cal-year-pct">
-          <span class="sm-cal-ret">区间盈亏率 ${retEom}</span>
-        </div>
+        <div class="sm-cal-year-amt ${sm !== 0 ? (sm > 0 ? 'pos' : 'neg') : ''}">${fmtUsdTiny(sm)}</div>
       </div>`);
   }
   return `<div class="sm-cal-year-grid">${cells.join('')}</div>`;
 }
 
 function buildAnnualCalendar(range, dayNet) {
-  if (!range.length) return '<p class="sm-pnl-empty">当前查询区间没有盈亏数据。</p>';
+  if (!range.length) return '<p class="sm-pnl-empty">暂无盈亏数据</p>';
   const years = [];
   for (const point of range) {
     const year = point.date.slice(0, 4);
@@ -247,10 +219,9 @@ function buildAnnualCalendar(range, dayNet) {
       years.push(row);
     }
     row.closing = point.cumulativeNet;
-    row.rate = point.rate;
   }
   const maxAbs = years.reduce((max, row) => Math.max(max, Math.abs(row.closing - row.opening)), 0);
-  const cards = years.reverse().map(({ year, opening, closing, rate }) => {
+  const cards = years.reverse().map(({ year, opening, closing }) => {
     const net = Math.round((closing - opening) * 100) / 100;
     const tone = calTone(net, true);
     const bg = calBg(net, maxAbs);
@@ -258,7 +229,6 @@ function buildAnnualCalendar(range, dayNet) {
       <span class="sm-cal-year-mo">${year}年</span>
       <span class="sm-cal-year-amt ${tone}">净盈亏 ${fmtUsdSigned(net)}</span>
       <span class="sm-cal-ret">期末累计 ${fmtUsdSigned(closing)}</span>
-      <span class="sm-cal-ret">区间盈亏率 ${fmtPct(rate)}</span>
     </button>`;
   });
   return `<div class="sm-cal-year-grid">${cards.join('')}</div>`;
@@ -307,9 +277,7 @@ export function sliceSeries(series, startDate, endDate) {
     return true;
   }).map(point => {
     const net = Math.round((point.cumulativeNet - (opening?.cumulativeNet ?? 0)) * 100) / 100;
-    const soldCost = point.cumulativeSoldCost - (opening?.cumulativeSoldCost ?? 0);
-    const complete = point.unmatchedSales === (opening?.unmatchedSales ?? 0);
-    return { ...point, cumulativeNet: net, rate: soldCost > 0 && complete ? net / soldCost * 100 : null };
+    return { ...point, cumulativeNet: net };
   });
 }
 
@@ -338,15 +306,13 @@ function buildChartOption(rangeSlice) {
   const colors = chartColors();
   const dates = rangeSlice.map((p) => p.date);
   const values = rangeSlice.map((p) => p.cumulativeNet);
-  const rates = rangeSlice.map((p) => p.rate);
   const zoom = zoomRange && Number.isFinite(zoomRange.start)
     ? zoomRange
     : defaultZoom();
   return {
     animation: false,
     backgroundColor: 'transparent',
-    grid: { left: 72, right: 64, top: 36, bottom: 64, containLabel: false },
-    legend: { textStyle: { color: colors.text } },
+    grid: { left: 16, right: 18, top: 24, bottom: 62, containLabel: true },
     tooltip: {
       trigger: 'axis',
       backgroundColor: colors.card,
@@ -364,7 +330,6 @@ function buildChartOption(rangeSlice) {
           : '';
         return `<div style="color:${colors.muted};margin-bottom:4px">${date}</div>
           <div>区间净盈亏 <b>${fmtUsdSigned(point.cumulativeNet)}</b></div>
-          <div style="margin-top:4px;color:${colors.muted}">区间盈亏率 ${fmtPct(point.rate)}</div>
           ${dayHtml}`;
       }
     },
@@ -380,7 +345,7 @@ function buildChartOption(rangeSlice) {
       },
       axisTick: { show: false }
     },
-    yAxis: [{
+    yAxis: {
       type: 'value',
       scale: true,
       splitLine: { lineStyle: { color: colors.border, opacity: 0.55 } },
@@ -388,7 +353,7 @@ function buildChartOption(rangeSlice) {
         color: colors.muted,
         formatter: (v) => `$${fmt(v)}`
       }
-    }, { type: 'value', show: rates.some(Number.isFinite), scale: true, splitLine: { show: false }, axisLabel: { color: colors.muted, formatter: '{value}%' } }],
+    },
     dataZoom: [
       {
         type: 'inside',
@@ -443,16 +408,13 @@ function buildChartOption(rangeSlice) {
         lineStyle: { color: '#334155', type: 'dashed', width: 1 },
         data: [{ yAxis: 0, label: { show: false } }]
       }
-    }, {
-      type: 'line', name: '区间盈亏率', yAxisIndex: 1, data: rates, showSymbol: dates.length === 1,
-      lineStyle: { color: '#deaa60', type: 'dashed', width: 2 }, itemStyle: { color: '#deaa60' }
     }]
   };
 }
 
 function seriesFingerprint(rangeSlice) {
   if (!rangeSlice.length) return '';
-  return JSON.stringify(rangeSlice.map(p => [p.date, p.cumulativeNet, p.rate]));
+  return JSON.stringify(rangeSlice.map(p => [p.date, p.cumulativeNet, p.dayNet]));
 }
 
 function mountLineChart(host, rangeSlice) {
@@ -589,7 +551,7 @@ function ensureShell(container) {
       <div class="sm-pnl-line-block">
         <div class="sm-pnl-echarts" id="sm-pnl-echarts"></div>
         <div class="sm-pnl-line-hint">
-          <span>盈亏率按区间净盈亏 ÷ 区间卖出份额的 FIFO 成本计算。拖动平移，滚轮缩放。</span>
+          <span>拖动平移，滚轮缩放。</span>
           <button type="button" class="btn ghost sm-btn-sm" data-pnl-reset>复位视窗</button>
         </div>
       </div>
@@ -606,23 +568,9 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
 
   const data = getData();
   const { chartSparse = [], pnlStart = '', pnlEnd = '' } = data;
-  if (!chartSparse.length) {
-    disposeLineChart();
-    container.innerHTML = '<div class="sm-pnl-empty">暂无盈亏数据</div>';
-    return;
-  }
-
-  const dayNet = new Map(chartSparse.map((p) => [p.date, p.dayNet]));
-  const chartExpandedFull = expandDailySeries(chartSparse);
-  const rangeSlice = sliceSeries(chartExpandedFull, pnlStart, pnlEnd);
-  const query = `${pnlStart}/${pnlEnd}`;
-  if (query !== lastQuery) {
-    lastQuery = query;
-    const focus = rangeSlice.at(-1)?.date || pnlStart || pnlEnd;
-    calYM = pnlStart || pnlEnd ? focus.slice(0, 7) : '';
-    calYearFocus = calYM.slice(0, 4);
-  }
   const isLine = vizMode === 'line';
+  callbacks.onModeChange?.(vizMode);
+  const dayNet = new Map(chartSparse.map((p) => [p.date, p.dayNet]));
   const { y: dispY, m: dispM } = ymParts();
   const yEff = effectiveYear();
   const bounds = yearBounds(chartSparse);
@@ -631,20 +579,10 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
 
   cachedDayNet = dayNet;
 
-  const fp = rangeFingerprint(rangeSlice);
-  if (fp !== viewFingerprint) {
-    viewFingerprint = fp;
-    zoomRange = defaultZoom();
-  }
-
   ensureShell(container);
 
-  const cumEnd = rangeSlice.length ? rangeSlice[rangeSlice.length - 1].cumulativeNet : null;
-  const cumBadge = cumEnd == null ? '—' : `<strong class="${cumEnd >= 0 ? 'pos' : 'neg'}">${fmtUsdSigned(cumEnd)}</strong>`;
   const badge = container.querySelector('.sm-pnl-cum-badge');
-  if (badge) {
-    badge.innerHTML = `区间净盈亏 ${cumBadge} · 盈亏率 <strong title="区间净盈亏 ÷ 区间卖出份额的 FIFO 成本，缺少完整成本时不计算">${fmtPct(rangeSlice.at(-1)?.rate)}</strong>`;
-  }
+  badge.classList.toggle('hidden', !isLine);
   container.querySelectorAll('[data-pnl-mode]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.pnlMode === vizMode);
   });
@@ -654,13 +592,22 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
   const calBlock = container.querySelector('.sm-cal-block');
 
   if (isLine) {
+    const rangeSlice = sliceSeries(expandDailySeries(chartSparse), pnlStart, pnlEnd);
+    const fp = rangeFingerprint(rangeSlice);
+    if (fp !== viewFingerprint) {
+      viewFingerprint = fp;
+      zoomRange = defaultZoom();
+    }
+    const cumEnd = rangeSlice.at(-1)?.cumulativeNet;
+    const cumBadge = cumEnd == null ? '—' : `<strong class="${cumEnd >= 0 ? 'pos' : 'neg'}">${fmtUsdSigned(cumEnd)}</strong>`;
+    badge.innerHTML = `区间净盈亏 ${cumBadge}`;
     calBlock?.classList.add('hidden');
     if (!rangeSlice.length) {
       disposeLineChart();
       lineBlock?.classList.add('hidden');
       if (emptyEl) {
         emptyEl.classList.remove('hidden');
-        emptyEl.textContent = '当前查询时间段与有数据的日期无交集，请调整起止日期或重置。';
+        emptyEl.textContent = chartSparse.length ? '该区间没有盈亏数据。' : '暂无盈亏数据';
       }
       return;
     }
@@ -693,7 +640,7 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
   let calHtml = '';
   let calGranNetHtml = '';
   if (calGranularity === 'month') {
-    const monthNet = sumMonthNet(dayNet, dispY, dispM, pnlStart, pnlEnd);
+    const monthNet = sumMonthNet(dayNet, dispY, dispM);
     calGranNetHtml = fmtNetBadge(monthNet, `${dispY}年${dispM}月`);
     calHtml = `
       <div class="sm-cal-toolbar">
@@ -709,9 +656,9 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
         </label>
         <button type="button" class="btn ghost sm-btn-sm" data-cal-reset>回到当月</button>
       </div>
-      ${buildMonthCal(dispY, dispM, dayNet, rangeSlice, pnlStart, pnlEnd)}`;
+      ${buildMonthCal(dispY, dispM, dayNet)}`;
   } else if (calGranularity === 'year') {
-    const yearNet = sumYearNet(dayNet, yEff, pnlStart, pnlEnd);
+    const yearNet = sumYearNet(dayNet, yEff);
     calGranNetHtml = fmtNetBadge(yearNet, `${yEff}年`);
     calHtml = `
       <div class="sm-cal-toolbar">
@@ -720,9 +667,9 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
           <select id="pnl-cal-year-only">${yearOnlyOpts}</select>
         </label>
       </div>
-      ${buildYearCal(yEff, dayNet, rangeSlice, pnlStart, pnlEnd)}`;
+      ${buildYearCal(yEff, dayNet)}`;
   } else {
-    calHtml = buildAnnualCalendar(rangeSlice, dayNet);
+    calHtml = buildAnnualCalendar(chartSparse, dayNet);
   }
 
   calBlock.innerHTML = `

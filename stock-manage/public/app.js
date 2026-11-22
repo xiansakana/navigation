@@ -5,7 +5,7 @@ import { renderTradeReview } from './js/trade-review.js?v=hk-fund-1';
 import { formatPrice, formatQuantity, priceInputValue } from './js/price-format.js?v=quantity-1';
 import { bindTradeInstrument } from './js/trade-instrument.js?v=keep-trade-account-1';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
-import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=period-1';
+import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=period-2';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey, isHoldingsSortable } from './js/holdings-table.js?v=group-summary-1';
 import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js?v=access-1';
 
@@ -628,17 +628,21 @@ function renderPnl() {
     pnlStart,
     pnlEnd
   }), {
+    onModeChange: (mode) => {
+      $('.sm-pnl-period').classList.toggle('hidden', mode !== 'line');
+      $('#pnl-stats').classList.toggle('hidden', mode !== 'line');
+    },
     onCalendarDay: (d) => openTradeHistoryForRange(d, d),
     onCalendarMonth: (y, mo) => {
       const start = `${y}-${String(mo).padStart(2, '0')}-01`;
       const end = `${y}-${String(mo).padStart(2, '0')}-${String(new Date(y, mo, 0).getDate()).padStart(2, '0')}`;
-      openTradeHistoryForRange(pnlStart > start ? pnlStart : start, pnlEnd && pnlEnd < end ? pnlEnd : end);
+      openTradeHistoryForRange(start, end);
     },
     onCalendarYear: (year) => {
       const start = `${year}-01-01`;
       const end = `${year}-12-31`;
       ui.tradeTab = 'list';
-      openTradeHistoryForRange(pnlStart > start ? pnlStart : start, pnlEnd && pnlEnd < end ? pnlEnd : end);
+      openTradeHistoryForRange(start, end);
     }
   });
 }
