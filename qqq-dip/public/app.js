@@ -488,7 +488,13 @@ function legRow(leg) {
     </tr>`;
   }
   const carry = leg.carryInfo ? `<div class="hint">${escapeHtml(leg.carryInfo)}</div>` : '';
-  if (leg.skipped) return `<tr><td>Call·USD</td><td>暂不推荐</td><td>跳过</td><td>${leg.pct}%</td><td>${fmtUsd(leg.usd)}（保留）</td><td>0 张</td><td>${leg.minimumCost != null ? `最低一张 ${fmtUsd(leg.minimumCost)}` : '报价不可用'}</td><td>${escapeHtml(leg.reason)}${carry}</td></tr>`;
+  if (leg.skipped) {
+    const reference = leg.referenceContract;
+    const cost = leg.minimumCost != null ? `最低一张 ${fmtUsd(leg.minimumCost)}（手续费另计）` : '报价不可用';
+    const contract = reference ? `${escapeHtml(reference.ticker)}<div class="hint">${escapeHtml(reference.expiry)} · ${fmtPrice(reference.strike)} Call</div>` : '暂不推荐';
+    const price = reference ? `卖价 ${fmtUsd(reference.ask)} × 100 · ${cost}` : cost;
+    return `<tr><td>Call·USD</td><td>${contract}</td><td>跳过</td><td>${leg.pct}%</td><td>${fmtUsd(leg.usd)}（保留）</td><td>0 张</td><td>${price}</td><td>${escapeHtml(leg.reason)}${carry}</td></tr>`;
+  }
   return `<tr>
     <td>Call·USD</td>
     <td>${escapeHtml(leg.occSymbol || leg.symbol)}</td>
@@ -560,7 +566,10 @@ function openBuyPreview() {
           }
           return `${leg.symbol} 正股·USD 买入 ${leg.shares}股 预算${fmtUsd(leg.usd)} @${leg.price?.toFixed(3)}`;
         }
-        if (leg.skipped) return `Call 跳过：${leg.reason}；保留预算${fmtUsd(leg.usd)}`;
+        if (leg.skipped) {
+          const ref = leg.referenceContract;
+          return `Call 跳过：${leg.reason}；保留预算${fmtUsd(leg.usd)}${ref ? `；参考 ${ref.ticker}，卖价 ${fmtUsd(ref.ask)}，一张 ${fmtUsd(leg.minimumCost)}` : ''}`;
+        }
         return `${leg.occSymbol || leg.symbol} Call·USD 买入 ${leg.shares}张 卖价${fmtPrice(leg.price)} 一张${fmtUsd(leg.oneContractCost)}（手续费另计） 预算${fmtUsd(leg.usd)} K${fmtPrice(leg.strike)} 到期${leg.expiry}`;
       }),
       '',

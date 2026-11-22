@@ -9,11 +9,15 @@ export function selectAffordableCall(contracts, { band, expiries, budget, now = 
   const mid = (band?.low + band?.high) / 2;
   affordable.sort((a, b) => Math.abs(a.strike - mid) - Math.abs(b.strike - mid) || a.ask - b.ask);
   const contract = affordable[0];
+  const lowest = contract ? null : quoted.reduce((best, row) => (
+    !best || costCents(row) < costCents(best) ? row : best
+  ), null);
   return contract ? { contract, shares: Math.floor(Math.round(budget * 100) / costCents(contract)),
     oneContractCost: Math.round(contract.ask * 10000) / 100 } : {
     shares: 0, skipped: true,
     reason: quoted.length ? '预算不足一张合规期权，跳过并保留期权预算'
       : '缺少合规合约的有效卖价，暂停期权建议并保留预算',
-    minimumCost: quoted.length ? Math.min(...quoted.map(costCents)) / 100 : null
+    minimumCost: lowest ? costCents(lowest) / 100 : null,
+    referenceContract: lowest?.ticker ? { ticker: lowest.ticker, ask: lowest.ask, strike: lowest.strike, expiry: lowest.expiry } : null
   };
 }

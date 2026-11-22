@@ -44,8 +44,12 @@ test('T2 16.51 premium needs $1651; a $400 budget must skip instead of sizing fr
   assert.equal(selection.skipped, true);
   assert.equal(selection.shares, 0);
   assert.equal(selection.minimumCost, 1651);
-  const preview = buildBuyPreview(ev, [option(875, 16.51)]);
-  assert.equal(preview.legs.find((l) => l.kind === 'call').skipped, true);
+  const cheapest = option(875, 16.51);
+  const preview = buildBuyPreview(ev, [option(925, 19), cheapest, option(1000, .1)]);
+  const leg = preview.legs.find((l) => l.kind === 'call');
+  assert.equal(leg.skipped, true);
+  assert.deepEqual(leg.referenceContract, { ticker: cheapest.ticker, ask: 16.51, strike: 875, expiry });
+  assert.equal(leg.occSymbol, '');
   assert.equal(preview.cashPlan.useUsd, 1200);
   assert.equal(preview.cashPlan.remainUsd, 18800);
   const plan = captureExecutionPlan({}, preview).executionPlans.T2;
@@ -72,7 +76,9 @@ test('unknown, stale, future, nonstandard or out-of-band quotes never become aff
     option(925, 1, { asOf: new Date(now - 86400001).toISOString() }),
     option(925, 1, { asOf: new Date(now + 300001).toISOString() }),
     option(925, 1, { sharesPerContract: 150 }), option(1000, .1)]) {
-    assert.equal(selectAffordableCall([item], config).skipped, true);
+    const result = selectAffordableCall([item], config);
+    assert.equal(result.skipped, true);
+    assert.equal(result.referenceContract, null);
   }
   assert.equal(buildBuyPreview(ev, []).legs.at(-1).skipped, true);
 });
