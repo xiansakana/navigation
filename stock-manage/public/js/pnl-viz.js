@@ -21,6 +21,13 @@ function fmtUsdSigned(n) {
   return `${n >= 0 ? '+' : ''}$${fmt(n)}`;
 }
 
+function fmtCalendarRate(net, totalAssets, priorNet) {
+  const base = totalAssets - priorNet;
+  if (!Number.isFinite(totalAssets) || totalAssets <= 0 || base <= 1e-9) return '—';
+  const rate = net / base * 100;
+  return `${rate >= 0 ? '+' : ''}${fmt(rate)}%`;
+}
+
 function fmtUsdTiny(net) {
   const a = Math.abs(net);
   const sign = net >= 0 ? '+' : '-';
@@ -149,7 +156,7 @@ function calTone(net, has) {
   return net > 0 ? 'pos' : 'neg';
 }
 
-function buildMonthCal(y, mo, dayNet) {
+function buildMonthCal(y, mo, dayNet, sparse, totalAssets) {
   const dim = daysInMonth(y, mo);
   let maxAbs = 0;
   for (let d = 1; d <= dim; d++) {
@@ -172,10 +179,13 @@ function buildMonthCal(y, mo, dayNet) {
       const tone = calTone(net, has);
       const bg = calBg(net, maxAbs);
       const amt = has ? fmtUsdTiny(net) : '$0';
+      const cumulative = pointAtDate(c.key, sparse)?.cumulativeNet ?? 0;
+      const rates = calendarRates(net, cumulative, totalAssets, '当日');
       const bgStyle = bg ? `background:${bg};` : '';
       return `<div class="sm-cal-cell sm-cal-cell--btn sm-cal-cell--${tone}" style="${bgStyle}" role="button" tabindex="0" data-cal-day="${c.key}" title="${c.key}">
         <span class="sm-cal-day">${c.d}</span>
         <span class="sm-cal-amt ${has && net !== 0 ? (net > 0 ? 'pos' : 'neg') : ''}">${amt}</span>
+        ${rates}
       </div>`;
     }).join('');
     rows.push(`<div class="sm-cal-row">${tds}</div>`);
@@ -185,7 +195,17 @@ function buildMonthCal(y, mo, dayNet) {
     <div class="sm-cal-grid">${rows.join('')}</div>`;
 }
 
-function buildYearCal(y, dayNet) {
+function calendarRates(net, cumulative, totalAssets, label) {
+  const rate = fmtCalendarRate(net, totalAssets, cumulative - net);
+  const cumulativeRate = fmtCalendarRate(cumulative, totalAssets, cumulative);
+  const tone = net > 0 ? 'pos' : 'neg';
+  return `<span class="sm-cal-rates">
+    ${net !== 0 ? `<span class="${tone}" title="${label}净盈亏 ÷（当前总资产 − 期初累计净盈亏）">${label} ${rate}</span>` : ''}
+    <span title="期末累计净盈亏 ÷（当前总资产 − 期末累计净盈亏）">累计 ${cumulativeRate}</span>
+  </span>`;
+}
+
+function buildYearCal(y, dayNet, sparse, totalAssets) {
   const monthSums = new Map();
   for (let mo = 1; mo <= 12; mo++) {
     monthSums.set(mo, sumMonthNet(dayNet, y, mo));
@@ -196,6 +216,7 @@ function buildYearCal(y, dayNet) {
   const cells = [];
   for (let mo = 1; mo <= 12; mo++) {
     const sm = monthSums.get(mo) ?? 0;
+    const cumulative = pointAtDate(ymKey(y, mo, daysInMonth(y, mo)), sparse)?.cumulativeNet ?? 0;
     const tone = calTone(sm, sm !== 0);
     const bg = sm !== 0 ? calBg(sm, maxAbs) : '';
     const bgStyle = bg ? `background:${bg};` : '';
@@ -203,6 +224,7 @@ function buildYearCal(y, dayNet) {
       <div class="sm-cal-year-cell sm-cal-cell--btn sm-cal-cell--${tone}" style="${bgStyle}" role="button" tabindex="0" data-cal-month="${y}-${mo}">
         <div class="sm-cal-year-mo">${mo}月</div>
         <div class="sm-cal-year-amt ${sm !== 0 ? (sm > 0 ? 'pos' : 'neg') : ''}">${fmtUsdTiny(sm)}</div>
+        ${calendarRates(sm, cumulative, totalAssets, '当月')}
       </div>`);
   }
   return `<div class="sm-cal-year-grid">${cells.join('')}</div>`;
@@ -567,7 +589,7 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
   lastCallbacks = callbacks;
 
   const data = getData();
-  const { chartSparse = [], pnlStart = '', pnlEnd = '' } = data;
+  const { chartSparse = [], totalAssets, pnlStart = '', pnlEnd = '' } = data;
   const isLine = vizMode === 'line';
   callbacks.onModeChange?.(vizMode);
   const dayNet = new Map(chartSparse.map((p) => [p.date, p.dayNet]));
@@ -656,7 +678,7 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
         </label>
         <button type="button" class="btn ghost sm-btn-sm" data-cal-reset>回到当月</button>
       </div>
-      ${buildMonthCal(dispY, dispM, dayNet)}`;
+      ${buildMonthCal(dispY, dispM, dayNet, chartSparse, totalAssets)}`;
   } else if (calGranularity === 'year') {
     const yearNet = sumYearNet(dayNet, yEff);
     calGranNetHtml = fmtNetBadge(yearNet, `${yEff}年`);
@@ -667,7 +689,7 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
           <select id="pnl-cal-year-only">${yearOnlyOpts}</select>
         </label>
       </div>
-      ${buildYearCal(yEff, dayNet)}`;
+      ${buildYearCal(yEff, dayNet, chartSparse, totalAssets)}`;
   } else {
     calHtml = buildAnnualCalendar(chartSparse, dayNet);
   }

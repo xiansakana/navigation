@@ -496,6 +496,18 @@ body.has-navbar {
 .sm-cal-amt { font-size: 11px; font-weight: 700; color: var(--text); word-break: break-all; }
 .sm-cal-amt.pos { color: var(--green); }
 .sm-cal-amt.neg { color: var(--red); }
+.sm-cal-rates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.sm-cal-rates .pos { color: var(--green); }
+.sm-cal-rates .neg { color: var(--red); }
+.sm-cal-year-cell .sm-cal-rates { margin-top: 4px; font-size: 11px; }
 .sm-cal-ret { color: var(--muted); }
 .sm-cal-year-grid {
   display: grid;
