@@ -16,6 +16,7 @@ import { marketStatus, latestCompletedSession } from './market-hours.js';
 import { evaluate, resetRound, buildBuyPreview, applyRoundFromEval } from './playbook.js';
 import { createDocService } from './docs.js';
 import { watchCash } from './cash-sync.js';
+import { refreshCnyPlan } from './cny-routing.js';
 import { prepareExecution, canExecutePlan, canSpendDipFunds, commitExecution, captureExecutionPlan } from './execution-plan.js';
 import { createExecutionDefaultsHandler } from './execution-defaults.js';
 import {
@@ -199,6 +200,7 @@ function liveEval() {
     vxn: markets.VXN,
     sentiment: markets.sentiment,
     cnyProxy: markets['159509'],
+    cnyFunds: Object.fromEntries(['159509', '513850', '161128'].map((s) => [s, markets[s]])),
     lots: store.getLots(),
     suggestedContracts: prev.suggestedContracts || []
   });
@@ -354,7 +356,18 @@ app.get('/api/execution-plans/:tier/defaults', requireDip('tier-exec', 'edit'), 
   return res.status(403).json({ error: '无权查看成交计划的资金与仓位' });
 }, createExecutionDefaultsHandler({ store, quotes }));
 
-app.post('/api/actions', (req, res) => {
+async function refreshCnyQuotes() {
+  const result = await Promise.all(['159509', '513850', '161128'].map(async (symbol) => {
+    try { return [symbol, await quotes.getCnyFundQuote(symbol)]; }
+    catch (error) { return [symbol, { symbol, navError: error.message }]; }
+  }));
+  const previous = store.getQuotes();
+  const current = Object.fromEntries(result.map(([s, q]) => [s, { ...q, candles: previous[s]?.candles || [] }]));
+  store.setQuotes({ ...previous, ...current });
+  return current;
+}
+
+app.post('/api/actions', async (req, res) => {
   const body = req.body || {};
   let syncedTrades = [];
 
@@ -391,11 +404,43 @@ app.post('/api/actions', (req, res) => {
     return res.json({ ok: true, evaluation: refreshEvaluation() });
   }
 
+  if (body.type === 'execute' && body.operation === 'refresh-cny') {
+    if (!hasDipPermission(req, 'cny-routing', 'edit') || !canSpendDipFunds(req.headers['x-portal-permissions'])) {
+      return res.status(403).json({ error: '无权调整人民币抄底标的' });
+    }
+    try {
+      const round = store.getRound();
+      const plan = round.executionPlans?.[body.tier];
+      if (!plan || plan.id !== body.planId) return res.status(409).json({ error: '计划已变化' });
+      const quotesBySymbol = await refreshCnyQuotes();
+      const next = refreshCnyPlan(plan, quotesBySymbol);
+      // Re-read after network I/O so concurrent fills cannot be overwritten.
+      const current = store.getRound();
+      if (JSON.stringify(current.executionPlans?.[body.tier]) !== JSON.stringify(plan)) {
+        return res.status(409).json({ error: '计划已变化，请重新打开' });
+      }
+      current.executionPlans[body.tier] = next;
+      store.setRound(current);
+      store.addAction({ type: 'note', source: 'user', tier: body.tier,
+        message: '按25%/10%溢价规则更新未成交人民币预算，已有成交不变',
+        payload: { revision: next.cnyRevision } });
+      return res.json({ ok: true, evaluation: refreshEvaluation() });
+    } catch (error) { return res.status(409).json({ error: error.message }); }
+  }
+
   if (body.type === 'execute' && body.tier) {
     if (!canSpendDipFunds(req.headers['x-portal-permissions'])) return res.status(403).json({ error: '无抄底专用资金成交权限' });
     let prepared;
     const executionRound = store.getRound();
     try {
+      const fillsCny = body.fills?.some((fill) => executionRound.executionPlans?.[body.tier]?.legs
+        .some((leg) => leg.id === fill.legId && leg.currency === 'CNY'));
+      if (fillsCny) {
+        await refreshCnyQuotes();
+        if (JSON.stringify(store.getRound().executionPlans?.[body.tier]) !== JSON.stringify(executionRound.executionPlans?.[body.tier])) {
+          return res.status(409).json({ error: '计划已变化，请重新打开' });
+        }
+      }
       prepared = prepareExecution(executionRound.executionPlans?.[body.tier], body, liveEval(), store.getCash());
     } catch (error) { return res.status(409).json({ error: error.message }); }
     if (prepared.duplicate) return res.json({ ok: true, duplicate: true, evaluation: refreshEvaluation() });

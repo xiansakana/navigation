@@ -1,9 +1,10 @@
 import { withDeadline } from './deadline.js';
 import { canExecutePlan } from './execution-plan.js';
+import { CNY_FUNDS, premiumStatus } from './cny-routing.js';
 
 export function suggestedQuantity(leg, price, fee = 0) {
   const budget = Math.max(0, Number(leg.currency === 'CNY' ? leg.cny : leg.usd) - Number(leg.spent || 0) - fee);
-  const lot = leg.symbol === '159509' ? 100 : 1;
+  const lot = ['159509', '513850', '161128'].includes(leg.symbol) ? 100 : 1;
   const multiplier = leg.kind === 'call' ? 100 : 1;
   return price > 0 && Number.isFinite(price) && Number.isFinite(budget)
     ? Math.max(0, Math.floor(budget / (price * multiplier * lot) + 1e-10) * lot) : 0;
@@ -19,8 +20,14 @@ export async function executionDefaults(plan, quotes, now = new Date()) {
     try {
       const quote = await withDeadline(() => leg.kind === 'call'
         ? quotes.getOptionSnapshot(leg.occSymbol)
-        : leg.symbol === '159509' ? quotes.getCnyProxyQuote() : quotes.getStock(leg.symbol), 15000, '计划报价');
+        : ['159509', '513850', '161128'].includes(leg.symbol)
+          ? (quotes.getCnyFundQuote ? quotes.getCnyFundQuote(leg.symbol) : quotes.getCnyProxyQuote())
+          : quotes.getStock(leg.symbol), 15000, '计划报价');
       const price = Number(quote.price);
+      if (CNY_FUNDS[leg.symbol] && quotes.getCnyFundQuote) {
+        const status = premiumStatus(quote, now);
+        if (!status.valid || status.premium > CNY_FUNDS[leg.symbol].cap + 1e-8) throw new Error('参考溢价无效或超限，保留本部分预算');
+      }
       const quoteTime = Date.parse(quote.asOf || '');
       if (!(price > 0) || !Number.isFinite(price) || quote.stale || quote.previousCloseOnly
         || (Number.isFinite(quoteTime) && (now.getTime() - quoteTime > 86400000 || quoteTime > now.getTime() + 300000))) {

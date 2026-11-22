@@ -4,6 +4,7 @@ import { selectAffordableCall } from './option-selection.js';
 import { equityTouchMarket } from './equity-touch.js';
 import { expectedVxnSession } from './vxn-session.js';
 import { sentimentStatus } from './market-sentiment.js';
+import { CNY_FUNDS, routeCnyBudget, premiumStatus, selectCnyFunds } from './cny-routing.js';
 
 export const TIER_ORDER = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'R1', 'R2'];
 export const LEFT_TIERS = ['T1', 'T2', 'T3', 'T4'];
@@ -352,7 +353,7 @@ function allocationText(tier, vxnGate, spot, B, usd, pctB, variant = 'default') 
     ? `VXN ${vxnGate.missing ? '未知' : vxnGate.value} 未达门槛 ${vxnGate.min}：本档全部改买正股，档位仍算触发。`
     : (vxnGate.value != null ? `VXN ${vxnGate.value}≥${vxnGate.min}，允许期权部分。` : '');
 
-  const cnyFirst = `正股优先人民币买 ${CNY_EQUITY_PROXY}，再用美元买 QQQ；期权仅美元。`;
+  const cnyFirst = `正股人民币按25%/10%溢价规则选择159509或513850/161128，不合格部分保留；美元买QQQ，期权仅美元。`;
   const map = {
     T1: `只买正股（${cnyFirst}最多 20% 可换成 SPY）。禁止任何期权、TQQQ、SOXL。`,
     T2: vxnGate.blocked
@@ -578,7 +579,8 @@ export function evaluate(input) {
   const qqq = statsFromMarket(qqqMarket, round.referenceHighs?.QQQ);
   const now = input.now || new Date();
   const closeDataPending = !!input.expectedCloseDate && qqq.sessionDates.at(-1) !== input.expectedCloseDate;
-  const touchMarket = equityTouchMarket(qqqMarket, input.cnyProxy, input.expectedCloseDate, now);
+  const selectedProxy = input.cnyFunds ? selectCnyFunds(input.cnyFunds, now).find((row) => !row.blocked) : null;
+  const touchMarket = equityTouchMarket(qqqMarket, selectedProxy ? input.cnyFunds[selectedProxy.symbol] : input.cnyProxy, input.expectedCloseDate, now);
   const tqqq = statsFromMarket(input.tqqq || {}, round.referenceHighs?.TQQQ);
   const soxl = statsFromMarket(input.soxl || {}, round.referenceHighs?.SOXL);
   const spy = statsFromMarket(input.spy || {});
@@ -808,7 +810,7 @@ export function evaluate(input) {
   const lots = (input.lots || []).map((lot) => {
     const isCall = lot.type === 'call';
     const under = (lot.symbol || 'QQQ').replace(/\d.*/, '') || 'QQQ';
-    const eq = lot.symbol === CNY_EQUITY_PROXY ? statsFromMarket(input.cnyProxy || {})
+    const eq = CNY_FUNDS[lot.symbol] ? statsFromMarket(input.cnyFunds?.[lot.symbol] || (lot.symbol === CNY_EQUITY_PROXY ? input.cnyProxy : {}) || {})
       : under === 'TQQQ' ? tqqq : under === 'SOXL' ? soxl : under === 'SPY' ? spy : qqq;
     return evaluateLot(lot, {
       now: input.now || new Date(),
@@ -872,6 +874,10 @@ export function evaluate(input) {
     cashCny,
     usdCnyRate,
     cnyProxy,
+    cnyFunds: input.cnyFunds,
+    cnyFundStats: input.cnyFunds ? Object.fromEntries(Object.entries(input.cnyFunds).map(([s, q]) => [s,
+      { ...statsFromMarket(q || {}), premiumStatus: premiumStatus(q, now) }])) : null,
+    now: input.now || new Date(),
     vxnGates: { t2: vxnPass(vxn, 25), t3: vxnPass(vxn, 32) },
     qqq,
     closeDataPending,
@@ -922,7 +928,7 @@ function equityLeg(symbol, usd, price, note, pct, extras = {}) {
   const currency = extras.currency || 'USD';
   const cny = extras.cny != null ? roundMoney(extras.cny) : null;
   let shares = 0;
-  if (currency === 'CNY' && cny != null && px > 0) shares = symbol === CNY_EQUITY_PROXY
+  if (currency === 'CNY' && cny != null && px > 0) shares = CNY_FUNDS[symbol]
     ? Math.floor(cny / px / 100) * 100 : Math.floor(cny / px);
   else if (px > 0) shares = Math.floor(budget / px);
   const estNotional = currency === 'CNY' && cny != null
@@ -1003,7 +1009,7 @@ function reserveOptionUsd(wallet, optionUsd) {
   return opt;
 }
 
-function appendEquityFromWallet(legs, wallet, { equityUsd, pct, note, spot, proxyPrice }) {
+function appendEquityFromWallet(legs, wallet, { equityUsd, pct, note, spot, proxyPrice, cnyFunds, now }) {
   const need = roundMoney(Math.max(0, Number(equityUsd) || 0));
   if (need <= 0) return { cnyUsd: 0, usdUsd: 0, cnyAmount: 0 };
   const plan = planEquityCurrencySpend({
@@ -1020,7 +1026,17 @@ function appendEquityFromWallet(legs, wallet, { equityUsd, pct, note, spot, prox
 
   if (plan.cnyUsd > 0) {
     const subPct = need > 0 ? Math.max(1, Math.round((plan.cnyUsd / need) * pct)) : pct;
-    legs.push(equityLeg(
+    if (cnyFunds) {
+      for (const row of routeCnyBudget(plan.cnyAmount, plan.cnyUsd, cnyFunds, new Date(now))) {
+        const leg = equityLeg(row.symbol, row.usd, row.price, `${note}；${row.note}`, subPct * row.weight,
+          { currency: 'CNY', cny: row.cny });
+        Object.assign(leg, { name: row.name || CNY_FUNDS[row.symbol].name,
+          cnyPolicyVersion: 1, routeBlocked: row.blocked, routeInfo: row.note,
+          skipped: row.blocked, reason: row.reason, selection: row.selection });
+        if (row.blocked) leg.shares = 0;
+        legs.push(leg);
+      }
+    } else legs.push(equityLeg(
       CNY_EQUITY_PROXY,
       plan.cnyUsd,
       proxyPrice,
@@ -1111,7 +1127,7 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
   if ((ev.sameDaySkip || []).length) {
     notes.push(`同一天只执行最深档 ${primary.tier}，其余已触发档跳过。`);
   }
-  notes.push(`正股：人民币优先买 ${CNY_EQUITY_PROXY}，再用美元买 QQQ；期权只用美元。`);
+  notes.push(`正股：159509参考溢价≤25%时买入；超过25%改为513850/161128各50%，替代标的上限10%，不合格部分保留；美元买QQQ，期权只用美元。`);
 
   const blocked = tier.vxnGate?.blocked && !tier.pendingClose;
   const id = tier.id;
@@ -1132,7 +1148,8 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
         pct: part.pct,
         note: part.note,
         spot,
-        proxyPrice
+        proxyPrice,
+        cnyFunds: ev.cnyFunds, now: ev.now
       });
     }
     for (const c of deferredCalls) {
@@ -1317,6 +1334,7 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
     }
   }
   const cashPlan = summarizeCashPlan(legs, startWallet);
+  for (const leg of legs.filter((row) => row.currency === 'CNY' && row.routeInfo)) notes.push(leg.routeInfo);
   const checklist = [
     `H = ${ev.qqq?.H != null ? ev.qqq.H.toFixed(3) : '—'}，${id} 触发价 ${tier.triggerPrice != null ? tier.triggerPrice.toFixed(3) : '—'}${tier.intradayPrice ? ` / 盘中 ${tier.intradayPrice.toFixed(3)}` : ''}`,
     `弹药 B = $${Number(ev.B || 0).toFixed(2)}，本档预算 $${totalUsd.toFixed(2)}（${formatPctB(tier.pctB)}%B）`,

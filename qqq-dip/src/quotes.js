@@ -4,6 +4,7 @@ import { latestCompletedSession, nyParts } from './market-hours.js';
 import { expectedVxnSession, parseVxnClose } from './vxn-session.js';
 import { createSentimentLoader } from './market-sentiment.js';
 import { createCboeChainLoader } from './option-chain.js';
+import { createCnyFundLoader } from './cny-fund-quotes.js';
 const CANDLE_CACHE = new Map();
 const QUOTE_CACHE = new Map();
 const QUOTE_CACHE_MS = 30000;
@@ -52,6 +53,7 @@ function mapQuote(sym, q) {
 }
 
 export function createQuoteService(config) {
+  const getCnyFundQuote = createCnyFundLoader(fetchJson, fetchText, getCnyProxyQuote);
   const getCboeChain = createCboeChainLoader(fetchJson);
   let polygonOptionsRetryAt = 0;
   let polygonOptionsError = 'Polygon 期权接口暂不可用';
@@ -609,17 +611,19 @@ export function createQuoteService(config) {
     } catch (e) {
       errors.VXN = e.message;
     }
+    await Promise.all(['159509', '513850', '161128'].map(async (symbol) => {
     try {
-      out[CNY_EQUITY_PROXY_SYMBOL] = await getCnyProxyQuote();
+      out[symbol] = await getCnyFundQuote(symbol);
       try {
-        out[CNY_EQUITY_PROXY_SYMBOL].candles = await getCnyHistory();
+        out[symbol].candles = await getCnyHistory(symbol);
       } catch (e) {
-        out[CNY_EQUITY_PROXY_SYMBOL].historyError = '历史行情不可用';
-        errors[CNY_EQUITY_PROXY_SYMBOL] = `历史行情不可用（${e.message}）`;
+        out[symbol].historyError = '历史行情不可用';
+        errors[symbol] = `历史行情不可用（${e.message}）`;
       }
     } catch (e) {
-      errors[CNY_EQUITY_PROXY_SYMBOL] = e.message;
+      errors[symbol] = e.message;
     }
+    }));
     out.sentiment = await sentiment;
     return { markets: out, errors };
   }
@@ -630,6 +634,7 @@ export function createQuoteService(config) {
     getVxn,
     getUsdCny,
     getCnyProxyQuote,
+    getCnyFundQuote,
     getOptionSnapshot,
     searchLeapCalls,
     getMarketBundle,

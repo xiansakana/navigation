@@ -12,7 +12,7 @@ const SYMBOLS = ['QQQ', 'TQQQ', 'SOXL', 'SPY'];
 function alertMarket(ev, alert) {
   const symbol = alert?.symbol || 'QQQ';
   const key = symbol.toLowerCase();
-  return { symbol, stats: ev?.[key] || ev?.qqq };
+  return { symbol, stats: ev?.cnyFundStats?.[symbol] || ev?.[key] || ev?.qqq };
 }
 
 export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = publishBusinessEvent, stageTimeoutMs = 240000, tickTimeoutMs = 300000 }) {
@@ -121,6 +121,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
           vxn: markets.VXN,
           sentiment: markets.sentiment,
           cnyProxy: markets['159509'],
+          cnyFunds: Object.fromEntries(['159509', '513850', '161128'].map((s) => [s, markets[s]])),
           lots, suggestedContracts
         });
       };

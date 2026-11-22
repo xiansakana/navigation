@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { cnMarketStatus } from './cn-market-hours.js';
 import { isRth, nyParts } from './market-hours.js';
+import { CNY_FUNDS, validateCnyLeg } from './cny-routing.js';
 
 export function canExecutePlan(encodedPermissions) {
   try {
@@ -100,9 +101,13 @@ export function prepareExecution(plan, body, evaluation, cash, now = new Date())
       }
       if (leg.symbol === 'QQQ' && price > tier.triggerPrice) throw new Error('QQQ 实际成交价高于盘中触发价');
     }
-    if (leg.symbol === '159509') {
-      if (!cnMarketStatus(time).open) throw new Error('159509 成交时间须在已维护的A股常规交易时段');
-      if (shares % 100) throw new Error('159509 买入数量须为100份整数倍');
+    if (CNY_FUNDS[leg.symbol] && leg.kind === 'equity') {
+      if (!cnMarketStatus(time).open) throw new Error(`${leg.symbol} 成交时间须在已维护的A股常规交易时段`);
+      if (shares % 100) throw new Error(`${leg.symbol} 买入数量须为100份整数倍`);
+      if (evaluation.cnyFunds) {
+        const checked = validateCnyLeg(leg, evaluation.cnyFunds, now, price);
+        if (cnMarketStatus(now).open && now - Date.parse(checked.asOf) > 120000) throw new Error('人民币行情超过两分钟，请刷新后再核对');
+      }
     }
     if (leg.currency === 'USD' && !isRth(time)) throw new Error('美元腿成交时间须在美股常规交易时段（暂不支持盘前盘后）');
     if (leg.kind === 'call' && (tier.closeConfirmed === false || tier.vxnGate?.blocked

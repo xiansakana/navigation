@@ -61,7 +61,7 @@ export function applyDipCashRules(db, userId, payload, before, options = {}) {
       if (trade.historicalBackfill) throw new Error('补录历史交易不能使用抄底专用资金');
       if (trade.account_id !== fund || !reserveRows.some((r) => r.account_id === fund)) throw new Error('策略资金来源与证券账户不匹配');
       trade.dip_fund_account = fund;
-      if (trade.type === 'buy' && trade.symbol === '159509' && Number(trade.shares) % 100 !== 0) throw new Error('159509 抄底买入须为100份整数倍');
+      if (trade.type === 'buy' && ['159509', '513850', '161128'].includes(trade.symbol) && Number(trade.shares) % 100 !== 0) throw new Error(`${trade.symbol} 抄底买入须为100份整数倍`);
       if (!old && !effective(trade)) throw new Error('策略成交必须晚于账户现金基准，历史补录请先核对资金归属');
     }
     return trade;

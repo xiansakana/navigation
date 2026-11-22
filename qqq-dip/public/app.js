@@ -456,7 +456,7 @@ function renderPrimary() {
   }
   const prohib = (p.prohibitions || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
   const previewHint = preview?.available && canViewLotMoney()
-    ? `<p class="hint">本档预算 ${fmtUsd(preview.totalUsd)}；拟用 ${fmtUsd(preview.cashPlan?.useUsd ?? preview.totalUsd)} + ${fmtCny(preview.cashPlan?.useCny || 0)}（正股优先 159509）。QQQ ${preview.spot?.toFixed(3) ?? '—'} · 159509 ${preview.proxyPrice != null ? preview.proxyPrice.toFixed(3) : '—'}。点「预览买入」查看拆单。</p>`
+    ? `<p class="hint">本档预算 ${fmtUsd(preview.totalUsd)}；拟用 ${fmtUsd(preview.cashPlan?.useUsd ?? preview.totalUsd)} + ${fmtCny(preview.cashPlan?.useCny || 0)}（人民币按25%/10%溢价规则选券）。QQQ ${preview.spot?.toFixed(3) ?? '—'} · 159509 ${preview.proxyPrice != null ? preview.proxyPrice.toFixed(3) : '—'}。点「预览买入」查看拆单。</p>`
     : (preview?.reason ? `<p class="hint">${escapeHtml(preview.reason)}</p>` : '');
   $('#primary-rec').innerHTML = `
     <h3>${escapeHtml(p.title)}</h3>
@@ -479,10 +479,10 @@ function legRow(leg) {
     return `<tr>
       <td>正股${isCny ? '·CNY' : '·USD'}</td>
       <td>${escapeHtml(leg.symbol)}</td>
-      <td>买入</td>
+      <td>${leg.routeBlocked ? '保留预算' : '买入'}</td>
       <td>${leg.pct}%</td>
       <td>${budget}</td>
-      <td>${qty}</td>
+      <td>${leg.routeBlocked ? '0 股（待条件满足）' : qty}</td>
       <td>${ref}</td>
       <td>${escapeHtml(leg.note || '')}</td>
     </tr>`;
@@ -605,7 +605,7 @@ function openPlanFillModal(tierId) {
     <p class="hint">当前计划预算 ${maskMoney(fmtUsd(plan.totalUsd))}（含期权预算顺延调整）。</p>
     <p class="hint">${escapeHtml(state.evaluation?.cnMarket?.label || '等待A股交易时段')}。这里只补记券商实际成交，不自动下单。未填写数量的交易腿保持待执行。</p>
     <p class="hint">不设固定截止时间；当前策略条件仍满足时可继续分批成交。仍须在对应市场交易时段登记真实成交；取消不撤销已成交持仓。</p>
-    ${waitingClose ? '<p class="hint">期权待收盘确认。盘中正股须在对应市场开盘、现价仍达标时登记；159509 须复核当前价格、溢价和停牌状态。已成交但超出策略条件的交易可在持仓页如实补记。</p>' : ''}
+    ${waitingClose ? '<p class="hint">期权待收盘确认。盘中正股须在对应市场开盘、现价仍达标时登记；人民币标的须复核当前价格、参考溢价和停牌状态。已成交但超出策略条件的交易可在持仓页如实补记。</p>' : ''}
     <p class="hint" id="fill-quote-status">正在获取各腿最新报价并估算数量；预填值不是实际成交，请核对后手动修改。本次仅登记所选资金池同币种的交易腿。</p>
     <label class="field">实际成交时间（本机时区）<input id="fill-time" type="datetime-local" step="1"></label>
     <label class="field">本次成交所属抄底资金池<select id="fill-account"><option value="">请选择同币种证券账户</option>${(state.cash?.strategyFunds || []).map((f) => `<option value="${escapeHtml(f.accountId)}">${escapeHtml(f.name)} · ${f.currency} · 策略可用 ${maskMoneyText(String(f.strategyAvailable))} · 缺口 ${maskMoneyText(String(f.deficit))}</option>`).join('')}</select></label>
@@ -614,15 +614,17 @@ function openPlanFillModal(tierId) {
       <legend>${escapeHtml(leg.occSymbol || leg.symbol)} · ${leg.budgetCarryOut ? '已顺延' : leg.complete ? '已完成' : leg.spent > 0 ? '部分成交' : '待执行'} · ${escapeHtml(leg.currency)} 已用 ${maskMoneyText(String(leg.spent))} · 按当前策略条件复核</legend>
       ${leg.budgetCarryOut ? `<p class="hint">已将 ${maskMoney(fmtUsd(leg.budgetCarryOut.usd))} 顺延到 ${escapeHtml(leg.budgetCarryOut.tier)} 的同类期权。</p>` : ''}
       ${leg.budgetCarryIns?.length ? `<p class="hint">合并后期权预算 ${maskMoney(fmtUsd(leg.usd))}，含 ${leg.budgetCarryIns.map((entry) => `${escapeHtml(entry.tier)} 顺延 ${maskMoney(fmtUsd(entry.usd))}`).join('、')}。</p>` : ''}
-      <label class="field">本次实际数量（期权填张数）<input data-qty type="number" min="0" step="${leg.symbol === '159509' ? '100' : '1'}"></label>
+      <label class="field">本次实际数量（期权填张数）<input data-qty type="number" min="0" step="${['159509', '513850', '161128'].includes(leg.symbol) ? '100' : '1'}"></label>
       <label class="field">实际成交单价<input data-price type="number" min="0" step="0.001"></label>
       <label class="field">本次费用<input data-fee type="number" min="0" step="0.01" value="0"></label>
       <p class="hint" data-quote-info>${leg.pendingOption ? `期权待用预算 ${maskMoney(fmtUsd(leg.usd))}。有有效报价且不足一张时，可顺延到同袋后续符合条件的同类期权。` : ''}</p>
       <label><input data-complete type="checkbox">此腿已全部完成（不再补单）</label>
     </fieldset>`).join('')}
-    <label><input id="fill-review" type="checkbox">已复核当前信号、159509 最新报价/停牌/溢价及真实成交；不使用昨夜估价</label>
+    <p class="hint">人民币规则：159509 参考溢价超过25%切换513850/161128各50%，替代标的分别不得超过10%；按已公布净值计算，非实时IOPV。部分不合格时保留对应预算。已有成交不迁移；需要切换时使用下方按钮更新未成交部分。</p>
+    <label><input id="fill-review" type="checkbox">已复核当前信号、人民币标的最新报价/停牌/参考溢价及真实成交；不使用昨夜估价</label>
     <div class="sm-modal-actions"><button class="btn ghost" data-close>关闭</button>
       <button class="btn ghost" id="plan-cancel">取消剩余计划</button>
+      ${can('cny-routing', 'edit') && canStock('dip-spend', 'edit') && !plan.cancelled ? '<button class="btn ghost" id="plan-refresh-cny">更新未成交人民币标的</button>' : ''}
       <button class="btn primary" id="fill-save" ${canStock('dip-spend', 'edit') ? '' : 'hidden'}>登记本次成交</button></div>`, 'sm-modal--plan');
   const modal = $('#fill-quote-status').closest('.sm-modal') || $('#fill-quote-status').parentElement;
   const rows = [...modal.querySelectorAll('[data-fill-leg]')];
@@ -633,7 +635,7 @@ function openPlanFillModal(tierId) {
     const price = Number(row.querySelector('[data-price]').value);
     const fee = Number(row.querySelector('[data-fee]').value || 0);
     const budget = Math.max(0, Number(leg.currency === 'CNY' ? leg.cny : leg.usd) - Number(leg.spent || 0) - fee);
-    const lot = leg.symbol === '159509' ? 100 : 1;
+    const lot = ['159509', '513850', '161128'].includes(leg.symbol) ? 100 : 1;
     const multiplier = leg.kind === 'call' ? 100 : 1;
     qty.value = price > 0 ? Math.max(0, Math.floor(budget / (price * multiplier * lot) + 1e-10) * lot) : '';
   };
@@ -682,6 +684,14 @@ function openPlanFillModal(tierId) {
       $('#modal-root').innerHTML = ''; applyState(data);
     } catch (error) { toast('error', error.message); }
   });
+  $('#plan-refresh-cny')?.addEventListener('click', async (event) => {
+    event.target.disabled = true;
+    try {
+      const data = await api('/actions', { method: 'POST', body: { type: 'execute', operation: 'refresh-cny', tier: tierId, planId: plan.id } });
+      $('#modal-root').innerHTML = ''; applyState(data);
+      await openExecModal(tierId);
+    } catch (error) { toast('error', error.message); event.target.disabled = false; }
+  });
 }
 
 function planLabel(plan) {
@@ -695,7 +705,7 @@ function sleeveBySymbol(symbol) {
 }
 
 function nextLevelHint(label, stats) {
-  if (label === '159509') {
+  if (['159509', '513850', '161128'].includes(label)) {
     return `${stats?.H ? `自身 H ${stats.H.toFixed(3)}（近60根日线）` : '自身 H — · 历史行情不可用'} · 梯度按 QQQ 触发`;
   }
   if (!stats?.H) return '—';
@@ -741,7 +751,7 @@ function symbolRow(label, stats) {
     <td>${stats.price != null ? stats.price.toFixed(3) : '—'}</td>
     <td class="${pctClass(stats.changePercent)}">${fmtPct(stats.changePercent)}</td>
     <td class="${pctClass(stats.drawdownLive)}">${fmtPct(stats.drawdownLive)}</td>
-    <td>${nextLevelHint(label, stats)}</td>
+    <td>${nextLevelHint(label, stats)}${stats.premiumStatus ? `<div class="hint">${stats.premiumStatus.valid ? `参考溢价 ${stats.premiumStatus.premium.toFixed(2)}% · 净值日期 ${escapeHtml(stats.premiumStatus.navDate)}` : escapeHtml(stats.premiumStatus.reason)} · 非实时IOPV</div>` : ''}</td>
   </tr>`;
 }
 
@@ -749,7 +759,9 @@ function renderSymbols() {
   const ev = state.evaluation || {};
   const rows = [symbolRow('QQQ', ev.qqq)];
   if (state.settings?.showSpy !== false) rows.push(symbolRow('SPY', ev.spy));
-  if (ev.cnyProxy) rows.push(symbolRow('159509', ev.cnyProxy));
+  if (ev.cnyFundStats) {
+    for (const s of ['159509', '513850', '161128']) rows.push(symbolRow(s, ev.cnyFundStats[s]));
+  } else if (ev.cnyProxy) rows.push(symbolRow('159509', ev.cnyProxy));
   rows.push(symbolRow('TQQQ', ev.tqqq));
   if (state.settings?.soxlEnabled) rows.push(symbolRow('SOXL', ev.soxl));
   $('#symbol-table tbody').innerHTML = rows.join('');

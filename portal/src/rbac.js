@@ -113,6 +113,7 @@ var QQQ_DIP_FEATURES = [
     { feature: 'lots-edit', name: '登记/删除仓位', action: 'edit', permissionPath: ['抄底监控', '资金与仓位'] },
     { feature: 'settings', name: '规则开关', action: 'edit', permissionPath: ['抄底监控', '规则执行'] },
     { feature: 'tier-exec', name: '登记分腿实际成交/取消待执行计划', action: 'edit', permissionPath: ['抄底监控', '规则执行'] },
+    { feature: 'cny-routing', name: '调整未成交人民币抄底标的', action: 'edit', permissionPath: ['抄底监控', '规则执行'] },
     { feature: 'actions', name: '查看操作记录', action: 'view', permissionPath: ['抄底监控', '操作记录'] },
     { feature: 'actions-note', name: '手动记一笔', action: 'edit', permissionPath: ['抄底监控', '操作记录'] },
     { feature: 'tab-qq', name: '进入 QQ 提醒', action: 'view', permissionPath: ['QQ 提醒'] },

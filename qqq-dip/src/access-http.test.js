@@ -58,6 +58,8 @@ test('the portfolio owner still needs feature permissions for QQQ endpoints and 
       assert.equal((await request(route, view, method, method === 'GET' ? undefined : {})).status, 403, route);
     }
     const note = [...view, 'service:qqq-dip:actions-note:edit'];
+    const executeOnly = [...view, 'service:qqq-dip:tier-exec:edit'];
+    assert.equal((await request('/actions', executeOnly, 'POST', { type: 'execute', operation: 'refresh-cny', tier: 'T2' })).status, 403);
     assert.equal((await request('/actions', note, 'POST', { type: 'sell' })).status, 403);
     assert.equal((await request('/actions', note, 'POST', { legs: [{ side: 'sell' }] })).status, 403);
     assert.equal((await request('/actions', note, 'POST', { message: 'fixture note' })).status, 200);

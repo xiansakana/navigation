@@ -1,6 +1,7 @@
 import { buildBuyPreview } from './playbook.js';
 import { cnMarketStatus } from './cn-market-hours.js';
 import { isRth } from './market-hours.js';
+import { CNY_FUNDS, validateCnyLeg } from './cny-routing.js';
 
 export function alertMarketOpen(market, now = new Date()) {
   return market === 'CN' ? cnMarketStatus(now).open : isRth(now);
@@ -21,9 +22,12 @@ export function marketAlertRoutes(ev, round, alert, now = new Date()) {
     const plan = round.executionPlans?.[tierId];
     if (plan?.cancelled || plan?.inFlight) return [];
     const preview = plan || buildBuyPreview({ ...ev, primary: { ...ev.primary, tier: tierId } }, ev.suggestedContracts);
-    const legs = (preview.legs || []).filter((leg) => !leg.complete && !leg.pendingOption && !leg.skipped
+    const legs = (preview.legs || []).filter((leg) => !leg.complete && !leg.pendingOption && (!leg.skipped || leg.cnyPolicyVersion)
       && (leg.kind !== 'call' || !tier.vxnGate?.blocked)
-      && Number(leg.currency === 'CNY' ? leg.cny : leg.usd) > Number(leg.spent || 0));
+      && Number(leg.currency === 'CNY' ? leg.cny : leg.usd) > Number(leg.spent || 0)).filter((leg) => {
+        if (!ev.cnyFunds || !CNY_FUNDS[leg.symbol]) return true;
+        try { validateCnyLeg(leg, ev.cnyFunds, now); return true; } catch { return false; }
+      });
     return (alert.optionReady ? ['US'] : ['CN', 'US']).flatMap((market) => {
       const matched = legs.filter((leg) => (leg.currency === 'CNY' ? 'CN' : 'US') === market);
       return matched.length ? [{ market, symbols: [...new Set(matched.map((leg) => leg.symbol))] }] : [];

@@ -182,7 +182,7 @@ export function legsToTradeInputs(legs = [], extras = {}) {
     out.push({
       type: side,
       symbol,
-      name: leg.name || (symbol === '159509' ? '纳指科技ETF景顺' : symbol),
+      name: leg.name || ({ '159509': '纳指科技ETF景顺', '513850': '美国50ETF易方达', '161128': '标普信息科技LOF' }[symbol] || symbol),
       currency,
       shares,
       price,
