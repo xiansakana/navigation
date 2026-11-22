@@ -28,3 +28,16 @@ test('only new cash-bearing rows can be selected, across preview pages, and stal
   assert.deepEqual(decodeImportHistory(Buffer.concat([header, meta, file]), true), { file, selection: only });
   assert.throws(() => decodeImportHistory(Buffer.concat([header, meta]), true), /补录选择数据无效/);
 });
+
+test('mixed account previews bind historical selections to both accounts and cash baselines', () => {
+  const rows = [{ account_id: 'usd', type: 'buy' }, { account_id: 'hkd', type: 'sell' }, { account_id: 'foreign', type: 'buy' }];
+  const accounts = [{ id: 'usd', baseline_at: '2026-10-01' }, { id: 'hkd', baseline_at: '2026-11-01' }];
+  const file = Buffer.from('mixed pdf batch');
+  const plan = importHistoryPlan(file, rows, accounts, 'merge');
+  const selection = { snapshot: plan.snapshot, all: true, indexes: [] };
+  assert.deepEqual([...selectHistoricalImports(plan, selection)], [0, 1]);
+  const changed = [accounts[0], { ...accounts[1], baseline_at: '2026-11-02' }];
+  assert.throws(() => selectHistoricalImports(importHistoryPlan(file, rows, changed, 'merge'), selection), /重新预览/);
+  const reassigned = [{ ...rows[0], account_id: 'hkd' }, ...rows.slice(1)];
+  assert.throws(() => selectHistoricalImports(importHistoryPlan(file, reassigned, accounts, 'merge'), selection), /重新预览/);
+});

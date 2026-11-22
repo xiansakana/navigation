@@ -15,17 +15,23 @@ export function decodeImportHistory(body, encoded) {
 }
 
 export function importHistoryPlan(file, rows, account, mode) {
-  const enabled = !!account && mode === 'merge';
+  const multiple = Array.isArray(account);
+  const byId = multiple ? new Map(account.map(row => [row.id, row])) : null;
   const eligible = new Set();
   const actions = rows.map((row, index) => {
     const action = row.importAction || 'added';
+    const enabled = mode === 'merge' && (multiple ? byId.has(row.account_id) : !!account);
     if (enabled && action === 'added' && !row.reinvestedDividend && ['buy', 'sell', 'other'].includes(row.type)
       && !row.historicalBackfill) eligible.add(index);
-    return [action, eligible.has(index), row.broker_order_key, row.symbol, row.type, row.trade_date,
+    const entry = [action, eligible.has(index), row.broker_order_key, row.symbol, row.type, row.trade_date,
       row.cash_effective_at, row.shares, row.price, row.total_amount, row.commission, row.other_category];
+    if (multiple) entry.push(row.account_id);
+    return entry;
   });
+  const accountSnapshot = row => [row?.id, row?.baseline_at, row?.bookkeeping_id];
+  const scope = multiple ? [account.map(accountSnapshot)] : accountSnapshot(account);
   const snapshot = createHash('sha256').update(file)
-    .update(JSON.stringify([account?.id, account?.baseline_at, account?.bookkeeping_id, mode, actions])).digest('hex');
+    .update(JSON.stringify([...scope, mode, actions])).digest('hex');
   return { eligible, snapshot };
 }
 

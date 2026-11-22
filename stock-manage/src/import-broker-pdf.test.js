@@ -32,11 +32,17 @@ function textPdf(lines) {
   return Buffer.from(pdf);
 }
 
+function batchPdf(...files) {
+  return Buffer.concat([Buffer.from('STOCKPDF1\n'), ...files.flatMap(file => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(file.length);
+    return [length, file];
+  })]);
+}
+
 test('batch extracts real PDF text, validates settlement fees, and deduplicates the same document', async () => {
   const pdf = textPdf(stockNote);
-  const length = Buffer.alloc(4);
-  length.writeUInt32BE(pdf.length);
-  const batch = Buffer.concat([Buffer.from('STOCKPDF1\n'), length, pdf, length, pdf]);
+  const batch = batchPdf(pdf, pdf);
   const rows = await parseBrokerPdf(batch);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].symbol, '03170.HK');
@@ -45,6 +51,18 @@ test('batch extracts real PDF text, validates settlement fees, and deduplicates 
   assert.equal(rows.pdfImportInfo.sourceCount, 2);
   assert.equal(rows.pdfImportInfo.excluded[0].count, 1);
   await assert.rejects(parseBrokerPdf(batch.subarray(0, -1)), /不完整/);
+});
+
+test('recognizes USD and HKD in one batch while keeping one source account per currency', async () => {
+  const hk = textPdf(stockNote);
+  const us = textPdf(stockNote.map(line => line.replace('03170', 'TSLA').replace('HKD', 'USD')
+    .replace('ZATEST', 'ANOTHER-US-ACCOUNT').replace('TEST-0199', 'TEST-0200')));
+  const rows = await parseBrokerPdf(batchPdf(hk, us));
+  assert.deepEqual(rows.pdfImportInfo.currencies, ['HKD', 'USD']);
+  assert.equal(rows.find(row => row.symbol === '03170.HK').currency, 'HKD');
+  assert.equal(rows.find(row => row.symbol === 'TSLA').currency, 'USD');
+  const otherHk = textPdf(stockNote.map(line => line.replace('ZATEST', 'DIFFERENT-HK-ACCOUNT').replace('TEST-0199', 'TEST-0201')));
+  await assert.rejects(parseBrokerPdf(batchPdf(hk, otherHk)), /HKD 单据属于不同的券商账户/);
 });
 
 test('Chief supports displaced quote fields and validates the explicit fee subtotal', () => {

@@ -624,16 +624,30 @@ app.delete('/api/trades/:id', (req, res) => {
 
 function brokerImportPlan(req, trades, data) {
   if (trades.pdfImportInfo) {
-    const { currency, ...info } = trades.pdfImportInfo;
-    const account = importAccount(req);
-    if (!account || (currency && account.currency !== currency)) {
-      throw new Error(`请选择本人名下${currency ? '同为 ' + currency + ' 币种的' : '的'}证券账户`);
+    const { currencies, ...info } = trades.pdfImportInfo;
+    const owned = investmentRows(portfolioDb, currentPortfolioUserId());
+    const accounts = [], missingCurrencies = [];
+    for (const cur of currencies) {
+      const id = req.query[cur === 'USD' ? 'usdAccountId' : 'hkdAccountId'] || req.query.accountId;
+      const account = owned.find(row => row.id === id && row.currency === cur);
+      if (account) accounts.push(account);
+      else missingCurrencies.push(cur);
     }
-    const plan = mergeBbaeTrades(data.trades, trades, account.id, {
-      matchManualTrade: matchesPdfTrade,
-      combineTrade: combinePdfTrade
-    });
-    return { ...plan, summary: { ...plan.summary, ...info } };
+    const summary = { ...info, currencies, missingCurrencies, added: 0, updated: 0, skipped: 0, unassigned: 0 };
+    const preview = [];
+    let merged = data.trades;
+    if (missingCurrencies.length) return { accounts, summary, preview, trades: merged };
+    for (const account of accounts) {
+      const plan = mergeBbaeTrades(merged, trades.filter(row => row.currency === account.currency), account.id, {
+        matchManualTrade: matchesPdfTrade,
+        combineTrade: combinePdfTrade
+      });
+      merged = plan.trades;
+      preview.push(...plan.preview);
+      for (const key of ['added', 'updated', 'skipped', 'unassigned']) summary[key] += plan.summary[key] || 0;
+    }
+    preview.sort((a, b) => Date.parse(a.trade_date) - Date.parse(b.trade_date) || a.id.localeCompare(b.id));
+    return { accounts, summary, preview, trades: merged };
   }
   if (trades.fundImportInfo) {
     const account = investmentRows(portfolioDb, currentPortfolioUserId()).find(a => a.id === req.query.accountId && a.currency === 'CNY');
@@ -753,7 +767,7 @@ app.post('/api/trades/import/preview', express.raw({
     await fillImportedNames(trades, data);
     const plan = isBrokerImport(trades) ? brokerImportPlan(req, trades, data) : null;
     const rows = plan?.preview || trades;
-    const history = importHistoryPlan(buf, rows, importAccount(req), plan ? 'merge' : String(req.query.mode || 'merge'));
+    const history = importHistoryPlan(buf, rows, plan?.accounts ?? importAccount(req), plan ? 'merge' : String(req.query.mode || 'merge'));
     const pageSize = 50;
     const pages = Math.max(1, Math.ceil(rows.length / pageSize));
     const page = Math.min(pages, Math.max(1, Math.trunc(Number(req.query.page) || 1)));
@@ -789,21 +803,26 @@ app.post('/api/trades/import', express.raw({
       const broker = isBrokerImport(imported);
       if (broker && mode !== 'merge') throw new Error('券商导出可能只含部分日期，请使用合并模式，避免删除其他交易');
       const plan = broker ? brokerImportPlan(req, imported, data) : null;
+      if (plan?.summary.missingCurrencies?.length) {
+        throw new Error(`请选择本人名下 ${plan.summary.missingCurrencies.join('、')} 对应币种的证券账户`);
+      }
       if (plan?.summary.unassigned) throw new Error('存在可能重复的未归属历史，请先核对并设置账户归属，未导入');
       if (plan?.summary.updated && req.query.allowUpdates !== '1') throw new Error('存在待更新记录，请先预览并明确勾选允许更新匹配记录');
       const rows = plan?.preview || imported;
-      const indexes = selection ? selectHistoricalImports(importHistoryPlan(file, rows, account, mode), selection) : new Set();
-      const selected = [...indexes].map(i => rows[i]);
+      const historyAccounts = plan?.accounts ?? account;
+      const indexes = selection ? selectHistoricalImports(importHistoryPlan(file, rows, historyAccounts, mode), selection) : new Set();
+      const selected = [...indexes].map(i => rows[i].account_id ? rows[i] : { ...rows[i], account_id: account?.id });
       const ids = new Set(selected.map(row => row.id));
       const next = imported.map(t => req.query.accountId ? { ...t, account_id: req.query.accountId } : t);
       const base = mode === 'replace' ? req.query.accountId ? data.trades.filter(t => t.account_id !== req.query.accountId) : [] : data.trades;
       const merged = plan?.trades || base.concat(next);
       const trades = ids.size ? merged.map(t => ids.has(t.id) ? { ...t, historicalBackfill: true } : t) : merged;
-      return { data, trades, selected, account, importSummary: plan?.summary };
+      const linkedAccounts = new Set((plan?.accounts ?? [account]).filter(row => row?.bookkeeping_id).map(row => row.id));
+      return { data, trades, selected, linkedAccounts, importSummary: plan?.summary };
     };
     let result = build();
-    const needed = result.account?.bookkeeping_id ? [...new Set(result.selected.filter(t => t.type !== 'other')
-      .map(t => t.symbol).filter(s => !(result.data.quotes[s]?.price > 0)))] : [];
+    const needed = [...new Set(result.selected.filter(t => t.type !== 'other' && result.linkedAccounts.has(t.account_id))
+      .map(t => t.symbol).filter(s => !(result.data.quotes[s]?.price > 0)))];
     if (needed.length) {
       const fetched = await mapWithConcurrency(needed, 4, async symbol => [symbol, await quotes.getQuote(symbol).catch(() => null)]);
       result = build();

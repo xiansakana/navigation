@@ -1335,6 +1335,11 @@ select:focus {
 .sm-modal--import .sm-modal-body { grid-template-columns: minmax(0, 1fr); }
 .sm-modal--import .sm-modal-body > *, .sm-modal--import .sm-form-grid label { min-width: 0; }
 .sm-modal--import .sm-form-grid [hidden] { display: none; }
+.sm-import-currency-accounts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+    gap: 12px;
+}
 .sm-import-dropzone {
     padding: 16px;
     border: 1px dashed var(--border);

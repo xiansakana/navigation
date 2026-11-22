@@ -285,7 +285,8 @@ export async function parseBrokerPdf(buffer, password) {
   const files = splitBatch(buffer);
   const records = new Map(), excluded = new Map(), warnings = new Set();
   const fingerprints = new Set();
-  let broker, currency, statementAccount;
+  let broker;
+  const statementAccounts = new Map();
   for (const [index, file] of files.entries()) {
     try {
       const fingerprint = createHash('sha256').update(file).digest('hex');
@@ -297,14 +298,15 @@ export async function parseBrokerPdf(buffer, password) {
       fingerprints.add(fingerprint);
       const doc = parseBrokerPdfLines(await readPdf(file, password));
       if (broker && doc.broker !== broker) throw new Error('众安和致富文件请分批上传');
-      if (statementAccount && doc.account && doc.account !== statementAccount) throw new Error('不同券商账户的单据请分批上传');
       broker = doc.broker;
-      statementAccount ||= doc.account;
       if (doc.excluded) excluded.set(doc.excluded, (excluded.get(doc.excluded) || 0) + 1);
       for (const warning of doc.warnings || []) warnings.add(warning);
       for (const trade of doc.rows || []) {
-        if (currency && trade.currency !== currency) throw new Error('美元和港币单据请按对应账户分批上传');
-        currency = trade.currency;
+        const previousAccount = statementAccounts.get(trade.currency);
+        if (previousAccount && doc.account && doc.account !== previousAccount) {
+          throw new Error(`多份 ${trade.currency} 单据属于不同的券商账户，请分批上传`);
+        }
+        if (!previousAccount || doc.account) statementAccounts.set(trade.currency, doc.account);
         const old = records.get(trade.broker_order_key);
         if (old) {
           if (JSON.stringify(old) !== JSON.stringify(trade)) throw new Error('相同交易编号的文件内容不同，请核对后只保留正确版本');
@@ -317,7 +319,8 @@ export async function parseBrokerPdf(buffer, password) {
     }
   }
   const trades = [...records.values()].sort((a, b) => a.trade_date.localeCompare(b.trade_date) || a.id.localeCompare(b.id));
-  trades.pdfImportInfo = { broker, currency, sourceCount: files.length,
+  const currencies = [...statementAccounts.keys()].sort();
+  trades.pdfImportInfo = { broker, currencies, currency: currencies.length === 1 ? currencies[0] : undefined, sourceCount: files.length,
     excluded: [...excluded].map(([reason, count]) => ({ reason, count })), warnings: [...warnings] };
   return trades;
 }

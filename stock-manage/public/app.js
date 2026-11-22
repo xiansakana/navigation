@@ -987,7 +987,7 @@ function openTradeModal(trade = {}) {
 }
 
 const importState = { buffer: null, pdf: false, count: 0, preview: [], error: null, mode: 'merge', accountId: '', summary: null, format: '',
-  page: 1, pages: 1, history: null, historicalAll: false, historicalIndexes: new Set() };
+  currencies: [], currencyAccounts: {}, page: 1, pages: 1, history: null, historicalAll: false, historicalIndexes: new Set() };
 let importQuoteSyncUntil = 0;
 
 const historicalImportCount = () => importState.historicalAll
@@ -1014,6 +1014,13 @@ function importRequestHeaders(layer) {
   const password = $('#import-pdf-password', layer).value;
   if (importState.pdf && password) headers.Password = encodeURIComponent(password);
   return headers;
+}
+
+function setImportAccountParams(params) {
+  if (importState.currencies.length > 1) {
+    if (importState.currencyAccounts.USD) params.set('usdAccountId', importState.currencyAccounts.USD);
+    if (importState.currencyAccounts.HKD) params.set('hkdAccountId', importState.currencyAccounts.HKD);
+  } else if (importState.accountId) params.set('accountId', importState.accountId);
 }
 
 const importChangeFields = {
@@ -1070,12 +1077,16 @@ function paginationTarget(form) {
 function renderImportPreviewSection() {
   if (importState.error) return `<div class="sm-error-box">${escapeHtml(importState.error)}</div>`;
   if (!importState.count && !importState.summary) return '';
+  if (importState.summary?.missingCurrencies?.length) {
+    return `<p class="hint">已识别 ${escapeHtml(importState.currencies.join('、'))} 单据。请选择 ${escapeHtml(importState.summary.missingCurrencies.join('、'))} 对应币种的证券账户继续预览。</p>`;
+  }
+  const names = new Map(importState.pdf ? (state.investmentAccounts || []).map(a => [a.id, a.name]) : []);
   const rows = importState.preview.map((t) => `
     <tr>
       <td data-label="时间">${formatLocalDateTime(t.trade_date)}</td>
       <td data-label="类型">${escapeHtml(typeLabel(t))}${t.broker_category === 'Stockback 回赠' ? '<div class="hint">Stockback 回赠</div>' : ''}${t.historicalBackfill ? '<div class="hint">历史补录</div>' : ''}</td>
       <td data-label="代码">${escapeHtml(t.symbol)}</td>
-      <td data-label="名称">${escapeHtml(t.name || '')}</td>
+      <td data-label="名称">${escapeHtml(t.name || '')}${names.has(t.account_id) ? `<div class="hint">${escapeHtml(names.get(t.account_id))} · ${escapeHtml(t.currency)}</div>` : ''}</td>
       <td data-label="数量">${t.type === 'other' ? '—' : formatQuantity(t.shares)}</td>
       <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.reinvestedDividend ? t.reinvestmentNav : t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? fundPriceDigits(t.symbol) : 3)}</td>
       <td data-label="本金">${tradeAmountLabel(t)}${Number.isFinite(t.broker_gross_dividend) ? `<div class="hint">毛息 ${fmtMoney(t.broker_gross_dividend, t.currency)} · 税 ${fmtMoney(t.broker_withholding_tax, t.currency)} · 代收费 ${fmtMoney(t.broker_dividend_fee, t.currency)}</div>` : ''}</td><td data-label="总费用">${fmtMoney(t.commission, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
@@ -1109,6 +1120,18 @@ function renderImportPreviewSection() {
 
 function bindImportModal(layer) {
   const area = $('#import-preview-area', layer);
+  const currencySelects = [...layer.querySelectorAll('[data-import-currency-account]')];
+  const syncPdfAccounts = () => {
+    const multiple = importState.currencies.length > 1;
+    $('#import-single-account-field', layer).hidden = multiple;
+    $('#import-currency-accounts', layer).hidden = !multiple;
+    if (!multiple) return;
+    const selected = (state.investmentAccounts || []).find(a => a.id === importState.accountId);
+    if (selected && !Object.hasOwn(importState.currencyAccounts, selected.currency)) {
+      importState.currencyAccounts[selected.currency] = selected.id;
+    }
+    for (const select of currencySelects) select.value = importState.currencyAccounts[select.dataset.importCurrencyAccount] || '';
+  };
   const syncHistory = () => {
     const all = $('#import-history-all', layer);
     if (!all) return;
@@ -1130,7 +1153,7 @@ function bindImportModal(layer) {
     area.inert = true;
     try {
       const params = new URLSearchParams({ page, mode: importState.mode });
-      if (importState.accountId) params.set('accountId', importState.accountId);
+      setImportAccountParams(params);
       const res = await fetch('./api/trades/import/preview?' + params + repoQuery(), {
         method: 'POST',
         headers: importRequestHeaders(layer),
@@ -1143,6 +1166,8 @@ function bindImportModal(layer) {
       importState.preview = data.preview || data.trades || [];
       importState.summary = data.summary || null;
       importState.format = data.format || '';
+      importState.currencies = data.summary?.currencies || [];
+      syncPdfAccounts();
       if (importState.history?.snapshot !== data.history?.snapshot) {
         resetHistoricalImport();
         $('#import-allow-updates', layer).checked = false;
@@ -1200,6 +1225,10 @@ function bindImportModal(layer) {
   $('#import-repo-start', layer).addEventListener('change', () => previewFile());
   $('#import-repo-baseline', layer).addEventListener('change', () => previewFile());
   $('#import-account', layer)?.addEventListener('change', async e => { importState.accountId = e.target.value; await previewFile(); });
+  currencySelects.forEach(select => select.addEventListener('change', () => {
+    importState.currencyAccounts[select.dataset.importCurrencyAccount] = select.value;
+    previewFile();
+  }));
   $('#import-pdf-password', layer).addEventListener('change', () => previewFile());
   const drop = $('#import-dropzone', layer);
   const input = $('#import-file', layer);
@@ -1211,6 +1240,9 @@ function bindImportModal(layer) {
     importState.preview = [];
     importState.summary = null;
     importState.error = null;
+    importState.currencies = [];
+    importState.currencyAccounts = {};
+    syncPdfAccounts();
     resetHistoricalImport();
     $('#import-confirm', layer).disabled = true;
     $('#import-confirm', layer).textContent = '导入';
@@ -1272,12 +1304,20 @@ function openImportModal() {
   importState.accountId = selectedAccountId === 'unassigned' ? '' : selectedAccountId;
   importState.summary = null;
   importState.format = '';
+  importState.currencies = [];
+  importState.currencyAccounts = {};
   importState.page = importState.pages = 1;
   resetHistoricalImport();
   const layer = openModal('导入交易', `
     <p class="hint">支持众安投资通知书和致富日结单 PDF，以及现有券商和应用备份 Excel。请选择对应币种的账户，更新已有记录须勾选确认。</p>
     <form id="import-form" class="sm-form-grid">
-      <label>所属证券账户<select id="import-account"><option value="">请选择账户（券商原始文件必选）</option>${(state.investmentAccounts || []).map(a => `<option value="${a.id}" ${a.id === importState.accountId ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></label>
+      <label id="import-single-account-field">所属证券账户<select id="import-account"><option value="">请选择账户（券商原始文件必选）</option>${(state.investmentAccounts || []).map(a => `<option value="${escapeHtml(a.id)}" ${a.id === importState.accountId ? 'selected' : ''}>${escapeHtml(a.name)} · ${escapeHtml(a.currency)}</option>`).join('')}</select></label>
+      <div class="sm-import-currency-accounts" id="import-currency-accounts" hidden>
+        ${[['USD', '美元'], ['HKD', '港币']].map(([currency, name]) => `<label>${name}证券账户<select data-import-currency-account="${currency}">
+          <option value="">请选择${name}账户</option>
+          ${(state.investmentAccounts || []).filter(a => a.currency === currency).map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}</option>`).join('')}
+        </select></label>`).join('')}
+      </div>
       <label>导入模式<select name="mode" id="import-mode">
         <option value="merge">合并到现有记录</option>
         <option value="replace">替换全部记录</option>
@@ -1286,7 +1326,7 @@ function openImportModal() {
       <label><input type="checkbox" id="import-repo-baseline"> 起始日利息尚未包含在核对的现金基准中（仅东方财富回购利息）</label>
       <label id="import-dropzone" class="sm-import-dropzone">
         <span>拖拽文件到这里，或点击选择</span>
-        <span class="hint">同一证券账户最多 30 份 PDF，或 1 份 Excel。整批上限 20 MB。</span>
+        <span class="hint">同一券商最多 30 份 PDF，美元和港币可同批上传。Excel 每批 1 份。整批上限 20 MB。</span>
         <input type="file" id="import-file" class="sm-file-input" aria-label="选择导入文件" accept=".pdf,.xlsx,.xls" multiple>
         <span id="import-file-status" class="hint" aria-live="polite"></span>
       </label>
@@ -1305,7 +1345,12 @@ function openImportModal() {
     setModalBusy(layer, true, '导入中…');
     try {
       const history = historicalImportCount() > 0;
-      const res = await fetch('./api/trades/import?mode=' + encodeURIComponent(importState.mode) + (importState.accountId ? '&accountId=' + encodeURIComponent(importState.accountId) : '') + '&repoInterestStart=' + encodeURIComponent($('#import-repo-start', layer).value) + ($('#import-repo-baseline', layer).checked ? '&repoInterestBaselineExcluded=1' : '') + ($('#import-allow-updates', layer)?.checked ? '&allowUpdates=1' : '') + (history ? '&historicalSelection=1' : ''), {
+      const params = new URLSearchParams({ mode: importState.mode, repoInterestStart: $('#import-repo-start', layer).value });
+      setImportAccountParams(params);
+      if ($('#import-repo-baseline', layer).checked) params.set('repoInterestBaselineExcluded', '1');
+      if ($('#import-allow-updates', layer)?.checked) params.set('allowUpdates', '1');
+      if (history) params.set('historicalSelection', '1');
+      const res = await fetch('./api/trades/import?' + params, {
         method: 'POST',
         headers: importRequestHeaders(layer),
         body: buildImportBody()
@@ -1313,7 +1358,8 @@ function openImportModal() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '导入失败');
       closeModal(layer);
-      applyPortfolio(data);
+      if (selectedAccountId && importState.currencies.length > 1) loadPortfolio().catch(error => toastErr(error.message));
+      else applyPortfolio(data);
       const outcome = data.importSummary ? `新增 ${data.importSummary.added}，更新 ${data.importSummary.updated}，跳过重复 ${data.importSummary.skipped}` : `已导入 ${importState.count} 条交易`;
       if (data.importQuoteRefreshCount || data.importHkdRatePending) importQuoteSyncUntil = Date.now() + 120_000;
       toastOk(outcome + (data.historicalBackfillCount ? `，历史补录 ${data.historicalBackfillCount} 笔` : '')
