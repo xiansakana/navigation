@@ -7,11 +7,31 @@ import {
   enrichHoldings,
   deriveHoldings,
   computeSymbolSummaries,
+  computePnl,
+  buildDailyCumulativeSeries,
   computeDailySummary,
   zonedDateKey,
   cashUsdEquivalent,
   roundMoney
 } from './trades.js';
+import { sliceSeries } from '../public/js/pnl-viz.js';
+
+test('selected P&L excludes prior profits and uses FIFO cost carried into the selected period', () => {
+  const trade = (day, type, price, commission = 0, symbol = 'AAPL') => normalizeTrade({
+    symbol, type, price, commission, shares: 1, trade_date: day + 'T12:00:00+08:00'
+  });
+  const rows = [
+    trade('2025-01-02', 'buy', 100), trade('2025-02-02', 'sell', 160),
+    trade('2025-12-02', 'buy', 200), trade('2026-01-02', 'sell', 230, 2),
+    trade('2026-02-02', 'sell', 300, 0, 'MSFT')
+  ];
+  const sparse = buildDailyCumulativeSeries(rows);
+  const range = sliceSeries(sparse, '2026-01-01', '2026-01-31');
+  assert.equal(computePnl(rows, { startDate: '2026-01-01', endDate: '2026-01-31' }).netPL, 28);
+  assert.equal(range[0].cumulativeNet, 28);
+  assert.equal(Math.round(range[0].rate), 14);
+  assert.equal(sliceSeries(sparse, '2026-01-01', '2026-02-28').at(-1).rate, null);
+});
 
 test('daily P&L attributes trading gains, fees and market moves to each native currency', () => {
   const today = zonedDateKey() + 'T12:00:00+08:00';

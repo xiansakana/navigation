@@ -5,7 +5,7 @@ import { renderTradeReview } from './js/trade-review.js?v=hk-fund-1';
 import { formatPrice, formatQuantity, priceInputValue } from './js/price-format.js?v=quantity-1';
 import { bindTradeInstrument } from './js/trade-instrument.js?v=keep-trade-account-1';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
-import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=annual-1';
+import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=period-1';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey, isHoldingsSortable } from './js/holdings-table.js?v=group-summary-1';
 import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js?v=access-1';
 
@@ -122,6 +122,8 @@ let dragSourceSymbol = null;
 let quotesRefreshBusy = false;
 let pnlStart = '';
 let pnlEnd = '';
+let pnlPeriod = 'all';
+let portfolioLoadRevision = 0;
 let selectedAccountId = new URLSearchParams(location.search).get('accountId') || '';
 let prefSaveTimer = null;
 
@@ -623,7 +625,6 @@ function renderPnl() {
     chartSeries: state.chartSeries || [],
     chartSparse: state.chartSparse || [],
     chartExpandedFull: state.chartExpandedFull || [],
-    totalAssets: s.totalAssets || 0,
     pnlStart,
     pnlEnd
   }), {
@@ -631,7 +632,7 @@ function renderPnl() {
     onCalendarMonth: (y, mo) => {
       const start = `${y}-${String(mo).padStart(2, '0')}-01`;
       const end = `${y}-${String(mo).padStart(2, '0')}-${String(new Date(y, mo, 0).getDate()).padStart(2, '0')}`;
-      openTradeHistoryForRange(start, end);
+      openTradeHistoryForRange(pnlStart > start ? pnlStart : start, pnlEnd && pnlEnd < end ? pnlEnd : end);
     },
     onCalendarYear: (year) => {
       const start = `${year}-01-01`;
@@ -705,11 +706,9 @@ function applyPortfolio(data) {
 }
 
 async function loadPortfolio() {
-  const q = new URLSearchParams();
-  if (selectedAccountId) q.set('accountId', selectedAccountId);
-  if (pnlStart) q.set('start', pnlStart);
-  if (pnlEnd) q.set('end', pnlEnd);
-  applyPortfolio(await api('/portfolio?' + q.toString()));
+  const revision = ++portfolioLoadRevision;
+  const data = await api('/portfolio' + pnlQuery());
+  if (revision === portfolioLoadRevision) applyPortfolio(data);
 }
 
 function closeModal(layerEl) {
@@ -1904,20 +1903,71 @@ $('#btn-accounts')?.addEventListener('click', openAccounts);
 $('#btn-import').addEventListener('click', openImportModal);
 $('#btn-trades').addEventListener('click', () => openTradeHistoryModal());
 
-$('#pnl-start').addEventListener('change', (e) => { pnlStart = e.target.value; });
-$('#pnl-end').addEventListener('change', (e) => { pnlEnd = e.target.value; });
-$('#btn-pnl-query').addEventListener('click', () => {
-  loadPortfolio()
-    .then(() => toastOk('查询完成'))
-    .catch((e) => toastErr(e.message));
-});
-$('#btn-pnl-reset').addEventListener('click', () => {
-  pnlStart = pnlEnd = '';
-  $('#pnl-start').value = $('#pnl-end').value = '';
-  loadPortfolio()
-    .then(() => toastOk('已重置查询区间'))
-    .catch((e) => toastErr(e.message));
-});
+const pnlAnchor = $('#pnl-anchor');
+const pnlToday = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(new Date());
+const pnlIso = day => day.toISOString().slice(0, 10);
+pnlAnchor.value = pnlToday();
+
+function queryPnlPeriod() {
+  let start = '', end = '';
+  if (pnlPeriod === 'range') {
+    start = $('#pnl-start').value;
+    end = $('#pnl-end').value;
+    if (!start || !end || start > end) {
+      toastErr('请选择有效的开始和结束日期');
+      return;
+    }
+  } else if (pnlPeriod !== 'all') {
+    const a = new Date((pnlAnchor.value || pnlToday()) + 'T12:00:00Z');
+    const b = new Date(a);
+    if (pnlPeriod === 'week') {
+      a.setUTCDate(a.getUTCDate() - (a.getUTCDay() + 6) % 7);
+      b.setTime(a.getTime());
+      b.setUTCDate(b.getUTCDate() + 6);
+    } else if (pnlPeriod === 'month') {
+      a.setUTCDate(1);
+      b.setUTCMonth(b.getUTCMonth() + 1, 0);
+    } else {
+      a.setUTCMonth(0, 1);
+      b.setUTCMonth(11, 31);
+    }
+    start = pnlIso(a);
+    end = pnlIso(b);
+    $('#pnl-caption').textContent = `${start} ～ ${end}`;
+  }
+  pnlStart = start;
+  pnlEnd = end;
+  loadPortfolio().catch(error => toastErr(error.message));
+}
+
+document.querySelectorAll('[data-pnl-period]').forEach(button => button.addEventListener('click', () => {
+  const next = button.dataset.pnlPeriod;
+  if (next === 'range') {
+    $('#pnl-start').value ||= pnlStart || pnlToday();
+    $('#pnl-end').value ||= pnlEnd || pnlToday();
+  }
+  pnlPeriod = next;
+  $('#pnl-navigation').classList.toggle('hidden', ['all', 'range'].includes(next));
+  $('#pnl-range').classList.toggle('hidden', next !== 'range');
+  document.querySelectorAll('[data-pnl-period]').forEach(item => {
+    item.classList.toggle('active', item === button);
+    item.setAttribute('aria-pressed', String(item === button));
+  });
+  queryPnlPeriod();
+}));
+for (const [id, step] of [['pnl-prev', -1], ['pnl-next', 1]]) {
+  $('#' + id).addEventListener('click', () => {
+    const day = new Date((pnlAnchor.value || pnlToday()) + 'T12:00:00Z');
+    if (pnlPeriod === 'week') day.setUTCDate(day.getUTCDate() + 7 * step);
+    if (pnlPeriod === 'month') day.setUTCMonth(day.getUTCMonth() + step, 1);
+    if (pnlPeriod === 'year') day.setUTCFullYear(day.getUTCFullYear() + step, 0, 1);
+    pnlAnchor.value = pnlIso(day);
+    queryPnlPeriod();
+  });
+}
+pnlAnchor.addEventListener('change', queryPnlPeriod);
+$('#pnl-today').addEventListener('click', () => { pnlAnchor.value = pnlToday(); queryPnlPeriod(); });
+$('#btn-pnl-query').addEventListener('click', queryPnlPeriod);
 
 $('#holdings-head').addEventListener('click', (e) => {
   const key = e.target.closest('[data-sort]')?.dataset.sort;

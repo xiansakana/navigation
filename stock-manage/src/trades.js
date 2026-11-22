@@ -279,7 +279,7 @@ export function computePnl(trades, options = {}) {
       if (tr.type === 'buy') queue.push(tradeLot(tr));
       else {
         const gainNative = applyFifoSellToQueue(queue, tr, tr.symbol);
-        realized = realized.plus(decimalUsd(gainNative, tradeCurrency(tr) || cur, rate, usdHkdRate));
+        if (inWindow(tr)) realized = realized.plus(decimalUsd(gainNative, tradeCurrency(tr) || cur, rate, usdHkdRate));
       }
     }
   }
@@ -436,6 +436,8 @@ export function buildDailyCumulativeSeries(trades, options = {}) {
   let cumRealized = new Decimal(0);
   let cumCommission = new Decimal(0);
   let cumOther = new Decimal(0);
+  let cumSoldCost = new Decimal(0);
+  let unmatchedSales = 0;
   let prevNet = 0;
   const out = [];
 
@@ -451,10 +453,17 @@ export function buildDailyCumulativeSeries(trades, options = {}) {
       if (!queues.has(key)) queues.set(key, []);
       const q = queues.get(key);
       if (tr.type === 'buy') q.push(tradeLot(tr));
-      else cumRealized = cumRealized.plus(decimalUsd(applyFifoSellToQueue(q, tr, tr.symbol), cur, rate, usdHkdRate));
+      else {
+        const matched = {};
+        const gain = applyFifoSellToQueue(q, tr, tr.symbol, matched);
+        cumRealized = cumRealized.plus(decimalUsd(gain, cur, rate, usdHkdRate));
+        cumSoldCost = cumSoldCost.plus(decimalUsd(matched.cost, cur, rate, usdHkdRate));
+        if (matched.unmatchedShares > 1e-8) unmatchedSales++;
+      }
     }
     const cumulativeNet = roundMoney(cumRealized.minus(cumCommission).plus(cumOther));
-    out.push({ date: day, cumulativeNet, dayNet: roundMoney(new Decimal(cumulativeNet).minus(prevNet)) });
+    out.push({ date: day, cumulativeNet, cumulativeSoldCost: roundMoney(cumSoldCost), unmatchedSales,
+      dayNet: roundMoney(new Decimal(cumulativeNet).minus(prevNet)) });
     prevNet = cumulativeNet;
   }
   return out;

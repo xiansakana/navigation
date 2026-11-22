@@ -239,6 +239,9 @@ body.has-navbar {
 .sm-chart-empty { padding: 24px; text-align: center; color: var(--muted); }
 
 /* 累计盈亏可视化 */
+.sm-pnl-period { justify-content: flex-start; padding: 0 16px 12px; }
+.sm-pnl-period-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.sm-pnl-period-controls.hidden { display: none; }
 .sm-pnl-viz { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
 .sm-pnl-viz-head {
   display: flex;

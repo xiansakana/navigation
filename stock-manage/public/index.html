@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>股票管理</title>
-  <link rel="stylesheet" href="./style.css?v=import-progress-1">
+  <link rel="stylesheet" href="./style.css?v=pnl-period-1">
   <link rel="stylesheet" href="/skeleton/skeleton.css?v=2">
   <script src="/ui/input-guard.js?v=20261011-2"></script>
   <script defer src="/ui/back-to-top.js?v=1"></script>
@@ -20,20 +20,26 @@
     <section class="sm-panel" id="section-pnl">
       <div class="sm-panel-head sm-panel-head--pnl">
         <h2>查询盈亏</h2>
-        <div class="sm-pnl-filter">
-          <label class="sm-pnl-filter-field">
-            <span class="sm-pnl-filter-label">起始</span>
-            <input type="date" id="pnl-start">
-          </label>
-          <span class="sm-pnl-filter-sep">至</span>
-          <label class="sm-pnl-filter-field">
-            <span class="sm-pnl-filter-label">结束</span>
-            <input type="date" id="pnl-end">
-          </label>
-          <div class="sm-pnl-filter-actions">
-            <button type="button" id="btn-pnl-query" class="btn ghost sm-btn-sm">查询</button>
-            <button type="button" id="btn-pnl-reset" class="btn ghost sm-btn-sm">重置</button>
-          </div>
+      </div>
+      <div class="sm-pnl-filter sm-pnl-period">
+        <div class="sm-seg" role="group" aria-label="盈亏时间范围">
+          <button type="button" class="sm-seg-btn" data-pnl-period="week">周</button>
+          <button type="button" class="sm-seg-btn" data-pnl-period="month">月</button>
+          <button type="button" class="sm-seg-btn" data-pnl-period="year">年</button>
+          <button type="button" class="sm-seg-btn active" data-pnl-period="all" aria-pressed="true">全部</button>
+          <button type="button" class="sm-seg-btn" data-pnl-period="range">范围</button>
+        </div>
+        <div class="sm-pnl-period-controls hidden" id="pnl-navigation">
+          <button type="button" id="pnl-prev" class="btn ghost sm-btn-sm" aria-label="上一时间段">←</button>
+          <span id="pnl-caption" aria-live="polite"></span>
+          <button type="button" id="pnl-next" class="btn ghost sm-btn-sm" aria-label="下一时间段">→</button>
+          <label class="sm-pnl-filter-field">定位日期<input type="date" id="pnl-anchor"></label>
+          <button type="button" id="pnl-today" class="btn ghost sm-btn-sm">今天</button>
+        </div>
+        <div class="sm-pnl-period-controls hidden" id="pnl-range">
+          <label class="sm-pnl-filter-field">开始日期<input type="date" id="pnl-start"></label>
+          <label class="sm-pnl-filter-field">结束日期<input type="date" id="pnl-end"></label>
+          <button type="button" id="btn-pnl-query" class="btn ghost sm-btn-sm">查询</button>
         </div>
       </div>
       <div id="pnl-stats" class="sm-stats sm-stats--inner"></div>
@@ -82,6 +88,6 @@
   <div id="modal-root"></div>
   <script src="/skeleton/skeleton.js?v=1"></script>
   <script src="./vendor/echarts.min.js"></script>
-  <script type="module" src="./app.js?v=import-progress-1"></script>
+  <script type="module" src="./app.js?v=pnl-period-1"></script>
 </body>
 </html>
