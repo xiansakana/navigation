@@ -3,6 +3,7 @@ import { createCnyHistoryLoader } from './cny-history.js';
 import { latestCompletedSession, nyParts } from './market-hours.js';
 import { expectedVxnSession, parseVxnClose } from './vxn-session.js';
 import { createSentimentLoader } from './market-sentiment.js';
+import { createCboeChainLoader } from './option-chain.js';
 const CANDLE_CACHE = new Map();
 const QUOTE_CACHE = new Map();
 const QUOTE_CACHE_MS = 30000;
@@ -51,6 +52,9 @@ function mapQuote(sym, q) {
 }
 
 export function createQuoteService(config) {
+  const getCboeChain = createCboeChainLoader(fetchJson);
+  let polygonOptionsRetryAt = 0;
+  let polygonOptionsError = 'Polygon 期权接口暂不可用';
   const getSentiment = createSentimentLoader();
   const getCnyHistory = createCnyHistoryLoader(fetchJson);
   const finnhubKey = config.finnhubApiKey;
@@ -352,7 +356,7 @@ export function createQuoteService(config) {
     }
   }
 
-  async function getOptionSnapshot(symbol) {
+  async function getPolygonOptionSnapshot(symbol) {
     if (!polygonKey) throw new Error('未配置 Polygon API Key');
     const upper = String(symbol).toUpperCase();
     const parsed = parseOptionSymbol(upper);
@@ -368,13 +372,14 @@ export function createQuoteService(config) {
     const r = data?.results;
     if (!r) throw new Error('期权无快照');
     const day = r.day || {};
-    const last = r.last_quote || r.last_trade || {};
-    const price = last.ask || last.midpoint || last.price || day.close || 0;
+    const price = Number(r.last_quote?.ask) || 0;
     const prev = day.close || price;
     return {
       symbol: upper,
       source: 'polygon-option',
-      previousCloseOnly: !(last.ask || last.midpoint || last.price),
+      previousCloseOnly: !(price > 0),
+      asOf: Number(r.last_quote?.last_updated) > 0
+        ? new Date(Number(r.last_quote.last_updated) / 1e6).toISOString() : null,
       name: `${parsed.underlying} ${r.details?.expiration_date || parsed.expiration} ${parsed.type} $${parsed.strike}`,
       price,
       change: day.change || 0,
@@ -387,7 +392,23 @@ export function createQuoteService(config) {
     };
   }
 
-  async function searchLeapCalls(underlying, strikeLow, strikeHigh, expiryGte, expiryLte) {
+  async function getOptionSnapshot(symbol) {
+    if (polygonKey && Date.now() >= polygonOptionsRetryAt) {
+      try {
+        const quote = await getPolygonOptionSnapshot(symbol);
+        if (!quote.previousCloseOnly && quote.price > 0) return quote;
+      } catch (error) {
+        polygonOptionsError = /403/.test(error.message) ? 'Polygon 期权数据权限不足（HTTP 403）' : error.message;
+        polygonOptionsRetryAt = Date.now() + 15 * 60000;
+      }
+    }
+    const ticker = toPolygonOptionSymbol(symbol);
+    const row = (await getCboeChain()).find((entry) => entry.ticker === ticker);
+    if (!row) throw new Error('Cboe 未找到有效 QQQ 标准看涨合约报价');
+    return { ...row, symbol, price: row.ask, previousCloseOnly: false };
+  }
+
+  async function searchPolygonCalls(underlying, strikeLow, strikeHigh, expiryGte, expiryLte) {
     if (!polygonKey) return [];
     const u = String(underlying).toUpperCase();
     const params = new URLSearchParams({
@@ -422,8 +443,27 @@ export function createQuoteService(config) {
           ask: Number(r.last_quote?.ask),
           asOf: timestamp > 0 && Number.isFinite(timestamp) ? new Date(timestamp / 1e6).toISOString() : null };
       });
-    } catch {
-      return [];
+    } catch (error) { throw error; }
+  }
+
+  async function searchLeapCalls(underlying, strikeLow, strikeHigh, expiryGte, expiryLte) {
+    let rows = [];
+    if (polygonKey && Date.now() >= polygonOptionsRetryAt) {
+      try {
+        rows = await searchPolygonCalls(underlying, strikeLow, strikeHigh, expiryGte, expiryLte);
+        if (rows.some((row) => row.ask > 0 && row.asOf)) return rows;
+        polygonOptionsError = 'Polygon 未返回有效卖价';
+      } catch (error) {
+        polygonOptionsError = /403/.test(error.message) ? 'Polygon 期权数据权限不足（HTTP 403）' : error.message;
+      }
+      polygonOptionsRetryAt = Date.now() + 15 * 60000;
+    }
+    if (String(underlying).toUpperCase() !== 'QQQ') return rows;
+    try {
+      return (await getCboeChain()).filter((row) => row.strike >= strikeLow && row.strike <= strikeHigh
+        && row.expiry >= expiryGte && row.expiry <= expiryLte);
+    } catch (error) {
+      throw new Error(`${polygonKey ? polygonOptionsError : '未配置 Polygon'}；Cboe 备用期权链：${error.message}`);
     }
   }
 

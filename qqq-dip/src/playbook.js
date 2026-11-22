@@ -1104,6 +1104,7 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
 
   const legs = [];
   const notes = [];
+  if (suggestedContracts.some((row) => row.delayed)) notes.push('期权参考价来自 Cboe 延迟行情，按卖价估算；下单前须核对券商实时卖价和手续费。');
   if (tier.pendingClose) notes.push(tier.equityMarket
     ? '正股已触价，可登记对应市场的真实成交。期权预算保留至收盘确认。'
     : '最新报价已达阈值，等待有效现价及对应市场开盘，或等待收盘确认。');

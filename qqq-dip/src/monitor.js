@@ -125,13 +125,14 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
         });
       };
       let suggestedContracts = [];
+      let optionError;
       try {
         suggestedContracts = await stage('suggestLeaps', () => suggestLeaps(evaluateLatest(store.getRound())));
-      } catch { /* Equity evaluation is independent of the option chain. */ }
+      } catch (error) { optionError = error.message; }
       const round = store.getRound();
       const ev = evaluateLatest(round, suggestedContracts);
       ev.suggestedContracts = suggestedContracts;
-      ev.quoteErrors = bundle.errors;
+      ev.quoteErrors = { ...bundle.errors, ...(optionError ? { options: optionError } : {}) };
       // Persist observed peaks only, never pretend a suggested sale was filled.
       for (const lot of ev.lots || []) {
         const previous = lots.find((row) => row.id === lot.id);

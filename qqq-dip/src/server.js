@@ -213,6 +213,7 @@ function refreshEvaluation() {
 function snapshot() {
   const snap = monitor.buildSnapshot();
   snap.evaluation = liveEval();
+  snap.evaluation.quoteErrors = monitor.getEvaluation()?.quoteErrors || {};
   snap.market = marketStatus();
   snap.notify = maskNotifyForClient(store.getNotify());
   snap.actions = store.listActionRows({ limit: 20 });

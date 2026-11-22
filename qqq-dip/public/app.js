@@ -539,7 +539,7 @@ function openBuyPreview() {
       </div>
       ${checklist ? `<h4>下单前核对</h4><ul class="sm-buy-checklist">${checklist}</ul>` : ''}
       ${prohib ? `<h4>禁令</h4><ul>${prohib}</ul>` : ''}
-      <p class="hint">期权张数需按实际买卖价重算；有 Polygon 链上合约时会填入 OCC 代码。标记已执行会按填写金额扣减美元/人民币现金。</p>
+      <p class="hint">期权张数需按实际买卖价重算；有效期权链会填入 OCC 代码。Cboe 备用数据为延迟参考报价，下单前须复核券商实时卖价。标记已执行会按填写金额扣减美元/人民币现金。</p>
       <div class="sm-modal-actions">
         <button type="button" class="btn ghost" id="btn-copy-buy">复制清单</button>
         ${can('tier-exec', 'edit') && (state.evaluation?.round?.executionPlans?.[preview.tier] || (preview.pendingClose && preview.equityMarket && canStock('dip-spend', 'edit')))
