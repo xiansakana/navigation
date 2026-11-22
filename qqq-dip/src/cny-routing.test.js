@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { premiumStatus, selectCnyFunds, routeCnyBudget, refreshCnyPlan, validateCnyLeg } from './cny-routing.js';
+import { premiumStatus, selectCnyFunds, routeCnyBudget, refreshCnyPlan, syncCnyPlan, validateCnyLeg } from './cny-routing.js';
 import { createCnyFundLoader } from './cny-fund-quotes.js';
 import { buildBuyPreview, evaluate } from './playbook.js';
 import { captureExecutionPlan, prepareExecution } from './execution-plan.js';
@@ -59,6 +59,20 @@ test('refreshing a partial plan preserves original spend, receipts, USD legs and
   assert.equal(next.legs.reduce((s, l) => s + l.usd, 0), 1500);
   assert.throws(() => refreshCnyPlan({ ...plan, cancelled: true }, funds(), now), /不可调整/);
   assert.throws(() => refreshCnyPlan({ ...plan, inFlight: 'x' }, funds(), now), /不可调整/);
+});
+
+test('opening a plan switches legacy legs once and preserves the other half after a fill', () => {
+  const plan = { legs: [{ id: 'old', kind: 'equity', currency: 'CNY', symbol: '159509', cny: 7000, usd: 1000, spent: 1400 }] };
+  assert.equal(syncCnyPlan(plan, {}, now), plan);
+  const updated = syncCnyPlan(plan, funds(), now);
+  assert.equal(updated.legs[0].spent, 1400);
+  assert.deepEqual(updated.legs.slice(1).map((leg) => [leg.symbol, leg.cny]), [['513850', 2800], ['161128', 2800]]);
+  updated.legs[1].complete = true;
+  assert.equal(syncCnyPlan(updated, funds(), now), updated);
+  assert.equal(syncCnyPlan(updated, {}, now), updated);
+  const reversed = syncCnyPlan(updated, funds(20), now);
+  assert.equal(reversed.legs.at(-1).symbol, '159509');
+  assert.equal(reversed.legs.at(-1).cny, 2800);
 });
 
 test('server execution checks selected symbol, cap and lot size and bridge keeps correct names', () => {

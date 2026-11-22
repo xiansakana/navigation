@@ -591,6 +591,14 @@ async function openExecModal(tierId) {
       applyState(data);
     } catch (error) { toast('error', error.message); return; }
   }
+  const plan = state.evaluation?.round?.executionPlans?.[tierId];
+  if (plan && !plan.cancelled && !plan.inFlight && canStock('dip-spend', 'edit')
+    && plan.legs.some((leg) => leg.currency === 'CNY' && !leg.complete && leg.cny > (leg.spent || 0))) {
+    try {
+      const data = await api('/actions', { method: 'POST', body: { type: 'execute', operation: 'sync-cny', tier: tierId, planId: plan.id } });
+      applyState(data);
+    } catch (error) { toast('error', `计划同步失败：${error.message}`); return; }
+  }
   openPlanFillModal(tierId);
 }
 
@@ -609,7 +617,7 @@ function openPlanFillModal(tierId) {
     <p class="hint" id="fill-quote-status">正在获取各腿最新报价并估算数量；预填值不是实际成交，请核对后手动修改。本次仅登记所选资金池同币种的交易腿。</p>
     <label class="field">实际成交时间（本机时区）<input id="fill-time" type="datetime-local" step="1"></label>
     <label class="field">本次成交所属抄底资金池<select id="fill-account"><option value="">请选择同币种证券账户</option>${(state.cash?.strategyFunds || []).map((f) => `<option value="${escapeHtml(f.accountId)}">${escapeHtml(f.name)} · ${f.currency} · 策略可用 ${maskMoneyText(String(f.strategyAvailable))} · 缺口 ${maskMoneyText(String(f.deficit))}</option>`).join('')}</select></label>
-    ${plan.legs.map((leg) => `<fieldset data-fill-leg="${leg.id}" data-currency="${escapeHtml(leg.currency)}" ${leg.complete || leg.pendingOption || plan.cancelled
+    ${plan.legs.filter((leg) => !leg.routingReplaced || leg.spent > 0).map((leg) => `<fieldset data-fill-leg="${leg.id}" data-currency="${escapeHtml(leg.currency)}" ${leg.complete || leg.pendingOption || plan.cancelled
       || (waitingClose && (leg.kind === 'call' || tier?.equityMarket !== (leg.currency === 'CNY' ? 'CN' : 'US'))) ? 'disabled' : ''}>
       <legend>${escapeHtml(leg.occSymbol || leg.symbol)} · ${leg.budgetCarryOut ? '已顺延' : leg.complete ? '已完成' : leg.spent > 0 ? '部分成交' : '待执行'} · ${escapeHtml(leg.currency)} 已用 ${maskMoneyText(String(leg.spent))} · 按当前策略条件复核</legend>
       ${leg.budgetCarryOut ? `<p class="hint">已将 ${maskMoney(fmtUsd(leg.budgetCarryOut.usd))} 顺延到 ${escapeHtml(leg.budgetCarryOut.tier)} 的同类期权。</p>` : ''}
@@ -620,7 +628,7 @@ function openPlanFillModal(tierId) {
       <p class="hint" data-quote-info>${leg.pendingOption ? `期权待用预算 ${maskMoney(fmtUsd(leg.usd))}。有有效报价且不足一张时，可顺延到同袋后续符合条件的同类期权。` : ''}</p>
       <label><input data-complete type="checkbox">此腿已全部完成（不再补单）</label>
     </fieldset>`).join('')}
-    <p class="hint">人民币规则：159509 参考溢价超过25%切换513850/161128各50%，替代标的分别不得超过10%；按已公布净值计算，非实时IOPV。部分不合格时保留对应预算。已有成交不迁移；需要切换时使用下方按钮更新未成交部分。</p>
+    <p class="hint">打开计划时自动按25%/10%溢价规则同步未成交的人民币标的。行情或净值缺失时保留原计划及预算，等待有效数据。</p>
     <label><input id="fill-review" type="checkbox">已复核当前信号、人民币标的最新报价/停牌/参考溢价及真实成交；不使用昨夜估价</label>
     <div class="sm-modal-actions"><button class="btn ghost" data-close>关闭</button>
       <button class="btn ghost" id="plan-cancel">取消剩余计划</button>
@@ -689,7 +697,7 @@ function openPlanFillModal(tierId) {
     try {
       const data = await api('/actions', { method: 'POST', body: { type: 'execute', operation: 'refresh-cny', tier: tierId, planId: plan.id } });
       $('#modal-root').innerHTML = ''; applyState(data);
-      await openExecModal(tierId);
+      openPlanFillModal(tierId);
     } catch (error) { toast('error', error.message); event.target.disabled = false; }
   });
 }

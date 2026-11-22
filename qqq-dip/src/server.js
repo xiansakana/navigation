@@ -16,7 +16,7 @@ import { marketStatus, latestCompletedSession } from './market-hours.js';
 import { evaluate, resetRound, buildBuyPreview, applyRoundFromEval } from './playbook.js';
 import { createDocService } from './docs.js';
 import { watchCash } from './cash-sync.js';
-import { refreshCnyPlan } from './cny-routing.js';
+import { syncCnyPlan } from './cny-routing.js';
 import { prepareExecution, canExecutePlan, canSpendDipFunds, commitExecution, captureExecutionPlan } from './execution-plan.js';
 import { createExecutionDefaultsHandler } from './execution-defaults.js';
 import {
@@ -404,21 +404,23 @@ app.post('/api/actions', async (req, res) => {
     return res.json({ ok: true, evaluation: refreshEvaluation() });
   }
 
-  if (body.type === 'execute' && body.operation === 'refresh-cny') {
-    if (!hasDipPermission(req, 'cny-routing', 'edit') || !canSpendDipFunds(req.headers['x-portal-permissions'])) {
+  if (body.type === 'execute' && ['refresh-cny', 'sync-cny'].includes(body.operation)) {
+    if (!canViewFunds(req) || !canViewLots(req) || !canSpendDipFunds(req.headers['x-portal-permissions'])
+      || (body.operation === 'refresh-cny' && !hasDipPermission(req, 'cny-routing', 'edit'))) {
       return res.status(403).json({ error: '无权调整人民币抄底标的' });
     }
     try {
       const round = store.getRound();
-      const plan = round.executionPlans?.[body.tier];
+      const plan = structuredClone(round.executionPlans?.[body.tier]);
       if (!plan || plan.id !== body.planId) return res.status(409).json({ error: '计划已变化' });
       const quotesBySymbol = await refreshCnyQuotes();
-      const next = refreshCnyPlan(plan, quotesBySymbol);
+      const next = syncCnyPlan(plan, quotesBySymbol);
       // Re-read after network I/O so concurrent fills cannot be overwritten.
       const current = store.getRound();
       if (JSON.stringify(current.executionPlans?.[body.tier]) !== JSON.stringify(plan)) {
         return res.status(409).json({ error: '计划已变化，请重新打开' });
       }
+      if (next === plan) return res.json({ ok: true, evaluation: refreshEvaluation() });
       current.executionPlans[body.tier] = next;
       store.setRound(current);
       store.addAction({ type: 'note', source: 'user', tier: body.tier,

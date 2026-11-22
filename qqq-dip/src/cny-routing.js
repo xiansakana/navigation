@@ -80,3 +80,16 @@ export function refreshCnyPlan(plan, quotes, now = new Date()) {
   next.cnyRoutingAt = now.toISOString();
   return next;
 }
+
+export function syncCnyPlan(plan, quotes, now = new Date()) {
+  if (plan.cancelled || plan.inFlight || !premiumStatus(quotes?.['159509'], now).valid) return plan;
+  const legs = plan.legs.filter((leg) => leg.kind === 'equity' && leg.currency === 'CNY' && !leg.routingReplaced);
+  const open = legs.filter((leg) => !leg.complete && leg.cny > (leg.spent || 0));
+  if (!open.length) return plan;
+  const selected = selectCnyFunds(quotes, now).map((row) => row.symbol);
+  // A completed half still belongs to this allocation. Reopening must not
+  // split the other half again or reopen a leg the user already closed.
+  if (open.every((leg) => selected.includes(leg.symbol))
+    && selected.every((symbol) => legs.some((leg) => leg.symbol === symbol))) return plan;
+  return refreshCnyPlan(plan, quotes, now);
+}
