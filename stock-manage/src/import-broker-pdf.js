@@ -281,8 +281,9 @@ async function readPdf(file, password) {
   }
 }
 
-export async function parseBrokerPdf(buffer, password) {
+export async function parseBrokerPdf(buffer, password, onProgress = () => {}) {
   const files = splitBatch(buffer);
+  onProgress(0, files.length);
   const records = new Map(), excluded = new Map(), warnings = new Set();
   const fingerprints = new Set();
   let broker;
@@ -293,6 +294,7 @@ export async function parseBrokerPdf(buffer, password) {
       if (fingerprints.has(fingerprint)) {
         const reason = '批次内重复文件';
         excluded.set(reason, (excluded.get(reason) || 0) + 1);
+        onProgress(index + 1, files.length);
         continue;
       }
       fingerprints.add(fingerprint);
@@ -314,6 +316,7 @@ export async function parseBrokerPdf(buffer, password) {
           excluded.set(reason, (excluded.get(reason) || 0) + 1);
         } else records.set(trade.broker_order_key, trade);
       }
+      onProgress(index + 1, files.length);
     } catch (error) {
       throw new Error(`第 ${index + 1} 份 PDF：${error.message}`);
     }

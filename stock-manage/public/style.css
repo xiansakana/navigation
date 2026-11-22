@@ -1335,6 +1335,29 @@ select:focus {
 .sm-modal--import .sm-modal-body { grid-template-columns: minmax(0, 1fr); }
 .sm-modal--import .sm-modal-body > *, .sm-modal--import .sm-form-grid label { min-width: 0; }
 .sm-modal--import .sm-form-grid [hidden] { display: none; }
+@media (min-width: 641px) {
+    .sm-modal.sm-modal--import { width: min(1640px, calc(100vw - 48px)); }
+}
+.sm-modal--import .sm-modal-foot { align-items: center; flex-wrap: wrap; }
+.sm-import-progress:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-inline-end: auto;
+    width: min(360px, 100%);
+    color: var(--text);
+    font-size: 13px;
+}
+.sm-import-progress progress, .sm-import-busy-progress {
+    width: 100%;
+    height: 8px;
+    accent-color: var(--accent);
+}
+.sm-import-busy-progress { width: min(320px, 80%); }
+.sm-modal--import .sm-modal-busy-label { text-align: center; }
+@media (max-width: 640px) {
+    .sm-import-progress:not([hidden]) { width: 100%; }
+}
 .sm-import-currency-accounts {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));

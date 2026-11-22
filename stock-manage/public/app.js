@@ -1023,6 +1023,55 @@ function setImportAccountParams(params) {
   } else if (importState.accountId) params.set('accountId', importState.accountId);
 }
 
+function renderImportProgress(layer, progress, saving = false) {
+  const footer = $('#import-progress', layer);
+  footer.hidden = saving || !progress;
+  const busyBar = $('.sm-import-busy-progress', layer);
+  if (!progress) return;
+  const { phase, completed, total } = progress;
+  const parsing = phase === 'parse' && completed < total;
+  const message = phase === 'parse'
+    ? parsing ? `已解析 ${completed} / ${total} 份，正在处理第 ${completed + 1} 份` : `已解析 ${completed} / ${total} 份`
+    : ({ upload: '正在提交文件…', match: '解析完成，正在核对账户和交易…', quotes: '正在查询持仓行情…', save: '正在保存交易…' })[phase];
+  const bar = saving ? busyBar : $('progress', footer);
+  const label = saving ? $('.sm-modal-busy-label', layer) : $('[data-import-progress-text]', footer);
+  if (label.textContent !== message) label.textContent = message;
+  if (phase === 'parse') {
+    bar.max = total;
+    bar.value = completed;
+  } else bar.removeAttribute('value');
+}
+
+async function readImportResponse(response, onProgress) {
+  if (!response.headers.get('Content-Type')?.includes('text/event-stream')) {
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data) throw new Error(data?.error || '导入请求失败，请重新预览');
+    return data;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = '';
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error('进度连接已中断，请重新预览核对结果');
+      pending += decoder.decode(value, { stream: true });
+      let end;
+      while ((end = pending.indexOf('\n\n')) !== -1) {
+        const packet = pending.slice(0, end);
+        pending = pending.slice(end + 2);
+        if (!packet.startsWith('data: ')) continue;
+        const event = JSON.parse(packet.slice(6));
+        if (event.error) throw new Error(event.error);
+        if (Object.hasOwn(event, 'result')) return event.result;
+        if (event.phase) onProgress(event);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 const importChangeFields = {
   symbol: '代码', type: '交易方向', shares: '数量', price: '价格', total_amount: '金额', commission: '手续费',
   trade_date: '成交时间', other_category: '其它类别', cash_effective_at: '现金入账时间', reinvestmentNav: '折算净值'
@@ -1141,27 +1190,35 @@ function bindImportModal(layer) {
     $('#import-history-count', layer).textContent = `已选 ${count} 笔历史补录`;
   };
   let revision = 0;
+  let previewController;
   const repoQuery = () => '&repoInterestStart=' + encodeURIComponent($('#import-repo-start', layer).value) + ($('#import-repo-baseline', layer).checked ? '&repoInterestBaselineExcluded=1' : '');
   const previewFile = async (page = 1, keepSelection = false) => {
-    if (!importState.buffer) return;
+    if (!importState.buffer || layer.dataset.busy === '1') return;
     const current = ++revision;
+    previewController?.abort();
+    previewController = new AbortController();
     if (!keepSelection) {
       resetHistoricalImport();
       $('#import-allow-updates', layer).checked = false;
     }
-    $('#import-confirm', layer).disabled = true;
+    const confirm = $('#import-confirm', layer);
+    confirm.disabled = true;
+    confirm.textContent = '解析中…';
     area.inert = true;
+    renderImportProgress(layer, { phase: 'upload' });
     try {
-      const params = new URLSearchParams({ page, mode: importState.mode });
+      const params = new URLSearchParams({ page, mode: importState.mode, progress: '1' });
       setImportAccountParams(params);
       const res = await fetch('./api/trades/import/preview?' + params + repoQuery(), {
         method: 'POST',
         headers: importRequestHeaders(layer),
-        body: importState.buffer
+        body: importState.buffer,
+        signal: previewController.signal
       });
-      const data = await res.json();
-      if (current !== revision) return;
-      if (!res.ok) throw new Error(data.error || '解析失败');
+      const data = await readImportResponse(res, progress => {
+        if (current === revision && layer.isConnected) renderImportProgress(layer, progress);
+      });
+      if (current !== revision || !layer.isConnected) return;
       importState.count = data.count;
       importState.preview = data.preview || data.trades || [];
       importState.summary = data.summary || null;
@@ -1180,13 +1237,14 @@ function bindImportModal(layer) {
       if (modeEl.disabled) { modeEl.value = 'merge'; importState.mode = 'merge'; }
       importState.error = null;
     } catch (err) {
-      if (current !== revision) return;
+      if (current !== revision || !layer.isConnected) return;
       importState.count = 0;
       importState.preview = [];
       importState.summary = null;
       importState.error = err.message;
       toastErr(err.message);
     }
+    renderImportProgress(layer, null);
     area.innerHTML = renderImportPreviewSection();
     area.inert = false;
     syncHistory();
@@ -1235,6 +1293,8 @@ function bindImportModal(layer) {
   const setFiles = (files) => {
     if (!files.length || layer.dataset.busy === '1') return;
     revision++;
+    previewController?.abort();
+    renderImportProgress(layer, null);
     importState.buffer = null;
     importState.count = 0;
     importState.preview = [];
@@ -1334,18 +1394,25 @@ function openImportModal() {
       <label><input type="checkbox" id="import-allow-updates"> 已核对预览，允许用券商数据更新匹配记录的数量、价格、费用和成交时间</label>
     </form>
     <div id="import-preview-area"></div>`, `
+    <div class="sm-import-progress" id="import-progress" hidden>
+      <span data-import-progress-text role="status" aria-live="polite"></span>
+      <progress aria-label="导入解析进度"></progress>
+    </div>
     <button type="button" class="btn ghost" data-close>取消</button>
     <button type="button" class="btn primary" id="import-confirm" disabled>导入</button>`, null, { size: 'xl' });
   layer.querySelector('[role="dialog"]').classList.add('sm-modal--import');
+  $('.sm-modal-busy-label', layer).setAttribute('role', 'status');
+  $('.sm-modal-busy', layer).insertAdjacentHTML('beforeend', '<progress class="sm-import-busy-progress" aria-label="导入处理进度"></progress>');
   bindImportModal(layer);
   $('#import-confirm', layer)?.addEventListener('click', async () => {
     if (!importState.buffer || !importState.count) return;
     if (importState.summary?.updated && !$('#import-allow-updates', layer)?.checked) { toastErr('存在待更新记录，请核对预览并勾选允许更新'); return; }
     if (layer.dataset.busy === '1') return;
-    setModalBusy(layer, true, '导入中…');
+    setModalBusy(layer, true, '正在提交文件…');
+    renderImportProgress(layer, { phase: 'upload' }, true);
     try {
       const history = historicalImportCount() > 0;
-      const params = new URLSearchParams({ mode: importState.mode, repoInterestStart: $('#import-repo-start', layer).value });
+      const params = new URLSearchParams({ mode: importState.mode, repoInterestStart: $('#import-repo-start', layer).value, progress: '1' });
       setImportAccountParams(params);
       if ($('#import-repo-baseline', layer).checked) params.set('repoInterestBaselineExcluded', '1');
       if ($('#import-allow-updates', layer)?.checked) params.set('allowUpdates', '1');
@@ -1355,8 +1422,7 @@ function openImportModal() {
         headers: importRequestHeaders(layer),
         body: buildImportBody()
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '导入失败');
+      const data = await readImportResponse(res, progress => renderImportProgress(layer, progress, true));
       closeModal(layer);
       if (selectedAccountId && importState.currencies.length > 1) loadPortfolio().catch(error => toastErr(error.message));
       else applyPortfolio(data);
@@ -1368,6 +1434,7 @@ function openImportModal() {
       window._refreshTradeModal?.();
     } catch (err) {
       setModalBusy(layer, false);
+      renderImportProgress(layer, null);
       toastErr(err.message);
     }
   });

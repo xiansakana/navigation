@@ -43,8 +43,10 @@ function batchPdf(...files) {
 test('batch extracts real PDF text, validates settlement fees, and deduplicates the same document', async () => {
   const pdf = textPdf(stockNote);
   const batch = batchPdf(pdf, pdf);
-  const rows = await parseBrokerPdf(batch);
+  const progress = [];
+  const rows = await parseBrokerPdf(batch, undefined, (completed, total) => progress.push([completed, total]));
   assert.equal(rows.length, 1);
+  assert.deepEqual(progress, [[0, 2], [1, 2], [2, 2]]);
   assert.equal(rows[0].symbol, '03170.HK');
   assert.equal(rows[0].commission, 18.58);
   assert.equal(rows[0].cash_effective_at, '2026-07-08T15:00:00+08:00');

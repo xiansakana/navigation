@@ -682,13 +682,43 @@ const importFileLimit = 20 * 1024 * 1024;
 const isBrokerImport = trades => !!(trades.pdfImportInfo || trades.importInfo || trades.fundImportInfo || trades[0]?.broker === 'bbae');
 const importContentTypes = ['application/octet-stream', 'application/pdf', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
 
-function importRequestTrades(file, req) {
-  if (!isBrokerPdf(file)) return parseImportBuffer(file);
+function importRequestTrades(file, req, progress) {
+  const parsing = (completed, total) => progress('parse', { completed, total });
+  if (!isBrokerPdf(file)) {
+    parsing(0, 1);
+    const trades = parseImportBuffer(file);
+    parsing(1, 1);
+    return trades;
+  }
   const header = String(req.get('Password') || '');
   if (header.length > 512) throw new Error('PDF 密码过长');
   const userId = currentPortfolioUserId();
   const defaultPassword = Object.hasOwn(config.chiefPdfPasswordsByUser, userId) ? config.chiefPdfPasswordsByUser[userId] : '';
-  return parseBrokerPdf(file, header ? decodeURIComponent(header) : String(defaultPassword || ''));
+  return parseBrokerPdf(file, header ? decodeURIComponent(header) : String(defaultPassword || ''), parsing);
+}
+
+function importResponse(req, res, preview = false) {
+  const stream = req.query.progress === '1';
+  const packet = value => `data: ${JSON.stringify(value)}\n\n`;
+  return {
+    progress(phase, details) {
+      if (!stream) return;
+      if (res.destroyed) {
+        if (preview) throw new Error('预览已取消');
+        return;
+      }
+      if (!res.headersSent) {
+        res.set({ 'Content-Type': 'text/event-stream; charset=utf-8', 'X-Accel-Buffering': 'no' });
+        res.flushHeaders();
+      }
+      res.write(packet({ phase, ...details }));
+    },
+    finish(data, status = 200) {
+      if (res.destroyed) return;
+      if (res.headersSent) res.end(packet(status < 400 ? { result: data } : { error: data.error }));
+      else res.status(status).json(data);
+    }
+  };
 }
 
 function stillHeldSymbols(data, candidates) {
@@ -759,10 +789,12 @@ app.post('/api/trades/import/preview', express.raw({
 }), async (req, res) => {
   const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
   if (!buf.length) return res.status(400).json({ error: '空文件' });
+  const reply = importResponse(req, res, true);
   try {
     if (isBrokerPdf(buf) && !requireStockPermission(req, res, 'import', 'edit')) return;
-    const trades = await importRequestTrades(buf, req);
-    if (!trades.length && !isBrokerImport(trades)) return res.status(400).json({ error: '未解析到有效记录' });
+    const trades = await importRequestTrades(buf, req, reply.progress);
+    if (!trades.length && !isBrokerImport(trades)) return reply.finish({ error: '未解析到有效记录' }, 400);
+    reply.progress('match');
     const data = store.read();
     await fillImportedNames(trades, data);
     const plan = isBrokerImport(trades) ? brokerImportPlan(req, trades, data) : null;
@@ -775,11 +807,11 @@ app.post('/api/trades/import/preview', express.raw({
     const preview = rows.slice(start, start + pageSize).map((row, i) => ({
       ...describeReinvestment(row), ...(history.eligible.has(start + i) ? { historicalIndex: start + i } : {})
     }));
-    res.json({ count: rows.length, format: trades.pdfImportInfo?.broker || (trades.fundImportInfo ? 'fund' : trades.importInfo ? 'eastmoney' : plan ? 'bbae' : 'other'),
+    reply.finish({ count: rows.length, format: trades.pdfImportInfo?.broker || (trades.fundImportInfo ? 'fund' : trades.importInfo ? 'eastmoney' : plan ? 'bbae' : 'other'),
       summary: plan?.summary, trades: trades.slice(0, 5).map(describeReinvestment), preview, page, pages,
       history: { snapshot: history.snapshot, count: history.eligible.size } });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    reply.finish({ error: e.message }, 400);
   }
 });
 
@@ -789,12 +821,14 @@ app.post('/api/trades/import', express.raw({
 }), async (req, res) => {
   const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
   if (!buf.length) return res.status(400).json({ error: '空文件' });
+  const reply = importResponse(req, res);
   try {
     const { file, selection } = decodeImportHistory(buf, req.query.historicalSelection === '1');
     if (file.length > importFileLimit) throw new Error('文件不能超过 20 MB');
     if (isBrokerPdf(file) && !requireStockPermission(req, res, 'import', 'edit')) return;
-    const imported = await importRequestTrades(file, req);
-    if (!imported.length) return res.status(400).json({ error: isBrokerImport(imported) ? '单据没有本次支持的可导入交易，请查看预览中的未导入原因' : '未解析到有效记录' });
+    const imported = await importRequestTrades(file, req, reply.progress);
+    if (!imported.length) return reply.finish({ error: isBrokerImport(imported) ? '单据没有本次支持的可导入交易，请查看预览中的未导入原因' : '未解析到有效记录' }, 400);
+    reply.progress('match');
     await fillImportedNames(imported, store.read());
     const mode = String(req.query.mode || 'merge');
     const build = () => {
@@ -824,11 +858,13 @@ app.post('/api/trades/import', express.raw({
     const needed = [...new Set(result.selected.filter(t => t.type !== 'other' && result.linkedAccounts.has(t.account_id))
       .map(t => t.symbol).filter(s => !(result.data.quotes[s]?.price > 0)))];
     if (needed.length) {
+      reply.progress('quotes');
       const fetched = await mapWithConcurrency(needed, 4, async symbol => [symbol, await quotes.getQuote(symbol).catch(() => null)]);
       result = build();
       for (const [symbol, quote] of fetched) if (quote?.price > 0 && !(result.data.quotes[symbol]?.price > 0)) result.data.quotes[symbol] = quote;
     }
     const { data, trades, selected, importSummary } = result;
+    reply.progress('save');
     const quoteCandidates = changedHoldingSymbols(data.trades, trades);
     const previous = new Map(data.trades.map(trade => [trade.id, trade]));
     const changed = trades.filter(trade => {
@@ -851,10 +887,10 @@ app.post('/api/trades/import', express.raw({
     const refreshSymbols = stillHeldSymbols(saved, quoteCandidates);
     const importHkdRatePending = Boolean(missingHkdRate(saved));
     queueImportedHoldingQuotes(refreshSymbols, importHkdRatePending);
-    res.json({ ...portfolioForRequest(req, saved), importSummary, historicalBackfillCount: selected.length,
+    reply.finish({ ...portfolioForRequest(req, saved), importSummary, historicalBackfillCount: selected.length,
       importQuoteRefreshCount: refreshSymbols.length, importHkdRatePending });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    reply.finish({ error: e.message }, 400);
   }
 });
 
