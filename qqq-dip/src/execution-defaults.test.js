@@ -49,6 +49,22 @@ test('closed plans skip quote fetching', async () => {
   assert.equal(result.legs[0].shares, 300);
 });
 
+test('CNY plans prefill from the latest session on weekends and require fresh quotes once open', async () => {
+  const p = { legs: [{ id: 'cn', symbol: '513850', currency: 'CNY', cny: 4493.55 }] };
+  const getCnyFundQuote = async () => ({ price: 1.717, nav: 1.5986, navDate: '2026-11-19',
+    asOf: '2026-11-20T16:14:58+08:00' });
+  const sunday = new Date('2026-11-22T03:00:00Z');
+  const weekend = await executionDefaults(p, { getCnyFundQuote }, sunday);
+  assert.equal(weekend.legs[0].shares, 2600);
+  assert.match(weekend.legs[0].warning, /休市/);
+  const monday = await executionDefaults(p, { getCnyFundQuote }, new Date('2026-11-23T02:00:00Z'));
+  assert.match(monday.legs[0].error, /过旧/);
+  const obsolete = await executionDefaults(p, { getCnyFundQuote: async () => ({
+    ...await getCnyFundQuote(), asOf: '2026-11-19T15:00:00+08:00'
+  }) }, sunday);
+  assert.match(obsolete.legs[0].error, /过旧/);
+});
+
 test('defaults endpoint rejects missing permissions before fetching or reading a plan', async () => {
   const handler = createExecutionDefaultsHandler({ store: { getRound: () => { throw new Error('must not read'); } } });
   const res = { status(code) { this.code = code; return this; }, json(body) { this.body = body; } };
