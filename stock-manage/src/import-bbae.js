@@ -68,7 +68,7 @@ function importTradeChanges(old, trade) {
   });
 }
 
-export function mergeBbaeTrades(existing, incoming, accountId) {
+export function mergeBbaeTrades(existing, incoming, accountId, { matchManualTrade, combineTrade } = {}) {
   if (!accountId || accountId === 'unassigned') throw new Error('导入券商文件前请选择实际所属证券账户');
   const next = [...existing], preview = [], used = new Set();
   const summary = { added: 0, updated: 0, skipped: 0 };
@@ -76,6 +76,7 @@ export function mergeBbaeTrades(existing, incoming, accountId) {
     const owned = next.filter(x => x.account_id === accountId);
     let matches = owned.filter(x => x.broker_order_key === t.broker_order_key);
     const nearTime = x => {
+      if (matchManualTrade) return matchManualTrade(x, t);
       if (x.symbol !== t.symbol || x.type !== t.type || !!x.reinvestedDividend !== !!t.reinvestedDividend) return false;
       if (t.reinvestedDividend) return Number(x.shares) === t.shares && tradeCalendarDate(x.trade_date) === tradeCalendarDate(t.trade_date);
       return (t.type !== 'other' || (x.other_category || '') === (t.other_category || '') || Number(x.total_amount) === Number(t.total_amount))
@@ -89,7 +90,7 @@ export function mergeBbaeTrades(existing, incoming, accountId) {
       preview.push({ ...t, importAction: 'needsAssignment' });
       continue;
     }
-    const trade = { ...old, ...t, account_id: accountId, id: old?.id || `${t.broker || 'bbae'}-${hash([accountId, t.broker_order_key])}`, name: old && !needsTradeName(old) ? old.name : t.name, created_at: old?.created_at || t.created_at };
+    const trade = { ...old, ...t, ...combineTrade?.(old, t, owned), account_id: accountId, id: old?.id || `${t.broker || 'bbae'}-${hash([accountId, t.broker_order_key])}`, name: old && !needsTradeName(old) ? old.name : t.name, created_at: old?.created_at || t.created_at };
     const changes = importTradeChanges(old, trade);
     const action = !old ? 'added' : changes.length ? 'updated' : 'skipped';
     summary[action]++;

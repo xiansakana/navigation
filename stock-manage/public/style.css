@@ -1334,6 +1334,20 @@ select:focus {
 /* Keep the import preview inside its grid track; mobile rows show complete values. */
 .sm-modal--import .sm-modal-body { grid-template-columns: minmax(0, 1fr); }
 .sm-modal--import .sm-modal-body > *, .sm-modal--import .sm-form-grid label { min-width: 0; }
+.sm-modal--import .sm-form-grid [hidden] { display: none; }
+.sm-import-dropzone {
+    padding: 16px;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+}
+.sm-import-dropzone:focus-within, .sm-import-dropzone.is-dragover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.sm-import-dropzone > span:first-child { color: var(--text); font-weight: 600; }
+.sm-import-dropzone #import-file-status { max-height: 4.5em; overflow: auto; }
 .sm-import-preview .sm-table-wrap { margin: 0; }
 .sm-import-changes { white-space: normal; overflow-wrap: anywhere; margin-top: 4px; }
 .sm-import-changes summary { cursor: pointer; color: var(--accent); }

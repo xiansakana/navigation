@@ -31,6 +31,7 @@ export function loadConfig() {
     polygonApiKey: raw.polygonApiKey || process.env.POLYGON_API_KEY || '',
     alpacaApiKeyId: raw.alpacaApiKeyId || process.env.ALPACA_API_KEY_ID || '',
     alpacaApiSecretKey: raw.alpacaApiSecretKey || process.env.ALPACA_API_SECRET_KEY || '',
+    chiefPdfPasswordsByUser: raw.chiefPdfPasswordsByUser || {},
     alpacaOvernightFeed: raw.alpacaOvernightFeed || process.env.ALPACA_OVERNIGHT_FEED || 'overnight'
   };
 }

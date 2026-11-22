@@ -26,6 +26,7 @@ import { decodeImportHistory, importHistoryMetaLimit, importHistoryPlan, selectH
 import { changedHoldingSymbols } from './import-quote-targets.js';
 import { mergeEastmoneyTrades } from './import-eastmoney.js';
 import { mergeBbaeTrades } from './import-bbae.js';
+import { isBrokerPdf, parseBrokerPdf, matchesPdfTrade, combinePdfTrade } from './import-broker-pdf.js';
 import { backfillTradeName, knownTradeNames, needsTradeName, normalizeNamedTrade } from './trade-name.js';
 import { computeTradeReview } from './trade-review.js';
 import {
@@ -591,8 +592,14 @@ app.put('/api/trades/:id', async (req, res) => {
     const old = data.trades[i];
     if (old.dip_fund_account && !requireStockPermission(req, res, 'dip-spend', 'edit')) return;
     if (quote && !data.quotes[trade.symbol]) data.quotes[trade.symbol] = quote;
-    data.trades[i] = { ...trade, ...(old.broker_order_key ? { broker: old.broker, broker_order_key: old.broker_order_key, broker_net: old.broker_net, cash_effective_at: old.cash_effective_at, repo_principal: old.repo_principal, broker_category: old.broker_category, source_trade_date: old.source_trade_date, settlement_date: old.settlement_date, security_received_at: old.security_received_at } : {}), id: req.params.id, created_at: old.created_at || trade.created_at };
-    Object.assign(data, applyCashDelta(undoCashDelta(data, old), trade));
+    const brokerFields = old.broker_order_key ? {
+      ...Object.fromEntries(Object.entries(old).filter(([key]) => key.startsWith('broker_'))),
+      broker: old.broker, cash_effective_at: old.cash_effective_at, repo_principal: old.repo_principal,
+      source_trade_date: old.source_trade_date, settlement_date: old.settlement_date, security_received_at: old.security_received_at
+    } : {};
+    if (old.broker_category === 'Stockback 回赠' && old.total_amount === 0 && old.symbol === trade.symbol && trade.type === 'buy') trade.total_amount = 0;
+    data.trades[i] = { ...trade, ...brokerFields, id: req.params.id, created_at: old.created_at || trade.created_at };
+    Object.assign(data, applyCashDelta(undoCashDelta(data, old), data.trades[i]));
     store.write(data);
     backfillSavedTrades([old, data.trades[i]]);
     sendPortfolio(res, req);
@@ -616,6 +623,18 @@ app.delete('/api/trades/:id', (req, res) => {
 });
 
 function brokerImportPlan(req, trades, data) {
+  if (trades.pdfImportInfo) {
+    const { currency, ...info } = trades.pdfImportInfo;
+    const account = importAccount(req);
+    if (!account || (currency && account.currency !== currency)) {
+      throw new Error(`请选择本人名下${currency ? '同为 ' + currency + ' 币种的' : '的'}证券账户`);
+    }
+    const plan = mergeBbaeTrades(data.trades, trades, account.id, {
+      matchManualTrade: matchesPdfTrade,
+      combineTrade: combinePdfTrade
+    });
+    return { ...plan, summary: { ...plan.summary, ...info } };
+  }
   if (trades.fundImportInfo) {
     const account = investmentRows(portfolioDb, currentPortfolioUserId()).find(a => a.id === req.query.accountId && a.currency === 'CNY');
     if (!account) throw new Error('基金交割单请选择本人名下的人民币证券账户');
@@ -646,7 +665,17 @@ async function fillImportedNames(trades, data) {
 
 const importAccount = req => investmentRows(portfolioDb, currentPortfolioUserId()).find(a => a.id === req.query.accountId);
 const importFileLimit = 20 * 1024 * 1024;
-const isBrokerImport = trades => !!(trades.importInfo || trades.fundImportInfo || trades[0]?.broker === 'bbae');
+const isBrokerImport = trades => !!(trades.pdfImportInfo || trades.importInfo || trades.fundImportInfo || trades[0]?.broker === 'bbae');
+const importContentTypes = ['application/octet-stream', 'application/pdf', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+
+function importRequestTrades(file, req) {
+  if (!isBrokerPdf(file)) return parseImportBuffer(file);
+  const header = String(req.get('Password') || '');
+  if (header.length > 512) throw new Error('PDF 密码过长');
+  const userId = currentPortfolioUserId();
+  const defaultPassword = Object.hasOwn(config.chiefPdfPasswordsByUser, userId) ? config.chiefPdfPasswordsByUser[userId] : '';
+  return parseBrokerPdf(file, header ? decodeURIComponent(header) : String(defaultPassword || ''));
+}
 
 function stillHeldSymbols(data, candidates) {
   if (!candidates.size) return [];
@@ -711,14 +740,15 @@ function queueImportedHoldingQuotes(symbols, refreshHkdRate) {
 }
 
 app.post('/api/trades/import/preview', express.raw({
-  type: ['application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  type: importContentTypes,
   limit: '20mb'
 }), async (req, res) => {
   const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
   if (!buf.length) return res.status(400).json({ error: '空文件' });
   try {
-    const trades = parseImportBuffer(buf);
-    if (!trades.length && !trades.importInfo && !trades.fundImportInfo) return res.status(400).json({ error: '未解析到有效记录' });
+    if (isBrokerPdf(buf) && !requireStockPermission(req, res, 'import', 'edit')) return;
+    const trades = await importRequestTrades(buf, req);
+    if (!trades.length && !isBrokerImport(trades)) return res.status(400).json({ error: '未解析到有效记录' });
     const data = store.read();
     await fillImportedNames(trades, data);
     const plan = isBrokerImport(trades) ? brokerImportPlan(req, trades, data) : null;
@@ -731,7 +761,7 @@ app.post('/api/trades/import/preview', express.raw({
     const preview = rows.slice(start, start + pageSize).map((row, i) => ({
       ...describeReinvestment(row), ...(history.eligible.has(start + i) ? { historicalIndex: start + i } : {})
     }));
-    res.json({ count: rows.length, format: trades.fundImportInfo ? 'fund' : trades.importInfo ? 'eastmoney' : plan ? 'bbae' : 'other',
+    res.json({ count: rows.length, format: trades.pdfImportInfo?.broker || (trades.fundImportInfo ? 'fund' : trades.importInfo ? 'eastmoney' : plan ? 'bbae' : 'other'),
       summary: plan?.summary, trades: trades.slice(0, 5).map(describeReinvestment), preview, page, pages,
       history: { snapshot: history.snapshot, count: history.eligible.size } });
   } catch (e) {
@@ -740,7 +770,7 @@ app.post('/api/trades/import/preview', express.raw({
 });
 
 app.post('/api/trades/import', express.raw({
-  type: ['application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+  type: importContentTypes,
   limit: importFileLimit + importHistoryMetaLimit + 4
 }), async (req, res) => {
   const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
@@ -748,8 +778,9 @@ app.post('/api/trades/import', express.raw({
   try {
     const { file, selection } = decodeImportHistory(buf, req.query.historicalSelection === '1');
     if (file.length > importFileLimit) throw new Error('文件不能超过 20 MB');
-    const imported = parseImportBuffer(file);
-    if (!imported.length) return res.status(400).json({ error: imported.importInfo ? '此交割单没有本次支持的可导入交易，请查看预览中的未导入原因' : '未解析到有效记录' });
+    if (isBrokerPdf(file) && !requireStockPermission(req, res, 'import', 'edit')) return;
+    const imported = await importRequestTrades(file, req);
+    if (!imported.length) return res.status(400).json({ error: isBrokerImport(imported) ? '单据没有本次支持的可导入交易，请查看预览中的未导入原因' : '未解析到有效记录' });
     await fillImportedNames(imported, store.read());
     const mode = String(req.query.mode || 'merge');
     const build = () => {

@@ -986,7 +986,7 @@ function openTradeModal(trade = {}) {
   });
 }
 
-const importState = { buffer: null, count: 0, preview: [], error: null, mode: 'merge', accountId: '', summary: null, format: '',
+const importState = { buffer: null, pdf: false, count: 0, preview: [], error: null, mode: 'merge', accountId: '', summary: null, format: '',
   page: 1, pages: 1, history: null, historicalAll: false, historicalIndexes: new Set() };
 let importQuoteSyncUntil = 0;
 
@@ -1007,6 +1007,13 @@ function buildImportBody() {
   const length = new ArrayBuffer(4);
   new DataView(length).setUint32(0, metadata.length);
   return new Blob([length, metadata, importState.buffer]);
+}
+
+function importRequestHeaders(layer) {
+  const headers = { 'Content-Type': 'application/octet-stream' };
+  const password = $('#import-pdf-password', layer).value;
+  if (importState.pdf && password) headers.Password = encodeURIComponent(password);
+  return headers;
 }
 
 const importChangeFields = {
@@ -1066,21 +1073,21 @@ function renderImportPreviewSection() {
   const rows = importState.preview.map((t) => `
     <tr>
       <td data-label="时间">${formatLocalDateTime(t.trade_date)}</td>
-      <td data-label="类型">${escapeHtml(typeLabel(t))}${t.historicalBackfill ? '<div class="hint">历史补录</div>' : ''}</td>
+      <td data-label="类型">${escapeHtml(typeLabel(t))}${t.broker_category === 'Stockback 回赠' ? '<div class="hint">Stockback 回赠</div>' : ''}${t.historicalBackfill ? '<div class="hint">历史补录</div>' : ''}</td>
       <td data-label="代码">${escapeHtml(t.symbol)}</td>
       <td data-label="名称">${escapeHtml(t.name || '')}</td>
       <td data-label="数量">${t.type === 'other' ? '—' : formatQuantity(t.shares)}</td>
       <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.reinvestedDividend ? t.reinvestmentNav : t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? fundPriceDigits(t.symbol) : 3)}</td>
-      <td data-label="本金">${tradeAmountLabel(t)}</td><td data-label="总费用">${fmtMoney(t.commission, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
+      <td data-label="本金">${tradeAmountLabel(t)}${Number.isFinite(t.broker_gross_dividend) ? `<div class="hint">毛息 ${fmtMoney(t.broker_gross_dividend, t.currency)} · 税 ${fmtMoney(t.broker_withholding_tax, t.currency)} · 代收费 ${fmtMoney(t.broker_dividend_fee, t.currency)}</div>` : ''}</td><td data-label="总费用">${fmtMoney(t.commission, (t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD')))}</td>
       <td data-label="处理">${renderImportAction(t)}</td>
       ${importState.history?.count ? `<td data-label="历史补录">${Number.isInteger(t.historicalIndex)
         ? `<input type="checkbox" data-import-history-index="${t.historicalIndex}" aria-label="补录 ${escapeHtml(t.symbol)} 这笔历史交易" ${historicalImportChecked(t.historicalIndex) ? 'checked' : ''}>` : '—'}</td>` : ''}
     </tr>`).join('');
   return `
     <div class="sm-import-preview">
-      <div class="sm-import-preview-head">预览（${importState.summary?.sourceCount != null ? '来源 ' + importState.summary.sourceCount + ' 条，' : ''}可导入 ${importState.count} 条，显示 ${importState.preview.length} 条）</div>
-      ${importState.summary ? `<p class="hint">${({ eastmoney: '东方财富', fund: '场外基金', bbae: 'BBAE' })[importState.format]}：新增 ${importState.summary.added}，更新 ${importState.summary.updated}，重复跳过 ${importState.summary.skipped}。${importState.format === 'eastmoney' ? '按交收日期入账，费用包含佣金、其他费用、印花税和过户费。' : importState.format === 'fund' ? '' : '时间按北京时间；费用按“总计”反推。'}</p>` : ''}
-      ${importState.summary?.excluded?.length ? `<details><summary>未单独导入 ${importState.summary.excluded.reduce((s,x) => s + x.count, 0)} 条来源记录（含新债合并入账），展开查看原因</summary>${importState.summary.excluded.map(x => `<p class="hint">${escapeHtml(x.reason)}：${x.count} 条</p>`).join('')}</details>` : ''}
+      <div class="sm-import-preview-head">预览（${importState.summary?.sourceCount != null ? '来源 ' + importState.summary.sourceCount + (importState.pdf ? ' 份，' : ' 条，') : ''}可导入 ${importState.count} 条，显示 ${importState.preview.length} 条）</div>
+      ${importState.summary ? `<p class="hint">${({ eastmoney: '东方财富', fund: '场外基金', bbae: 'BBAE', 'za-pdf': '众安投资通知书', 'chief-pdf': '致富日结单' })[importState.format]}：新增 ${importState.summary.added}，更新 ${importState.summary.updated}，重复跳过 ${importState.summary.skipped}。${importState.format === 'eastmoney' ? '按交收日期入账，费用包含佣金、其他费用、印花税和过户费。' : importState.format === 'bbae' ? '时间按北京时间；费用按“总计”反推。' : importState.pdf ? '单据仅提供成交日期时，新增记录显示为当日 15:00。现金按单据交收日计算。' : ''}</p>` : ''}
+      ${importState.summary?.excluded?.length ? `<details><summary>未单独导入 ${importState.summary.excluded.reduce((s,x) => s + x.count, 0)} 条来源记录${importState.format === 'eastmoney' ? '（含新债合并入账）' : ''}，展开查看原因</summary>${importState.summary.excluded.map(x => `<p class="hint">${escapeHtml(x.reason)}：${x.count} 条</p>`).join('')}</details>` : ''}
       ${(importState.summary?.warnings || []).map(x => `<p class="hint">${escapeHtml(x)}</p>`).join('')}
       ${importState.summary?.unassigned ? `<p class="sm-error-box">${importState.summary.unassigned} 笔可能与未归属历史重复。请先核对原记录的账户归属，再重新预览；本次不会导入。</p>` : ''}
       ${importState.history?.count ? `<div class="sm-import-preview-head">
@@ -1126,7 +1133,7 @@ function bindImportModal(layer) {
       if (importState.accountId) params.set('accountId', importState.accountId);
       const res = await fetch('./api/trades/import/preview?' + params + repoQuery(), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+        headers: importRequestHeaders(layer),
         body: importState.buffer
       });
       const data = await res.json();
@@ -1144,13 +1151,14 @@ function bindImportModal(layer) {
       importState.page = data.page || 1;
       importState.pages = data.pages || 1;
       const modeEl = $('#import-mode', layer);
-      modeEl.disabled = ['bbae', 'eastmoney', 'fund'].includes(importState.format);
+      modeEl.disabled = importState.pdf || ['bbae', 'eastmoney', 'fund'].includes(importState.format);
       if (modeEl.disabled) { modeEl.value = 'merge'; importState.mode = 'merge'; }
       importState.error = null;
     } catch (err) {
       if (current !== revision) return;
       importState.count = 0;
       importState.preview = [];
+      importState.summary = null;
       importState.error = err.message;
       toastErr(err.message);
     }
@@ -1187,30 +1195,87 @@ function bindImportModal(layer) {
     await previewFile(page, true);
     $('.sm-pagination-jump input', area)?.focus({ preventScroll: true });
   });
+  $('#import-form', layer).addEventListener('submit', event => event.preventDefault());
   $('#import-mode', layer).addEventListener('change', e => { importState.mode = e.target.value; previewFile(); });
   $('#import-repo-start', layer).addEventListener('change', () => previewFile());
   $('#import-repo-baseline', layer).addEventListener('change', () => previewFile());
   $('#import-account', layer)?.addEventListener('change', async e => { importState.accountId = e.target.value; await previewFile(); });
-  $('#import-file', layer)?.addEventListener('change', async e => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    importState.buffer = await file.arrayBuffer();
-    await previewFile();
+  $('#import-pdf-password', layer).addEventListener('change', () => previewFile());
+  const drop = $('#import-dropzone', layer);
+  const input = $('#import-file', layer);
+  const setFiles = (files) => {
+    if (!files.length || layer.dataset.busy === '1') return;
+    revision++;
+    importState.buffer = null;
+    importState.count = 0;
+    importState.preview = [];
+    importState.summary = null;
+    importState.error = null;
+    resetHistoricalImport();
+    $('#import-confirm', layer).disabled = true;
+    $('#import-confirm', layer).textContent = '导入';
+    const pdf = files.every(file => /\.pdf$/i.test(file.name));
+    const excel = files.length === 1 && /\.xlsx?$/i.test(files[0].name);
+    const fileNames = files.map(file => file.name);
+    $('#import-file-status', layer).textContent = files.length > 1 ? `已选 ${files.length} 份文件 · ${fileNames.join('、')}` : fileNames[0];
+    importState.pdf = pdf;
+    $('#import-password-field', layer).hidden = !pdf;
+    const mode = $('#import-mode', layer);
+    mode.disabled = pdf;
+    if (pdf) mode.value = importState.mode = 'merge';
+    if ((!pdf && !excel) || files.length > 30) {
+      importState.error = '请上传最多 30 份同类型 PDF，或单独上传一份 Excel 文件';
+    } else if (files.some(file => !file.size) || files.reduce((size, file) => size + file.size + 4, 10) > 20 * 1024 * 1024) {
+      importState.error = '文件不能为空，且整批不能超过 20 MB';
+    }
+    if (importState.error) {
+      area.inert = false;
+      area.innerHTML = renderImportPreviewSection();
+      return;
+    }
+    if (pdf && files.length > 1) {
+      const parts = ['STOCKPDF1\n'];
+      for (const file of files) {
+        const length = new ArrayBuffer(4);
+        new DataView(length).setUint32(0, file.size);
+        parts.push(length, file);
+      }
+      importState.buffer = new Blob(parts);
+    } else importState.buffer = new Blob(files);
+    previewFile();
+  };
+  input.addEventListener('change', () => {
+    setFiles([...input.files]);
+    input.value = '';
+  });
+  drop.addEventListener('dragover', event => {
+    event.preventDefault();
+    drop.classList.add('is-dragover');
+  });
+  drop.addEventListener('dragleave', event => {
+    if (!drop.contains(event.relatedTarget)) drop.classList.remove('is-dragover');
+  });
+  drop.addEventListener('drop', event => {
+    event.preventDefault();
+    drop.classList.remove('is-dragover');
+    setFiles([...event.dataTransfer.files]);
   });
 }
 
 function openImportModal() {
   importState.buffer = null;
+  importState.pdf = false;
   importState.count = 0;
   importState.preview = [];
   importState.error = null;
   importState.mode = 'merge';
   importState.accountId = selectedAccountId === 'unassigned' ? '' : selectedAccountId;
   importState.summary = null;
+  importState.format = '';
   importState.page = importState.pages = 1;
   resetHistoricalImport();
   const layer = openModal('导入交易', `
-    <p class="hint">支持场外基金交割单、东方财富交割单、BBAE 股票／期权订单、Moomoo 历史及本应用备份。请选择对应币种的账户；券商文件只合并，重复记录跳过，更新已有记录须勾选确认。</p>
+    <p class="hint">支持众安投资通知书和致富日结单 PDF，以及现有券商和应用备份 Excel。请选择对应币种的账户，更新已有记录须勾选确认。</p>
     <form id="import-form" class="sm-form-grid">
       <label>所属证券账户<select id="import-account"><option value="">请选择账户（券商原始文件必选）</option>${(state.investmentAccounts || []).map(a => `<option value="${a.id}" ${a.id === importState.accountId ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select></label>
       <label>导入模式<select name="mode" id="import-mode">
@@ -1219,7 +1284,13 @@ function openImportModal() {
       </select></label>
       <label>交割单导入起始日（含利息）<input type="date" id="import-repo-start" value="${new Date(Date.parse((state.investmentAccounts || []).find(a => a.id === importState.accountId || a.currency === 'CNY')?.baselineAt || new Date().toISOString()) + 8 * 3600000).toISOString().slice(0,10)}"></label>
       <label><input type="checkbox" id="import-repo-baseline"> 起始日利息尚未包含在核对的现金基准中（仅东方财富回购利息）</label>
-      <label>选择文件<input type="file" id="import-file" class="sm-file-input" accept=".xlsx,.xls"></label>
+      <label id="import-dropzone" class="sm-import-dropzone">
+        <span>拖拽文件到这里，或点击选择</span>
+        <span class="hint">同一证券账户最多 30 份 PDF，或 1 份 Excel。整批上限 20 MB。</span>
+        <input type="file" id="import-file" class="sm-file-input" aria-label="选择导入文件" accept=".pdf,.xlsx,.xls" multiple>
+        <span id="import-file-status" class="hint" aria-live="polite"></span>
+      </label>
+      <label id="import-password-field" hidden>致富 PDF 密码<input id="import-pdf-password" type="password" autocomplete="off" maxlength="128" placeholder="留空使用账户默认密码"></label>
       <label><input type="checkbox" id="import-allow-updates"> 已核对预览，允许用券商数据更新匹配记录的数量、价格、费用和成交时间</label>
     </form>
     <div id="import-preview-area"></div>`, `
@@ -1236,7 +1307,7 @@ function openImportModal() {
       const history = historicalImportCount() > 0;
       const res = await fetch('./api/trades/import?mode=' + encodeURIComponent(importState.mode) + (importState.accountId ? '&accountId=' + encodeURIComponent(importState.accountId) : '') + '&repoInterestStart=' + encodeURIComponent($('#import-repo-start', layer).value) + ($('#import-repo-baseline', layer).checked ? '&repoInterestBaselineExcluded=1' : '') + ($('#import-allow-updates', layer)?.checked ? '&allowUpdates=1' : '') + (history ? '&historicalSelection=1' : ''), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+        headers: importRequestHeaders(layer),
         body: buildImportBody()
       });
       const data = await res.json();

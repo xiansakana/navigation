@@ -9,5 +9,6 @@
   "polygonApiKey": "",
   "alpacaApiKeyId": "",
   "alpacaApiSecretKey": "",
+  "chiefPdfPasswordsByUser": {},
   "alpacaOvernightFeed": "overnight"
 }
