@@ -3,6 +3,7 @@ import { cnMarketStatus } from './cn-market-hours.js';
 import { isRth, nyParts } from './market-hours.js';
 import { CNY_FUNDS, validateCnyLeg } from './cny-routing.js';
 import { cnyNightGate } from './overnight.js';
+import { optionEntryBlock } from './option-entry-gate.js';
 
 export function canExecutePlan(encodedPermissions) {
   try {
@@ -117,6 +118,10 @@ export function prepareExecution(plan, body, evaluation, cash, now = new Date())
     if (leg.currency === 'USD' && !isRth(time)) throw new Error('美元腿成交时间须在美股常规交易时段（暂不支持盘前盘后）');
     if (leg.kind === 'call' && (tier.closeConfirmed === false || tier.vxnGate?.blocked
       || (leg.activatedAt && time < new Date(leg.activatedAt)))) throw new Error('期权尚未满足收盘确认、波动率或合约启用条件');
+    if (leg.kind === 'call') {
+      const block = optionEntryBlock(tier, evaluation.qqq);
+      if (block) throw new Error(block);
+    }
     const amount = Math.round((shares * price * (leg.kind === 'call' ? 100 : 1) + commission) * 100) / 100;
     const futureCarry = (leg.budgetCarryIns || []).reduce((sum, entry) =>
       time < new Date(entry.at) ? sum + entry.usd : sum, 0);

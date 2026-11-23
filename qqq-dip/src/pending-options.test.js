@@ -97,6 +97,10 @@ test('400 + 600 rolls once to the next eligible same-class leg and preserves tot
   const fill = { planId: T3.id, requestId: 'carry-fill-test', reviewed: true, filledAt: now.toISOString(),
     fills: [{ legId: '0', shares: 1, price: 8.5, commission: 2 }] };
   assert.equal(prepareExecution(T3, fill, ev, { usdCnyRate: 7, cashUsd: 3000 }, now).usd, 852);
+  const rebounded = { ...ev, qqq: { ...ev.qqq, price: 706 } };
+  assert.throws(() => prepareExecution(T3, fill, rebounded, { usdCnyRate: 7, cashUsd: 3000 }, now), /已高于 T3 触发价/);
+  assert.deepEqual(activatePendingOptions(result.round, rebounded).alerts, []);
+  assert.deepEqual(marketAlertRoutes(rebounded, result.round, result.alerts[0], now), []);
   assert.throws(() => prepareExecution(T3, { ...fill, fills: [{ ...fill.fills[0], commission: 151 }] },
     ev, { usdCnyRate: 7, cashUsd: 3000 }, now), /含费用/);
 });
@@ -105,6 +109,7 @@ test('missing quotes, insufficient combined budget, cross-bag or different type 
   for (const change of [
     (r, e) => { e.suggestedContracts = []; },
     (r, e) => { e.suggestedContracts[0].ask = 16.51; },
+    (r, e) => { e.qqq.price = 706; },
     (r, e) => { e.tiers[1].bag = 'crisis'; e.remaining.crisis = 3000; },
     (r) => { r.executionPlans.T3.legs[0].otmClass = 'deep'; },
     (r, e) => { e.tiers[1].vxnGate = { blocked: true }; },

@@ -6,6 +6,7 @@ import { expectedVxnSession } from './vxn-session.js';
 import { sentimentStatus } from './market-sentiment.js';
 import { CNY_FUNDS, routeCnyBudget, premiumStatus, selectCnyFunds } from './cny-routing.js';
 import { cnyNightGate } from './overnight.js';
+import { optionEntryBlock } from './option-entry-gate.js';
 
 export const TIER_ORDER = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'R1', 'R2'];
 export const LEFT_TIERS = ['T1', 'T2', 'T3', 'T4'];
@@ -1298,10 +1299,12 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
   }
 
   let optionCash = startWallet.usd;
+  const optionPriceBlock = optionEntryBlock(tier, ev.qqq);
   for (const leg of legs.filter((row) => row.kind === 'call')) {
     const band = leg.otmClass === 'deep' ? deep
       : ['shallow', 'shallow-medium'].includes(leg.otmClass) ? shallow : medium;
-    const selection = tier.pendingClose ? { skipped: true, shares: 0, reason: '期权待收盘确认，保留预算' } : selectAffordableCall(suggestedContracts, {
+    const waitReason = tier.pendingClose ? '期权待收盘确认，保留预算' : optionPriceBlock;
+    const selection = waitReason ? { skipped: true, shares: 0, reason: waitReason } : selectAffordableCall(suggestedContracts, {
       band, expiries: (leaps.expiries || []).map((e) => e.expiry), budget: Math.min(leg.usd, optionCash)
     });
     Object.assign(leg, selection);

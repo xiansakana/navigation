@@ -3,6 +3,7 @@ import { cnMarketStatus } from './cn-market-hours.js';
 import { isRth } from './market-hours.js';
 import { CNY_FUNDS, validateCnyLeg } from './cny-routing.js';
 import { cnyNightGate } from './overnight.js';
+import { optionEntryBlock } from './option-entry-gate.js';
 
 export function alertMarketOpen(market, now = new Date()) {
   return market === 'CN' ? cnMarketStatus(now).open : isRth(now);
@@ -24,7 +25,8 @@ export function marketAlertRoutes(ev, round, alert, now = new Date()) {
     if (plan?.cancelled || plan?.inFlight) return [];
     const preview = plan || buildBuyPreview({ ...ev, primary: { ...ev.primary, tier: tierId } }, ev.suggestedContracts);
     const legs = (preview.legs || []).filter((leg) => !leg.complete && !leg.pendingOption && (!leg.skipped || leg.cnyPolicyVersion)
-      && (leg.kind !== 'call' || !tier.vxnGate?.blocked)
+      && (!alert.optionReady || leg.kind === 'call')
+      && (leg.kind !== 'call' || (!tier.vxnGate?.blocked && !optionEntryBlock(tier, ev.qqq)))
       && Number(leg.currency === 'CNY' ? leg.cny : leg.usd) > Number(leg.spent || 0)).filter((leg) => {
         if (!ev.cnyFunds || !CNY_FUNDS[leg.symbol]) return true;
         try { validateCnyLeg(leg, ev.cnyFunds, now); return true; } catch { return false; }

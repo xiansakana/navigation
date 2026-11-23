@@ -1,4 +1,5 @@
 import { selectAffordableCall } from './option-selection.js';
+import { optionEntryBlock } from './option-entry-gate.js';
 import { mediumOtmBand, shallowOtmBand, deepOtmBand, roundMoney, TIER_ORDER } from './playbook.js';
 
 function selectForLeg(ev, leg, budget, contracts = ev.suggestedContracts || []) {
@@ -21,7 +22,8 @@ function confirmedPlans(round, ev) {
 }
 
 function canReceive(entry, ev) {
-  return !entry.tier.vxnGate?.blocked && !ev.sameDaySkip?.includes(entry.id);
+  return !entry.tier.vxnGate?.blocked && !ev.sameDaySkip?.includes(entry.id)
+    && !optionEntryBlock(entry.tier, ev.qqq);
 }
 
 function carryBudgets(plans, ev, round) {
