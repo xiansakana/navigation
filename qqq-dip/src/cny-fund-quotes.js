@@ -1,5 +1,12 @@
 import { CNY_FUNDS } from './cny-routing.js';
 
+function quoteMovement(price, previousClose) {
+  const prevClose = Number(previousClose);
+  if (!Number.isFinite(prevClose) || prevClose <= 0) return {};
+  const change = price - prevClose;
+  return { prevClose, change, changePercent: change / prevClose * 100 };
+}
+
 export function createCnyFundLoader(fetchJson, fetchText, legacyQuote) {
   const navCache = new Map();
   const quoteCache = new Map();
@@ -14,6 +21,7 @@ export function createCnyFundLoader(fetchJson, fetchText, legacyQuote) {
         const p = (text.match(/="([^"]*)"/)?.[1] || '').split('~');
         if (!(Number(p[3]) > 0) || p[2] !== symbol) throw new Error('腾讯无有效行情');
         quote = { symbol, name: CNY_FUNDS[symbol].name, price: Number(p[3]), source: 'tencent',
+          ...quoteMovement(Number(p[3]), p[4]),
           asOf: /^\d{14}$/.test(p[30] || '') ? p[30].replace(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/, '$1-$2-$3T$4:$5:$6+08:00') : null };
       } catch {
         const text = await fetchText('https://hq.sinajs.cn/list=' + prefix + symbol,
@@ -21,6 +29,7 @@ export function createCnyFundLoader(fetchJson, fetchText, legacyQuote) {
         const p = (text.match(/="([^"]*)"/)?.[1] || '').split(',');
         if (!(Number(p[3]) > 0)) throw new Error(symbol + ' 无有效行情');
         quote = { symbol, name: CNY_FUNDS[symbol].name, price: Number(p[3]), source: 'sina',
+          ...quoteMovement(Number(p[3]), p[2]),
           asOf: p[30] && p[31] ? p[30] + 'T' + p[31] + '+08:00' : null };
       }
     }

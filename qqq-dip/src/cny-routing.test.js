@@ -118,6 +118,23 @@ test('published NAV failures never reuse a guessed NAV, and loader preserves sou
   assert.equal((await failure('159509')).nav, null);
 });
 
+test('alternate fund daily moves use exchange previous close and survive the market projection', async () => {
+  const load = createCnyFundLoader(
+    async () => ({ Data: { LSJZList: [{ DWJZ: '2.5', FSRQ: '2026-11-19' }] } }),
+    async (url) => {
+      if (url.includes('sh513850')) return 'v_sh513850="1~name~513850~2.1~2.0";';
+      if (url.includes('gtimg')) throw new Error('offline');
+      return 'var hq_str_sz161128="name,2.0,2.0,1.9";';
+    }
+  );
+  const cnyFunds = { '513850': await load('513850'), '161128': await load('161128') };
+  const ev = evaluate({ now, cnyFunds, qqq: {} });
+  assert.equal(cnyFunds['513850'].prevClose, 2);
+  assert.equal(cnyFunds['161128'].prevClose, 2);
+  assert.equal(ev.cnyFundStats['513850'].changePercent.toFixed(2), '5.00');
+  assert.equal(ev.cnyFundStats['161128'].changePercent.toFixed(2), '-5.00');
+});
+
 test('existing lots value each CNY instrument using its own price', () => {
   const ev = evaluate({ now, cnyFunds: funds(), cashUsd: 1000, qqq: { price: 90, candles: [{ h: 100, c: 90 }] },
     lots: [{ id: 'lot', symbol: '513850', type: 'equity', cost: 1, shares: 100, originalShares: 100 }] });
