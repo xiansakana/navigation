@@ -146,8 +146,7 @@ export function snapshotPriceHistory(history,userId,today) {
   const prices=history.read(userId);
   const requests=new Map();
   return {...prices,request(symbol,date){
-    // Existing verified quotes and executions cover options; don't query every expired contract.
-    if(optionSymbol(symbol)||date<shift(today,-14)||requests.has(symbol)||requests.size>=12)return;
+    if(date<shift(today,-14)||requests.has(symbol)||requests.size>=12)return;
     requests.set(symbol,true);
     history.ensure?.(userId,[{symbol,start:shift(date,-7),end:date}]);
   }};

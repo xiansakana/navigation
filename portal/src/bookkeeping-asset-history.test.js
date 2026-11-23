@@ -12,6 +12,7 @@ import { getDatabase, closeDatabase } from '../../shared/db/index.js';
 import { handleBookkeepingApi } from './bookkeeping.js';
 import { refreshHoldingQuotes } from './bookkeeping-holding-quotes.js';
 import { tradeValuation } from './bookkeeping-trade-valuation.js';
+import { createSnapshotReplay } from './bookkeeping-snapshot-replay.js';
 
 const now = Date.parse('2026-10-15T10:00:00Z');
 const accounts = [{id:'cash',currency:'CNY',balance:100,included:true},
@@ -276,6 +277,41 @@ test('a late overnight option trade revises the prior day using its near-cutoff 
     update.run(uid,JSON.stringify({trades:[{...late,trade_date:'2026-10-15T18:00:00Z'}]}),late.created_at);
     assert.equal(read().period.closing,7000);
     assert.equal(read().points.at(-1).revisionPending,true);
+    const backfill=createSnapshotReplay(db,uid,{quote:()=>({date:original.date,close:1.5,source:'polygon'})});
+    const [recovered]=backfill(original);
+    assert.equal(recovered.balance,949);
+    assert.equal(recovered.revised,true);
     assert.deepEqual(db.prepare('SELECT * FROM bookkeeping_asset_snapshots').get(),original);
   } finally {db.close();}
+});
+
+test('older cash baselines can recover a snapshot, without adding pre-baseline holdings twice',()=>{
+  const db=new Database(':memory:'),store=createBookkeepingStore(db);
+  try{
+    const uid='late',ledgerId=store.saveAccount(uid,{name:'证券',currency:'CNY',balance:1000});
+    const id=saveInvestmentAccount(db,uid,{name:'证券',currency:'CNY',bookkeepingId:ledgerId,baselineCash:1000});
+    const baseline=db.prepare('SELECT * FROM investment_accounts WHERE id=?').get(id);
+    baseline.baseline_at='2026-11-05T00:00:00Z';
+    db.prepare('UPDATE investment_accounts SET baseline_at=? WHERE id=?').run('2026-11-09T00:00:00Z',id);
+    db.prepare("INSERT INTO investment_account_audit(user_id,account_id,action,data,at) VALUES(?,?,'cash-baseline',?,?)")
+      .run(uid,id,JSON.stringify({before:baseline}),'2026-11-09T00:00:00Z');
+    db.exec('CREATE TABLE portfolio_users(user_id TEXT PRIMARY KEY,data TEXT NOT NULL,updated_at TEXT NOT NULL)');
+    const created_at='2026-11-10T01:00:00Z';
+    const trade={account_id:id,symbol:'159915',type:'buy',shares:10,total_amount:100,commission:1,currency:'CNY',created_at};
+    db.prepare('INSERT INTO portfolio_users VALUES(?,?,?)').run(uid,JSON.stringify({trades:[
+      {...trade,id:'pre-baseline',trade_date:'2026-11-04T02:00:00Z'},
+      {...trade,id:'late',trade_date:'2026-11-06T02:00:00Z'}
+    ]}),created_at);
+    const row={date:'2026-11-08',captured_at:'2026-11-08T15:59:00Z',details:JSON.stringify([{id:ledgerId,source:'portfolio',currency:'CNY',balance:1000}])};
+    const point={date:'2026-11-06',close:12,source:'sina'};
+    const replay=createSnapshotReplay(db,uid,{quote:()=>point,splits:[]});
+    const [result]=replay(row);
+    assert.equal(result.balance,1019);
+    assert.equal(result.revisionPending,false);
+    assert.equal(result.quotes[0].asOf,'2026-11-06');
+    const [stale]=replay({...row,date:'2026-11-09',captured_at:'2026-11-09T00:00:00Z'});
+    assert.equal(stale.revised,undefined);
+    const [weekday]=replay({...row,date:'2026-11-09',captured_at:'2026-11-08T23:00:00Z'});
+    assert.equal(weekday.revisionPending,true);
+  }finally{db.close();}
 });
