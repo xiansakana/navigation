@@ -26,6 +26,20 @@ test('25% and 10% boundaries are inclusive and missing or stale data fails close
   }
 });
 
+test('Monday quotes accept Thursday NAV while Tuesday rejects it after a second US close', () => {
+  const monday = new Date('2026-11-23T02:37:33Z');
+  const tuesday = new Date('2026-11-24T02:37:33Z');
+  const data = Object.fromEntries(Object.entries(funds()).map(([symbol, row]) => [
+    symbol, { ...row, asOf: monday.toISOString() }
+  ]));
+  assert.deepEqual(selectCnyFunds(data, monday).map((row) => [row.symbol, row.blocked]), [
+    ['513850', false], ['161128', false]
+  ]);
+  const result = premiumStatus({ ...data['159509'], asOf: tuesday.toISOString() }, tuesday);
+  assert.equal(result.valid, false);
+  assert.match(result.reason, /2026-11-19.*2026-11-20/);
+});
+
 test('half budget stays reserved for blocked alternative and every buy uses 100-share lots', () => {
   const rows = routeCnyBudget(7000.01, 1000, funds(26, 11, 9), now);
   assert.deepEqual(rows.map((r) => r.cny), [3500.01, 3500]);

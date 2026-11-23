@@ -1,3 +1,5 @@
+import { latestCompletedSession } from './market-hours.js';
+
 export const CNY_FUNDS = {
   '159509': { name: '纳指科技ETF景顺', cap: 25 },
   '513850': { name: '美国50ETF易方达', cap: 10 },
@@ -11,10 +13,18 @@ export function premiumStatus(quote, now = new Date()) {
   const navTime = /^\d{4}-\d{2}-\d{2}$/.test(quote?.navDate || '')
     ? Date.parse(quote.navDate + 'T00:00:00+08:00') : NaN;
   // Published QDII NAVs lag. This is a disclosed NAV reference, not realtime IOPV.
-  if (quote?.stale || quote?.suspended || !(price > 0) || !(nav > 0) || !Number.isFinite(price) || !Number.isFinite(nav) || !Number.isFinite(quoteTime) || !Number.isFinite(navTime)
-    || now - quoteTime > 4 * 86400000 || quoteTime > now.getTime() + 300000
-    || quoteTime - navTime > 4 * 86400000 || navTime > quoteTime) {
-    return { valid: false, reason: '行情或净值缺失/过旧，保留人民币预算' };
+  if (quote?.stale || quote?.suspended || !(price > 0) || !Number.isFinite(price) || !Number.isFinite(quoteTime)
+    || now - quoteTime > 4 * 86400000 || quoteTime > now.getTime() + 300000) {
+    return { valid: false, reason: '行情缺失、过旧或停牌，保留人民币预算' };
+  }
+  if (!(nav > 0) || !Number.isFinite(nav) || !Number.isFinite(navTime) || navTime > quoteTime) {
+    return { valid: false, reason: '缺少有效已公布净值，保留人民币预算' };
+  }
+  const latest = latestCompletedSession(now);
+  // Noon New York is before the close in both winter and summer.
+  const earliest = latestCompletedSession(new Date(latest + 'T17:00:00Z'));
+  if (quote.navDate < earliest) {
+    return { valid: false, reason: `已公布净值日期 ${quote.navDate}，需 ${earliest} 或更新的净值，保留人民币预算` };
   }
   return { valid: true, premium: (price / nav - 1) * 100, nav, navDate: quote.navDate,
     asOf: quote.asOf, source: quote.navSource || 'eastmoney-published-nav' };
