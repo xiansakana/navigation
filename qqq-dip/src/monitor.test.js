@@ -26,6 +26,7 @@ function signalFixture(publish, extraStore = {}) {
     getMarketBundle: async () => ({ markets: { QQQ: { price: 90, low: 90,
       candles: [{ t: Date.parse(`${latestCompletedSession()}T05:00:00Z`) / 1000, h: 100, l: 90, c: 90 }] },
       '159509': { price: 2, nav: 2, navDate: latestCompletedSession(), asOf: new Date().toISOString() },
+      qqqOvernight: { price: 90, asOf: new Date().toISOString(), delayed: false },
       sentiment: { score: 19.88, rating: 'extreme fear', asOf: latestCompletedSession(), source: 'cnn-public-archive' } }, errors: {} }),
     searchLeapCalls: async () => []
   } });

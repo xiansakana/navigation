@@ -121,6 +121,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
           vxn: markets.VXN,
           sentiment: markets.sentiment,
           cnyProxy: markets['159509'],
+          qqqOvernight: markets.qqqOvernight || null,
           cnyFunds: Object.fromEntries(['159509', '513850', '161128'].map((s) => [s, markets[s]])),
           lots, suggestedContracts
         });
@@ -199,6 +200,12 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
           if (opts.silent || nextRound.marketDeliveries?.[deliveryKey] || !alertMarketOpen(route.market)
             || Date.now() < (nextRound.retryAlerts?.[deliveryKey] || 0)) continue;
           const market = alertMarket(ev, alert);
+          if (route.overnightQuote) {
+            const quote = route.overnightQuote;
+            market.stats = { ...market.stats, price: quote.price, asOf: quote.asOf, delayed: quote.delayed,
+              session: 'overnight', drawdownLive: market.stats?.H > 0 ? (quote.price / market.stats.H - 1) * 100 : null,
+              changePercent: ev.qqq?.lastClose > 0 ? (quote.price / ev.qqq.lastClose - 1) * 100 : null };
+          }
           const label = route.market === 'CN' ? 'A股交易时段' : '美股交易时段';
           const qqText = appendMarketSnapshot(`【${label}】${route.symbols.join('、') || '仓位检查'}\n${alert.message}\n仅处理本市场交易腿；其他市场等待其开盘。仍须复核最新报价与实际成交。`, market.stats, market.symbol);
           let qq;

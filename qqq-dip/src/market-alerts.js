@@ -2,6 +2,7 @@ import { buildBuyPreview } from './playbook.js';
 import { cnMarketStatus } from './cn-market-hours.js';
 import { isRth } from './market-hours.js';
 import { CNY_FUNDS, validateCnyLeg } from './cny-routing.js';
+import { cnyNightGate } from './overnight.js';
 
 export function alertMarketOpen(market, now = new Date()) {
   return market === 'CN' ? cnMarketStatus(now).open : isRth(now);
@@ -29,8 +30,11 @@ export function marketAlertRoutes(ev, round, alert, now = new Date()) {
         try { validateCnyLeg(leg, ev.cnyFunds, now); return true; } catch { return false; }
       });
     return (alert.optionReady ? ['US'] : ['CN', 'US']).flatMap((market) => {
+      const gate = market === 'CN' && 'qqqOvernight' in ev ? cnyNightGate(tier, ev.qqqOvernight, now) : { ok: true };
+      if (!gate.ok) return [];
       const matched = legs.filter((leg) => (leg.currency === 'CNY' ? 'CN' : 'US') === market);
-      return matched.length ? [{ market, symbols: [...new Set(matched.map((leg) => leg.symbol))] }] : [];
+      return matched.length ? [{ market, symbols: [...new Set(matched.map((leg) => leg.symbol))],
+        ...(gate.quote ? { overnightQuote: gate.quote } : {}) }] : [];
     });
   }
   const lot = ev.lots?.find((row) => alert.key.startsWith(`${row.id}:`));

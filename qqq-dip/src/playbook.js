@@ -5,6 +5,7 @@ import { equityTouchMarket } from './equity-touch.js';
 import { expectedVxnSession } from './vxn-session.js';
 import { sentimentStatus } from './market-sentiment.js';
 import { CNY_FUNDS, routeCnyBudget, premiumStatus, selectCnyFunds } from './cny-routing.js';
+import { cnyNightGate } from './overnight.js';
 
 export const TIER_ORDER = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'R1', 'R2'];
 export const LEFT_TIERS = ['T1', 'T2', 'T3', 'T4'];
@@ -875,6 +876,7 @@ export function evaluate(input) {
     usdCnyRate,
     cnyProxy,
     cnyFunds: input.cnyFunds,
+    ...(input.qqqOvernight !== undefined ? { qqqOvernight: input.qqqOvernight } : {}),
     cnyFundStats: input.cnyFunds ? Object.fromEntries(Object.entries(input.cnyFunds).map(([s, q]) => [s,
       { ...statsFromMarket(q || {}), premiumStatus: premiumStatus(q, now) }])) : null,
     now: input.now || new Date(),
@@ -1334,6 +1336,10 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
     }
   }
   const cashPlan = summarizeCashPlan(legs, startWallet);
+  if ('qqqOvernight' in ev && legs.some((leg) => leg.currency === 'CNY')) {
+    const gate = cnyNightGate(tier, ev.qqqOvernight, ev.now);
+    if (!gate.ok) notes.push(gate.reason);
+  }
   for (const leg of legs.filter((row) => row.currency === 'CNY' && row.routeInfo)) notes.push(leg.routeInfo);
   const checklist = [
     `H = ${ev.qqq?.H != null ? ev.qqq.H.toFixed(3) : '—'}，${id} 触发价 ${tier.triggerPrice != null ? tier.triggerPrice.toFixed(3) : '—'}${tier.intradayPrice ? ` / 盘中 ${tier.intradayPrice.toFixed(3)}` : ''}`,

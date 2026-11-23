@@ -5,6 +5,8 @@ import { expectedVxnSession, parseVxnClose } from './vxn-session.js';
 import { createSentimentLoader } from './market-sentiment.js';
 import { createCboeChainLoader } from './option-chain.js';
 import { createCnyFundLoader } from './cny-fund-quotes.js';
+import { fetchQqqOvernight, currentQqqOvernight } from './overnight.js';
+import { cnMarketStatus } from './cn-market-hours.js';
 const CANDLE_CACHE = new Map();
 const QUOTE_CACHE = new Map();
 const QUOTE_CACHE_MS = 30000;
@@ -625,6 +627,12 @@ export function createQuoteService(config) {
     }
     }));
     out.sentiment = await sentiment;
+    if (cnMarketStatus().open) {
+      try {
+        out.qqqOvernight = currentQqqOvernight(await fetchQqqOvernight(config));
+        if (!out.qqqOvernight) errors.qqqOvernight = 'Alpaca 暂无有效 QQQ 夜盘报价';
+      } catch (error) { errors.qqqOvernight = error.message; }
+    }
     return { markets: out, errors };
   }
 

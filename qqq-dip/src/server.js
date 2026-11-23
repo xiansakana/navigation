@@ -200,6 +200,7 @@ function liveEval() {
     vxn: markets.VXN,
     sentiment: markets.sentiment,
     cnyProxy: markets['159509'],
+    qqqOvernight: markets.qqqOvernight || null,
     cnyFunds: Object.fromEntries(['159509', '513850', '161128'].map((s) => [s, markets[s]])),
     lots: store.getLots(),
     suggestedContracts: prev.suggestedContracts || []

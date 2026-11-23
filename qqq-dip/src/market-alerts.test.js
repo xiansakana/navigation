@@ -45,6 +45,20 @@ test('selling follows the instrument market, not cash currency or signal benchma
   assert.equal(marketAlertRoutes({}, {}, { ...sell, symbol: 'SOXL' })[0].market, 'US');
 });
 
+test('A-share T3 reminders use the current QQQ overnight quote and do not reuse Friday close', () => {
+  const now = new Date('2026-11-23T02:43:00Z');
+  const tier = { id: 'T3', status: 'confirmed', triggerPrice: 625.545 };
+  const round = { executionPlans: { T3: plan().executionPlans.T1 } };
+  const event = { event: 'T3', key: 'T3' };
+  const quote = { price: 621.54, asOf: '2026-11-23T02:27:45Z', delayed: true };
+  const get = (qqqOvernight) => marketAlertRoutes({ tiers: [tier], qqq: { lastClose: 608.45 }, qqqOvernight }, round, event, now);
+  assert.equal(get(quote)[0].overnightQuote, quote);
+  for (const invalid of [null, { ...quote, price: 626 }, { ...quote, delayed: false },
+    { ...quote, asOf: '2026-11-20T21:00:00Z' }]) {
+    assert.deepEqual(get(invalid).map((r) => r.market), ['US']);
+  }
+});
+
 test('migration preserves in-session delivery only for its market, and persists across reload', () => {
   const round = { firedAlerts: { T1: '2026-11-02T02:00:00Z' } };
   const actions = [{ type: 'notify', tier: 'T1', ts: '2026-11-02T02:00:01Z', payload: { key: 'T1', sent: ['Slack'] } }];

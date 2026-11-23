@@ -18,11 +18,17 @@ export function loadConfig() {
   const host = raw.server?.host || '127.0.0.1';
   const port = Number(raw.server?.port) || 5001;
   const integrations = integrationConfig();
+  let stockQuotes = {};
+  try { stockQuotes = JSON.parse(fs.readFileSync(path.join(ROOT, '../stock-manage/config.json'), 'utf8')); }
+  catch { /* This service may be installed separately. */ }
   return {
     server: { host, port },
     dbPath: raw.dbPath || 'data/qqq-dip.db',
     finnhubApiKey: raw.finnhubApiKey || process.env.FINNHUB_API_KEY || integrations.finnhubApiKey || '',
     polygonApiKey: raw.polygonApiKey || process.env.POLYGON_API_KEY || integrations.polygonApiKey || '',
+    alpacaApiKeyId: raw.alpacaApiKeyId || process.env.ALPACA_API_KEY_ID || stockQuotes.alpacaApiKeyId,
+    alpacaApiSecretKey: raw.alpacaApiSecretKey || process.env.ALPACA_API_SECRET_KEY || stockQuotes.alpacaApiSecretKey,
+    alpacaOvernightFeed: raw.alpacaOvernightFeed || process.env.ALPACA_OVERNIGHT_FEED || stockQuotes.alpacaOvernightFeed,
     notify: {
       desktop: raw.notify?.desktop === true,
       qq: {

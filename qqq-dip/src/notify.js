@@ -9,6 +9,10 @@ function formatPct(value) {
 export function appendMarketSnapshot(text, stats, symbol = 'QQQ') {
   const price = Number.isFinite(stats?.price) ? stats.price.toFixed(3) : '—';
   const h = Number.isFinite(stats?.H) ? stats.H.toFixed(3) : '—';
+  if (stats?.session === 'overnight') {
+    const time = new Date(stats.asOf).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+    return `${text}\n行情：${symbol} 夜盘 ${price}｜${time} 北京时间${stats.delayed ? '（延迟）' : ''}｜较上次收盘 ${formatPct(stats.changePercent)}｜相对 H 回撤 ${formatPct(stats.drawdownLive)}（H ${h}）`;
+  }
   return `${text}\n行情：${symbol} 现价 ${price}｜当日涨跌幅 ${formatPct(stats?.changePercent)}｜相对 H 回撤 ${formatPct(stats?.drawdownLive)}（H ${h}）`;
 }
 

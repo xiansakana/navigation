@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { cnMarketStatus } from './cn-market-hours.js';
 import { isRth, nyParts } from './market-hours.js';
 import { CNY_FUNDS, validateCnyLeg } from './cny-routing.js';
+import { cnyNightGate } from './overnight.js';
 
 export function canExecutePlan(encodedPermissions) {
   try {
@@ -102,6 +103,10 @@ export function prepareExecution(plan, body, evaluation, cash, now = new Date())
       if (leg.symbol === 'QQQ' && price > tier.triggerPrice) throw new Error('QQQ 实际成交价高于盘中触发价');
     }
     if (CNY_FUNDS[leg.symbol] && leg.kind === 'equity') {
+      if ('qqqOvernight' in evaluation) {
+        const gate = cnyNightGate(tier, evaluation.qqqOvernight, now);
+        if (!gate.ok) throw new Error(gate.reason);
+      }
       if (!cnMarketStatus(time).open) throw new Error(`${leg.symbol} 成交时间须在已维护的A股常规交易时段`);
       if (shares % 100) throw new Error(`${leg.symbol} 买入数量须为100份整数倍`);
       if (evaluation.cnyFunds) {
