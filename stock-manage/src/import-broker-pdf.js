@@ -163,6 +163,8 @@ const chiefDatePattern = String.raw`\d{1,2}/\d{1,2}/(?:\d{4}|\d{2})`;
 const chiefRow = new RegExp(String.raw`^(${chiefDatePattern})\s+(${chiefDatePattern})\s+([BS]\d+)\s*([买買卖賣]\s*[入出])\s+(.+)$`);
 const chiefAmounts = new RegExp(String.raw`^(.*?)\s+(${numeric})\s+(${numeric})\s+(\(?-?${numeric}\s*\)?)$`);
 const chiefStandalonePrice = /^(?:([A-Z]{4})\s+)?(\d[\d,]*\.\d{3,8})$/;
+const chiefFill = new RegExp(String.raw`^[A-Z]{4}\s+(${numeric})\s+(${numeric})$`);
+const chiefTradeEnd = new RegExp(String.raw`^(${chiefDatePattern}|(?:股票)?交易记[录錄]|总|總|投资组合|投資組合|账面现金结余)`);
 function parseChief(lines) {
   const accountMatch = lines.join('\n').match(/户口编号\s*[:：]\s*([A-Z0-9]+)/);
   if (!accountMatch) throw new Error('未找到致富日结单账户编号');
@@ -191,13 +193,33 @@ function parseChief(lines) {
     const amounts = chiefAmounts.exec(details);
     if (!amounts) throw new Error('致富成交金额或数量缺失');
     const [, described, rawShares, rawGross, rawNet] = amounts;
-    const gross = number(rawGross), net = number(rawNet.replace(/[()\s-]/g, '')), shares = number(rawShares);
+    const gross = number(rawGross), net = number(rawNet.replace(/[()\s-]/g, ''));
     const parts = described.split(/\s+/);
     const inlinePrice = /^\d[\d,]*\.\d{3,8}$/.test(parts.at(-1)) ? parts.pop() : '';
     const above = chiefStandalonePrice.exec(lines[i - 1] || '');
     const below = chiefStandalonePrice.exec(lines[i + 1] || '');
     const priceCandidates = [inlinePrice, above?.[2], below?.[2]].filter(Boolean);
-    const price = priceCandidates.map(number).find(value => new Decimal(shares).times(value).minus(gross).abs().lte(0.01));
+    let next = i + 1;
+    while (next < lines.length && !chiefTradeEnd.test(lines[next]) && !/小[结結]\s*[:：]/.test(lines[next])) next++;
+    const continuation = lines.slice(i + 1, next);
+    const fills = currency === 'USD' && inlinePrice ? continuation.map(line => chiefFill.exec(line)).filter(Boolean) : [];
+    let shares = number(rawShares);
+    let price;
+    if (fills.length) {
+      let quantity = new Decimal(shares);
+      let value = quantity.times(number(inlinePrice));
+      for (const [, fillPrice, fillShares] of fills) {
+        const size = number(fillShares);
+        quantity = quantity.plus(size);
+        value = value.plus(new Decimal(size).times(number(fillPrice)));
+      }
+      if (quantity.gt(0) && value.minus(gross).abs().lte(0.01)) {
+        shares = quantity.toNumber();
+        price = roundDecimal(value.div(quantity), 8);
+      }
+    } else {
+      price = priceCandidates.map(number).find(value => new Decimal(shares).times(value).minus(gross).abs().lte(0.01));
+    }
     if (!price) throw new Error('无法在致富日结单核对成交单价');
     const [code, ...nameParts] = currency === 'USD' && !above?.[1] ? parts.slice(1) : parts;
     const symbol = stockSymbol(code, currency);
@@ -205,8 +227,7 @@ function parseChief(lines) {
       ? lines[i + 1]?.match(/^[A-Z][A-Z0-9 .&,'()-]*[A-Z0-9](?=\s|$)/)?.[0] || symbol
       : nameParts.join(' ').replace(/\s*(?:网上交易|網上交易|电话交易|電話交易).*$/, '').trim() || symbol;
     const commission = charge(gross, net, type);
-    const printedFee = lines.slice(i + 1, i + 4).find(line => /小结\s*[:：]|小結\s*[:：]/.test(line))
-      ?.match(new RegExp(String.raw`小[结結]\s*[:：]\s*(${numeric})`))?.[1];
+    const printedFee = lines[next]?.match(new RegExp(String.raw`小[结結]\s*[:：]\s*(${numeric})`))?.[1];
     if (printedFee != null && number(printedFee) !== commission) throw new Error('致富成交差额和费用小结不一致');
     rows.push(record('chief-pdf', [account, currency, ref], {
       day: chiefDate(when), settlement: chiefDate(settle), name, symbol, currency, type, shares, price,

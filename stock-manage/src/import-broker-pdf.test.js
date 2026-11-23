@@ -81,6 +81,21 @@ test('Chief supports displaced quote fields and validates the explicit fee subto
   assert.throws(() => parseBrokerPdfLines(incorrect), /费用小结不一致/);
 });
 
+test('Chief totals fills from multiple US venues on the same order', () => {
+  const lines = ['Chief Securities Limited', '环球股票综合成交单及日结单', '户口编号 : MTEST1', '股票交易记录 (USD)',
+    '20/11/26 23/11/26 S123456 卖出 MEMX SOFI 全时段网上交 13.110000 39 655.50 654.35',
+    'SOFI TECHNOLOGIES 易', 'INC', 'ARCX 13.110000 11',
+    '证监会费 : 0.01 平台使用费 : 0.99 清算费 : 0.15 小结 : 1.15', '总卖出金额 : 654.35'];
+  const [row] = parseBrokerPdfLines(lines).rows;
+  assert.equal(row.symbol, 'SOFI');
+  assert.equal(row.shares, 50);
+  assert.equal(row.price, 13.11);
+  assert.equal(row.total_amount, 655.50);
+  assert.equal(row.commission, 1.15);
+  assert.equal(row.broker_net, 654.35);
+  assert.throws(() => parseBrokerPdfLines(lines.map(line => line.replace('13.110000 11', '13.110000 10'))), /核对成交单价/);
+});
+
 test('PDF matches the old cash-dividend gross and tax on its record date without counting the net twice', () => {
   const incoming = parseBrokerPdfLines([
     'Stock Corporate Action Advice', 'Account Number : ZATEST', 'Stock Code', 'AVGO', 'Event Type', 'Cash Dividend',
