@@ -1459,10 +1459,10 @@ function filteredTrades(trades) {
   }).sort((a, b) => new Date(b.trade_date) - new Date(a.trade_date));
 }
 
-function renderTradeFilters(summary = false) {
+function renderTradeFilters({ summary = false, showAccount = true } = {}) {
   return `<div class="sm-trade-filters ${ui.tradeFilterOpen ? 'is-open' : ''}">
       <div class="sm-trade-filter-fields">
-      ${!summary && can('accounts') && state.investmentAccounts?.length ? `<select id="trade-account-filter" aria-label="证券账户">
+      ${showAccount && can('accounts') && state.investmentAccounts?.length ? `<select id="trade-account-filter" aria-label="证券账户">
         <option value="">全部账户</option>
         <option value="unassigned">待归属交易</option>
         ${state.investmentAccounts.map((a) => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)} · ${escapeHtml(a.currency)}</option>`).join('')}
@@ -1491,7 +1491,7 @@ function activeTradeFilterCount(summary = ui.tradeTab !== 'list') {
   const fields = Object.entries(ui.tradeFilter)
     .filter(([key]) => key !== 'type' || !summary)
     .filter(([, value]) => value && value !== 'all').length;
-  return fields + Number(!summary && Boolean(ui.tradeAccountId));
+  return fields + Number(ui.tradeTab !== 'review' && Boolean(ui.tradeAccountId));
 }
 
 function updateTradeFilterToggle(root) {
@@ -1549,7 +1549,7 @@ function renderTradeListTab(trades, loadError) {
 
 async function renderTradeSummaryTab() {
   const q = new URLSearchParams();
-  if (selectedAccountId) q.set('accountId', selectedAccountId);
+  if (ui.tradeAccountId && can('accounts')) q.set('accountId', ui.tradeAccountId);
   if (ui.tradeFilter.start) q.set('start', ui.tradeFilter.start);
   if (ui.tradeFilter.end) q.set('end', ui.tradeFilter.end);
   if (ui.tradeFilter.assetType !== 'all') q.set('assetType', ui.tradeFilter.assetType);
@@ -1573,7 +1573,7 @@ async function renderTradeSummaryTab() {
   }), { buy: 0, sell: 0, fee: 0, pnl: 0, other: 0 });
 
   return `
-    ${renderTradeFilters(true)}
+    ${renderTradeFilters({ summary: true })}
     <div class="sm-trade-modal-scroll">
       <div class="sm-table-wrap sm-table-wrap--modal">
         <table class="sm-table">
@@ -1620,7 +1620,7 @@ async function renderTradeReviewTab() {
   for (const [key, value] of Object.entries(ui.tradeFilter)) {
     if (key !== 'type' && value && value !== 'all') query.set(key, value);
   }
-  const filters = renderTradeFilters(true);
+  const filters = renderTradeFilters({ summary: true, showAccount: false });
   try {
     const report = await api('/trades/review?' + query);
     return `${filters}<div class="sm-trade-modal-scroll sm-review">${renderTradeReview(report, ui.reviewCurrency, pnlVisible)}</div>`;
@@ -1760,7 +1760,7 @@ function bindTradeModalEvents(layer, getListTrades) {
   });
   unbound('#filter-reset')[0]?.addEventListener('click', () => {
     ui.tradeFilter = { symbol: '', type: 'all', assetType: 'all', otherCategory: '', start: '', end: '' };
-    if (ui.tradeTab === 'list') ui.tradeAccountId = '';
+    if (ui.tradeTab !== 'review') ui.tradeAccountId = '';
     updateTradeFilterToggle(root);
     ui.tradePage = 1;
     window._refreshTradeModal?.();
@@ -1805,7 +1805,7 @@ function bindTradeModalEvents(layer, getListTrades) {
   unbound('#modal-import')[0]?.addEventListener('click', () => { openImportModal(); });
   unbound('#modal-export')[0]?.addEventListener('click', () => {
     const q = new URLSearchParams();
-    const accountId = ui.tradeTab === 'list' ? ui.tradeAccountId : selectedAccountId;
+    const accountId = ui.tradeTab === 'review' ? selectedAccountId : ui.tradeAccountId;
     if (accountId) q.set('accountId', accountId);
     for (const [k, v] of Object.entries(ui.tradeFilter)) {
       if (ui.tradeTab !== 'list' && k === 'type') continue;
