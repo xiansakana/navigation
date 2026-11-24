@@ -119,22 +119,31 @@ export function createBookkeepingStore(db) {
     if (from && from.currency !== c && !historical) fail('账单货币须与付款/收款账户一致');
     if (from && to && from.id === to.id) fail('转出和转入账户不能相同');
     if (transfer && !historical && (!from || !to)) fail('请选择转出和转入账户');
+    const nonnegative = v => { const n = cents(v ?? 0, true); if (n < 0) fail('退款、优惠和手续费不能为负数'); return n; };
+    const fee = nonnegative(input.fee);
     let toAmount = null;
     if (transfer && to) {
       const receipt = input.toAmount != null && input.toAmount !== '' ? cents(input.toAmount) : null;
       if (to.currency === c) {
         // For a same-currency transfer, the stored principal is the net receipt.
+        const feeOnly = previous && previous.type === type && previous.currency === c &&
+          previous.account_id === from?.id && previous.to_account_id === to.id &&
+          (previous.to_amount ?? previous.amount) === previous.amount &&
+          amount === previous.amount && (receipt ?? previous.amount) === previous.amount &&
+          fee !== previous.fee;
         const onlyPrincipalChanged = previous && receipt === previous.to_amount && amount !== previous.amount;
-        if (receipt !== null && !onlyPrincipalChanged) amount = receipt;
+        if (feeOnly) {
+          amount = previous.amount + previous.fee - fee;
+          if (amount <= 0) fail('手续费必须小于原转出总额');
+        } else if (receipt !== null && !onlyPrincipalChanged) amount = receipt;
         toAmount = amount;
       } else if (receipt !== null) toAmount = receipt;
       else if (!historical) fail('跨币种转账须填写到账金额');
     }
-    const nonnegative = v => { const n = cents(v ?? 0, true); if (n < 0) fail('退款、优惠和手续费不能为负数'); return n; };
     return { date: entryDate(input.date), type, amount, currency: c, category: text(input.category || (transfer ? type : '其他')),
       subcategory: text(input.subcategory), accountId: from?.id || null, toAccountId: to?.id || null, toAmount,
       note: text(input.note, 5000), book: text(input.book || '个人账本'), tags: text(input.tags, 1000), location: text(input.location, 1000),
-      refund: nonnegative(input.refund), discount: nonnegative(input.discount), fee: nonnegative(input.fee) };
+      refund: nonnegative(input.refund), discount: nonnegative(input.discount), fee };
   }
   function insertEntry(userId, e, opts = {}) {
     const eid = opts.id || id();

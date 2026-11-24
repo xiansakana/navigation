@@ -227,6 +227,22 @@
       }
       t.addEventListener('change',update); update();
       form.elements.accountId.addEventListener('change',()=>{ const a=state.accounts.find(a=>a.id===form.elements.accountId.value); if(a) form.elements.currency.value=a.currency; });
+      const recipient=state.accounts.find(a=>a.id===item.toAccountId);
+      if(detailGroup==='fee' && transferTypes.includes(item.type) && recipient?.currency===item.currency &&
+        (item.toAmount ?? item.amount)===item.amount){
+        const feeInput=form.elements.fee, preview=document.createElement('p');
+        const total=Math.round(item.amount*100)+Math.round((item.fee||0)*100);
+        preview.className='bk-form-hint';
+        preview.setAttribute('role','status');
+        feeInput.closest('label').after(preview);
+        const show=()=>{
+          const fee=feeInput.valueAsNumber, net=total-Math.round(fee*100);
+          preview.innerHTML=Number.isFinite(fee)&&fee>=0&&net>0
+            ?'转出总额 '+m(total/100,item.currency)+' · 金额与实际到账均为 '+m(net/100,item.currency)
+            :'手续费必须小于原转出总额 '+m(total/100,item.currency)+'。';
+        };
+        feeInput.addEventListener('input',show); show();
+      }
       if(detailGroup){const control=form.elements[window.bookkeepingDetailGroups[detailGroup].fields[0]];control?.focus({preventScroll:true});if(control?.name==='amount')control.select();}
     }
   }

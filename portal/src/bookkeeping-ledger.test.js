@@ -86,8 +86,13 @@ test('editing an actual same-currency receipt updates linked cash and posts the 
     assert.deepEqual(accounts(),[0,6912.67]);
     const corrected=store.entries(uid)[0];
     assert.deepEqual([corrected.amount,corrected.toAmount,corrected.fee],[5203.24,5203.24,20]);
-    store.saveEntry(uid,{...corrected,amount:5100},id);
-    assert.deepEqual(accounts(),[103.24,6809.43]);
+    store.saveEntry(uid,{...corrected,fee:25},id);
+    assert.deepEqual(accounts(),[0,6907.67]);
+    const editedFee=store.entries(uid)[0];
+    assert.deepEqual([editedFee.amount,editedFee.toAmount,editedFee.fee],[5198.24,5198.24,25]);
+    assert.throws(()=>store.saveEntry(uid,{...editedFee,fee:5223.24},id),/原转出总额/);
+    store.saveEntry(uid,{...editedFee,amount:5100},id);
+    assert.deepEqual(accounts(),[98.24,6809.43]);
     assert.equal(store.entries(uid)[0].toAmount,5100);
   }finally{db.close();}
 });
