@@ -72,6 +72,26 @@ test('historical snapshots reverse complete account history and cross-currency a
   assert.equal(accountLedger(entries,null,quotes).size,0);
 });
 
+test('editing an actual same-currency receipt updates linked cash and posts the fee once',()=>{
+  const db=new Database(':memory:'),store=createBookkeepingStore(db),uid='owner';
+  try{
+    const from=store.saveAccount(uid,{name:'证券',currency:'USD'});
+    const to=store.saveAccount(uid,{name:'储蓄',currency:'USD',balance:1709.43});
+    saveInvestmentAccount(db,uid,{name:'券商',currency:'USD',baselineCash:5223.24,bookkeepingId:from});
+    const time=new Date(Date.now()+8*3600000).toISOString().slice(0,19);
+    const id=store.saveEntry(uid,{date:time,type:'转账',currency:'USD',accountId:from,toAccountId:to,amount:5223.24,fee:20});
+    const accounts=()=>store.accounts(uid).map(a=>a.balance);
+    assert.deepEqual(accounts(),[-20,6932.67]);
+    store.saveEntry(uid,{...store.entries(uid)[0],toAmount:5203.24},id);
+    assert.deepEqual(accounts(),[0,6912.67]);
+    const corrected=store.entries(uid)[0];
+    assert.deepEqual([corrected.amount,corrected.toAmount,corrected.fee],[5203.24,5203.24,20]);
+    store.saveEntry(uid,{...corrected,amount:5100},id);
+    assert.deepEqual(accounts(),[103.24,6809.43]);
+    assert.equal(store.entries(uid)[0].toAmount,5100);
+  }finally{db.close();}
+});
+
 test('securities cash reverses settlements, matches duplicate interest, and identifies missing actual receipts',()=>{
   const account={id:'ledger',currency:'USD',balance:2000,balanceSource:'portfolio',investment:{id:'broker',cash:600}};
   const rows=[

@@ -105,9 +105,9 @@ export function createBookkeepingStore(db) {
     } catch (error) { if (error.code?.startsWith('SQLITE_CONSTRAINT')) fail('账户名称已存在'); throw error; }
     return aid;
   }
-  function normalizeEntry(userId, input, historical = false, allowedArchived = []) {
+  function normalizeEntry(userId, input, historical = false, allowedArchived = [], previous) {
     const type = text(input.type); if (!ENTRY_TYPES.includes(type)) fail('账单类型无效');
-    const amount = cents(input.amount, type === '余额调整' || historical);
+    let amount = cents(input.amount, type === '余额调整' || historical);
     if (amount < 0 && type !== '余额调整') fail('收支与转账金额不能为负数');
     const c = currency(input.currency);
     const find = aid => { if (!aid) return null; const a = db.prepare('SELECT id,currency,archived FROM bookkeeping_accounts WHERE user_id=? AND id=?').get(userId, aid); if (!a) fail('账户不存在或不属于当前用户'); if (a.archived && !allowedArchived.includes(aid)) fail('账户已归档，请先恢复账户'); return a; };
@@ -121,8 +121,13 @@ export function createBookkeepingStore(db) {
     if (transfer && !historical && (!from || !to)) fail('请选择转出和转入账户');
     let toAmount = null;
     if (transfer && to) {
-      if (to.currency === c) toAmount = amount;
-      else if (input.toAmount != null && input.toAmount !== '') toAmount = cents(input.toAmount);
+      const receipt = input.toAmount != null && input.toAmount !== '' ? cents(input.toAmount) : null;
+      if (to.currency === c) {
+        // For a same-currency transfer, the stored principal is the net receipt.
+        const onlyPrincipalChanged = previous && receipt === previous.to_amount && amount !== previous.amount;
+        if (receipt !== null && !onlyPrincipalChanged) amount = receipt;
+        toAmount = amount;
+      } else if (receipt !== null) toAmount = receipt;
       else if (!historical) fail('跨币种转账须填写到账金额');
     }
     const nonnegative = v => { const n = cents(v ?? 0, true); if (n < 0) fail('退款、优惠和手续费不能为负数'); return n; };
@@ -145,7 +150,7 @@ export function createBookkeepingStore(db) {
     return db.transaction(() => {
       const old = eid && db.prepare('SELECT * FROM bookkeeping_entries WHERE user_id=? AND id=?').get(userId, eid);
       if (eid && !old) fail('账单不存在');
-      const normalized = normalizeEntry(userId, input, old?.affects_balance === 0, old ? [old.account_id,old.to_account_id] : []);
+      const normalized = normalizeEntry(userId, input, old?.affects_balance === 0, old ? [old.account_id,old.to_account_id] : [], old);
       catalog.validateEntry(userId, normalized, old);
       let raw=old?.raw?JSON.parse(old.raw):null;
       if(raw?.kind==='icost-screenshot-adjustment-v1' && (normalized.type!==old.type || normalized.date!==old.date || normalized.amount!==old.amount || normalized.currency!==old.currency || normalized.accountId!==old.account_id || normalized.fee!==old.fee))raw={...raw,checkpoint:null};
