@@ -210,12 +210,26 @@ body.has-navbar {
 .sm-holding-option td { background: rgba(91, 156, 255, 0.04); }
 .sm-sort-th { cursor: pointer; user-select: none; white-space: nowrap; }
 .sm-sort-th:hover { color: var(--accent); }
-.sm-symbol-drag {
+.sm-symbol-controls {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  cursor: grab;
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: center;
 }
+.sm-holding-symbol { min-width: 0; cursor: text; user-select: text; }
+.sm-symbol-drag {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  min-height: 22px;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: grab;
+  user-select: none;
+}
+.sm-symbol-drag:hover { color: var(--accent); background: var(--hover-bg); }
 .sm-symbol-drag:active { cursor: grabbing; }
 .sm-clear-group { padding: 0 4px !important; font-size: 12px !important; }
 .sm-weight-cell {
@@ -1347,8 +1361,6 @@ select:focus {
 }
 #holdings-table .sm-holding-name { line-height: 1.5; }
 .sm-etf-premium { color: var(--muted); font-size: 11px; white-space: nowrap; }
-#holdings-table .sm-symbol-drag { max-width: 100%; flex-wrap: wrap; justify-content: center; }
-#holdings-table .sm-symbol-drag strong { min-width: 0; }
 #holdings-table .sm-cell-select { width: 100%; min-width: 0; padding: 4px 2px; }
 #holdings-table .btn.link { white-space: normal; padding: 4px 2px; }
 @media (max-width: 960px) {

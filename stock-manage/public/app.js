@@ -510,6 +510,7 @@ function renderHoldingsGroupSummary(group, expanded, cols) {
 
 function renderHoldingsRowCells(h, group) {
   const groupSymbol = escapeHtml(h.tradeSymbol || h.symbol);
+  const canGroup = can('meta', 'edit');
   return visibleHoldingsColumns().map((c) => {
     if (c.key === 'weight') {
       const individual = h.marketValue == null ? null : h.groupMarketValue === 0 ? h.weight : h.weight * h.marketValue / h.groupMarketValue;
@@ -526,13 +527,15 @@ function renderHoldingsRowCells(h, group) {
     const opt = h.optionInfo;
     const optStr = opt ? `${opt.type} ${formatPrice(opt.strike, 'USD')} · ${opt.expiration}` : '—';
     const lots = h.costLots?.length > 1 ? `<div class="sm-lots-hint">${h.costLots.length} 笔合计</div>` : '';
-    const symbol = `<strong>${escapeHtml(h.symbol)}</strong>`;
-    const symInner = can('meta', 'edit') ? `
-        <span class="sm-symbol-drag" draggable="true" data-drag="${groupSymbol}" title="拖动代码到另一行，合并为同一标的">
+    const symbol = `<strong class="sm-holding-symbol">${escapeHtml(h.symbol)}</strong>`;
+    const symInner = canGroup ? `
+        <span class="sm-symbol-controls">
           ${symbol}
+          <span class="sm-symbol-drag" draggable="true" data-drag="${groupSymbol}" title="拖动此手柄到另一行的代码，合并为同一标的" aria-label="拖拽合并">⠿</span>
           ${h.groupWith ? `<button type="button" class="btn link sm-clear-group" data-clear-group="${groupSymbol}" title="恢复自动分组">↺</button>` : ''}
         </span>` : symbol;
-    return `<td data-label="${c.label}"${tdCls ? ` class="${tdCls}"` : ''}>${holdingsCellContent(h, c.key, { optStr, lots, symInner })}</td>`;
+    const dropTarget = canGroup && c.key === 'symbol' ? ` data-group-drop="${groupSymbol}"` : '';
+    return `<td data-label="${c.label}"${tdCls ? ` class="${tdCls}"` : ''}${dropTarget}>${holdingsCellContent(h, c.key, { optStr, lots, symInner })}</td>`;
   }).join('');
 }
 
@@ -1991,7 +1994,7 @@ $('#holdings-body').addEventListener('dragstart', (e) => {
 });
 
 $('#holdings-body').addEventListener('dragover', (e) => {
-  if (e.target.closest('[data-drag], [data-group-drop]')) {
+  if (dragSourceSymbol && e.target.closest('[data-group-drop]')) {
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
   }
@@ -2000,12 +2003,13 @@ $('#holdings-body').addEventListener('dragover', (e) => {
 $('#holdings-body').addEventListener('dragend', () => { dragSourceSymbol = null; });
 
 $('#holdings-body').addEventListener('drop', async (e) => {
-  if (!can('meta', 'edit')) return;
-  const targetEl = e.target.closest('[data-drag], [data-group-drop]');
+  if (!can('meta', 'edit') || !dragSourceSymbol) return;
+  const targetEl = e.target.closest('[data-group-drop]');
   if (!targetEl) return;
   e.preventDefault();
-  const src = (e.dataTransfer?.getData('text/plain') || dragSourceSymbol || '').trim();
-  const dst = targetEl.dataset.drag || targetEl.dataset.groupDrop;
+  const src = dragSourceSymbol;
+  dragSourceSymbol = null;
+  const dst = targetEl.dataset.groupDrop;
   if (!src || !dst || src === dst) return;
   const anchor = state.holdings.find(h => h.symbol === dst)
     || state.fundHoldings?.find(h => h.tradeSymbol === dst);

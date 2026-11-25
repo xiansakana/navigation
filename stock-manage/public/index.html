@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>股票管理</title>
-  <link rel="stylesheet" href="./style.css?v=pnl-period-3">
+  <link rel="stylesheet" href="./style.css?v=holding-drag-handle">
   <link rel="stylesheet" href="/skeleton/skeleton.css?v=2">
   <script src="/ui/input-guard.js?v=20261011-2"></script>
   <script defer src="/ui/back-to-top.js?v=1"></script>
@@ -80,7 +80,7 @@
       </div>
       <div id="col-toggle-panel" class="sm-col-panel hidden"></div>
       <p id="quote-refresh-status" class="sm-holdings-hint hint" role="status" aria-live="polite" hidden></p>
-      <p class="sm-holdings-hint hint">同标的自动分组（期权归入正股）；可拖动代码行合并分组，点击 ↺ 恢复。点击「代码」「仓位 / 占比」表头排序。</p>
+      <p class="sm-holdings-hint hint">同标的自动分组（期权归入正股）。拖动代码旁的 ⠿ 到另一行代码可合并，点击 ↺ 恢复。点击「代码」或「仓位 / 占比」表头可排序。</p>
       <div class="sm-table-wrap">
         <table class="sm-table" id="holdings-table">
           <thead id="holdings-head"></thead>
@@ -93,6 +93,6 @@
   <div id="modal-root"></div>
   <script src="/skeleton/skeleton.js?v=1"></script>
   <script src="./vendor/echarts.min.js"></script>
-  <script type="module" src="./app.js?v=trade-account-summary"></script>
+  <script type="module" src="./app.js?v=holding-drag-handle"></script>
 </body>
 </html>
