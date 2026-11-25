@@ -2,6 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildHoldingsGroups } from './holdings-table.js';
 
+test('weight sorting orders groups by total and their children by individual weight', () => {
+  const rows = [
+    { symbol: 'A', accountId: 'one', marketValue: 10, groupMarketValue: 50, weight: 50 },
+    { symbol: 'A', accountId: 'two', marketValue: 40, groupMarketValue: 50, weight: 50 },
+    { symbol: 'B', groupWith: 'A', marketValue: null, groupMarketValue: 50, weight: 50 },
+    { symbol: 'C', marketValue: 30, groupMarketValue: 30, weight: 30 }
+  ];
+  const [larger, smaller] = buildHoldingsGroups(rows, 'weight', -1);
+  assert.deepEqual(larger.items, [rows[1], rows[0], rows[2]]);
+  assert.equal(larger.anchor, rows[0]);
+  assert.equal(smaller.key, 'C');
+  const ascending = buildHoldingsGroups(rows, 'weight', 1);
+  assert.equal(ascending[0].key, 'C');
+  assert.deepEqual(ascending[1].items, [rows[0], rows[1], rows[2]]);
+});
+
 test('financial sorting aggregates grouped holdings in a common currency and puts missing results last', () => {
   const rows = [
     { symbol: 'A', currency: 'USD', marketValue: 120, marketValueNative: 120, pnl: 20, pnlPct: 20, costBasisNative: 100, dailyPnl: -2, dailyPnlPct: -1.64 },

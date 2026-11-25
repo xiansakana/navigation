@@ -6,7 +6,7 @@ import { formatPrice, formatQuantity, priceInputValue } from './js/price-format.
 import { bindTradeInstrument } from './js/trade-instrument.js?v=keep-trade-account-1';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js?v=holding-note';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=period-3';
-import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey, isHoldingsSortable } from './js/holdings-table.js?v=group-summary-1';
+import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey, isHoldingsSortable, individualHoldingWeight } from './js/holdings-table.js?v=group-weight-sort';
 import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js?v=access-1';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -492,7 +492,7 @@ function renderHoldingsGroupSummary(group, expanded, cols) {
   const shown = key => cols.some(c => c.key === key) && colVis[key] !== false;
   const control = ['symbol', 'name', 'type', 'actions'].find(shown) || cols.find(c => colVis[c.key] !== false)?.key || cols[0]?.key;
   const symbol = shown('symbol') ? `${escapeHtml(group.key)} · ` : '';
-  const first = group.items[0];
+  const first = group.anchor;
   const usdCnyRate = Number(state.usdCnyRate);
   const dropTarget = shown('symbol') && can('meta', 'edit')
     ? ` data-group-drop="${escapeHtml(first.tradeSymbol || first.symbol)}"` : '';
@@ -523,7 +523,7 @@ function renderHoldingsRowCells(h, group) {
   const canGroup = can('meta', 'edit');
   return visibleHoldingsColumns().map((c) => {
     if (c.key === 'weight') {
-      const individual = h.marketValue == null ? null : h.groupMarketValue === 0 ? h.weight : h.weight * h.marketValue / h.groupMarketValue;
+      const individual = individualHoldingWeight(h);
       if (group.individualWeight) {
         return `<td data-label="${c.label}" class="sm-weight-cell">${maskCol('weight', fmtPct(individual))}</td>`;
       }

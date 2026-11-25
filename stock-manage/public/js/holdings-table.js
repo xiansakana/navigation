@@ -45,6 +45,14 @@ function groupWeight(items) {
   return items[0]?.weight ?? 0;
 }
 
+export function individualHoldingWeight(holding) {
+  if (holding.marketValue == null) return null;
+  const weight = holding.groupMarketValue === 0
+    ? holding.weight
+    : holding.weight * holding.marketValue / holding.groupMarketValue;
+  return Number.isFinite(weight) ? weight : null;
+}
+
 const numericSorts = new Set(['pnl', 'pnlPct', 'dailyPnl', 'dailyPnlPct', 'position']);
 const accountCollator = new Intl.Collator('zh-CN', { numeric: true });
 export const isHoldingsSortable = key => numericSorts.has(key) || ['account', 'symbol', 'type', 'weight'].includes(key);
@@ -125,7 +133,13 @@ export function buildHoldingsGroups(rows, sortKey, sortDir, rates = {}) {
     if (ta !== tb) return ta - tb;
     return a.localeCompare(b);
   });
-  return keys.map((key) => ({ key, items: groupMap.get(key), summary: summaries.get(key) }));
+  return keys.map((key) => {
+    const items = groupMap.get(key);
+    const ordered = sortKey === 'weight' && items.length > 1
+      ? [...items].sort((a, b) => comparable(individualHoldingWeight(a), individualHoldingWeight(b), sortDir))
+      : items;
+    return { key, items: ordered, anchor: items[0], summary: summaries.get(key) };
+  });
 }
 
 export function toggleTableSort(current, key) {
