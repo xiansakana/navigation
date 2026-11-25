@@ -410,7 +410,8 @@ function holdingsCellContent(h, key, ctx) {
       const refreshTarget = can('refresh', 'edit') ? `data-refresh="${escapeHtml(h.tradeSymbol || h.symbol)}"`
         : isFund && can('fund-holdings', 'edit') ? `data-fund-refresh="${h.fundIndex}"` : '';
       const label = isFund ? '更新净值' : '刷新价格';
-      const refresh = refreshTarget ? ` <button type="button" class="btn link" ${refreshTarget} title="${label}" aria-label="${label}">↻</button>` : '';
+      const disabled = quotesRefreshBusy && can('refresh', 'edit') ? ' disabled' : '';
+      const refresh = refreshTarget ? ` <button type="button" class="btn link" ${refreshTarget} title="${label}" aria-label="${label}"${disabled}>↻</button>` : '';
       if (isFund) {
         const nav = h.price == null ? '待更新净值' : formatPrice(h.price, cur, fundPriceDigits(h.tradeSymbol || h.symbol));
         const date = h.quoteAsOf ? `<div class="sm-lots-hint">净值 ${escapeHtml(h.quoteAsOf)}</div>` : '';
@@ -1049,10 +1050,10 @@ function renderImportProgress(layer, progress, saving = false) {
   } else bar.removeAttribute('value');
 }
 
-async function readImportResponse(response, onProgress) {
+async function readProgressResponse(response, onProgress, messages = {}) {
   if (!response.headers.get('Content-Type')?.includes('text/event-stream')) {
     const data = await response.json().catch(() => null);
-    if (!response.ok || !data) throw new Error(data?.error || '导入请求失败，请重新预览');
+    if (!response.ok || !data) throw new Error(data?.error || messages.failed || '导入请求失败，请重新预览');
     return data;
   }
   const reader = response.body.getReader();
@@ -1061,7 +1062,7 @@ async function readImportResponse(response, onProgress) {
   try {
     for (;;) {
       const { value, done } = await reader.read();
-      if (done) throw new Error('进度连接已中断，请重新预览核对结果');
+      if (done) throw new Error(messages.interrupted || '进度连接已中断，请重新预览核对结果');
       pending += decoder.decode(value, { stream: true });
       let end;
       while ((end = pending.indexOf('\n\n')) !== -1) {
@@ -1222,7 +1223,7 @@ function bindImportModal(layer) {
         body: importState.buffer,
         signal: previewController.signal
       });
-      const data = await readImportResponse(res, progress => {
+      const data = await readProgressResponse(res, progress => {
         if (current === revision && layer.isConnected) renderImportProgress(layer, progress);
       });
       if (current !== revision || !layer.isConnected) return;
@@ -1429,7 +1430,7 @@ function openImportModal() {
         headers: importRequestHeaders(layer),
         body: buildImportBody()
       });
-      const data = await readImportResponse(res, progress => renderImportProgress(layer, progress, true));
+      const data = await readProgressResponse(res, progress => renderImportProgress(layer, progress, true));
       closeModal(layer);
       if (selectedAccountId && importState.currencies.length > 1) loadPortfolio().catch(error => toastErr(error.message));
       else applyPortfolio(data);
@@ -1870,15 +1871,40 @@ async function refreshQuotes(symbol) {
   const btn = $('#btn-refresh');
   const buttonText = btn?.textContent;
   const status = $('#quote-refresh-status');
-  const report = (message) => { if (status) { status.hidden = false; status.textContent = message; } };
+  const statusText = $('[role="status"]', status);
+  const bar = $('progress', status);
+  const report = (message) => {
+    status.hidden = false;
+    if (statusText.textContent !== message) statusText.textContent = message;
+  };
+  bar.hidden = false;
+  bar.removeAttribute('value');
   report(symbol ? `正在刷新 ${symbol} 报价…` : '正在刷新持仓报价，请稍候…');
-  const rowBtns = [...document.querySelectorAll('[data-refresh]')];
   if (btn) { btn.disabled = true; btn.textContent = '刷新中…'; }
-  rowBtns.forEach((el) => { el.disabled = true; });
+  document.querySelectorAll('[data-refresh]').forEach(el => { el.disabled = true; });
+  const scope = pnlQuery();
+  const revision = portfolioLoadRevision;
+  const isCurrent = () => revision === portfolioLoadRevision && scope === pnlQuery();
   try {
-    const body = symbol ? { symbol } : undefined;
-    const data = await api('/quotes/refresh' + pnlQuery(), { method: 'POST', body });
-    applyPortfolio(data);
+    const response = await fetch('./api/quotes/refresh' + (scope ? scope + '&' : '?') + 'progress=1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(symbol ? { symbol } : {})
+    });
+    const data = await readProgressResponse(response, ({ phase, total, completed, active, ok, failed, valuation, symbol: finished }) => {
+      bar.max = total;
+      bar.value = completed;
+      const current = active.length ? `正在刷新 ${active.join('、')}` : finished ? `刚处理 ${finished}` : '准备刷新';
+      const counts = `已处理 ${completed}/${total}（成功 ${ok}，失败 ${failed}）`;
+      report(phase === 'fx' ? `${counts} · 正在更新汇率` : `${counts} · ${current}`);
+      if (valuation && isCurrent()) {
+        state = { ...state, ...valuation, summary: { ...state.summary, ...valuation.summary } };
+        renderDashboard();
+        renderHoldings();
+      }
+    }, { failed: '行情刷新请求失败', interrupted: '行情刷新进度连接已中断' });
+    if (isCurrent()) applyPortfolio(data);
+    else await loadPortfolio();
     const r = data.refresh;
     if (r?.failed) {
       const msg = r.errors.slice(0, 5).map((e) => `${e.symbol}: ${e.error}`).join(' · ');
@@ -1895,8 +1921,9 @@ async function refreshQuotes(symbol) {
     toastRefresh('error', e.message);
   } finally {
     quotesRefreshBusy = false;
+    bar.hidden = true;
     if (btn) { btn.disabled = false; btn.textContent = buttonText; }
-    rowBtns.forEach((el) => { el.disabled = false; });
+    document.querySelectorAll('[data-refresh]').forEach(el => { el.disabled = false; });
   }
 }
 

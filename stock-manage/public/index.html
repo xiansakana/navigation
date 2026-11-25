@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>股票管理</title>
-  <link rel="stylesheet" href="./style.css?v=holding-drag-handle">
+  <link rel="stylesheet" href="./style.css?v=quote-progress">
   <link rel="stylesheet" href="/skeleton/skeleton.css?v=2">
   <script src="/ui/input-guard.js?v=20261011-2"></script>
   <script defer src="/ui/back-to-top.js?v=1"></script>
@@ -79,7 +79,10 @@
         </div>
       </div>
       <div id="col-toggle-panel" class="sm-col-panel hidden"></div>
-      <p id="quote-refresh-status" class="sm-holdings-hint hint" role="status" aria-live="polite" hidden></p>
+      <div id="quote-refresh-status" class="sm-quote-refresh sm-holdings-hint hint" hidden>
+        <progress aria-label="报价刷新进度" hidden></progress>
+        <span role="status" aria-live="polite"></span>
+      </div>
       <p class="sm-holdings-hint hint">同标的自动分组（期权归入正股）。拖动代码旁的 ⠿ 到另一行代码可合并，点击 ↺ 恢复。点击「代码」或「仓位 / 占比」表头可排序。</p>
       <div class="sm-table-wrap">
         <table class="sm-table" id="holdings-table">
@@ -93,6 +96,6 @@
   <div id="modal-root"></div>
   <script src="/skeleton/skeleton.js?v=1"></script>
   <script src="./vendor/echarts.min.js"></script>
-  <script type="module" src="./app.js?v=holding-drag-handle"></script>
+  <script type="module" src="./app.js?v=quote-progress"></script>
 </body>
 </html>

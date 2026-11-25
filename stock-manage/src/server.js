@@ -8,7 +8,7 @@ import { serveUiAsset } from '../../shared/ui-assets.js';
 import { portfolioIdentityMiddleware } from '../../shared/portfolio-user.js';
 import { currentPortfolioUserId, runWithPortfolioUser } from '../../shared/portfolio-user.js';
 import { getDatabase } from '../../shared/db/index.js';
-import { investmentRows, saveInvestmentAccount, unlinkInvestmentAccount } from '../../shared/investment-accounts.js';
+import { investmentRows, projectInvestments, saveInvestmentAccount, unlinkInvestmentAccount } from '../../shared/investment-accounts.js';
 import { dipCashFunds, setDipCashReserve } from '../../shared/dip-cash-funds.js';
 import { createBookkeepingStore } from '../../portal/src/bookkeeping-store.js';
 import { queueSavedTradeHistory } from '../../portal/src/bookkeeping-security-history.js';
@@ -144,6 +144,7 @@ function completePortfolioFundQuote(quote, saved) {
 }
 
 function buildPortfolio(data, pnlOpts = {}) {
+  const { valuationOnly } = pnlOpts;
   const rate = Number(data.usdCnyRate) > 0 ? Number(data.usdCnyRate) : DEFAULT_USD_CNY_RATE;
   const fxOpts = { ...pnlOpts, usdCnyRate: rate, usdHkdRate: data.usdHkdRate };
   const openings = openingFundsForAccount(pnlOpts.accountId);
@@ -183,8 +184,8 @@ function buildPortfolio(data, pnlOpts = {}) {
   }
   const enriched = enrichHoldings(valuedHoldings, { ...data.quotes, ...fundQuotes }, cashState, data.holdingsMeta);
   const enrichedFunds = enriched.rows.filter(row => row.type === 'fund');
-  const pnl = computePnl(calculationTrades, fxOpts);
-  const sparse = buildDailyCumulativeSeries(calculationTrades, fxOpts);
+  const pnl = valuationOnly ? undefined : computePnl(calculationTrades, fxOpts);
+  const sparse = valuationOnly ? undefined : buildDailyCumulativeSeries(calculationTrades, fxOpts);
   const daily = computeDailySummary(enriched.rows, calculationTrades, fxOpts);
   const cashEq = enriched.cashUsdEq;
   return {
@@ -194,7 +195,7 @@ function buildPortfolio(data, pnlOpts = {}) {
     cashHkd: cashState.cashHkd,
     usdHkdRate: data.usdHkdRate,
     usdCnyRate: rate,
-    trades: data.trades.map(describeReinvestment),
+    trades: valuationOnly ? undefined : data.trades.map(describeReinvestment),
     quotes: data.quotes,
     holdingsMeta: data.holdingsMeta,
     holdings: enriched.rows.filter(row => row.type !== 'fund'),
@@ -256,7 +257,7 @@ function orderedInvestmentAccounts(accounts) {
   return [...ordered, ...byId.values()];
 }
 
-function portfolioForRequest(req, data = store.read()) {
+function portfolioForRequest(req, data = store.read(), { valuationOnly = false } = {}) {
   const accounts = data.investmentAccounts || [];
   const accountsVisible = hasStockPermission(req, 'accounts');
   const pnlOptions = pnlOptsFromReq(req);
@@ -266,7 +267,7 @@ function portfolioForRequest(req, data = store.read()) {
     const selected = accounts.find((a) => a.id === accountId);
     data = { ...data, trades: data.trades.filter((t) => (t.account_id || 'unassigned') === accountId), cashUsd: selected?.currency === 'USD' ? selected.cash : 0, cashCny: selected?.currency === 'CNY' ? selected.cash : 0, cashHkd: selected?.currency === 'HKD' ? selected.cash : 0 };
   }
-  const portfolio = buildPortfolio(data, pnlOptions);
+  const portfolio = buildPortfolio(data, { ...pnlOptions, valuationOnly });
   if (!hasStockPermission(req, 'pnl')) {
     delete portfolio.chartSparse;
     for (const field of ['totalBuy', 'totalSell', 'commission', 'otherAmount', 'realizedPL', 'netPL',
@@ -697,7 +698,7 @@ function importRequestTrades(file, req, progress) {
   return parseBrokerPdf(file, header ? decodeURIComponent(header) : String(defaultPassword || ''), parsing);
 }
 
-function importResponse(req, res, preview = false) {
+function progressResponse(req, res, preview = false) {
   const stream = req.query.progress === '1';
   const packet = value => `data: ${JSON.stringify(value)}\n\n`;
   return {
@@ -708,7 +709,7 @@ function importResponse(req, res, preview = false) {
         return;
       }
       if (!res.headersSent) {
-        res.set({ 'Content-Type': 'text/event-stream; charset=utf-8', 'X-Accel-Buffering': 'no' });
+        res.set({ 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store, no-transform', 'X-Accel-Buffering': 'no' });
         res.flushHeaders();
       }
       res.write(packet({ phase, ...details }));
@@ -789,7 +790,7 @@ app.post('/api/trades/import/preview', express.raw({
 }), async (req, res) => {
   const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
   if (!buf.length) return res.status(400).json({ error: '空文件' });
-  const reply = importResponse(req, res, true);
+  const reply = progressResponse(req, res, true);
   try {
     if (isBrokerPdf(buf) && !requireStockPermission(req, res, 'import', 'edit')) return;
     const trades = await importRequestTrades(buf, req, reply.progress);
@@ -821,7 +822,7 @@ app.post('/api/trades/import', express.raw({
 }), async (req, res) => {
   const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
   if (!buf.length) return res.status(400).json({ error: '空文件' });
-  const reply = importResponse(req, res);
+  const reply = progressResponse(req, res);
   try {
     const { file, selection } = decodeImportHistory(buf, req.query.historicalSelection === '1');
     if (file.length > importFileLimit) throw new Error('文件不能超过 20 MB');
@@ -1437,6 +1438,7 @@ app.get('/api/option/:symbol', async (req, res) => {
 });
 
 app.post('/api/quotes/refresh', async (req, res) => {
+  if (!requireStockPermission(req, res, 'refresh', 'edit')) return;
   const data = store.read();
   const symbol = req.body?.symbol;
   const symbols = symbol
@@ -1448,38 +1450,83 @@ app.post('/api/quotes/refresh', async (req, res) => {
   const updated = {};
   const rates = {};
   const errors = [];
+  const reply = progressResponse(req, res);
+  const streaming = req.query.progress === '1';
+  const active = new Set();
+  const total = symbols.length;
+  let completed = 0;
   let ok = 0;
-  for (const sym of symbols) {
-    try {
-      updated[sym] = await quotes.getQuote(sym);
-      ok += 1;
-      if (!symbol) await new Promise((r) => setTimeout(r, 800));
-    } catch (e) {
-      errors.push({ symbol: sym, error: e.message || '失败' });
+  let nextStart = 0;
+  let lastSnapshot = 0;
+  const report = (phase, details) => reply.progress(phase, { completed, total, ok, failed: errors.length, active: [...active], ...details });
+  const withRefreshedQuotes = (latest) => {
+    const merged = { ...latest.quotes };
+    for (const [sym, quote] of Object.entries(updated)) {
+      if (fundIdentifier(sym) && merged[sym]?.asOf > quote.asOf) continue;
+      merged[sym] = completePortfolioFundQuote(quote, merged[sym]);
     }
-  }
+    return { ...latest, quotes: merged };
+  };
+  report('quotes');
+  let phase = 'quotes';
+  const heartbeat = streaming ? setInterval(() => report(phase), 8000) : null;
   try {
-    const fx = await quotes.getUsdCny();
-    if (fx?.rate > 0) rates.usdCnyRate = fx.rate;
-  } catch (e) {
-    errors.push({ symbol: 'USDCNY', error: e.message || '汇率失败' });
+    // Pace starts to avoid bursts against providers while overlapping slow requests.
+    await mapWithConcurrency(symbols, 3, async (sym) => {
+      const now = Date.now();
+      const delay = Math.max(0, nextStart - now);
+      nextStart = now + delay + 1000;
+      if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+      active.add(sym);
+      report('quotes');
+      let received = false;
+      try {
+        updated[sym] = await quotes.getQuote(sym);
+        ok++;
+        received = true;
+      } catch (error) {
+        errors.push({ symbol: sym, error: error.message || '失败' });
+      }
+      completed++;
+      active.delete(sym);
+      let valuation;
+      if (received && streaming && !res.destroyed && Date.now() - lastSnapshot >= 750) {
+        const live = withRefreshedQuotes(store.read());
+        live.investmentAccounts = projectInvestments(portfolioDb, currentPortfolioUserId(), live);
+        const { holdings, fundHoldings, summary, missingQuotes } = portfolioForRequest(req, live, { valuationOnly: true });
+        valuation = { holdings, fundHoldings, summary, missingQuotes };
+        lastSnapshot = Date.now();
+      }
+      report('quotes', { symbol: sym, valuation });
+    });
+    phase = 'fx';
+    report(phase);
+    const refreshFx = async (symbol, field, getRate) => {
+      try {
+        const { rate } = await getRate();
+        if (rate > 0) rates[field] = rate;
+      } catch (error) {
+        errors.push({ symbol, error: error.message || '汇率失败' });
+      }
+    };
+    const fx = [refreshFx('USDCNY', 'usdCnyRate', quotes.getUsdCny)];
+    if (data.investmentAccounts?.some(account => account.currency === 'HKD')) {
+      fx.push(refreshFx('USDHKD', 'usdHkdRate', quotes.getUsdHkd));
+    }
+    await Promise.all(fx);
+    const saved = store.write({ ...withRefreshedQuotes(store.read()), ...rates });
+    const payload = portfolioForRequest(req, saved);
+    payload.refresh = { ok, failed: errors.length, errors };
+    if (!ok && errors.length) {
+      if (streaming) return reply.finish(payload);
+      return reply.finish({ error: '行情刷新全部失败', ...payload }, 502);
+    }
+    reply.finish(payload);
+  } catch (error) {
+    reply.finish({ error: error.message || '行情刷新失败' }, 500);
+  } finally {
+    clearInterval(heartbeat);
   }
-  if (data.investmentAccounts?.some(account => account.currency === 'HKD')) {
-    try { rates.usdHkdRate = (await quotes.getUsdHkd()).rate; }
-    catch (e) { errors.push({ symbol: 'USDHKD', error: e.message || '汇率失败' }); }
-  }
-  const latest = store.read();
-  for (const [sym, quote] of Object.entries(updated)) {
-    if (fundIdentifier(sym) && latest.quotes[sym]?.asOf > quote.asOf) delete updated[sym];
-    else updated[sym] = completePortfolioFundQuote(quote, latest.quotes[sym]);
-  }
-  const saved = store.write({ ...latest, ...rates, quotes: { ...latest.quotes, ...updated } });
-  const payload = portfolioForRequest(req, saved);
-  payload.refresh = { ok, failed: errors.length, errors };
-  if (!ok && errors.length) {
-    return res.status(502).json({ error: '行情刷新全部失败', ...payload });
-  }
-  res.json(payload);
 });
 
 app.get('/vendor/echarts.min.js', (_req, res) => {

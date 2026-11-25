@@ -117,6 +117,21 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.deepEqual(refreshed.missingQuotes, []);
     assert.equal(refreshed.summary.totalAssets, 125);
     assert.equal(refreshed.cashUsd, 100);
+    const refreshStream = await fetch(base + '/quotes/refresh?progress=1', {
+      method: 'POST',
+      headers: { 'x-portal-user-id': 'a', 'x-portal-permissions': Buffer.from(JSON.stringify(['service:stock-manage:refresh:edit'])).toString('base64url'),
+        'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: 'AAPL' })
+    });
+    assert.match(refreshStream.headers.get('content-type'), /text\/event-stream/);
+    const refreshEvents = (await refreshStream.text()).trimEnd().split('\n\n').map(packet => JSON.parse(packet.slice(6)));
+    assert.ok(refreshEvents.some(event => event.active?.includes('AAPL')));
+    const quoteProgress = refreshEvents.find(event => event.completed === 1 && event.valuation);
+    assert.equal(quoteProgress.valuation.holdings[0].price, 25);
+    assert.equal(quoteProgress.valuation.summary.totalAssets, undefined);
+    assert.ok(refreshEvents.some(event => event.phase === 'fx'));
+    assert.equal(refreshEvents.at(-1).result.refresh.ok, 1);
+    assert.equal(refreshEvents.at(-1).result.cashUsd, undefined);
     const bbaeBook = XLSX.utils.book_new();
     const bbaeRows = [['订单状态','方向','股票代码','成交价','成交数量','总计','下单时间','成交时间'],['已成','买入','AAPL','$25.000',1,'$26.00','2099/01/01 20:00:00','2099/01/01 20:00:01']];
     XLSX.utils.book_append_sheet(bbaeBook, XLSX.utils.aoa_to_sheet(bbaeRows), '股票');
