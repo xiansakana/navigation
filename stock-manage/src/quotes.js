@@ -38,6 +38,13 @@ function easternClock(now) {
   return { weekday: clock.weekday, minute: Number(clock.hour) * 60 + Number(clock.minute), date: `${clock.year}-${clock.month}-${clock.day}` };
 }
 
+function extendedWindow(session) {
+  const noon = Date.parse(session.date + 'T12:00:00Z');
+  const midnight = noon - easternClock(new Date(noon)).minute * 60000;
+  const minutes = { premarket: [240, 570], afterhours: [960, 1200], overnight: [1200, 1680] }[session.kind];
+  return minutes.map(minute => midnight + minute * 60000);
+}
+
 function usExtendedSession(now) {
   const { weekday, minute, date } = easternClock(now);
   const workday = weekday !== 'Sat' && weekday !== 'Sun';
@@ -445,32 +452,84 @@ export function createQuoteService(config) {
       .sort((a, b) => b.date.localeCompare(a.date));
   }
 
-  async function getAfterHoursWithMovement(symbol, session) {
-    const { assetClass, ...quote } = await getNasdaqAfterHours(symbol, session);
+  async function getAfterHoursWithMovement(symbol, session, now) {
+    let quote, assetClass;
+    try {
+      ({ assetClass, ...quote } = await getNasdaqAfterHours(symbol, session));
+    } catch {
+      quote = await getAlpacaExtended(symbol, session, now);
+    }
     // The extended-trading "Market Close" caption can lag by one session.
     const closes = await getRegularCloses(symbol, session.date, assetClass).catch(() => []);
-    return extendedMovement(quote, closes.find(row => row.date < session.date)?.price,
-      closes.find(row => row.date === session.date)?.price ?? null);
+    return applyExtendedBaseline(symbol, quote, session, closes);
   }
 
-  async function getAlpacaOvernight(symbol, session, now) {
-    const feed = config.alpacaOvernightFeed === 'boats' ? 'boats' : 'overnight';
-    const params = new URLSearchParams({ symbols: symbol, feed });
-    const data = await fetchJson(`https://data.alpaca.markets/v2/stocks/trades/latest?${params}`, {
+  async function applyExtendedBaseline(symbol, quote, session, closes) {
+    const sameDay = closes.find(row => row.date === session.date)?.price;
+    const previous = closes.find(row => row.date < session.date)?.price;
+    if (session.kind === 'premarket') return extendedMovement(quote, previous);
+    if (session.kind === 'overnight' ? sameDay : sameDay && previous) {
+      return extendedMovement(quote, session.kind === 'overnight' ? sameDay : previous, sameDay);
+    }
+    const regular = await getStockFromFinnhub(symbol).catch(() => null);
+    const verified = regular?.regularSessionDate === session.date ? regular : null;
+    const close = sameDay ?? verified?.price;
+    const base = session.kind === 'overnight' ? close : previous ?? verified?.prevClose;
+    return extendedMovement(quote, base, close ?? null);
+  }
+
+  const extendedCache = new Map();
+  async function getAlpacaExtended(symbol, session, now) {
+    if (!config.alpacaApiKeyId || !config.alpacaApiSecretKey) throw new Error('未配置 Alpaca 行情');
+    const night = session.kind === 'overnight';
+    const feed = night ? (config.alpacaOvernightFeed === 'boats' ? 'boats' : 'overnight') : 'delayed_sip';
+    const [start, end] = extendedWindow(session);
+    const headers = {
       'APCA-API-KEY-ID': config.alpacaApiKeyId,
       'APCA-API-SECRET-KEY': config.alpacaApiSecretKey
-    }, extendedRequest);
-    const trade = data?.trades?.[symbol];
-    const when = new Date(trade?.t);
-    const price = Number(trade?.p);
-    const tradeSession = Number.isFinite(when.getTime()) ? usExtendedSession(when) : null;
-    if (!(price > 0) || when > now || tradeSession?.kind !== 'overnight' || tradeSession.date !== session.date) {
-      throw new Error('Alpaca 暂无当前夜盘成交');
+    };
+    const cacheKey = `${symbol}:${session.kind}`;
+    const cached = extendedCache.get(cacheKey);
+    const cutoff = now.getTime();
+    const read = (raw, source) => {
+      const at = Date.parse(raw?.t);
+      const price = Number(raw?.p ?? raw?.c);
+      if (!Number.isFinite(price) || !(price > 0) || !(at >= start && at < end && at <= cutoff)) {
+        throw new Error('Alpaca 暂无对应时段的有效成交');
+      }
+      const { date, minute } = easternClock(new Date(at));
+      const hhmm = [Math.floor(minute / 60), minute % 60].map(part => String(part).padStart(2, '0')).join(':');
+      const delayed = feed !== 'boats' || source === 'alpaca-minute-bar';
+      return { at, quote: { symbol, price, currency: 'USD', source, delayed,
+        session: session.kind, asOf: `${date} ${hhmm} ET` } };
+    };
+    const params = new URLSearchParams({ symbols: symbol, feed });
+    let result;
+    try {
+      const data = await fetchJson(`https://data.alpaca.markets/v2/stocks/trades/latest?${params}`, headers, extendedRequest);
+      result = read(data?.trades?.[symbol], 'alpaca');
+    } catch (error) {
+      try {
+        // A complete delayed minute must end before the subscription's 15-minute cutoff.
+        const lastMinute = Math.min(end - 60000, Math.floor(cutoff / 60000) * 60000 - 16 * 60000);
+        if (lastMinute < start) throw error;
+        const query = new URLSearchParams({ feed: night ? 'boats' : 'sip', timeframe: '1Min', limit: '1', sort: 'desc',
+          start: new Date(start).toISOString(), end: new Date(lastMinute).toISOString() });
+        const data = await fetchJson(`https://data.alpaca.markets/v2/stocks/${encodeURIComponent(symbol)}/bars?${query}`, headers, extendedRequest);
+        const bar = data?.bars?.[0];
+        if (!(Date.parse(bar?.t) <= lastMinute)) throw error;
+        result = read(bar, 'alpaca-minute-bar');
+      } catch {
+        if (cached?.date === session.date && cached.at <= cutoff && Date.now() - cached.fetchedAt < 5 * 60000) {
+          return { ...cached.quote, delayed: true };
+        }
+        throw error;
+      }
     }
-    const { date, minute } = easternClock(when);
-    const hhmm = [Math.floor(minute / 60), minute % 60].map(part => String(part).padStart(2, '0')).join(':');
-    return { symbol, price, currency: 'USD', source: 'alpaca', delayed: feed !== 'boats',
-      session: 'overnight', asOf: `${date} ${hhmm} ET` };
+    if (cached?.date === session.date && cached.at <= cutoff && cached.at > result.at) return { ...cached.quote, delayed: true };
+    if (extendedCache.size >= 150 && !extendedCache.has(cacheKey)) extendedCache.delete(extendedCache.keys().next().value);
+    extendedCache.set(cacheKey, { ...result, date: session.date, fetchedAt: Date.now() });
+    return result.quote;
   }
 
   async function getUsStockQuote(symbol) {
@@ -877,7 +936,7 @@ export function createQuoteService(config) {
     if (!session) return getStock(sym);
     if (session.kind === 'afterhours') {
       try {
-        return await getAfterHoursWithMovement(sym, session);
+        return await getAfterHoursWithMovement(sym, session, now);
       } catch {
         return regularMovementFallback(await getStock(sym), session, 'no-afterhours');
       }
@@ -885,18 +944,23 @@ export function createQuoteService(config) {
     if (session.kind === 'overnight') {
       if (config.alpacaApiKeyId && config.alpacaApiSecretKey) {
         try {
-          const quote = await getAlpacaOvernight(sym, session, now);
+          const quote = await getAlpacaExtended(sym, session, now);
           const closes = await getRegularCloses(sym, session.date).catch(() => []);
-          return extendedMovement(quote, closes[0]?.price);
+          return await applyExtendedBaseline(sym, quote, session, closes);
         } catch { /* Fall back to the previous session without labeling it as overnight. */ }
       }
-      const post = await getAfterHoursWithMovement(sym, { ...session, minute: 1200 }).catch(() => null);
+      const post = await getAfterHoursWithMovement(sym, { ...session, minute: 1200, kind: 'afterhours' }, now).catch(() => null);
       if (post) return { ...post, session: 'no-overnight-afterhours' };
       return regularMovementFallback(await getStock(sym), session, 'no-overnight');
     }
     try {
       return await getNasdaqQuote(sym, session);
     } catch {
+      const trade = await getAlpacaExtended(sym, session, now).catch(() => null);
+      if (trade) {
+        const closes = await getRegularCloses(sym, session.date).catch(() => []);
+        return applyExtendedBaseline(sym, trade, session, closes);
+      }
       const fallback = await getStock(sym);
       return { ...fallback, change: null, changePercent: null, session: 'no-premarket' };
     }

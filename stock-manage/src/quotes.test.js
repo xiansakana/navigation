@@ -90,6 +90,7 @@ test('overnight uses the current overnight session across midnight and labels fa
   global.fetch = async (url, options) => {
     if (String(url).includes('/historical?')) return response(closeHistory);
     if (String(url).includes('nasdaq')) return response(afterHoursFixture(18));
+    if (String(url).includes('/bars?')) return response({ bars: [] });
     alpacaRequests++;
     assert.match(String(url), /alpaca\.markets.*symbols=TSM&feed=overnight/);
     assert.equal(options.headers['APCA-API-KEY-ID'], 'fixture');
@@ -105,9 +106,10 @@ test('overnight uses the current overnight session across midnight and labels fa
   time = '2026-11-19T05:01:00Z';
   assert.equal((await service.getQuote('TSM', now)).asOf, '2026-11-19 00:01 ET');
   time = '2026-11-19T00:30:00Z'; // Same evening, still after-hours.
-  assert.equal((await service.getQuote('TSM', now)).session, 'no-overnight-afterhours');
+  assert.equal((await service.getQuote('TSM', now)).asOf, '2026-11-19 00:01 ET');
   time = '2026-11-18T05:01:00Z'; // Previous overnight session.
-  assert.equal((await service.getQuote('TSM', now)).session, 'no-overnight-afterhours');
+  const freshService = createQuoteService({ alpacaApiKeyId:'fixture', alpacaApiSecretKey:'fixture' });
+  assert.equal((await freshService.getQuote('TSM', now)).session, 'no-overnight-afterhours');
   const noAlpaca = createQuoteService({});
   const fallback = await noAlpaca.getQuote('TSM', now);
   assert.equal(alpacaRequests, 4);
@@ -121,6 +123,30 @@ test('overnight uses the current overnight session across midnight and labels fa
   assert.equal(withoutClose.price, 103);
   assert.equal(rows(withoutClose)[0].dailyPnl, null);
   assert.equal(rows(withoutClose)[0].dailyPnlPct, null);
+});
+
+test('Alpaca minute data recovers the exact premarket, postmarket and night windows', async context => {
+  const original = global.fetch; context.after(() => { global.fetch = original; });
+  let bars, expected;
+  global.fetch = async raw => {
+    const url = new URL(raw);
+    if (url.hostname === 'api.nasdaq.com') return response(url.pathname.endsWith('/historical') ? closeFixture : {});
+    if (url.pathname.endsWith('/latest')) return response({trades:{TSM:{t:'2026-11-16T14:00:00Z',p:99}}});
+    assert.match(url.pathname, /\/TSM\/bars$/);
+    assert.deepEqual(['feed','start','end'].map(key => url.searchParams.get(key)), expected);
+    return response({bars:[bars]});
+  };
+  const service = createQuoteService({alpacaApiKeyId:'fixture',alpacaApiSecretKey:'fixture'});
+  for (const [kind, now, start, end, stamp, feed, baseline] of [
+    ['premarket','2026-11-18T12:00:00Z','2026-11-18T09:00:00.000Z','2026-11-18T11:44:00.000Z','2026-11-18T11:44:00Z','sip',100],
+    ['afterhours','2026-11-18T23:00:00Z','2026-11-18T21:00:00.000Z','2026-11-18T22:44:00.000Z','2026-11-18T22:44:00Z','sip',100],
+    ['overnight','2026-11-19T05:20:00Z','2026-11-19T01:00:00.000Z','2026-11-19T05:04:00.000Z','2026-11-19T05:04:00Z','boats',105]
+  ]) {
+    bars = {t:stamp,c:107};
+    expected = [feed,start,end];
+    const quote = await service.getQuote('TSM', new Date(now));
+    assert.deepEqual([quote.session,quote.price,quote.source,quote.prevClose,quote.delayed],[kind,107,'alpaca-minute-bar',baseline,true]);
+  }
 });
 
 test('USD/CNY uses the shared Finnhub/FRED fallback and caches observation metadata', async context => {
