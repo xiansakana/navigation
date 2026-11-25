@@ -797,16 +797,41 @@ function bagLabel(bag) {
   return ({ left: '左侧', crisis: '危机', right: '右侧' })[bag] || bag || '—';
 }
 
+function renderTierBudget(tier, plan) {
+  const original = `<div>原档预算 ${maskMoney(fmtUsd(tier.usd))}</div>`;
+  if (!plan || !tier.planBalance) return `${original}<div class="hint">尚未建计划</div>`;
+
+  const { remainingUsd, remainingCny } = tier.planBalance;
+  const total = `<div><strong>未用余额 ${maskMoney(fmtUsd(remainingUsd))} + ${maskMoney(fmtCny(remainingCny))}</strong></div>`;
+  const transfers = plan.legs.flatMap((leg) => [
+    ...(leg.budgetCarryIns || []).map((entry) => `从 ${escapeHtml(entry.tier)} 顺延入 ${maskMoney(fmtUsd(entry.usd))}`),
+    ...(leg.budgetCarryOut ? [`顺延至 ${escapeHtml(leg.budgetCarryOut.tier)} ${maskMoney(fmtUsd(leg.budgetCarryOut.usd))}`] : [])
+  ]);
+  const callLabels = { medium: '中虚值 Call', deep: '深虚值 Call', shallow: '浅虚值 Call', 'shallow-medium': '中浅虚值 Call' };
+  const legs = plan.legs.flatMap((leg) => {
+    const cny = leg.currency === 'CNY';
+    const format = cny ? fmtCny : fmtUsd;
+    const amount = (value) => maskMoney(format(value));
+    const allocated = Number(cny ? leg.cny : leg.usd) || 0;
+    const spent = Number(leg.spent) || 0;
+    if (allocated <= 0 && spent <= 0) return [];
+    const label = leg.kind === 'call' ? callLabels[leg.otmClass] || '期权 Call' : escapeHtml(leg.symbol);
+    const left = Math.max(0, Math.round((allocated - spent) * 100) / 100);
+    const remainder = plan.cancelled ? '已取消' : leg.complete
+      ? (left > 0 ? `已结束，余款 ${amount(left)}` : '已完成')
+      : `剩 ${amount(left)}${leg.pendingOption ? '（待补买）' : ''}`;
+    return [`<div class="hint">${label}：分配 ${amount(allocated)} · 已成交 ${amount(spent)} · ${remainder}</div>`];
+  });
+  const details = transfers.map((line) => `<div class="hint">${line}</div>`).join('');
+  return `${total}${original}${details}${legs.join('')}`;
+}
+
 function renderTiers() {
   const tiers = state.evaluation?.tiers || [];
   $('#tier-table tbody').innerHTML = tiers.map((t) => {
     const action = t.recommendation || '—';
     const cond = t.triggerCondition || '—';
     const plan = state.evaluation?.round?.executionPlans?.[t.id];
-    const balance = t.planBalance;
-    const budget = balance
-      ? `<div>未用余额</div><div>${maskMoney(fmtUsd(balance.remainingUsd))} + ${maskMoney(fmtCny(balance.remainingCny))}</div>`
-      : `<div>档位预算</div><div>${maskMoney(fmtUsd(t.usd))}</div>`;
     return `
     <tr class="tier-row st-row-${escapeHtml(t.status || '')}">
       <td><strong>${escapeHtml(t.id)}</strong></td>
@@ -814,7 +839,7 @@ function renderTiers() {
       <td class="tier-cond" title="${escapeHtml(cond)}">${escapeHtml(cond)}</td>
       <td>${fmtPrice(t.triggerPrice)}${t.intradayPrice ? ` / 盘中 ${fmtPrice(t.intradayPrice)}` : ''}</td>
       <td>${fmtPctB(t.pctB)}%</td>
-      <td>${budget}</td>
+      <td>${renderTierBudget(t, plan)}</td>
       <td class="st-${t.status}">${t.pendingClose ? (t.equityMarket ? '正股已触价 · 期权待确认' : '触价 · 等待收盘数据或有效现价') : statusLabel(t.status)}${plan
         ? `<div class="hint">${escapeHtml(planLabel(plan))}</div>` : ''}</td>
       <td class="tier-action" title="${escapeHtml(action)}">${escapeHtml(action)}</td>
