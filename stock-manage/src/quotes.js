@@ -70,6 +70,13 @@ function extendedMovement(quote, baseline, sessionClose = baseline) {
   };
 }
 
+function regularMovementFallback(quote, session, label) {
+  if (quote.regularSessionDate === session.date && quote.prevClose > 0) {
+    return { ...extendedMovement(quote, quote.prevClose, null), session: label };
+  }
+  return { ...quote, change: null, changePercent: null, session: label };
+}
+
 function validPremarketTimestamp(timestamp, session) {
   const match = String(timestamp || '').match(/^([A-Za-z]{3} \d{1,2}, \d{4}) (\d{1,2}):(\d{2}) (AM|PM) ET$/);
   if (!match || match[4] !== 'AM') return false;
@@ -161,12 +168,17 @@ export function createQuoteService(config) {
     if (q.error) throw new Error(String(q.error));
     if (!q.c && q.c !== 0) throw new Error('无效代码或无行情');
     if (q.c === 0 && q.pc === 0) throw new Error('无效代码或无行情');
+    const clock = Number(q.t) > 0 ? easternClock(new Date(Number(q.t) * 1000)) : null;
+    const regular = clock && clock.minute >= 570 && clock.minute <= 960;
     return {
       symbol: sym,
       name: sym,
       price: q.c,
       change: q.d ?? 0,
       changePercent: q.dp ?? 0,
+      ...(Number(q.pc) > 0 ? { prevClose: Number(q.pc) } : {}),
+      ...(regular ? { regularSessionDate: clock.date,
+        asOf: `${clock.date} ${String(Math.floor(clock.minute / 60)).padStart(2, '0')}:${String(clock.minute % 60).padStart(2, '0')} ET` } : {}),
       currency: 'USD',
       source: 'finnhub'
     };
@@ -866,7 +878,7 @@ export function createQuoteService(config) {
       try {
         return await getAfterHoursWithMovement(sym, session);
       } catch {
-        return { ...await getStock(sym), change: null, changePercent: null, session: 'no-afterhours' };
+        return regularMovementFallback(await getStock(sym), session, 'no-afterhours');
       }
     }
     if (session.kind === 'overnight') {
@@ -879,7 +891,7 @@ export function createQuoteService(config) {
       }
       const post = await getAfterHoursWithMovement(sym, { ...session, minute: 1200 }).catch(() => null);
       if (post) return { ...post, session: 'no-overnight-afterhours' };
-      return { ...await getStock(sym), change: null, changePercent: null, session: 'no-overnight' };
+      return regularMovementFallback(await getStock(sym), session, 'no-overnight');
     }
     try {
       return await getNasdaqQuote(sym, session);

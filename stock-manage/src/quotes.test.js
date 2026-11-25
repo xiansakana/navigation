@@ -39,8 +39,9 @@ test('after-hours stocks and ETFs distinguish the prior close and the current cl
   const original = global.fetch; context.after(() => { global.fetch = original; });
   let reportDay = 18;
   let closeHistoryAvailable = true;
+  let regularStamp = Date.parse('2026-11-17T21:00:00Z') / 1000;
   global.fetch = async url => {
-    if (String(url).includes('finnhub')) return response({c:105,d:5,dp:5,pc:100});
+    if (String(url).includes('finnhub')) return response({c:105,d:5,dp:5,pc:100,t:regularStamp});
     if (String(url).includes('/historical?')) return response(closeHistoryAvailable ? closeFixture : {});
     assert.match(String(url), /extended-trading.*markettype=post/);
     return response(String(url).includes('assetclass=stocks') ? { data: null } : afterHoursFixture(reportDay));
@@ -62,6 +63,13 @@ test('after-hours stocks and ETFs distinguish the prior close and the current cl
   assert.equal(fallback.session, 'no-afterhours');
   assert.equal(fallback.price, 105);
   assert.equal(fallback.changePercent, null);
+  regularStamp = Date.parse('2026-11-18T21:00:00Z') / 1000;
+  const sameDay = await service.getQuote('QQQ', now);
+  assert.equal(sameDay.session, 'no-afterhours');
+  assert.equal(sameDay.asOf, '2026-11-18 16:00 ET');
+  const [regularRow] = enrichHoldings([{symbol:'QQQ', shares:2, avgCost:100}], { QQQ:sameDay }, 0).rows;
+  assert.equal(regularRow.dailyPnl, 10);
+  assert.equal(regularRow.dailyPnlPct, 5);
 });
 
 const closeFixture = { data: { tradesTable: { rows: [
