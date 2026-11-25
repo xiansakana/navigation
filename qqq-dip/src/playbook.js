@@ -697,8 +697,10 @@ export function evaluate(input) {
       });
     }
 
+    const savedPlan = round.executionPlans?.[id];
     tiers.push({
       id,
+      planBalance: savedPlan ? remainingPlanBalance(savedPlan) : null,
       bag: def.bag,
       pctB,
       usd,
@@ -1077,6 +1079,18 @@ function summarizeCashPlan(legs, startWallet) {
   };
 }
 
+export function remainingPlanBalance(plan) {
+  const balance = { remainingUsd: 0, remainingCny: 0 };
+  if (plan.cancelled) return balance;
+  for (const leg of plan.legs || []) {
+    if (leg.complete) continue;
+    const isCny = leg.currency === 'CNY';
+    const key = isCny ? 'remainingCny' : 'remainingUsd';
+    balance[key] += Math.max(0, (Number(isCny ? leg.cny : leg.usd) || 0) - (Number(leg.spent) || 0));
+  }
+  return { remainingUsd: roundMoney(balance.remainingUsd), remainingCny: roundMoney(balance.remainingCny) };
+}
+
 function previewRemainingPlan(ev, tier, plan, suggestedContracts) {
   const id = tier.id;
   const executed = ev.round.executed[id];
@@ -1111,12 +1125,10 @@ function previewRemainingPlan(ev, tier, plan, suggestedContracts) {
         referenceContract: reference.referenceContract, minimumCost: reference.minimumCost };
     });
   if (!legs.length) return { available: false, reason: '本档计划没有可预览的未成交余额' };
-  const remainingCny = roundMoney(legs.reduce((sum, leg) => sum + (leg.cny || 0), 0));
-  const remainingUsd = roundMoney(legs.reduce((sum, leg) => sum + (leg.currency === 'USD' ? leg.usd : 0), 0));
   const carried = roundMoney(plan.legs.reduce((sum, leg) => sum + (leg.budgetCarryOut?.usd || 0), 0));
   if (carried) notes.push(`已有 $${carried.toFixed(2)} 期权预算顺延至后续档位。`);
   return { available: true, title: `${id} 剩余计划预览`, tier: id, status: tier.status, totalUsd: plan.totalUsd,
-    savedRemainder: { executedUsd: executed.usd, remainingCny, remainingUsd }, spot, proxyPrice,
+    savedRemainder: { executedUsd: executed.usd, ...remainingPlanBalance(plan) }, spot, proxyPrice,
     pendingClose: !!tier.pendingClose, equityMarket: tier.equityMarket, legs, notes,
     cashPlan: summarizeCashPlan(legs, makeCashWallet(ev)), prohibitions: ev.primary.prohibitions || [],
     recommendation: '以下金额为已保存计划的未成交余额。' };

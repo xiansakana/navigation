@@ -1,4 +1,4 @@
-import { evaluate, applyRoundFromEval, newAlertKeys, TIER_ORDER } from './playbook.js';
+import { evaluate, buildBuyPreview, remainingPlanBalance, applyRoundFromEval, newAlertKeys, TIER_ORDER } from './playbook.js';
 import { marketStatus, isOpenSummaryTime, isRth, latestCompletedSession } from './market-hours.js';
 import { appendMarketSnapshot } from './notify.js';
 import { publishBusinessEvent } from '../../shared/business-events.js';
@@ -257,6 +257,11 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
 
       persistDeliveryState();
       ev.round = store.getRound();
+      for (const tier of ev.tiers) {
+        const plan = ev.round.executionPlans?.[tier.id];
+        tier.planBalance = plan ? remainingPlanBalance(plan) : null;
+      }
+      ev.buyPreview = buildBuyPreview(ev, ev.suggestedContracts);
       lastEval = ev;
       lastError = Object.keys(bundle.errors || {}).length ? bundle.errors : null;
       lastPush = pushResults.length ? { at: new Date().toISOString(), items: pushResults } : lastPush;

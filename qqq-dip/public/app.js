@@ -803,7 +803,10 @@ function renderTiers() {
     const action = t.recommendation || '—';
     const cond = t.triggerCondition || '—';
     const plan = state.evaluation?.round?.executionPlans?.[t.id];
-    const adjusted = plan?.legs?.some((leg) => leg.budgetCarryOut || leg.budgetCarryIns?.length);
+    const balance = t.planBalance;
+    const budget = balance
+      ? `<div>未用余额</div><div>${maskMoney(fmtUsd(balance.remainingUsd))} + ${maskMoney(fmtCny(balance.remainingCny))}</div>`
+      : `<div>档位预算</div><div>${maskMoney(fmtUsd(t.usd))}</div>`;
     return `
     <tr class="tier-row st-row-${escapeHtml(t.status || '')}">
       <td><strong>${escapeHtml(t.id)}</strong></td>
@@ -811,9 +814,9 @@ function renderTiers() {
       <td class="tier-cond" title="${escapeHtml(cond)}">${escapeHtml(cond)}</td>
       <td>${fmtPrice(t.triggerPrice)}${t.intradayPrice ? ` / 盘中 ${fmtPrice(t.intradayPrice)}` : ''}</td>
       <td>${fmtPctB(t.pctB)}%</td>
-      <td>${maskMoney(fmtUsd(t.usd))}${adjusted ? `<div class="hint">顺延后 ${maskMoney(fmtUsd(plan.totalUsd))}</div>` : ''}</td>
-      <td class="st-${t.status}">${t.pendingClose ? (t.equityMarket ? '正股已触价 · 期权待确认' : '触价 · 等待收盘数据或有效现价') : statusLabel(t.status)}${state.evaluation?.round?.executionPlans?.[t.id]
-        ? `<div class="hint">${escapeHtml(planLabel(state.evaluation.round.executionPlans[t.id]))}</div>` : ''}</td>
+      <td>${budget}</td>
+      <td class="st-${t.status}">${t.pendingClose ? (t.equityMarket ? '正股已触价 · 期权待确认' : '触价 · 等待收盘数据或有效现价') : statusLabel(t.status)}${plan
+        ? `<div class="hint">${escapeHtml(planLabel(plan))}</div>` : ''}</td>
       <td class="tier-action" title="${escapeHtml(action)}">${escapeHtml(action)}</td>
       <td>${can('tier-exec', 'edit') && (state.evaluation?.round?.executionPlans?.[t.id]
         || (t.pendingClose && t.equityMarket && !state.evaluation?.sameDaySkip?.includes(t.id) && canStock('dip-spend', 'edit')))
