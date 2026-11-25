@@ -419,7 +419,8 @@ export function createQuoteService(config) {
     if (!data?.tradeDetailTable?.rows?.length && assetClass === 'stocks') {
       return getNasdaqAfterHours(symbol, session, 'etf');
     }
-    const stamp = data?.lastUpdateInfo?.[0]?.match(/([A-Za-z]{3} \d{1,2}, \d{4}) \d{1,2}:\d{2} [AP]M ET/);
+    const stamp = data?.lastUpdateInfo?.map(line => line.match(/([A-Za-z]{3} \d{1,2}, \d{4}) \d{1,2}:\d{2} [AP]M ET/))
+      .find(Boolean);
     const date = stamp ? Date.parse(stamp[1] + ' GMT') : NaN;
     const trade = data?.tradeDetailTable?.rows?.[0];
     const time = String(trade?.time || '').match(/^(\d{2}):([0-5]\d):([0-5]\d)$/);

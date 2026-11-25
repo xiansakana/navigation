@@ -78,7 +78,7 @@ const closeFixture = { data: { tradesTable: { rows: [
 
 const afterHoursFixture = day => ({ data: {
   previousInfo: ' Market Close: $100.00',
-  lastUpdateInfo: [`Data last updated Nov ${day}, 2026 05:55 PM ET.`],
+  lastUpdateInfo: ['This page refreshes every 30 seconds.', `Data last updated Nov ${day}, 2026 05:55 PM ET.`],
   tradeDetailTable: { rows: [{ time: '17:50:00', price: '$103.00' }] }
 } });
 
