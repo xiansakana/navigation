@@ -13,6 +13,7 @@ export const HOLDINGS_COLUMNS = [
   { key: 'position', label: '持仓' },
   { key: 'weight', label: '仓位 / 占比' },
   { key: 'optinfo', label: '期权信息' },
+  { key: 'note', label: '备注' },
   { key: 'actions', label: '操作' }
 ];
 

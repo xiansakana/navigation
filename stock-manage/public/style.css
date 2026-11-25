@@ -222,6 +222,26 @@ body.has-navbar {
   justify-content: center;
 }
 .sm-holding-symbol { min-width: 0; cursor: text; user-select: text; }
+.sm-holding-note-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.sm-holding-note-form textarea {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
 .sm-symbol-drag {
   display: inline-grid;
   place-items: center;

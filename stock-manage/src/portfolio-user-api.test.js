@@ -112,6 +112,17 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     assert.equal(assigned.cashUsd, 100);
     assert.deepEqual(assigned.missingQuotes, ['AAPL']);
     assert.equal(assigned.summary.totalAssets, null);
+    const noteRoute = '/holdings-note/AAPL';
+    const note = '长期观察\n分批加仓 <待确认>';
+    assert.equal((await call(noteRoute, 'a', 'PUT', { accountId: investment.id, note })).status, 200);
+    assert.equal((await call(noteRoute, 'b', 'PUT', { accountId: investment.id, note: '越权' })).status, 404);
+    const withNote = await (await call('/portfolio?accountId=' + investment.id, 'a')).json();
+    assert.equal(withNote.holdings[0].note, note);
+    assert.equal(withNote.holdingsMeta.AAPL.notes, undefined);
+    const withoutNote = await fetch(base + '/portfolio', { headers: { 'x-portal-user-id': 'a', 'x-portal-permissions': Buffer.from('[]').toString('base64url') } });
+    assert.equal((await withoutNote.json()).holdings[0].note, undefined);
+    assert.equal((await call(noteRoute, 'a', 'PUT', { accountId: investment.id, note: '' })).status, 200);
+    assert.equal((await (await call('/portfolio', 'a')).json()).holdings[0].note, '');
     const refreshed = await (await call('/quotes/refresh', 'a', 'POST', { symbol: 'AAPL' })).json();
     assert.equal(refreshed.refresh.ok, 1);
     assert.deepEqual(refreshed.missingQuotes, []);

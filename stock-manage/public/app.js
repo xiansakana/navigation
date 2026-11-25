@@ -4,7 +4,7 @@ import { isDividendTax, normalizeOtherAmount } from './js/dividend-tax.js';
 import { renderTradeReview } from './js/trade-review.js?v=hk-fund-1';
 import { formatPrice, formatQuantity, priceInputValue } from './js/price-format.js?v=quantity-1';
 import { bindTradeInstrument } from './js/trade-instrument.js?v=keep-trade-account-1';
-import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js';
+import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js?v=holding-note';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=period-3';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey, isHoldingsSortable } from './js/holdings-table.js?v=group-summary-1';
 import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js?v=access-1';
@@ -450,6 +450,15 @@ function holdingsCellContent(h, key, ctx) {
       return maskCol('weight', fmtPct(h.weight));
     case 'optinfo':
       return maskCol('optinfo', optStr);
+    case 'note': {
+      const text = escapeHtml(h.note || '');
+      const display = text ? `<span class="sm-holding-note-text" title="${text}">${text}</span>` : '';
+      const edit = can('holding-note', 'edit')
+        ? `<button type="button" class="btn link" data-edit-note="${escapeHtml(h.tradeSymbol || h.symbol)}"
+            data-account="${escapeHtml(h.accountId || '')}">${text ? '编辑' : '添加'}</button>`
+        : '';
+      return maskCol('note', display + edit || '—');
+    }
     case 'actions':
       {
         const symbol = escapeHtml(h.tradeSymbol || h.symbol);
@@ -2067,6 +2076,26 @@ $('#holdings-body').addEventListener('click', async (e) => {
       await saveMeta(clearSym, { groupWith: '' });
       toastOk('已恢复自动分组');
     } catch (err) { toastErr(err.message); }
+    return;
+  }
+  const noteButton = e.target.closest('[data-edit-note]');
+  if (noteButton && canCol('note') && can('holding-note', 'edit')) {
+    const { editNote: symbol, account: accountId } = noteButton.dataset;
+    const holding = [...state.holdings, ...state.fundHoldings].find(row =>
+      (row.tradeSymbol || row.symbol) === symbol && (row.accountId || '') === accountId);
+    if (!holding) return;
+    const layer = openModal('编辑持仓备注', `
+      <form data-validate class="sm-holding-note-form">
+        <label>${escapeHtml(holding.symbol)}${holding.accountName ? ` · ${escapeHtml(holding.accountName)}` : ''}
+          <textarea name="note" rows="4" maxlength="500" aria-label="持仓备注" placeholder="最多 500 字">${escapeHtml(holding.note || '')}</textarea>
+        </label>
+      </form>`, null, async modal => {
+      await api('/holdings-note/' + encodeURIComponent(symbol), {
+        method: 'PUT', body: { accountId, note: modal._formData.get('note') }
+      });
+      return '备注已保存';
+    });
+    $('textarea', layer).focus();
     return;
   }
   const sym = e.target.closest('[data-refresh]')?.dataset.refresh;

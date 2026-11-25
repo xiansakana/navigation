@@ -268,6 +268,16 @@ function portfolioForRequest(req, data = store.read(), { valuationOnly = false }
     data = { ...data, trades: data.trades.filter((t) => (t.account_id || 'unassigned') === accountId), cashUsd: selected?.currency === 'USD' ? selected.cash : 0, cashCny: selected?.currency === 'CNY' ? selected.cash : 0, cashHkd: selected?.currency === 'HKD' ? selected.cash : 0 };
   }
   const portfolio = buildPortfolio(data, { ...pnlOptions, valuationOnly });
+  if (hasStockPermission(req, 'col-note')) {
+    for (const holding of [...portfolio.holdings, ...portfolio.fundHoldings]) {
+      const notes = data.holdingsMeta?.[holding.tradeSymbol || holding.symbol]?.notes;
+      holding.note = notes?.[holding.accountId || 'unassigned'] || '';
+    }
+  }
+  portfolio.holdingsMeta = Object.fromEntries(Object.entries(data.holdingsMeta || {}).map(([symbol, value]) => {
+    const { notes, ...meta } = value || {};
+    return [symbol, meta];
+  }));
   if (!hasStockPermission(req, 'pnl')) {
     delete portfolio.chartSparse;
     for (const field of ['totalBuy', 'totalSell', 'commission', 'otherAmount', 'realizedPL', 'netPL',
@@ -520,6 +530,29 @@ app.put('/api/holdings-meta/:symbol', (req, res) => {
   data.holdingsMeta[symbol] = next;
   store.write(data);
   sendPortfolio(res, req);
+});
+
+app.put('/api/holdings-note/:symbol', (req, res) => {
+  if (!requireStockPermission(req, res, 'col-note') || !requireStockPermission(req, res, 'holding-note', 'edit')) return;
+  const symbol = normalizeSymbol(req.params.symbol);
+  const { accountId, note } = req.body || {};
+  if (typeof accountId !== 'string' || typeof note !== 'string' || note.length > 500) {
+    return res.status(400).json({ error: '请选择有效持仓，备注最多 500 字' });
+  }
+  const data = store.read();
+  const trades = data.trades.filter(trade => trade.symbol === symbol && (trade.account_id || '') === accountId);
+  const openings = openingFundTrades(openingFundsForAccount(accountId || 'unassigned')).filter(trade => trade.symbol === symbol);
+  if (!deriveHoldings([...openings, ...trades]).some(row => row.symbol === symbol)) {
+    return res.status(404).json({ error: '找不到对应持仓' });
+  }
+  const meta = data.holdingsMeta[symbol] || {};
+  const notes = { ...meta.notes };
+  const key = accountId || 'unassigned';
+  if (note.trim()) notes[key] = note.trim();
+  else delete notes[key];
+  data.holdingsMeta[symbol] = { ...meta, notes };
+  store.write(data);
+  res.json({ ok: true });
 });
 
 async function recordNamedTrade(input) {
