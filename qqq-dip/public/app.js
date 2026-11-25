@@ -455,7 +455,10 @@ function renderPrimary() {
     return;
   }
   const prohib = (p.prohibitions || []).map((x) => `<li>${escapeHtml(x)}</li>`).join('');
-  const previewHint = preview?.available && canViewLotMoney()
+  const remainder = preview?.savedRemainder;
+  const previewHint = preview?.available && canViewLotMoney() && remainder
+    ? `<p class="hint">已成交约 ${fmtUsd(remainder.executedUsd)} · 计划未用余额 ${fmtUsd(remainder.remainingUsd)} + ${fmtCny(remainder.remainingCny)}。点「预览买入」查看剩余计划。</p>`
+    : preview?.available && canViewLotMoney()
     ? `<p class="hint">本档预算 ${fmtUsd(preview.totalUsd)}；拟用 ${fmtUsd(preview.cashPlan?.useUsd ?? preview.totalUsd)} + ${fmtCny(preview.cashPlan?.useCny || 0)}（人民币按25%/10%溢价规则选券）。QQQ ${preview.spot?.toFixed(3) ?? '—'} · 159509 ${preview.proxyPrice != null ? preview.proxyPrice.toFixed(3) : '—'}。点「预览买入」查看拆单。</p>`
     : (preview?.reason ? `<p class="hint">${escapeHtml(preview.reason)}</p>` : '');
   $('#primary-rec').innerHTML = `
@@ -524,7 +527,7 @@ function openBuyPreview() {
   const legs = (preview.legs || []).map(legRow).join('');
   const summary = [
     preview.title,
-    `预算 ${fmtUsd(preview.totalUsd)}`,
+    preview.savedRemainder ? `未用余额 ${fmtUsd(preview.savedRemainder.remainingUsd)} / ${fmtCny(preview.savedRemainder.remainingCny)}` : `预算 ${fmtUsd(preview.totalUsd)}`,
     `USD ${fmtUsd(preview.cashPlan?.useUsd ?? 0)} / CNY ${fmtCny(preview.cashPlan?.useCny || 0)}`,
     `QQQ ${preview.spot?.toFixed(3) ?? '—'}`,
     preview.pendingClose ? (preview.equityMarket ? '正股已触价 · 期权待收盘确认' : '等待收盘数据或有效现价') : null

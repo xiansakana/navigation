@@ -1077,6 +1077,51 @@ function summarizeCashPlan(legs, startWallet) {
   };
 }
 
+function previewRemainingPlan(ev, tier, plan, suggestedContracts) {
+  const id = tier.id;
+  const executed = ev.round.executed[id];
+  const spot = ev.qqq?.price;
+  const proxyPrice = ev.cnyProxy?.price ?? null;
+  if (plan.cancelled) return { available: false, reason: '本档剩余计划已取消' };
+  const notes = [];
+  const routes = ev.cnyFunds ? selectCnyFunds(ev.cnyFunds, ev.now) : null;
+  const legs = plan.legs.filter((leg) => !leg.complete && Number(leg.currency === 'CNY' ? leg.cny : leg.usd) > (leg.spent || 0))
+    .map((leg) => {
+      const spent = Number(leg.spent) || 0;
+      const cny = leg.currency === 'CNY' ? roundMoney(leg.cny - spent) : null;
+      const usd = cny == null ? roundMoney(leg.usd - spent) : roundMoney(leg.usd * cny / leg.cny);
+      if (leg.kind === 'equity') {
+        const route = routes?.find((row) => row.symbol === leg.symbol);
+        const price = cny == null ? spot : ev.cnyFunds?.[leg.symbol]?.price ?? (leg.symbol === CNY_EQUITY_PROXY ? proxyPrice : null);
+        const current = equityLeg(leg.symbol, usd, price, '', leg.pct ?? 0, { currency: leg.currency, cny });
+        const reason = cny != null && routes && (!route || route.blocked)
+          ? route?.reason || '标的已变化，请打开成交/计划同步'
+          : current.shares === 0 ? '剩余预算不足最小交易单位，或缺少有效报价' : '';
+        return { ...current, routeBlocked: !!reason, skipped: !!reason, note: reason || '按已保存计划的剩余预算估算' };
+      }
+      const quotes = leg.pendingOption ? suggestedContracts : suggestedContracts.filter((row) => row.ticker === leg.occSymbol);
+      const band = leg.otmClass === 'deep' ? deepOtmBand(spot)
+        : ['shallow', 'shallow-medium'].includes(leg.otmClass) ? shallowOtmBand(spot) : mediumOtmBand(spot);
+      const reference = selectAffordableCall(quotes, {
+        band, expiries: (ev.leaps?.expiries || []).map((row) => row.expiry), budget: 0
+      });
+      const reason = plan.inFlight ? '计划写入待核对' : tier.pendingClose ? '期权待收盘确认'
+        : optionEntryBlock(tier, ev.qqq) || (leg.pendingOption ? '期权预算待用，等待计划更新' : '请在成交/计划核对最新卖价');
+      return { ...leg, usd, skipped: true, shares: 0, reason,
+        referenceContract: reference.referenceContract, minimumCost: reference.minimumCost };
+    });
+  if (!legs.length) return { available: false, reason: '本档计划没有可预览的未成交余额' };
+  const remainingCny = roundMoney(legs.reduce((sum, leg) => sum + (leg.cny || 0), 0));
+  const remainingUsd = roundMoney(legs.reduce((sum, leg) => sum + (leg.currency === 'USD' ? leg.usd : 0), 0));
+  const carried = roundMoney(plan.legs.reduce((sum, leg) => sum + (leg.budgetCarryOut?.usd || 0), 0));
+  if (carried) notes.push(`已有 $${carried.toFixed(2)} 期权预算顺延至后续档位。`);
+  return { available: true, title: `${id} 剩余计划预览`, tier: id, status: tier.status, totalUsd: plan.totalUsd,
+    savedRemainder: { executedUsd: executed.usd, remainingCny, remainingUsd }, spot, proxyPrice,
+    pendingClose: !!tier.pendingClose, equityMarket: tier.equityMarket, legs, notes,
+    cashPlan: summarizeCashPlan(legs, makeCashWallet(ev)), prohibitions: ev.primary.prohibitions || [],
+    recommendation: '以下金额为已保存计划的未成交余额。' };
+}
+
 export function buildBuyPreview(ev, suggestedContracts = []) {
   const primary = ev?.primary;
   if (ev?.reset || ev?.fakeRight) {
@@ -1101,6 +1146,8 @@ export function buildBuyPreview(ev, suggestedContracts = []) {
       reason: '当前推荐不可生成买入清单。'
     };
   }
+  const savedPlan = ev.round?.executionPlans?.[tier.id];
+  if (savedPlan && ev.round?.executed?.[tier.id]) return previewRemainingPlan(ev, tier, savedPlan, suggestedContracts);
   if ((Number.isFinite(ev.availableCash) && ev.availableCash + 0.01 < tier.usd)
     || (Number.isFinite(ev.remaining?.[tier.bag]) && ev.remaining[tier.bag] + 0.01 < tier.usd)) {
     return { available: false, title: '可用资金不足',

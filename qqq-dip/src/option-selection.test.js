@@ -57,6 +57,23 @@ test('T2 16.51 premium needs $1651; a $400 budget must skip instead of sizing fr
   assert.equal(plan.totalUsd, 1600);
 });
 
+test('partial T2 previews only saved unfilled balances after option budget carries out', () => {
+  const input = { ...ev, availableCash: 300, cashCny: 300, qqq: { price: 660 },
+    round: { executed: { T2: { usd: 1011.39, complete: false } }, executionPlans: {
+      T2: { totalUsd: 1049.76, legs: [
+        { kind: 'equity', symbol: '159509', currency: 'CNY', cny: 6729.60, spent: 6729.60, complete: true },
+        { kind: 'call', currency: 'USD', usd: 0, complete: true, budgetCarryOut: { tier: 'T3', usd: 349.92 } },
+        { kind: 'equity', symbol: '513850', currency: 'CNY', cny: 127.65, usd: 19.18 },
+        { kind: 'equity', symbol: '161128', currency: 'CNY', cny: 127.64, usd: 19.19 }
+      ] }
+    } } };
+  const preview = buildBuyPreview(input);
+  assert.deepEqual(preview.savedRemainder, { executedUsd: 1011.39, remainingCny: 255.29, remainingUsd: 0 });
+  assert.deepEqual(preview.legs.map((leg) => leg.symbol), ['513850', '161128']);
+  assert.equal(preview.cashPlan.useCny, 0);
+  assert.match(preview.notes[0], /349\.92/);
+});
+
 test('choose an affordable candidate within the allowed band and expiry only', () => {
   const list = [option(925, 16.51), option(950, 3.5), option(1000, .1),
     option(920, .1, { expiry: '2026-12-18' })];
