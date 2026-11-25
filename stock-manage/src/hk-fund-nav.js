@@ -67,6 +67,16 @@ export async function getHkFundQuote(isin) {
   const { name, currency, shareClassId } = info;
   const base = { symbol: isin, name, currency };
   if (!shareClassId) {
+    if (info.gaotengClassId) {
+      const rows = await getHkFundNavHistory(isin).catch(() => []);
+      rows.sort((a, b) => b.date.localeCompare(a.date));
+      const latest = rows[0];
+      if (latest) {
+        const previous = rows.find(row => row.date < latest.date);
+        return { ...base, price: latest.close, asOf: latest.date, source: latest.source,
+          ...changeFrom(latest.close, previous?.close) };
+      }
+    }
     const html = await fetchQuoteResource(gaoteng, { ...request, json: false });
     for (const row of html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
       const cells = Array.from(row[1].matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi), cell => cell[1].replace(/<[^>]*>/g, '').trim());

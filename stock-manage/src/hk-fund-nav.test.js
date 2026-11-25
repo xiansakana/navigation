@@ -10,6 +10,7 @@ test('Hong Kong NAV sources select the exact ISIN or share class and preserve th
     .map(value => '<td>' + value + '</td>').join('') + '</tr>';
   globalThis.fetch = async url => {
     const u = new URL(url);
+    if (u.hostname === 'api.gaotengasset.com') return new Response(null, { status: 503 });
     if (u.hostname === 'www.gaotengasset.com') return new Response(row('HK0000478914', '12') + row('HK0000478872', '11.67977'));
     assert.equal(u.hostname, 'www.chinaamc.com.hk');
     assert.equal(u.searchParams.get('fundId'), 'HKSELMMF');
@@ -28,6 +29,26 @@ test('Hong Kong NAV sources select the exact ISIN or share class and preserve th
   const b = await service.getQuote('HK0000489952');
   assert.deepEqual([b.price, b.prevClose, b.currency, b.asOf], [11.143, 11.1421, 'HKD', '2026-11-20']);
   await assert.rejects(service.getQuote('HK0000000000'), /暂未接入/);
+});
+
+test('Gaoteng known share class uses its NAV API without loading the product page', async t => {
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const hosts = [];
+  globalThis.fetch = async url => {
+    const u = new URL(url);
+    hosts.push(u.hostname);
+    assert.equal(u.searchParams.get('shareClassID'), '10008003');
+    return Response.json({ data: { sectionList: [
+      { fund_class_id: 10008003, nav_date: '2026-11-23', fund_nav: 11.68313 },
+      { fund_class_id: 10008004, nav_date: '2026-11-25', fund_nav: 99 },
+      { fund_class_id: '10008003', nav_date: '2026-11-24', fund_nav: 11.68396 },
+      { fund_class_id: '10008003', nav_date: '2026-11-24', fund_nav: 11.68396 }
+    ] } });
+  };
+  const quote = await createQuoteService({}).getQuote('HK0000478872');
+  assert.deepEqual(hosts, ['api.gaotengasset.com']);
+  assert.deepEqual([quote.price, quote.prevClose, quote.asOf, quote.currency], [11.68396, 11.68313, '2026-11-24', 'HKD']);
 });
 
 test('ChinaAMC historical NAV selects the exact currency and share class', async () => {
