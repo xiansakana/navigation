@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { lockKnowledgeWorkerOwner } from './knowledge-postgres-leases.js';
 
 const hash = value => crypto.createHash('sha256').update(String(value)).digest('hex');
 const labelOf = label => String(label || 'Windows 视频工作器').trim().slice(0, 80);
@@ -71,7 +72,7 @@ export function createPostgresKnowledgeDeviceStore(db) {
     },
     revoke(uid, id) {
       return db.transaction(async client => {
-        await client.query("SELECT pg_advisory_xact_lock(hashtextextended('knowledge:worker:' || $1, 0))", [uid]);
+        await lockKnowledgeWorkerOwner(client, uid);
         const time = new Date().toISOString();
         const result = await client.query('UPDATE navigation.knowledge_worker_devices SET revoked_at=$3 WHERE user_id=$1 AND id=$2 AND revoked_at IS NULL', [uid, id, time]);
         if (!result.rowCount) return false;

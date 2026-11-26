@@ -123,6 +123,22 @@ export function extractKnowledgeCases(notes) {
   return [...found.values()].map(item => ({ ...item, validation: item.validation + (item.genderConflict ? '；性别依据冲突，需核对' : '') }));
 }
 
+export function knowledgeCaseStamp(row) {
+  return { digest: hash(VERSION + JSON.stringify([row.title, row.topic, row.tags_json, row.notes, row.source_url])),
+    stamp: VERSION + ':' + row.revision + ':' + row.updated_at };
+}
+
+export function knowledgeCaseRows(row) {
+  if (!['ready', 'failed'].includes(row.status) || !row.notes) return [];
+  return extractKnowledgeCases(row.notes).map(item => {
+    const id = hash(row.user_id + ':' + row.id + ':' + item.key).slice(0, 32);
+    const chart = { dayMaster: item.pairs[2][0], pillars: item.pairs.map((p, i) => ({ ...(flowPillar(p, item.pairs[2][0]) || { ganZhi: p, gan: p[0], zhi: p[1] }), label: PILLARS[i] })) };
+    const metadata = { subject: item.subject, validation: item.validation, genderEvidence: item.genderEvidence, genderConflict: item.genderConflict, timeLabel: item.timeLabel, offset: item.offset, anchor: item.anchor, excerptTruncated: item.excerptTruncated, occurrences: item.occurrences, references: item.references, tags: JSON.parse(row.tags_json), parserVersion: VERSION };
+    return { id, key: item.key, title: item.title, birth: JSON.stringify({ gender: item.gender, location: '' }),
+      chart: JSON.stringify(chart), notes: item.context, metadata: JSON.stringify(metadata) };
+  });
+}
+
 export function createKnowledgeCaseStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS mingli_knowledge_cases (
     id TEXT PRIMARY KEY,user_id TEXT NOT NULL,document_id TEXT NOT NULL,case_key TEXT NOT NULL,
@@ -143,25 +159,21 @@ export function createKnowledgeCaseStore(db) {
     WHERE c.user_id=? AND d.status IN ('ready','failed') AND d.notes<>''`;
   function syncDocument(row) {
     return db.transaction(() => {
-      const digest = hash(VERSION + JSON.stringify([row.title, row.topic, row.tags_json, row.notes, row.source_url]));
-      const stamp = VERSION + ':' + row.revision + ':' + row.updated_at;
+      const { digest, stamp } = knowledgeCaseStamp(row);
       if (db.prepare('SELECT content_hash FROM mingli_knowledge_index WHERE user_id=? AND document_id=?').get(row.user_id, row.id)?.content_hash === digest) {
         db.prepare('UPDATE mingli_knowledge_index SET source_stamp=? WHERE user_id=? AND document_id=?').run(stamp, row.user_id, row.id); return;
       }
-      const active = ['ready', 'failed'].includes(row.status) && row.notes;
-      const cases = active ? extractKnowledgeCases(row.notes) : [];
+      const cases = knowledgeCaseRows(row);
       const keys = new Set(cases.map(c => c.key));
       for (const old of db.prepare('SELECT id,case_key FROM mingli_knowledge_cases WHERE user_id=? AND document_id=?').all(row.user_id, row.id)) {
         if (!keys.has(old.case_key)) db.prepare('DELETE FROM mingli_knowledge_cases WHERE user_id=? AND id=?').run(row.user_id, old.id);
       }
       for (const item of cases) {
-        const id = hash(row.user_id + ':' + row.id + ':' + item.key).slice(0, 32), now = new Date().toISOString();
-        const chart = { dayMaster: item.pairs[2][0], pillars: item.pairs.map((p, i) => ({ ...(flowPillar(p, item.pairs[2][0]) || { ganZhi: p, gan: p[0], zhi: p[1] }), label: PILLARS[i] })) };
-        const metadata = { subject: item.subject, validation: item.validation, genderEvidence: item.genderEvidence, genderConflict: item.genderConflict, timeLabel: item.timeLabel, offset: item.offset, anchor: item.anchor, excerptTruncated: item.excerptTruncated, occurrences: item.occurrences, references: item.references, tags: JSON.parse(row.tags_json), parserVersion: VERSION };
+        const now = new Date().toISOString();
         db.prepare(`INSERT INTO mingli_knowledge_cases(id,user_id,document_id,case_key,title,birth_json,chart_json,notes,metadata_json,created_at,updated_at)
           VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,document_id,case_key) DO UPDATE SET title=excluded.title,birth_json=excluded.birth_json,
           chart_json=excluded.chart_json,notes=excluded.notes,metadata_json=excluded.metadata_json,updated_at=excluded.updated_at`)
-          .run(id, row.user_id, row.id, item.key, item.title, JSON.stringify({ gender: item.gender, location: '' }), JSON.stringify(chart), item.context, JSON.stringify(metadata), now, now);
+          .run(item.id, row.user_id, row.id, item.key, item.title, item.birth, item.chart, item.notes, item.metadata, now, now);
       }
       db.prepare('INSERT INTO mingli_knowledge_index VALUES(?,?,?,?) ON CONFLICT(user_id,document_id) DO UPDATE SET content_hash=excluded.content_hash,source_stamp=excluded.source_stamp').run(row.user_id, row.id, digest, stamp);
     })();

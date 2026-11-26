@@ -1,15 +1,16 @@
 import { randomBytes } from 'node:crypto';
 import { pipelineSettings } from './knowledge-pipeline.js';
+import { syncPostgresKnowledgeCases } from './mingli-knowledge-postgres-index.js';
 
 const expired = () => new Date(Date.now() - 15 * 60000).toISOString();
 const now = () => new Date().toISOString();
 const conflict = message => Object.assign(new Error(message), { status: 409 });
 
-async function serializeOwner(client, uid) {
+export async function lockKnowledgeWorkerOwner(client, uid) {
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended('knowledge:worker:' || $1, 0))", [uid]);
 }
 
-async function expireLeases(client, uid) {
+export async function expireKnowledgeLeases(client, uid) {
   await client.query(`UPDATE navigation.knowledge_documents
     SET status='queued',stage='等待GPU工作器恢复',error='',lease=NULL,worker_id='',processing_phase='',progress=0,updated_at=$2
     WHERE user_id=$1 AND status='processing' AND heartbeat<$3`, [uid, now(), expired()]);
@@ -24,8 +25,8 @@ export function createPostgresKnowledgeLeases(db) {
   return {
     claim(uid, backends, workerId, localDocuments = []) {
       return db.transaction(async client => {
-        await serializeOwner(client, uid);
-        await expireLeases(client, uid);
+        await lockKnowledgeWorkerOwner(client, uid);
+        await expireKnowledgeLeases(client, uid);
         const { rows: [worker] } = await client.query(`SELECT capabilities_json FROM navigation.knowledge_worker_instances
           WHERE user_id=$1 AND worker_id=$2 AND last_seen>$3`, [uid, workerId, new Date(Date.now() - 90000).toISOString()]);
         const capabilities = JSON.parse(worker?.capabilities_json || '{}');
@@ -67,7 +68,7 @@ export function createPostgresKnowledgeLeases(db) {
     phase(uid, id, lease, phase) {
       if (!['summary_wait', 'summary'].includes(phase)) throw new Error('处理阶段无效');
       return db.transaction(async client => {
-        await serializeOwner(client, uid);
+        await lockKnowledgeWorkerOwner(client, uid);
         const { rows: [row] } = await client.query(`SELECT worker_id,processing_phase FROM navigation.knowledge_documents
           WHERE user_id=$1 AND id=$2 AND status='processing' AND lease=$3 AND heartbeat>=$4 FOR UPDATE`, [uid, id, lease, expired()]);
         if (!row) throw conflict('任务已过期');
@@ -88,6 +89,34 @@ export function createPostgresKnowledgeLeases(db) {
       const result = await db.query(`UPDATE navigation.knowledge_documents SET stage=$4,progress=$5,heartbeat=$6,updated_at=$6
         WHERE user_id=$1 AND id=$2 AND status='processing' AND lease=$3 AND heartbeat>=$7`,
       [uid, id, lease, String(stage || '处理中').slice(0, 100), Math.max(1, Math.min(99, Math.floor(Number(progress) || 1))), now(), expired()]);
+      return result.rowCount === 1;
+    },
+    async leased(uid, id, lease) {
+      if (!lease) return false;
+      const result = await db.query(`SELECT 1 FROM navigation.knowledge_documents
+        WHERE user_id=$1 AND id=$2 AND lease=$3 AND status='processing' AND heartbeat>=$4`, [uid, id, lease, expired()]);
+      return result.rowCount === 1;
+    },
+    finish(uid, id, lease, result) {
+      return db.transaction(async client => {
+        const { rows: [imported] } = await client.query('SELECT media_json FROM navigation.knowledge_imports WHERE user_id=$1 AND document_id=$2', [uid, id]);
+        const provenance = { ...result.provenance, ...(imported ? { sourceMedia: JSON.parse(imported.media_json) } : {}) };
+        const { rows: [row] } = await client.query(`UPDATE navigation.knowledge_documents SET
+          status='ready',stage='笔记已生成',progress=100,error='',duration=$4,language=$5,notes=$6,transcript_json=$7,
+          frames_json=$8,provenance_json=$9,revision=revision+1,lease=NULL,updated_at=$10
+          WHERE user_id=$1 AND id=$2 AND lease=$3 AND status='processing' AND heartbeat>=$11 RETURNING *`,
+        [uid, id, lease, result.duration, result.language, result.notes, JSON.stringify(result.transcript),
+          JSON.stringify(result.frames), JSON.stringify(provenance), now(), expired()]);
+        if (!row) return false;
+        await syncPostgresKnowledgeCases(client, row);
+        await client.query("UPDATE navigation.knowledge_reanalyses SET state='done' WHERE user_id=$1 AND document_id=$2 AND state='pending'", [uid, id]);
+        return true;
+      });
+    },
+    async fail(uid, id, lease, error) {
+      const result = await db.query(`UPDATE navigation.knowledge_documents SET status='failed',stage='处理失败',
+        error=$4,lease=NULL,updated_at=$5 WHERE user_id=$1 AND id=$2 AND lease=$3 AND status='processing' AND heartbeat>=$6`,
+      [uid, id, lease, String(error).slice(0, 500), now(), expired()]);
       return result.rowCount === 1;
     },
   };

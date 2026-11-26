@@ -36,6 +36,7 @@ export function createPostgresKnowledgeSourceStore(db) {
     },
     deleting(uid, id) {
       return db.transaction(async client => {
+        await client.query('SELECT id FROM navigation.knowledge_documents WHERE user_id=$1 AND id=$2 FOR UPDATE', [uid, id]);
         const { rows: [row] } = await client.query('SELECT lease,heartbeat FROM navigation.knowledge_sources WHERE ' + scoped + ' FOR UPDATE', [uid, id]);
         if (!row) return false;
         if (row.lease && Number(row.heartbeat) > Date.now() - 120000) throw Object.assign(new Error('原视频正在保存至115，请稍后删除'), { status: 409 });

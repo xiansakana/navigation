@@ -46,7 +46,8 @@ export function stream(req, res, file, type, attachment = '') {
   input.on('error', () => res.destroy()); res.on('close', () => input.destroy()); input.pipe(res);
 }
 export async function serveSource(req, res, store, uid, id) {
-  const source = store.sources.get(uid, id), item = store.get(uid, id);
+  const [source, item] = await Promise.all([store.sources.get(uid, id), store.get(uid, id)]);
+  if (!item) return res.writeHead(404).end();
   // Link imports may be processed while 115 archives in parallel. If its cache
   // was cleaned between claim and GET, verified/ready storage below is available.
   const local = path.join(knowledgeDirectory(id), 'source');

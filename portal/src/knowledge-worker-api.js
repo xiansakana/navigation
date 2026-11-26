@@ -1,5 +1,6 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { getDatabase } from '../../shared/db/index.js';
 import { createKnowledgeStore } from './knowledge-store.js';
 import { knowledgeWorkerPackage, sendWorkerPackage } from './knowledge-worker-package.js';
@@ -33,14 +34,13 @@ export function validateKnowledgeResult(raw) {
   return { duration: raw.duration, language: String(raw.language || '').slice(0, 30), notes: raw.notes.trim(), transcript, frames, provenance };
 }
 
-export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = () => false) {
-  try { return await workerApi(req, res, url, json, authorize); }
+export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = () => false, store) {
+  try { return await workerApi(req, res, url, json, authorize, store); }
   catch (e) { return knowledgeFailure(res, json, e); }
 }
-async function workerApi(req, res, url, json, authorize) {
+async function workerApi(req, res, url, json, authorize, store = createKnowledgeStore(getDatabase())) {
   res.setHeader('Cache-Control', 'no-store');
   const route = url.pathname.slice('/api/knowledge/worker'.length), method = req.method;
-  const store = createKnowledgeStore(getDatabase());
   if (['/pair/start', '/pair/poll'].includes(route) && method === 'POST') {
     try {
       const raw = await body(req, 1024);
@@ -50,45 +50,52 @@ async function workerApi(req, res, url, json, authorize) {
         const rate = pairingRates.get(key) || { count: 0, until: time + 60000 };
         if (++rate.count > 30 || pairingRates.size > 10000) return json(res, 429, { ok: false, error: '配对请求过多，请稍后重试' });
         pairingRates.set(key, rate);
-        return json(res, 200, { ok: true, ...store.devices.start(raw.label) });
+        return json(res, 200, { ok: true, ...await store.devices.start(raw.label) });
       }
       if (!/^[a-f0-9]{64}$/.test(raw.deviceCode || '')) return json(res, 400, { ok: false, error: '配对请求无效' });
-      return json(res, 200, { ok: true, ...store.devices.poll(raw.deviceCode, authorize, raw.label) });
+      return json(res, 200, { ok: true, ...await store.devices.poll(raw.deviceCode, authorize, raw.label) });
     } catch (e) { return json(res, e.status || 400, { ok: false, error: e.message }); }
   }
   const token = /^Bearer (nkw_[a-f0-9]{64})$/.exec(req.headers.authorization || '')?.[1];
   if (!token) return json(res, 401, { ok: false, error: '工作器凭据无效' });
-  const uid = store.workerUser(token), device = store.devices.authenticate(token);
+  const device = await store.devices.authenticate(token), uid = device?.user_id || await store.workerUser(token);
   if (!uid) return json(res, 401, { ok: false, error: '工作器凭据已撤销' });
-  if (!authorize(uid)) return json(res, 403, { ok: false, error: '账号已停用或知识库处理权限已撤销' });
+  if (!await authorize(uid)) return json(res, 403, { ok: false, error: '账号已停用或知识库处理权限已撤销' });
   try {
     if (route === '/package' && method === 'GET') return sendWorkerPackage(res);
     if (route === '/release' && method === 'GET') { const { version, sha256, bytes } = knowledgeWorkerPackage(); return json(res, 200, { ok: true, version, sha256, bytes }); }
-    if (route === '/heartbeat' && method === 'POST') { const raw = await body(req, 4096); store.heartbeatWorker(uid, device ? { ...raw, workerId: device.id, label: device.label } : raw); const { mediaConcurrency, summaryConcurrency } = store.settings(uid); return json(res, 200, { ok: true, pipeline: { mediaConcurrency, summaryConcurrency } }); }
+    if (route === '/heartbeat' && method === 'POST') {
+      const raw = await body(req, 4096);
+      const accepted = await store.heartbeatWorker(uid, device ? { ...raw, workerId: device.id, label: device.label } : raw, token, device);
+      if (accepted === false) return json(res, 401, { ok: false, error: '工作器凭据已撤销' });
+      const { mediaConcurrency, summaryConcurrency } = await store.settings(uid);
+      return json(res, 200, { ok: true, pipeline: { mediaConcurrency, summaryConcurrency } });
+    }
     if (route === '/local-input' && method === 'POST') {
       const raw = await body(req, 4096), workerId = device?.id || raw.workerId;
-      if (raw.action === 'forget') { store.localInputs.forget(uid, raw.documentId, workerId); return json(res, 200, { ok: true }); }
-      return json(res, 200, { ok: true, ...store.localInputs.verify(uid, raw.documentId, workerId, raw.ticket, raw.sha256) });
+      if (raw.action === 'forget') { await store.localInputs.forget(uid, raw.documentId, workerId); return json(res, 200, { ok: true }); }
+      return json(res, 200, { ok: true, ...await store.localInputs.verify(uid, raw.documentId, workerId, raw.ticket, raw.sha256) });
     }
     if (route === '/claim' && method === 'POST') {
       const raw = await body(req, 4096);
       const backends = Array.isArray(raw.backends) ? raw.backends.filter(b => ['codex', 'openai'].includes(b)) : [];
-      return json(res, 200, { ok: true, job: store.claim(uid, backends, device?.id || (typeof raw.workerId === 'string' ? raw.workerId : ''), Array.isArray(raw.localDocuments) ? raw.localDocuments.slice(0, 200).filter(id => /^[a-f0-9]{32}$/.test(id)) : []) });
+      return json(res, 200, { ok: true, job: await store.claim(uid, backends, device?.id || (typeof raw.workerId === 'string' ? raw.workerId : ''), Array.isArray(raw.localDocuments) ? raw.localDocuments.slice(0, 200).filter(id => /^[a-f0-9]{32}$/.test(id)) : []) });
     }
     const match = /^\/jobs\/([a-f0-9]{32})\/(source|evidence|progress|phase|complete|fail|codex)$/.exec(route);
     if (!match) return json(res, 404, { ok: false, error: '工作器接口不存在' });
     const [, id, action] = match, lease = req.headers['x-knowledge-lease'];
     return await lock(id, async () => {
-      if (!store.leased(uid, id, lease)) return json(res, 409, { ok: false, error: '任务已删除、过期或由其他工作器领取' });
+      if (!await store.leased(uid, id, lease)) return json(res, 409, { ok: false, error: '任务已删除、过期或由其他工作器领取' });
       if(action==='codex'&&method==='POST'){
         const input=await body(req,3*1024*1024);
-        if(!store.leased(uid,id,lease))return json(res,409,{ok:false,error:'任务已过期'});
-        const doc=store.getRow(uid,id);if(doc.backend!=='codex')return json(res,400,{ok:false,error:'此任务未使用Codex'});
-        store.codexCalls.record(uid,doc,input);return json(res,200,{ok:true});
+        if(!await store.leased(uid,id,lease))return json(res,409,{ok:false,error:'任务已过期'});
+        const doc=await store.getRow(uid,id);if(doc?.backend!=='codex')return json(res,400,{ok:false,error:'此任务未使用Codex'});
+        if(await store.codexCalls.record(uid,doc,input,lease)===false)return json(res,409,{ok:false,error:'任务已过期'});
+        return json(res,200,{ok:true});
       }
       if (action === 'source' && method === 'GET') return serveSource(req, res, store, uid, id);
       if (action === 'evidence' && method === 'GET') {
-        const d = store.get(uid, id), run = store.reanalysis.get(uid, id);
+        const d = await store.get(uid, id), run = await store.reanalysis.get(uid, id);
         if (run?.state !== 'pending' || run.mode !== 'reuse') return json(res, 409, { ok: false, error: '此任务未请求复用素材' });
         const frames = [];
         for (const f of d.frames) {
@@ -99,30 +106,36 @@ async function workerApi(req, res, url, json, authorize) {
       }
       if (action === 'phase' && method === 'POST') {
         const input = await body(req, 1024);
-        return json(res, 200, { ok: true, accepted: store.phase(uid, id, lease, input.phase) });
+        return json(res, 200, { ok: true, accepted: await store.phase(uid, id, lease, input.phase) });
       }
       if (action === 'progress' && method === 'POST') {
-        const input = await body(req, 4096); store.progress(uid, id, lease, input.stage, input.progress); return json(res, 200, { ok: true });
+        const input = await body(req, 4096); await store.progress(uid, id, lease, input.stage, input.progress); return json(res, 200, { ok: true });
       }
       if (action === 'fail' && method === 'POST') {
-        const input = await body(req, 4096); store.fail(uid, id, lease, failureMessage(String(input.error || '工作器处理失败'), String(input.stage || store.getRow(uid, id)?.stage || '').slice(0, 120))); return json(res, 200, { ok: true });
+        const input = await body(req, 4096);
+        const stage = String(input.stage || (await store.getRow(uid, id))?.stage || '').slice(0, 120);
+        await store.fail(uid, id, lease, failureMessage(String(input.error || '工作器处理失败'), stage));
+        return json(res, 200, { ok: true });
       }
       if (action === 'complete' && method === 'POST') {
         const raw = await body(req, 18 * 1024 * 1024), result = validateKnowledgeResult(raw);
         const directory = knowledgeDirectory(id);
         await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
-        const run = store.reanalysis.get(uid, id);
-        if (run?.state === 'pending') {
-          for (let i = 0; i < result.frames.length; i++) {
-            const oldName = raw.frames[i].name || result.frames[i].name;
-            const name = `frame-${run.runId}-${i + 1}.jpg`;
-            if (/^[a-z0-9.-]+\.jpg$/.test(oldName)) result.notes = result.notes.split('/frames/' + oldName).join('/frames/' + name);
-            result.frames[i].name = name;
-          }
+        const batch = randomBytes(16).toString('hex');
+        const names = new Map();
+        for (let i = 0; i < result.frames.length; i++) {
+          const frame = result.frames[i], name = `frame-${batch}-${i + 1}.jpg`;
+          const previous = raw.frames[i].name || frame.name;
+          if (typeof previous === 'string' && /^[a-z0-9.-]+\.jpg$/.test(previous)) names.set(previous, name);
+          frame.name = name;
         }
+        result.notes = result.notes.replace(/\/frames\/([a-z0-9.-]+\.jpg)\b/g, (link, name) => names.has(name) ? '/frames/' + names.get(name) : link);
         for (const f of result.frames) await fsp.writeFile(path.join(directory, f.name), f.data);
         result.frames = result.frames.map(({ data, ...f }) => f);
-        if (!store.finish(uid, id, lease, result)) return json(res, 409, { ok: false, error: '任务已过期' });
+        if (!await store.finish(uid, id, lease, result)) {
+          await Promise.allSettled(result.frames.map(frame => fsp.rm(path.join(directory, frame.name), { force: true })));
+          return json(res, 409, { ok: false, error: '任务已过期' });
+        }
         return json(res, 200, { ok: true });
       }
       return json(res, 405, { ok: false, error: '不支持此请求方法' });

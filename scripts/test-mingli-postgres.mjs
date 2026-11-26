@@ -44,6 +44,15 @@ import { createPostgresQuantBacktestStore } from '../stock-manage/src/quant-back
 import { createPostgresKnowledgeLeases } from '../portal/src/knowledge-postgres-leases.js';
 import { createPostgresKnowledgeDeviceStore } from '../portal/src/knowledge-devices.js';
 import { createPostgresKnowledgeSourceStore } from '../portal/src/knowledge-source-store.js';
+import { createPostgresKnowledgeUploads } from '../portal/src/knowledge-postgres-uploads.js';
+import { createPostgresKnowledgeImports } from '../portal/src/knowledge-postgres-imports.js';
+import { createPostgresKnowledgeDocuments } from '../portal/src/knowledge-postgres-documents.js';
+import { createPostgresKnowledgeVersions } from '../portal/src/knowledge-postgres-versions.js';
+import { createPostgresKnowledgeLocalInputs } from '../portal/src/knowledge-local-store.js';
+import { createPostgresKnowledgeWorker } from '../portal/src/knowledge-postgres-worker.js';
+import { handleKnowledgeWorkerApi } from '../portal/src/knowledge-worker-api.js';
+import { handlePublicKnowledge, postgresPublicKnowledgeStore } from '../portal/src/knowledge-public.js';
+import { CHUNK_BYTES } from '../portal/src/knowledge-store.js';
 
 async function verifyQqMonitoring(db) {
   let restarts = 0, now = 1000000, usageReads = 0, sent = 0;
@@ -380,7 +389,7 @@ async function verifyKnowledgeLeases(db) {
   assert.deepEqual(polls.map(result => result.status).sort(), ['approved', 'expired']);
   const { token, deviceId: workerId } = polls.find(result => result.status === 'approved');
   assert.equal((await devices.authenticate(token)).user_id, uid);
-  const capabilities = { media: { ready: true, detail: 'cuda' }, codex: { ready: true }, pipeline: { version: 1 } };
+  const capabilities = { media: { ready: true, detail: 'cuda' }, codex: { ready: true }, pipeline: { version: 1 }, reanalysis: { version: 1 } };
   await db.query(`INSERT INTO navigation.knowledge_worker_instances(user_id,worker_id,last_seen,label,capabilities_json)
     VALUES($1,$2,$3,'Fixture',$4)`, [uid, workerId, stamp, JSON.stringify(capabilities)]);
   await db.query(`INSERT INTO navigation.knowledge_settings(user_id,pipeline_json) VALUES($1,'{"mediaConcurrency":1,"summaryConcurrency":1}')`, [uid]);
@@ -422,12 +431,178 @@ async function verifyKnowledgeLeases(db) {
   assert.equal(recovered.row.id, job.row.id);
   assert.notEqual(recovered.lease, job.lease);
   assert.equal(Number(recovered.row.attempt), 2);
+  const output = { duration: 60, language: 'zh', notes: '## 案例一\n\n四柱：甲子 丙寅 戊辰 庚申\n\n命例测试', transcript: [], frames: [], provenance: {} };
+  assert.equal(await first.finish(uid, recovered.row.id, job.lease, output), false);
+  assert.equal(await first.finish(uid, recovered.row.id, recovered.lease, output), true);
+  assert.equal(await first.finish(uid, recovered.row.id, recovered.lease, output), false);
+  const { rows: cases } = await db.query('SELECT case_key FROM navigation.mingli_knowledge_cases WHERE user_id=$1 AND document_id=$2', [uid, recovered.row.id]);
+  assert.deepEqual(cases, [{ case_key: '甲子丙寅戊辰庚申' }]);
+  const catalog = createPostgresKnowledgeDocuments(db);
+  const ready = await catalog.get(uid, recovered.row.id);
+  const edited = { title: '更正后的笔记', notes: '不再包含命理案例', revision: ready.revision };
+  const revisions = await Promise.allSettled([catalog.edit(uid, ready.id, edited), catalog.edit(uid, ready.id, edited)]);
+  assert.equal(revisions.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(revisions.find(result => result.status === 'rejected').reason.status, 409);
+  assert.equal((await db.query('SELECT id FROM navigation.mingli_knowledge_cases WHERE user_id=$1 AND document_id=$2', [uid, ready.id])).rowCount, 0);
+  const versions = createPostgresKnowledgeVersions(db);
+  const updated = await catalog.get(uid, ready.id);
+  const runId = await versions.schedule(uid, ready.id, updated.revision, 'full', { backend: 'codex' });
+  assert.equal((await versions.get(uid, ready.id)).runId, runId);
+  const [snapshot] = await versions.list(uid, ready.id);
+  assert.equal(snapshot.notes, edited.notes);
+  assert.deepEqual(await versions.list('other-knowledge-owner', ready.id), []);
+  const reanalysis = await claim(second);
+  assert.equal(reanalysis.row.id, ready.id);
+  assert.equal(await second.finish(uid, ready.id, reanalysis.lease, output), true);
+  const newlyGenerated = await catalog.get(uid, ready.id);
+  await assert.rejects(() => versions.restore(uid, ready.id, snapshot.id, updated.revision), { status: 409 });
+  await versions.restore(uid, ready.id, snapshot.id, newlyGenerated.revision);
+  assert.equal((await catalog.get(uid, ready.id)).notes, edited.notes);
+  assert.equal((await versions.get(uid, ready.id)).state, 'restored');
   assert.equal((await devices.list(uid))[0].online, true);
   assert.equal(await devices.revoke('other-knowledge-owner', workerId), false);
   assert.equal(await devices.revoke(uid, workerId), true);
   assert.equal(await devices.authenticate(token), undefined);
-  assert.equal(await first.progress(uid, recovered.row.id, recovered.lease, 'revoked', 90), false);
+  assert.equal(await first.progress(uid, next.row.id, next.lease, 'revoked', 90), false);
   assert.equal(await claim(second), null);
+}
+
+async function verifyKnowledgeUploads(db) {
+  const first = createPostgresKnowledgeUploads(db), second = createPostgresKnowledgeUploads(db);
+  const catalog = createPostgresKnowledgeDocuments(db);
+  const uid = 'native-knowledge-upload', outside = 'native-knowledge-upload-outsider';
+  const input = { title: 'Upload fixture %_', originalName: 'fixture.mp4', bytes: CHUNK_BYTES + 20, mimeType: 'video/mp4', topic: 'Fixture' };
+  const disk = 15 * 1024 ** 3;
+  const url = 'https://www.bilibili.com/video/BV123456789A?p=1';
+  const equivalent = 'https://m.bilibili.com/video/BV123456789A?ref=fixture';
+  await Promise.all([catalog.saveSettings(uid, { backend: 'openai' }), catalog.saveSettings(uid, { summaryConcurrency: 4 })]);
+  assert.equal((await catalog.settings(uid)).backend, 'openai');
+  assert.equal((await catalog.settings(uid)).summaryConcurrency, 4);
+  const docs = await Promise.allSettled([
+    first.createUpload(uid, { ...input, sourceUrl: url }, { rootPath: '/115/fixture' }, disk),
+    second.createUpload(uid, { ...input, sourceUrl: equivalent }, { rootPath: '/115/fixture' }, disk),
+  ]);
+  assert.equal(docs.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(docs.find(result => result.status === 'rejected').reason.code, 'KNOWLEDGE_DUPLICATE_SOURCE');
+  const item = docs.find(result => result.status === 'fulfilled').value;
+  assert.equal(item.storage.state, 'waiting');
+  assert.equal(item.backend, 'openai');
+  const local = createPostgresKnowledgeLocalInputs(db);
+  await db.query(`INSERT INTO navigation.knowledge_worker_instances(user_id,worker_id,last_seen,label,capabilities_json)
+    VALUES($1,'fixture-gpu',$2,'fixture',$3)`, [uid, new Date().toISOString(),
+    JSON.stringify({ media: { ready: true, detail: 'cuda' }, openai: { ready: true } })]);
+  const { ticket, workerId } = await local.offer(uid, item.id, 'fixture-gpu');
+  await assert.rejects(() => local.verify(outside, item.id, workerId, ticket), /授权已失效/);
+  assert.deepEqual(await local.verify(uid, item.id, workerId, ticket), { bytes: input.bytes });
+  const transfer = await Promise.allSettled([local.verify(uid, item.id, workerId, ticket, 'a'.repeat(64)),
+    local.verify(uid, item.id, workerId, ticket, 'a'.repeat(64))]);
+  assert.equal(transfer.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(await catalog.get(outside, item.id), null);
+  assert.equal(await second.duplicateSource(outside, url), null);
+  assert.equal(await second.parts(outside, item.id), null);
+  await assert.rejects(() => second.part(outside, item.id, 1, CHUNK_BYTES), /上传任务已结束/);
+  await assert.rejects(() => first.part(uid, item.id, 2, 21), /分片大小不符/);
+  await assert.rejects(() => first.enqueue(uid, item.id, 'a'.repeat(64)), /尚未上传完整/);
+  await Promise.all([first.part(uid, item.id, 1, CHUNK_BYTES), second.part(uid, item.id, 2, 20)]);
+  await first.part(uid, item.id, 1, CHUNK_BYTES);
+  assert.deepEqual(await second.parts(uid, item.id), [{ part: 1, bytes: CHUNK_BYTES }, { part: 2, bytes: 20 }]);
+  assert.deepEqual((await Promise.all([first.enqueue(uid, item.id, 'a'.repeat(64)), second.enqueue(uid, item.id, 'a'.repeat(64))])).sort(), [false, true]);
+  const archived = await createPostgresKnowledgeSourceStore(db).get(uid, item.id);
+  assert.equal(archived.state, 'pending');
+  assert.equal((await db.query('SELECT source_sha256 FROM navigation.knowledge_documents WHERE id=$1', [item.id])).rows[0].source_sha256, 'a'.repeat(64));
+  await assert.rejects(() => first.createUpload(outside, input, null, 1), /可用空间不足/);
+  const imported = await first.createLinkImport(uid, input, 'https://www.bilibili.com/video/BV123456789B', { quality: 80, strict: true }, null, disk);
+  assert.equal(imported.status, 'importing');
+  assert.equal(imported.importState, 'pending');
+  const downloads = createPostgresKnowledgeImports(db), otherDownloads = createPostgresKnowledgeImports(db);
+  const claims = (await Promise.all([downloads.claim(), otherDownloads.claim()])).filter(Boolean);
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].document_id, imported.id);
+  const hashes = { bytes: 30000, sha256: 'b'.repeat(64) };
+  assert.equal(await downloads.complete({ ...claims[0], user_id: outside }, hashes), false);
+  await db.query('UPDATE navigation.knowledge_imports SET heartbeat=0 WHERE document_id=$1', [imported.id]);
+  assert.equal(await downloads.touch(claims[0]), false);
+  const recoveredImport = await otherDownloads.claim();
+  assert.notEqual(recoveredImport.lease, claims[0].lease);
+  assert.equal(await downloads.complete(claims[0], hashes), false);
+  assert.equal(await otherDownloads.complete(recoveredImport, hashes, { quality: 80 }), true);
+  assert.equal(await downloads.fail(recoveredImport, 'late failure'), false);
+  const { rows: [published] } = await db.query(`SELECT d.status,d.source_sha256,i.state FROM navigation.knowledge_documents d
+    JOIN navigation.knowledge_imports i ON i.user_id=d.user_id AND i.document_id=d.id WHERE d.id=$1`, [imported.id]);
+  assert.deepEqual(published, { status: 'queued', source_sha256: hashes.sha256, state: 'done' });
+  const burst = await Promise.allSettled(Array.from({ length: 5 }, () => second.createUpload(uid, input, null, disk)));
+  assert.equal(burst.filter(result => result.status === 'fulfilled').length, 3);
+  assert.equal(burst.filter(result => result.status === 'rejected' && result.reason.code === 'KNOWLEDGE_CAPACITY').length, 2);
+  const queued = await catalog.list(uid, { search: 'FIXTURE %_', topic: 'Fixture', status: 'queued', limit: 1, offset: 1 });
+  assert.equal(queued.total, 2);
+  assert.equal(queued.documents.length, 1);
+  assert.equal(queued.statusCounts.uploading, 3);
+  assert.deepEqual(queued.topics, [{ topic: 'Fixture', count: 5 }]);
+}
+
+async function verifyKnowledgeWorkerHttp(db) {
+  const uid = 'postgres-knowledge-worker-http', store = createPostgresKnowledgeWorker(db);
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'navigation-knowledge-postgres-'));
+  const previous = process.env.KNOWLEDGE_DATA_DIR;
+  process.env.KNOWLEDGE_DATA_DIR = directory;
+  try {
+    const call = (route, data, token = '', lease = '') => handleKnowledgeWorkerApi({
+      method: 'POST', headers: { authorization: 'Bearer ' + token, 'x-knowledge-lease': lease }, socket: { remoteAddress: '::1' },
+      async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(data)); },
+    }, { setHeader() {} }, new URL('http://127.0.0.1/api/knowledge/worker' + route),
+    (_, status, body) => ({ status, body }), async owner => owner === uid, store);
+    const pair = await call('/pair/start', { label: 'PostgreSQL worker fixture' });
+    assert.equal(pair.status, 200);
+    assert.equal(await store.devices.approve(uid, pair.body.userCode), true);
+    const paired = await call('/pair/poll', { deviceCode: pair.body.deviceCode });
+    assert.equal(paired.body.status, 'approved');
+    const token = paired.body.token;
+    const seeded = createPostgresKnowledgeUploads(db);
+    const input = await seeded.createUpload(uid, { title: 'Worker HTTP fixture', originalName: 'a.mp4', bytes: 24, mimeType: 'video/mp4' }, null, 12 * 1024 ** 3);
+    await seeded.part(uid, input.id, 1, 24);
+    await seeded.enqueue(uid, input.id, 'b'.repeat(64));
+    assert.equal((await call('/heartbeat', { capabilities: { media: { ready: true, detail: 'cuda' }, codex: { ready: true } } }, token)).status, 200);
+    const work = await call('/claim', { backends: ['codex'] }, token);
+    assert.equal(work.status, 200, JSON.stringify(work.body));
+    assert.equal(work.body.job.id, input.id);
+    const lease = work.body.job.lease;
+    const route = '/jobs/' + input.id;
+    assert.equal((await call(route + '/progress', { stage: 'Fixture progress', progress: 25 }, token, lease)).status, 200);
+    const codexCall = { id: 'a'.repeat(32), state: 'succeeded', prompt: 'fixture', result: 'fixture', model: '', sessionId: '' };
+    assert.equal((await call(route + '/codex', codexCall, token, lease)).status, 200);
+    const image = Buffer.alloc(24, 255); image[1] = 216;
+    const result = { duration: 90, notes: 'PostgreSQL worker HTTP fixture with notes and a screenshot. [图](/frames/frame-1.jpg)',
+      transcript: [], frames: [{ time: 1, name: 'frame-1.jpg', data: image.toString('base64') }] };
+    assert.equal((await call(route + '/complete', result, token, 'stale')).status, 409);
+    const completed = await call(route + '/complete', result, token, lease);
+    assert.equal(completed.status, 200, JSON.stringify(completed.body));
+    const saved = await store.get(uid, input.id);
+    assert.equal(saved.status, 'ready');
+    assert.ok(saved.notes.includes(saved.frames[0].name));
+    assert.deepEqual(await readFile(path.join(directory, input.id, saved.frames[0].name)), image);
+    const visitors = postgresPublicKnowledgeStore(db);
+    const publicGet = (suffix = '/' + input.id) => handlePublicKnowledge({ method: 'GET' }, { setHeader() {} },
+      new URL('http://127.0.0.1/api/knowledge/public/documents' + suffix), (_, status, body) => ({ status, body }), db);
+    assert.equal((await publicGet()).status, 404);
+    const publish = { id: input.id, revision: saved.revision };
+    await assert.rejects(() => visitors.setVisibility('other-user', [publish], 'public'), { status: 404 });
+    await assert.rejects(() => visitors.setVisibility(uid, [publish, { id: 'missing-fixture', revision: 0 }], 'public'), { status: 404 });
+    assert.equal((await publicGet()).status, 404);
+    await visitors.setVisibility(uid, [publish], 'public');
+    const published = await publicGet();
+    assert.equal(published.status, 200);
+    assert.deepEqual(Object.keys(published.body.document).sort(), ['createdAt', 'id', 'notes', 'tags', 'title', 'topic', 'updatedAt']);
+    assert.equal((await publicGet('?search=worker%20http')).body.total, 1);
+    await assert.rejects(() => visitors.setVisibility(uid, [publish], 'private'), { status: 409 });
+    await visitors.setVisibility(uid, [{ ...publish, revision: publish.revision + 1 }], 'private');
+    assert.equal((await publicGet()).status, 404);
+    await store.devices.revoke(uid, paired.body.deviceId);
+    assert.equal((await call('/heartbeat', {}, token)).status, 401);
+  } finally {
+    if (previous === undefined) delete process.env.KNOWLEDGE_DATA_DIR;
+    else process.env.KNOWLEDGE_DATA_DIR = previous;
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 async function verifyCodexQueue(db) {
@@ -650,6 +825,8 @@ test('Mingli HTTP entry point uses PostgreSQL for owner-scoped cases, categories
     await verifyQuant(db);
     await verifyCodexQueue(db);
     await verifyKnowledgeLeases(db);
+    await verifyKnowledgeUploads(db);
+    await verifyKnowledgeWorkerHttp(db);
     await verifyQqMonitoring(db);
     await verifyRbac(db);
     const store = createMingliPostgresStore(db);

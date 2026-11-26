@@ -34,6 +34,19 @@ export const backendName = value => {
 const id = () => crypto.randomBytes(16).toString('hex');
 const now = () => new Date().toISOString();
 export const hashToken = token => crypto.createHash('sha256').update(token).digest('hex');
+export function knowledgeWorkerHeartbeat(raw, time = new Date().toISOString()) {
+  const capabilities = {};
+  for (const key of ['codex', 'openai', 'media']) {
+    const value = raw.capabilities?.[key] || {};
+    capabilities[key] = { ready: value.ready === true, model: String(value.model || '').slice(0, 120), detail: String(value.detail || '').slice(0, 160) };
+  }
+  for (const feature of ['pipeline', 'reanalysis']) {
+    if (raw.capabilities?.[feature]?.version === 1) capabilities[feature] = { version: 1 };
+  }
+  const label = String(raw.label || '').slice(0, 80);
+  const workerId = /^[\w-]{1,80}$/.test(raw.workerId || '') ? raw.workerId : 'legacy-' + hashToken(String(raw.label || '')).slice(0, 24);
+  return { capabilities: JSON.stringify(capabilities), workerId, label, time };
+}
 export function metadata(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('笔记格式无效');
   const title = String(raw.title || '').trim(), topic = String(raw.topic || '').trim();
@@ -43,6 +56,32 @@ export function metadata(raw) {
   const sourceUrl = String(raw.sourceUrl || '').trim();
   if (sourceUrl && (sourceUrl.length > 1000 || !/^https?:\/\//i.test(sourceUrl))) throw new Error('来源链接需为 HTTP(S) 地址');
   return { title, topic, tags: [...new Set(tags.map(t => t.trim()).filter(Boolean))], sourceUrl };
+}
+
+export function uploadInput(raw, defaults) {
+  const document = metadata(raw), bytes = raw.bytes, mimeType = raw.mimeType;
+  if (!Number.isSafeInteger(bytes) || bytes < 12 || bytes > MAX_VIDEO_BYTES) throw new Error('视频需在1GB以内');
+  if (!['video/mp4', 'video/webm', 'video/quicktime'].includes(mimeType)) throw new Error('支持 MP4、WebM、MOV 视频');
+  const originalName = String(raw.originalName || '').slice(0, 240);
+  if (!originalName) throw new Error('缺少文件名');
+  const backend = backendName(raw.backend || defaults.backend);
+  const fingerprint = String(raw.fingerprint || '');
+  if (fingerprint && !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('文件指纹无效');
+  return { ...document, bytes, mimeType, originalName, fingerprint, backend,
+    modelSettings: modelSettings({}, defaults) };
+}
+
+export function assertUploadDiskSpace(bytes, reserved, availableBytes) {
+  if (Number(bytes) * 3 + reserved * 2 + 5 * 1024 ** 3 > availableBytes) throw new Error('服务器可用空间不足');
+}
+
+export function projectKnowledgeDocument(row, { reanalysis, storage, sourceImport }) {
+  return { id: row.id, title: row.title, topic: row.topic, tags: JSON.parse(row.tags_json), sourceUrl: row.source_url,
+    visibility: row.visibility || 'private', originalName: row.original_name, bytes: Number(row.byte_size), mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, modelSettings: JSON.parse(row.model_settings_json || '{}'), status: row.status,
+    stage: row.stage, reanalysis, processingPhase: row.processing_phase || '', progress: Number(row.progress), error: row.error, duration: row.duration, language: row.language, notes: row.notes,
+    transcript: readableTranscript(JSON.parse(row.transcript_json)), frames: JSON.parse(row.frames_json), provenance: JSON.parse(row.provenance_json),
+    storage, importState: sourceImport?.state || '', sourceMedia: JSON.parse(sourceImport?.media_json || '{}'), revision: Number(row.revision),
+    attempt: Number(row.attempt), createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
 export const createKnowledgeStore = connectionStore(initializeKnowledgeStore);
@@ -86,13 +125,11 @@ function initializeKnowledgeStore(db) {
   const getRow = (uid, key) => selectDocument.get(uid, key);
   const read = row => {
     if (!row) return row;
-    const sourceImport = imports.get(row.user_id, row.id);
-    return { id: row.id, title: row.title, topic: row.topic, tags: JSON.parse(row.tags_json), sourceUrl: row.source_url,
-      visibility: row.visibility || 'private', originalName: row.original_name, bytes: row.byte_size, mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, modelSettings: JSON.parse(row.model_settings_json || '{}'), status: row.status,
-      stage: row.stage, reanalysis: reanalysis.get(row.user_id, row.id), processingPhase: row.processing_phase || '', progress: row.progress, error: row.error, duration: row.duration, language: row.language, notes: row.notes,
-      transcript: readableTranscript(JSON.parse(row.transcript_json)), frames: JSON.parse(row.frames_json), provenance: JSON.parse(row.provenance_json),
-      storage: sources.public(row.user_id, row.id), importState: sourceImport?.state || '',
-      sourceMedia: JSON.parse(sourceImport?.media_json || '{}'), revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at };
+    return projectKnowledgeDocument(row, {
+      sourceImport: imports.get(row.user_id, row.id),
+      reanalysis: reanalysis.get(row.user_id, row.id),
+      storage: sources.public(row.user_id, row.id),
+    });
   };
   const get = (uid, key) => { const row = getRow(uid, key); return row && row.status !== 'deleting' ? read(row) : null; };
   const expire = uid => db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待GPU工作器恢复',error='',lease=NULL,worker_id='',processing_phase='',progress=0,updated_at=? WHERE user_id=? AND status='processing' AND heartbeat<?")
@@ -101,8 +138,7 @@ function initializeKnowledgeStore(db) {
     .all(uid, new Date(Date.now() - 90000).toISOString())
     .map(r => ({ id: r.worker_id, label: r.label, lastSeen: r.last_seen, capabilities: JSON.parse(r.capabilities_json) }));
   const checkDiskSpace = (bytes, availableBytes) => {
-    const reserved = selectReserved.get().bytes;
-    if (Number(bytes) * 3 + reserved * 2 + 5 * 1024 ** 3 > availableBytes) throw new Error('服务器可用空间不足');
+    assertUploadDiskSpace(bytes, selectReserved.get().bytes, availableBytes);
   };
   return {
     failedDocuments(uid) {
@@ -156,17 +192,10 @@ function initializeKnowledgeStore(db) {
     },
     workerUser(token) { return devices.authenticate(token)?.user_id || db.prepare('SELECT user_id FROM knowledge_workers WHERE token_hash=?').get(hashToken(token))?.user_id || null; },
     heartbeatWorker(uid, raw = {}) {
-      const capabilities = {};
-      for (const key of ['codex', 'openai', 'media']) {
-        const c = raw.capabilities?.[key] || {};
-        capabilities[key] = { ready: c.ready === true, model: String(c.model || '').slice(0, 120), detail: String(c.detail || '').slice(0, 160) };
-      }
-      if (raw.capabilities?.pipeline?.version === 1) capabilities.pipeline = { version: 1 };
-      if (raw.capabilities?.reanalysis?.version === 1) capabilities.reanalysis = { version: 1 };
-      db.prepare('UPDATE knowledge_workers SET last_seen=?,label=?,capabilities_json=? WHERE user_id=?').run(now(), String(raw.label || '').slice(0, 80), JSON.stringify(capabilities), uid);
-      const workerId = /^[\w-]{1,80}$/.test(raw.workerId || '') ? raw.workerId : 'legacy-' + hashToken(String(raw.label || '')).slice(0, 24);
+      const { capabilities, workerId, label, time } = knowledgeWorkerHeartbeat(raw);
+      db.prepare('UPDATE knowledge_workers SET last_seen=?,label=?,capabilities_json=? WHERE user_id=?').run(time, label, capabilities, uid);
       db.prepare('INSERT INTO knowledge_worker_instances(user_id,worker_id,last_seen,label,capabilities_json) VALUES (?,?,?,?,?) ON CONFLICT(user_id,worker_id) DO UPDATE SET last_seen=excluded.last_seen,label=excluded.label,capabilities_json=excluded.capabilities_json')
-        .run(uid, workerId, now(), String(raw.label || '').slice(0, 80), JSON.stringify(capabilities));
+        .run(uid, workerId, time, label, capabilities);
       db.prepare('DELETE FROM knowledge_worker_instances WHERE user_id=? AND last_seen<?').run(uid, new Date(Date.now() - 7 * 86400000).toISOString());
     },
     list(uid, { search = '', topic = '', status = '', offset = 0, limit = 30, includeTranscript = true } = {}) {
@@ -189,14 +218,7 @@ function initializeKnowledgeStore(db) {
     duplicateSource(uid, url, options) { return findSourceDuplicate(db, uid, url, options); },
     create(uid, raw, { queueId = '' } = {}) {
       return db.transaction(() => {
-        const m = metadata(raw), size = raw.bytes, mime = raw.mimeType;
-        if (!Number.isSafeInteger(size) || size < 12 || size > MAX_VIDEO_BYTES) throw new Error('视频需在1GB以内');
-        if (!['video/mp4', 'video/webm', 'video/quicktime'].includes(mime)) throw new Error('支持 MP4、WebM、MOV 视频');
-        const name = String(raw.originalName || '').slice(0, 240);
-        if (!name) throw new Error('缺少文件名');
-        const backend = backendName(raw.backend || this.settings(uid).backend);
-        const fingerprint = String(raw.fingerprint || '');
-        if (fingerprint && !/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error('文件指纹无效');
+        const m = uploadInput(raw, this.settings(uid));
         const duplicate = findSourceDuplicate(db, uid, m.sourceUrl, { exceptQueue: queueId });
         if (duplicate) throw duplicateSourceError(duplicate);
         const quota = db.prepare("SELECT count(*) AS n,coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE user_id=?").get(uid);
@@ -205,11 +227,11 @@ function initializeKnowledgeStore(db) {
         if (quota.n >= 2000) throw new Error('最多2000篇笔记，请先清理已有内容');
         // Cloud archives do not consume a lifetime ECS video quota. Upload routes
         // still check free disk space before accepting temporary video files.
-        if (!storageConfig(uid) && quota.bytes + size > 20 * MAX_VIDEO_BYTES) throw new Error('服务器存储最多20GB视频，请先清理已有内容');
+        if (!storageConfig(uid) && quota.bytes + m.bytes > 20 * MAX_VIDEO_BYTES) throw new Error('服务器存储最多20GB视频，请先清理已有内容');
         const key = id(), time = now();
         db.prepare('INSERT INTO knowledge_documents(id,user_id,title,topic,tags_json,source_url,original_name,byte_size,mime_type,fingerprint,backend,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
-          .run(key, uid, m.title, m.topic, JSON.stringify(m.tags), m.sourceUrl, name, size, mime, fingerprint, backend, time, time);
-        db.prepare('UPDATE knowledge_documents SET model_settings_json=? WHERE id=?').run(JSON.stringify(modelSettings({}, this.settings(uid))), key);
+          .run(key, uid, m.title, m.topic, JSON.stringify(m.tags), m.sourceUrl, m.originalName, m.bytes, m.mimeType, m.fingerprint, m.backend, time, time);
+        db.prepare('UPDATE knowledge_documents SET model_settings_json=? WHERE id=?').run(JSON.stringify(m.modelSettings), key);
         return get(uid, key);
       }).immediate();
     },

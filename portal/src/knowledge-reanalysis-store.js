@@ -1,7 +1,12 @@
 import crypto from 'node:crypto';
 
-const active = ['queued', 'processing', 'uploading', 'importing', 'deleting'];
+export const activeKnowledgeStates = ['queued', 'processing', 'uploading', 'importing', 'deleting'];
 const now = () => new Date().toISOString();
+export const knowledgeSnapshot = row => Object.fromEntries(['title', 'notes', 'transcript_json', 'frames_json', 'provenance_json', 'duration', 'language'].map(key => [key, row[key]]));
+export function knowledgeVersion(row) {
+  const version = JSON.parse(row.snapshot_json);
+  return { id: row.id, createdAt: row.created_at, title: version.title, notes: version.notes, provenance: JSON.parse(version.provenance_json) };
+}
 export function createReanalysisStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS knowledge_reanalyses(document_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,run_id TEXT NOT NULL,mode TEXT NOT NULL,state TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS knowledge_note_versions(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,document_id TEXT NOT NULL,snapshot_json TEXT NOT NULL,created_at TEXT NOT NULL);
@@ -9,13 +14,13 @@ export function createReanalysisStore(db) {
   const row = (uid, id) => db.prepare('SELECT * FROM knowledge_documents WHERE user_id=? AND id=?').get(uid, id);
   const get = (uid, id) => db.prepare('SELECT run_id AS runId,mode,state FROM knowledge_reanalyses WHERE user_id=? AND document_id=?').get(uid, id);
   function snapshot(r) {
-    const value = Object.fromEntries(['title', 'notes', 'transcript_json', 'frames_json', 'provenance_json', 'duration', 'language'].map(k => [k, r[k]]));
+    const value = knowledgeSnapshot(r);
     db.prepare('INSERT INTO knowledge_note_versions VALUES(?,?,?,?,?)').run(crypto.randomBytes(16).toString('hex'), r.user_id, r.id, JSON.stringify(value), now());
     db.prepare('DELETE FROM knowledge_note_versions WHERE user_id=? AND document_id=? AND id NOT IN (SELECT id FROM knowledge_note_versions WHERE user_id=? AND document_id=? ORDER BY created_at DESC,rowid DESC LIMIT 10)').run(r.user_id, r.id, r.user_id, r.id);
   }
   return {
     get,
-    list(uid, id) { return db.prepare('SELECT id,snapshot_json,created_at FROM knowledge_note_versions WHERE user_id=? AND document_id=? ORDER BY created_at DESC,rowid DESC').all(uid, id).map(r => { const s = JSON.parse(r.snapshot_json); return { id: r.id, createdAt: r.created_at, title: s.title, notes: s.notes, provenance: JSON.parse(s.provenance_json) }; }); },
+    list(uid, id) { return db.prepare('SELECT id,snapshot_json,created_at FROM knowledge_note_versions WHERE user_id=? AND document_id=? ORDER BY created_at DESC,rowid DESC').all(uid, id).map(knowledgeVersion); },
     schedule(uid, id, revision, mode, settings) {
       return db.transaction(() => {
         const r = row(uid, id);
@@ -35,7 +40,7 @@ export function createReanalysisStore(db) {
       return db.transaction(() => {
         const r = row(uid, id), v = db.prepare('SELECT snapshot_json FROM knowledge_note_versions WHERE user_id=? AND document_id=? AND id=?').get(uid, id, versionId);
         if (!r || !v) throw Object.assign(new Error('笔记或历史版本不存在'), { status: 404 });
-        if (active.includes(r.status) || r.revision !== revision) throw Object.assign(new Error('笔记正在处理或已更新，请刷新后再恢复'), { status: 409 });
+        if (activeKnowledgeStates.includes(r.status) || r.revision !== revision) throw Object.assign(new Error('笔记正在处理或已更新，请刷新后再恢复'), { status: 409 });
         const s = JSON.parse(v.snapshot_json); snapshot(r);
         db.prepare("UPDATE knowledge_documents SET notes=?,transcript_json=?,frames_json=?,provenance_json=?,duration=?,language=?,status='ready',stage='已恢复历史版本',error='',progress=100,lease=NULL,worker_id='',processing_phase='',revision=revision+1,updated_at=? WHERE user_id=? AND id=?")
           .run(s.notes, s.transcript_json, s.frames_json, s.provenance_json, s.duration, s.language, now(), uid, id);

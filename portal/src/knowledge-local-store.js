@@ -1,6 +1,52 @@
 import crypto from 'node:crypto';
 
 const hash = value => crypto.createHash('sha256').update(String(value)).digest('hex');
+export function createPostgresKnowledgeLocalInputs(db) {
+  return {
+    async get(uid, id) {
+      const { rows: [row] } = await db.query('SELECT * FROM navigation.knowledge_local_inputs WHERE user_id=$1 AND document_id=$2', [uid, id]);
+      return row && { ...row, expires: Number(row.expires) };
+    },
+    offer(uid, id, workerId) {
+      return db.transaction(async client => {
+        const { rows: [doc] } = await client.query(`SELECT backend FROM navigation.knowledge_documents
+          WHERE user_id=$1 AND id=$2 AND status='uploading' FOR UPDATE`, [uid, id]);
+        const { rows: [worker] } = await client.query(`SELECT capabilities_json FROM navigation.knowledge_worker_instances
+          WHERE user_id=$1 AND worker_id=$2 AND last_seen>$3`, [uid, workerId, new Date(Date.now() - 90000).toISOString()]);
+        const caps = worker && JSON.parse(worker.capabilities_json);
+        if (!doc || !caps?.media?.ready || caps.media.detail !== 'cuda' || !caps[doc.backend]?.ready) throw new Error('没有可用的本机GPU工作器');
+        const ticket = crypto.randomBytes(32).toString('hex');
+        await client.query(`INSERT INTO navigation.knowledge_local_inputs(document_id,user_id,worker_id,ticket_hash,expires)
+          VALUES($2,$1,$3,$4,$5) ON CONFLICT(document_id) DO UPDATE
+          SET worker_id=excluded.worker_id,ticket_hash=excluded.ticket_hash,expires=excluded.expires,sha256=''`,
+        [uid, id, workerId, hash(ticket), Date.now() + 600000]);
+        return { ticket, workerId };
+      });
+    },
+    verify(uid, id, workerId, ticket, sha256) {
+      return db.transaction(async client => {
+        const { rows: [doc] } = await client.query(`SELECT byte_size FROM navigation.knowledge_documents
+          WHERE user_id=$1 AND id=$2 AND status IN ('uploading','queued') FOR UPDATE`, [uid, id]);
+        const { rows: [row] } = await client.query(`SELECT expires,ticket_hash FROM navigation.knowledge_local_inputs
+          WHERE user_id=$1 AND document_id=$2 AND worker_id=$3 FOR UPDATE`, [uid, id, workerId]);
+        if (!doc || !row || Number(row.expires) < Date.now() || row.ticket_hash !== hash(ticket)) throw new Error('本机接收授权已失效');
+        if (sha256 !== undefined) {
+          if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error('本机视频校验值无效');
+          await client.query("UPDATE navigation.knowledge_local_inputs SET sha256=$3,ticket_hash='' WHERE user_id=$1 AND document_id=$2",
+            [uid, id, sha256]);
+        }
+        return { bytes: Number(doc.byte_size) };
+      });
+    },
+    async forget(uid, id, workerId) {
+      await db.query('DELETE FROM navigation.knowledge_local_inputs WHERE user_id=$1 AND document_id=$2 AND worker_id=$3', [uid, id, workerId]);
+    },
+    async remove(uid, id) {
+      await db.query('DELETE FROM navigation.knowledge_local_inputs WHERE user_id=$1 AND document_id=$2', [uid, id]);
+    },
+  };
+}
+
 export function createLocalInputStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS knowledge_local_inputs (
     document_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,worker_id TEXT NOT NULL,
