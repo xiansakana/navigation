@@ -152,6 +152,7 @@ if should_run portal; then
     fi
     cd "$ROOT/portal"
     npm install --production
+    npm run build:views
     if pm2 describe portal >/dev/null 2>&1; then
         pm2 restart portal
     else

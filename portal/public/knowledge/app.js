@@ -87,40 +87,70 @@ function renderBatch() {
   $('batch-save').disabled = state.batchBusy || !state.selected.size;
   $('batch-all').disabled = $('batch-clear').disabled = state.batchBusy;
 }
+let notesView;
+let notesViewLoad;
+
+function prepareNotesView() {
+  if (!notesViewLoad) {
+    notesViewLoad = import('../generated/knowledge-notes-view.js?v=1').then(({ mountNotes }) => {
+      notesView = mountNotes($('documents'), {
+        open: id => open(id).catch(error),
+        select(id, checked) {
+          const document = state.documents.find(item => item.id === id);
+          if (!document || state.batchBusy) return false;
+          if (checked && state.selected.size >= 100) {
+            error(new Error('每批最多选择100篇笔记'));
+            return false;
+          }
+          if (checked) state.selected.set(id, document.revision);
+          else state.selected.delete(id);
+          renderBatch();
+          return true;
+        }
+      });
+    });
+  }
+  return notesViewLoad;
+}
+
 function renderList() {
   reanalysisPanel.refresh();
   show('retry-failed', can('process:batch:edit') && can('process:edit') && can('notes:view'));
   $('retry-failed').disabled = retrying;
   text('total', state.total + ' 篇');
-  const list = $('documents'), scrollTop = list.scrollTop; list.replaceChildren();
-  if (!state.documents.length) { const p = document.createElement('p'); p.className = 'kb-hint'; p.textContent = '还没有符合条件的内容。上传视频后会出现在这里。'; list.append(p); }
-  for (const d of state.documents) {
-    const button = document.createElement('button'); button.type = 'button'; button.className = 'kb-document' + (state.current?.id === d.id ? ' active' : '');
-    button.innerHTML = `<strong>${escape(d.title)}</strong><small>${escape(d.topic || '未分类')} · ${escape(d.status === 'queued' && d.storage?.provider === '115' && d.storage.state !== 'ready' ? ({ waiting: '等待上传', pending: '等待保存至115', uploading: '正在保存至115', verifying: '校验原视频', verified: '清理临时原片', failed: '115保存待重试' })[d.storage.state] || d.stage : d.stage)}${d.status === 'processing' ? ' ' + d.progress + '%' : ''}</small><p>${escape(d.preview || d.originalName)}</p>`;
-    button.addEventListener('click', () => open(d.id).catch(error));
-    if (phaseLabel(d)) { const phase = document.createElement('small'); phase.textContent = phaseLabel(d); button.append(phase); }
-    if ((can('publish:batch:edit') && can('publish:edit') || can('reanalysis:batch:edit') && can('reanalysis:edit')) && d.status === 'ready') {
-      const row = document.createElement('div'); row.className = 'kb-document-row';
-      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.setAttribute('aria-label', '选择笔记：' + d.title);
-      checkbox.checked = state.selected.has(d.id); checkbox.disabled = state.batchBusy;
-      checkbox.onchange = () => {
-        if (checkbox.checked && state.selected.size >= 100) { checkbox.checked = false; return error(new Error('每批最多选择100篇笔记')); }
-        if (checkbox.checked) state.selected.set(d.id, d.revision); else state.selected.delete(d.id);
-        renderBatch();
-      };
-      const badge = document.createElement('span'); badge.className = 'kb-hint'; badge.textContent = d.visibility === 'public' ? '公开' : '私有'; button.append(badge);
-      row.append(checkbox, button); list.append(row);
-    } else list.append(button);
-  }
+  const canSelect = (can('publish:batch:edit') && can('publish:edit')) || (can('reanalysis:batch:edit') && can('reanalysis:edit'));
+  const storageStage = { waiting: '等待上传', pending: '等待保存至115', uploading: '正在保存至115', verifying: '校验原视频', verified: '清理临时原片', failed: '115保存待重试' };
+  notesView?.update(state.documents.map(document => {
+    let stage = document.stage;
+    if (document.status === 'queued' && document.storage?.provider === '115' && document.storage.state !== 'ready') {
+      stage = storageStage[document.storage.state] || stage;
+    }
+    const progress = document.status === 'processing' ? ' ' + document.progress + '%' : '';
+    return {
+      id: document.id,
+      title: document.title,
+      subtitle: (document.topic || '未分类') + ' · ' + stage + progress,
+      preview: document.preview || document.originalName,
+      phase: phaseLabel(document),
+      active: state.current?.id === document.id,
+      selection: canSelect && document.status === 'ready' ? {
+        checked: state.selected.has(document.id),
+        disabled: state.batchBusy,
+        visibility: document.visibility === 'public' ? '公开' : '私有'
+      } : null
+    };
+  }));
   renderBatch();
-  list.scrollTop = scrollTop;
   show('notes-pagination', can('notes:view'));
   text('notes-page', `第 ${Math.floor(state.offset / 30) + 1} / ${Math.max(1, Math.ceil(state.total / 30))} 页 · 共 ${state.total} 篇`);
   $('notes-prev').disabled = state.offset === 0;
   $('notes-next').disabled = state.offset + 30 >= state.total;
 }
 async function load(offset, quiet = false) {
-  const result = await (quiet ? notePager.refresh() : notePager.load({ search: $('search').value, topic: $('topic-filter').value, status: $('status-filter').value }, offset));
+  const [result] = await Promise.all([
+    quiet ? notePager.refresh() : notePager.load({ search: $('search').value, topic: $('topic-filter').value, status: $('status-filter').value }, offset),
+    prepareNotesView()
+  ]);
   if (!result) return;
   if (result.offset !== state.offset || result.filterChanged) $('documents').scrollTop = 0;
   state.offset = result.offset; state.documents = result.documents; state.total = result.total;

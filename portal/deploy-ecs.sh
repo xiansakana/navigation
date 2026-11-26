@@ -33,6 +33,8 @@ if [ "$PORT" = "80" ] && [ "$(id -u)" != "0" ]; then
 fi
 
 echo "==> 启动 portal..."
+npm install --production
+npm run build:views
 npm install -g pm2 2>/dev/null || true
 pm2 delete portal 2>/dev/null || true
 pm2 start src/server.js --name portal

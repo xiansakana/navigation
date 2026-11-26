@@ -18,9 +18,8 @@ import { createSampling } from './sampling.js?v=1';
     return s >= 86400 ? `${Math.floor(s / 86400)} 天 ${Math.floor(s % 86400 / 3600)} 小时` : s >= 3600 ? `${Math.floor(s / 3600)} 小时 ${Math.floor(s % 3600 / 60)} 分` : `${Math.floor(s / 60)} 分`;
   }
   const meter = (value) => `<div class="resource-meter ${value >= 95 ? 'danger' : value >= 85 ? 'warn' : ''}"><i style="width:${Math.min(100, Math.max(0, Number(value) || 0))}%"></i></div>`;
-  const badge = (status, good) => `<span class="resource-badge ${good ? 'good' : 'bad'}">${esc(status)}</span>`;
   const empty = (cols, message) => `<tr><td colspan="${cols}" class="resource-empty">${esc(message)}</td></tr>`;
-  let snapshot = null, paused = false;
+  let snapshot = null, paused = false, view;
 
   function chart(id, points, fields, fixedMax) {
     const usable = points.filter((p) => fields.some((f) => p[f] != null));
@@ -53,9 +52,31 @@ import { createSampling } from './sampling.js?v=1';
     if (!snapshot) return;
     const term = $('service-search').value.trim().toLowerCase();
     const processes = snapshot.processes.filter((p) => `${p.name} ${p.status}`.toLowerCase().includes(term));
-    $('processes').innerHTML = processes.map((p) => `<tr><td><strong>${esc(p.name)}</strong><small>${esc(p.mode)}</small></td><td>${badge(p.status, p.status === 'online')}</td><td>${pct(p.cpuPercent)}</td><td>${bytes(p.rssBytes ?? p.memoryBytes)}</td><td>${p.status === 'online' && p.startedAt ? duration((snapshot.collectedAt - p.startedAt) / 1000) : '—'}</td><td>${count(p.restarts)}</td><td>${count(p.pid)} / ${count(p.threads)}</td><td>${count(p.fds)}</td></tr>`).join('') || empty(8, term ? '没有匹配的应用进程' : '未采集到 PM2 应用进程');
+    view.updateProcesses(processes.map((p) => ({
+      key: p.id ?? p.name,
+      name: p.name,
+      detail: p.mode,
+      state: p.status,
+      online: p.status === 'online',
+      metrics: [
+        pct(p.cpuPercent), bytes(p.rssBytes ?? p.memoryBytes),
+        p.status === 'online' && p.startedAt ? duration((snapshot.collectedAt - p.startedAt) / 1000) : '—',
+        count(p.restarts), `${count(p.pid)} / ${count(p.threads)}`, count(p.fds)
+      ]
+    })), term ? '没有匹配的应用进程' : '未采集到 PM2 应用进程');
     const containers = snapshot.containers.filter((p) => `${p.name} ${p.state} ${p.image}`.toLowerCase().includes(term));
-    $('containers').innerHTML = containers.map((p) => `<tr><td><strong>${esc(p.name)}</strong><small title="${esc(p.image)}">${esc(p.image)}</small></td><td>${badge(p.state, p.state === 'running' && !p.status.includes('unhealthy'))}<small>${esc(p.status)}</small></td><td>${pct(p.cpuPercent)}</td><td>${esc(p.memory || '—')}</td><td>${pct(p.memoryPercent)}</td><td>${esc(p.networkIo || '—')}</td><td>${esc(p.blockIo || '—')}</td><td>${count(p.pids)}</td></tr>`).join('') || empty(8, term ? '没有匹配的容器' : '未采集到 Docker 容器');
+    view.updateContainers(containers.map((p) => ({
+      key: p.id || p.name,
+      name: p.name,
+      detail: p.image,
+      state: p.state,
+      online: p.state === 'running' && !p.status.includes('unhealthy'),
+      statusDetail: p.status,
+      metrics: [
+        pct(p.cpuPercent), p.memory || '—', pct(p.memoryPercent),
+        p.networkIo || '—', p.blockIo || '—', count(p.pids)
+      ]
+    })), term ? '没有匹配的容器' : '未采集到 Docker 容器');
   }
 
   function render(data) {
@@ -72,7 +93,7 @@ import { createSampling } from './sampling.js?v=1';
       ['容器运行', data.sources?.docker === false ? '不可用' : `${data.containers.filter((p) => p.state === 'running').length} / ${data.containers.length}`, null, 'Docker 容器 · 含停止的容器'],
       ['系统文件句柄', count(data.openFiles?.allocated), null, `上限 ${count(data.openFiles?.limit)}`]
     ];
-    $('overview').innerHTML = stats.map(([label, value, usage, detail]) => `<article class="resource-stat"><span class="resource-label">${esc(label)}</span><strong>${esc(value)}</strong>${usage == null ? '' : meter(usage)}<small>${esc(detail)}</small></article>`).join('');
+    view.updateMetrics(stats);
     $('service-summary').textContent = `${data.processes.length} 个应用进程 · ${data.containers.length} 个容器`;
     const taskLabels = { queued: '排队', processing: '执行中', running: '执行中', failed: '失败', ready: '已完成', succeeded: '已完成', uploading: '上传中', cancelled: '已取消' };
     $('modules').innerHTML = (data.modules || []).map(m => `<tr><td><strong>${esc(m.title)}</strong><small>${esc(m.path)}</small></td><td>${esc(m.runtime)}</td><td>${esc(m.status === 'disabled' ? '已禁用' : '已注册')}</td><td>${esc(Object.entries(m.tasks || {}).map(([state, n]) => `${taskLabels[state] || state} ${n}`).join(' · ') || '—')}</td><td>${m.worker ? esc(`在线 ${m.worker.online}${m.worker.remote ? ' · 远端资源未采集' : ''}`) : '未上报 / 不适用'}</td></tr>`).join('') || empty(5, '模块目录暂不可用');
@@ -86,13 +107,25 @@ import { createSampling } from './sampling.js?v=1';
     $('updated-at').textContent = `采样时间 ${new Date(data.collectedAt).toLocaleString('sv-SE')}`;
   }
 
+  async function readMetrics(signal) {
+    const response = await fetch('/api/resources/metrics', { cache: 'no-store', signal });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || '资源监控加载失败');
+    return data.snapshot;
+  }
+
   const sampling = createSampling({
     document,
     async sample(signal) {
-      const response = await fetch('/api/resources/metrics', { cache: 'no-store', signal });
-      const data = await response.json();
-      if (!response.ok || !data.ok) throw new Error(data.error || '资源监控加载失败');
-      return data.snapshot;
+      const [data, renderer] = await Promise.all([
+        readMetrics(signal),
+        view ? null : import('../generated/resources-view.js?v=1')
+      ]);
+      signal.throwIfAborted();
+      if (renderer) {
+        view = renderer.mountResourcesView({ overview: $('overview'), processes: $('processes'), containers: $('containers') });
+      }
+      return data;
     },
     onSample(data) {
       render(data); $('error').classList.add('hidden');
@@ -117,6 +150,10 @@ import { createSampling } from './sampling.js?v=1';
     $('live-state').textContent = paused ? '已暂停' : '实时采样';
     sampling.setPaused(paused);
   });
-  window.addEventListener('pagehide', (event) => { if (!event.persisted) sampling.dispose(); });
+  window.addEventListener('pagehide', (event) => {
+    if (event.persisted) return;
+    sampling.dispose();
+    view?.dispose();
+  });
   sampling.refresh();
 })();
