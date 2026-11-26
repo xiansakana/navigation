@@ -20,6 +20,7 @@ SCHEMA_NAME = re.compile(r"navigation_rehearsal_[a-z0-9_]{1,38}\Z")
 ROW_ID = "_sqlite_rowid"
 SCHEMA_METADATA = "_sqlite_schema"
 TYPES = {"TEXT": "text", "INTEGER": "int8", "REAL": "float8", "BLOB": "bytea"}
+BASELINE = Path(__file__).resolve().parents[1] / "shared/db/postgres/001-initial.sql"
 
 
 class RehearsalError(Exception):
@@ -68,7 +69,6 @@ def fingerprint_row(digest, row):
 
 def copy_table(source, target, namespace, name):
     columns = inspect_columns(source, name)
-    insert_columns = sql.SQL(", ").join(sql.Identifier(c) for c in [ROW_ID, *(col.name for col in columns)])
     table = sql.Identifier(namespace, name)
     definitions = [sql.SQL("{} bigint PRIMARY KEY").format(sql.Identifier(ROW_ID))]
     definitions.extend(
@@ -87,14 +87,23 @@ def copy_table(source, target, namespace, name):
             sql.SQL(", ").join(sql.Identifier(col.name) for col in primary_columns)
         ))
     target.execute(sql.SQL("CREATE TABLE {} ({})").format(table, sql.SQL(", ").join(definitions)))
+    return copy_verified(source, target, table, name, columns, ROW_ID, True)
 
-    source_columns = ", ".join(sqlite_identifier(col.name) for col in columns)
+
+def copy_verified(source, target, table, name, columns, order_column, include_rowid):
+    column_names = [col.name for col in columns]
+    source_columns = ", ".join(sqlite_identifier(column) for column in column_names)
+    pg_types = [col.pg_type for col in columns]
+    if include_rowid:
+        column_names.insert(0, ROW_ID)
+        pg_types.insert(0, "int8")
+        source_columns = "rowid, " + source_columns
+    insert_columns = sql.SQL(", ").join(map(sql.Identifier, column_names))
     rows = source.execute(
-        f"SELECT rowid, {source_columns} FROM {sqlite_identifier(name)} ORDER BY rowid"
+        f"SELECT {source_columns} FROM {sqlite_identifier(name)} ORDER BY rowid"
     )
     original = hashlib.sha256()
     count = 0
-    pg_types = ["int8", *(col.pg_type for col in columns)]
     with target.copy(sql.SQL("COPY {} ({}) FROM STDIN (FORMAT BINARY)").format(table, insert_columns)) as copy:
         copy.set_types(pg_types)
         for row in rows:
@@ -106,7 +115,7 @@ def copy_table(source, target, namespace, name):
     imported_count = 0
     with target.copy(sql.SQL(
         "COPY (SELECT {} FROM {} ORDER BY {}) TO STDOUT (FORMAT BINARY)"
-    ).format(insert_columns, table, sql.Identifier(ROW_ID))) as copy:
+    ).format(insert_columns, table, sql.Identifier(order_column))) as copy:
         copy.set_types(pg_types)
         for row in copy.rows():
             fingerprint_row(imported, row)
@@ -116,8 +125,54 @@ def copy_table(source, target, namespace, name):
     return count
 
 
-def rehearse(sqlite_path, pg_connection, namespace):
-    if not SCHEMA_NAME.fullmatch(namespace):
+def copy_baseline(source, target, namespace, tables):
+    target.execute(sql.SQL("SET LOCAL search_path = {}, pg_catalog").format(sql.Identifier(namespace)))
+    target.execute(BASELINE.read_text(encoding="utf-8"), prepare=False)
+    schema = {}
+    for table_name, column, pg_type, identity in target.execute("""
+        SELECT c.relname, a.attname, t.typname, a.attidentity
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_attribute a ON a.attrelid = c.oid
+        JOIN pg_type t ON t.oid = a.atttypid
+        WHERE n.nspname = %s AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
+        ORDER BY c.relname, a.attnum
+    """, (namespace,)):
+        schema.setdefault(table_name, []).append((column, pg_type, bool(identity)))
+    rowids = dict(source.execute("SELECT name, seq FROM sqlite_sequence")) if "sqlite_sequence" in tables else {}
+    tables = [table for table in tables if table != "sqlite_sequence"]
+    if set(tables) != set(schema):
+        differences = sorted(set(tables) ^ set(schema))
+        raise RehearsalError("SQLite and PostgreSQL table sets differ: " + ", ".join(differences))
+    total = 0
+    for name in tables:
+        columns = inspect_columns(source, name)
+        expected = [(col.name, col.pg_type) for col in columns]
+        identities = [column for column, _, identity in schema[name] if identity]
+        if len(identities) != 1:
+            raise RehearsalError(f"Unexpected identity columns for {name}")
+        order = identities[0]
+        actual = [(column, pg_type) for column, pg_type, _ in schema[name] if column != ROW_ID]
+        if actual != expected or (
+            order != ROW_ID and not any(col.name == order and col.pg_type == "int8" and col.primary_position == 1 for col in columns)
+        ):
+            raise RehearsalError(f"SQLite and PostgreSQL columns differ for {name}")
+        table = sql.Identifier(namespace, name)
+        try:
+            total += copy_verified(source, target, table, name, columns, order, order == ROW_ID)
+            largest_id = source.execute(f"SELECT MAX(rowid) FROM {sqlite_identifier(name)}").fetchone()[0]
+            first_available = max(largest_id or 0, rowids.get(name, 0), 0) + 1
+            target.execute(sql.SQL("ALTER TABLE {} ALTER COLUMN {} RESTART WITH {}").format(
+                table, sql.Identifier(order), sql.Literal(first_available),
+            ))
+        except (TypeError, ValueError, sqlite3.Error, psycopg.Error) as exc:
+            code = getattr(exc, "sqlstate", None) or type(exc).__name__
+            raise RehearsalError(f"Could not copy {name} ({code})") from None
+    return len(tables), total
+
+
+def rehearse(sqlite_path, pg_connection, namespace, baseline=False):
+    if not SCHEMA_NAME.fullmatch(namespace) and not (baseline and namespace == "navigation"):
         raise RehearsalError("Use a new schema named navigation_rehearsal_<suffix>")
     source_path = Path(sqlite_path).resolve(strict=True)
     with closing(sqlite3.connect(source_path.as_uri() + "?mode=ro", uri=True, timeout=30)) as source:
@@ -138,6 +193,15 @@ def rehearse(sqlite_path, pg_connection, namespace):
         # The fresh schema, data and verification are committed together.
         with pg_connection.transaction(), pg_connection.cursor() as target:
             target.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(namespace)))
+            if baseline:
+                count, total = copy_baseline(source, target, namespace, [name for name, _ in tables])
+                return {
+                    "schema": namespace,
+                    "tables": count,
+                    "rows": total,
+                    "contentVerified": True,
+                    "baseline": BASELINE.name,
+                }
             schema_table = sql.Identifier(namespace, SCHEMA_METADATA)
             target.execute(sql.SQL(
                 "CREATE TABLE {} (type text NOT NULL, name text NOT NULL, table_name text NOT NULL, ddl text, PRIMARY KEY (type, name))"
@@ -166,11 +230,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sqlite", type=Path, required=True)
     parser.add_argument("--schema", required=True)
+    parser.add_argument("--baseline", action="store_true",
+                        help="Import into the versioned PostgreSQL schema with constraints and identities")
     args = parser.parse_args()
     try:
         # libpq supplies the destination through PGSERVICE, PGDATABASE, and related settings.
         with psycopg.connect(application_name="navigation_migration", connect_timeout=10) as connection:
-            print(json.dumps(rehearse(args.sqlite, connection, args.schema)))
+            print(json.dumps(rehearse(args.sqlite, connection, args.schema, args.baseline)))
     except (RehearsalError, OSError, sqlite3.Error, psycopg.Error) as exc:
         label = str(exc) if isinstance(exc, RehearsalError) else (
             getattr(exc, "sqlstate", None) or type(exc).__name__

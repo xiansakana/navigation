@@ -14,9 +14,24 @@ PGSERVICE=navigation-rehearsal python scripts/rehearse-postgres.py \
 
 演练表的 `_sqlite_rowid` 保留旧数据的排序依据，`sqlite_sequence` 保留自增高水位，`_sqlite_schema` 保存原始表、索引和触发器定义。演练报告只输出汇总数量，目标数据库包含完整业务数据，应按生产数据控制访问。
 
+## 生产目标库
+
+`shared/db/postgres/compose.yml` 运行持久化 PostgreSQL 17，监听 ECS 本机 `127.0.0.1:5432`。启动前在服务器的 `/opt/navigation-postgres/postgres-password` 保存随机数据库管理员密码，文件权限为 600。使用 `docker compose -f shared/db/postgres/compose.yml up -d` 启动。数据库连接经过 SSH 隧道或服务器本机，使用 SCRAM 密码认证。
+
+以迁移账号连接目标 PostgreSQL 时，执行：
+
+```bash
+PGSERVICE=navigation-target python scripts/rehearse-postgres.py \
+  --baseline --sqlite /path/to/navigation.db --schema navigation
+```
+
+`--baseline` 应用版本化 DDL，保留业务主键、约束、索引及 RBAC 版本触发器。目标库按实际记录和 SQLite 的自增高水位初始化 PostgreSQL 序列。迁入后逐表核对行数及内容。目标 schema 必须为空且由导入命令创建，表名、列名或类型漂移会导致整个事务回滚。
+
+从生产在线快照初始化的目标库可用于兼容性和 Navicat 只读验证；快照时间之后的生产写入仍进入 SQLite。正式切换使用停写后得到的快照，并按 [应用切换条件](#应用切换条件) 验收。
+
 ## 应用切换条件
 
-演练表用于校验数据转换。运行时需要独立的 PostgreSQL 版本化迁移和连接池，以及将 Portal、后台队列、股票、抄底和 QQ 业务改为异步数据库读写。
+运行时需要 PostgreSQL 连接池，以及将 Portal、后台队列、股票、抄底和 QQ 业务改为异步数据库读写。
 
 - 明确每处 `rowid` 排序和游标的业务顺序，给迁入和新增记录分配连续可比较的键。将 SQLite 序列值用于初始化 PostgreSQL 自增序列。
 - 将 RBAC 版本更新、账务事务、上传配额和任务领取迁移到 PostgreSQL 的事务与锁机制。对并发读取、写入、回滚和跨用户数据隔离做 PostgreSQL 集成测试。

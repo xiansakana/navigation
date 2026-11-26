@@ -1,0 +1,32 @@
+name: navigation-postgres
+services:
+  postgres:
+    image: postgres:17-alpine
+    network_mode: host
+    restart: unless-stopped
+    mem_limit: 192m
+    cpus: 0.5
+    environment:
+      POSTGRES_DB: navigation
+      POSTGRES_USER: navigation_db_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/navigation_postgres_password
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C --auth-host=scram-sha-256
+    command:
+      - postgres
+      - -c
+      - listen_addresses=127.0.0.1
+      - -c
+      - shared_buffers=32MB
+      - -c
+      - max_connections=20
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, navigation_db_admin, -d, navigation]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - /opt/navigation-postgres/postgres-password:/run/secrets/navigation_postgres_password:ro,Z
+
+volumes:
+  postgres_data:
