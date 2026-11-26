@@ -1,13 +1,14 @@
 (() => {
   const $ = id => document.getElementById(id), fields = ['minRespect', 'maxRespect', 'batchSize', 'apiIntervalSeconds', 'historyDays', 'dropMode', 'dailyDropAmount', 'peakDropAmount', 'minDifference', 'maxDifference'];
-  let loaded = false, dirty = false, busy = false, offset = 0;
+  let loaded = false, dirty = false, busy = false, offset = 0, view;
+  const viewReady = import('../../generated/torn-factions-view.js?v=1').then(({ mountFactionsView }) => {
+    view = mountFactionsView($('faction-results'));
+  });
   const day = value => Number.isInteger(value) ? new Date(value * 86400000).toISOString().slice(0, 10) : '—';
-  const value = number => Number.isFinite(number) ? number.toLocaleString() : '—';
-  const labels = { waiting: '待扫描', scanning: '扫描中', match: '命中', excluded: '已排除', unknown: '待确认' };
   async function api(route, method = 'GET', body) {
     const response = await fetch('/api/torn-factions/' + route, { method, credentials: 'same-origin', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
     if ([401, 403].includes(response.status) && method === 'GET') {
-      loaded = false; $('tab-factions').hidden = true; $('faction-results').replaceChildren(); tab(false); return null;
+      loaded = false; $('tab-factions').hidden = true; if (view) view.render([], { listComplete: true }); tab(false); return null;
     }
     const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.error || '帮派筛选操作失败'); return data;
   }
@@ -22,7 +23,8 @@
   $('tab-chain').onclick = () => { history.replaceState(null, '', location.pathname + location.search + '#chain'); tab(false); };
   $('tab-factions').onclick = () => { history.replaceState(null, '', location.pathname + location.search + '#factions'); tab(true); refresh(); };
   window.addEventListener('hashchange', () => tab(location.hash === '#factions'));
-  function render(data) {
+  async function render(data) {
+    await viewReady;
     loaded = true; $('tab-factions').hidden = false;
     const { config, state, permissions, counts } = data;
     if (!dirty) for (const field of fields) $('faction-' + field).value = config[field] ?? '';
@@ -38,25 +40,13 @@
     $('faction-status').textContent = `${state.running ? '运行中' : state.busy ? '停止中' : '已停止'} · ${state.stage || '尚未启动'}${retry}${state.error ? ' · ' + state.error : ''}`;
     $('faction-progress').textContent = `列表 ${state.listed || 0} 个 · 已处理 ${state.cursor || 0} 个 · 帮派第 ${state.factionBatch || 0} 批（自动续批） · 成功请求 ${state.requests || 0} · 缓存复用 ${state.cached || 0} · 跳过不变日期 ${state.skippedDays || 0} · 有效账号 ${state.ownerCount || '—'} · 自动跨日 ${state.rollovers || 0} 次 · 当前帮派 ${state.currentFaction || '—'} · 当前历史日 ${day(state.currentDay)}`;
     $('faction-counts').textContent = `命中 ${counts.match} · 已排除 ${counts.excluded} · 待确认 ${counts.unknown} · 扫描中 ${counts.scanning} · 待扫描 ${counts.waiting}（列表完整后按 respect 升序）`;
-    const rows = data.rows.map(row => {
-      const article = document.createElement('article'); article.className = 'faction-result';
-      const title = document.createElement('h4'), faction = document.createElement('a'); faction.textContent = `${row.name} [${row.id}]`; faction.href = 'https://www.torn.com/factions.php?step=profile&ID=' + row.id; faction.target = '_blank'; faction.rel = 'noopener noreferrer';
-      title.append(faction, document.createTextNode(` · respect ${value(row.respect)} · ${labels[row.status] || row.status}`)); article.append(title);
-      const leader = document.createElement('a'); leader.textContent = `Leader ${row.leaderName} [${row.leaderId}]`; leader.href = 'https://www.torn.com/profiles.php?XID=' + row.leaderId; leader.target = '_blank'; leader.rel = 'noopener noreferrer'; article.append(leader);
-      const dl = document.createElement('dl');
-      for (const [name, text] of [['核验基准日（TCT）', day(row.analysisDay ?? (row.checkedAt ? Math.floor(row.checkedAt / 86400) : row.lastDay))], ['下跌日（TCT）', day(row.dropDay)], ['A（天）', value(row.A)], ['B（天）', value(row.B)], ['C（天）', value(row.C)], ['A−B（天）', value(row.difference)], ['单日减少（Torn $）', value(row.dailyAmount)], ['距高点减少（Torn $）', value(row.peakAmount)], ['历史进度', `${row.loadedDays || 0}/${row.totalDays || '—'} · 第 ${row.historyBatch || 0} 批（自动续批）`], ['下跌前高点', value(row.peakBefore)], ['下跌前一日', value(row.beforeValue)], ['下跌日净资产', value(row.dropValue)], ['扫描范围', `${day(row.firstDay ?? row.historyStart)} 至 ${day(row.lastDay ?? state.today)}`]]) {
-        const wrap = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = name; dd.textContent = text; wrap.append(dt, dd); dl.append(wrap);
-      }
-      const reason = document.createElement('p'); reason.textContent = row.reason || '—'; article.append(dl, reason); return article;
-    });
-    if (!rows.length) { const empty = document.createElement('p'); empty.textContent = state.listComplete ? '当前筛选没有结果。' : '启动后先读取完整帮派列表，再按 respect 升序扫描。'; rows.push(empty); }
-    $('faction-results').replaceChildren(...rows);
+    view.render(data.rows, { listComplete: state.listComplete, today: state.today });
     $('faction-page').textContent = `${data.total ? data.offset + 1 : 0}–${Math.min(data.offset + data.limit, data.total)} / ${data.total}`;
     $('faction-prev').disabled = !data.offset; $('faction-next').disabled = data.offset + data.limit >= data.total;
   }
   async function refresh() {
     if (busy) return; busy = true;
-    try { const data = await api('state?offset=' + offset + '&filter=' + $('faction-filter').value); if (data) render(data); }
+    try { const data = await api('state?offset=' + offset + '&filter=' + $('faction-filter').value); if (data) await render(data); }
     catch (error) { $('faction-message').textContent = error.message; } finally { busy = false; }
   }
   $('faction-form').addEventListener('input', () => { dirty = true; });

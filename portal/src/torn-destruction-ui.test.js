@@ -8,15 +8,28 @@ async function until(check) {
   const deadline = Date.now() + 3000;
   while (!check()) { if (Date.now() >= deadline) throw new Error('UI condition timeout'); await delay(5); }
 }
+function installDomGlobals(w) {
+  const names = ['window', 'document', 'location', 'history', 'fetch', 'confirm', 'setInterval', 'clearInterval',
+    'queueMicrotask', 'Node', 'Element', 'SVGElement', 'HTMLElement', 'Text', 'Comment', 'DocumentFragment',
+    'Event', 'MutationObserver'];
+  const saved = new Map(names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
+  for (const name of names) { try { globalThis[name] = w[name]; } catch { /* keep the host value */ } }
+  return () => {
+    for (const [name, descriptor] of saved) {
+      try { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete globalThis[name]; } catch { /* keep the host value */ }
+    }
+  };
+}
 test('a background poll cannot overwrite a pending previous-page or filter choice', async t => {
   const dom = new JSDOM(fs.readFileSync(new URL('../public/torn-toolbox/chain/index.html', import.meta.url), 'utf8'), { url: 'https://test/torn-toolbox/chain/', runScripts: 'outside-only', pretendToBeVisual: true });
   t.after(() => dom.window.close()); const w = dom.window, d = w.document;
   const calls = []; let poll;
   w.setInterval = fn => { poll = fn; return 1; };
   w.fetch = url => new Promise(resolve => calls.push({ url, resolve }));
+  t.after(installDomGlobals(w));
   const state = offset => ({ ok: true, config: { minRespect: 0, maxRespect: 10000, intervalSeconds: 15, apiIntervalSeconds: 2, hasKey: true, keyCount: 1 }, permissions: { configure: true, control: true, clear: true }, history: [], state: { running: true, rounds: 1, problems: [], factionsTotal: 100, factionsOffset: offset, factionsLimit: 50, factions: Array.from({ length: 50 }, (_, i) => ({ id: i + offset + 1, name: 'Faction ' + (i + offset + 1), leaderId: 1001, respect: 10, lastAliveAt: 1000 })) } });
   const respond = (call, data) => call.resolve({ ok: true, json: async () => data });
-  w.eval(fs.readFileSync(new URL('../public/torn-toolbox/chain/app.js', import.meta.url), 'utf8'));
+  await import(new URL('../public/torn-toolbox/chain/app.js?ui-test=1', import.meta.url));
   respond(calls[0], state(0)); await until(() => d.querySelectorAll('#monitor-chains tr').length === 50);
   d.getElementById('monitor-next').click(); await until(() => calls.length === 2);
   respond(calls[1], state(50)); await until(() => d.getElementById('monitor-page').textContent.startsWith('51–100'));

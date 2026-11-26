@@ -1,11 +1,13 @@
 (() => {
 const $=id=>document.getElementById(id); let dirty=false, permission={};
 let historyRows=[],historyPage=1,historyPageSize=20;
-let revision=0,activeReads=0,configuredRows,displayedResults,displayedHistory;
+let revision=0,activeReads=0,configuredRows,displayedResults,displayedHistory,view;
+const viewReady=import('../../generated/torn-shopping-view.js?v=1').then(({mountShoppingView})=>{view=mountShoppingView({results:$('results'),history:$('history')});});
 function renderHistory(){
   const total=historyRows.length,pages=Math.max(1,Math.ceil(total/historyPageSize));
   historyPage=Math.min(historyPage,pages);
-  $('history').replaceChildren(...historyRows.slice((historyPage-1)*historyPageSize,historyPage*historyPageSize).map(r=>{const p=document.createElement('p'),a=document.createElement('a');a.href=r.link;a.target='_blank';a.rel='noopener noreferrer';a.textContent=`${r.name} · ${r.source==='market'?'市场':'巴扎'} $${r.price} × ${r.quantity} · ${new Date(r.detectedAt*1000).toLocaleString('sv-SE')} ↗`;p.append(a);return p;}));
+  if(!view)return;
+  view.renderHistory(historyRows.slice((historyPage-1)*historyPageSize,historyPage*historyPageSize));
   $('history-page-info').textContent=`共 ${total} 条 · 第 ${historyPage}/${pages} 页`;
   $('history-prev').disabled=historyPage<=1;$('history-next').disabled=historyPage>=pages;
 }
@@ -38,7 +40,8 @@ $('item-search').oninput=renderCatalog;
 document.addEventListener('click',event=>{if(!$('item-picker').contains(event.target))closePicker();});
 $('item-picker').addEventListener('keydown',event=>{if(event.key==='Escape'){closePicker();$('add').focus();}});
 
-function renderState({config,state,history,permissions}){
+async function renderState({config,state,history,permissions}){
+  await viewReady;
   permission=permissions;
   if(!dirty){
     $('interval').value=config.intervalSeconds;
@@ -62,11 +65,7 @@ function renderState({config,state,history,permissions}){
   const results=state.rows||[],resultsSnapshot=JSON.stringify(results);
   if(resultsSnapshot!==displayedResults){
     displayedResults=resultsSnapshot;
-    $('results').replaceChildren(...results.map(r=>{
-      const p=document.createElement('p');
-      p.textContent=`${r.name||r.itemId} · ${r.source==='market'?'市场':'巴扎'} · ${r.error||'发现 '+r.matches+' 条低价'}`;
-      return p;
-    }));
+    view.renderResults(results);
   }
   const historySnapshot=JSON.stringify(history);
   if(historySnapshot!==displayedHistory){
@@ -80,7 +79,7 @@ async function refresh(){
   activeReads++;
   try{
     const data=await api('state');
-    if(request===revision)renderState(data);
+    if(request===revision)await renderState(data);
   }catch(e){
     if(request===revision)$('message').textContent=e.message;
   }finally{

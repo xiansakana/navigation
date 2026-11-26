@@ -1,16 +1,16 @@
 (() => {
   const $ = id => document.getElementById(id), date = value => value ? new Date(value * 1000).toLocaleString('sv-SE') : '—';
   let dirty = false, loading = false, queued = false, latest, offset = 0;
-  let rowsSnapshot, historySnapshot;
+  let rowsSnapshot, historySnapshot, view;
+  const viewReady = import('../../generated/torn-chain-view.js?v=1').then(({ mountChainView }) => {
+    view = mountChainView({ rows: $('monitor-chains'), history: $('history') });
+  });
   async function api(path, method = 'GET', body) {
     const response = await fetch('/api/torn-chain/' + path, { method, credentials: 'same-origin', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
     const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.error || '操作失败'); return data;
   }
-  function link(label, url) { const a = document.createElement('a'); a.textContent = label; a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'; return a; }
-  const factionLink = row => link(row.name + ' [' + row.id + ']', 'https://www.torn.com/factions.php?step=profile&ID=' + Number(row.id));
-  const leaderLink = row => link((row.leaderName || 'Leader') + ' [' + row.leaderId + ']', 'https://www.torn.com/profiles.php?XID=' + Number(row.leaderId));
   function renderRows() {
-    const state = latest.state, problems = new Map((state.problems || []).map(row => [row.id, row.reason]));
+    const state = latest.state;
     const rows = state.factions || [], total = state.factionsTotal ?? rows.length;
     offset = state.factionsOffset ?? 0;
     $('monitor-count').textContent = '(' + total + ')'; $('monitor-table').hidden = !rows.length; $('monitor-empty').hidden = !!rows.length;
@@ -18,18 +18,13 @@
     const snapshot = JSON.stringify([rows, state.problems || []]);
     if (snapshot !== rowsSnapshot) {
       rowsSnapshot = snapshot;
-      $('monitor-chains').replaceChildren(...rows.map(row => {
-      const tr = document.createElement('tr'); tr.dataset.factionId = row.id;
-      const change = Number.isSafeInteger(row.previousRespect) ? row.respect - row.previousRespect : null;
-      for (const [label, content] of [['帮派', factionLink(row)], ['Leader', leaderLink(row)], ['respect', row.respect.toLocaleString()], ['变化', change === null ? '基线' : (change > 0 ? '+' : '') + change], ['最近存活', date(row.lastAliveAt)], ['核验说明', problems.get(row.id) || (row.respect === 0 ? 'respect 已清零，尚未标记摧毁' : 'API 确认存活')]]) {
-        const td = document.createElement('td'); td.dataset.label = label; if (typeof content === 'string') td.textContent = content; else td.append(content); tr.append(td);
-      } return tr;
-      }));
+      view.renderRows(rows, state.problems || []);
     }
     $('monitor-page').textContent = `${total ? offset + 1 : 0}–${Math.min(offset + 50, total)} / ${total}`;
     $('monitor-prev').disabled = !offset; $('monitor-next').disabled = offset + 50 >= total;
   }
-  function render(data) {
+  async function render(data) {
+    await viewReady;
     latest = data; const { config, state, history, permissions } = data;
     if (!dirty) { $('min-respect').value = config.minRespect; $('max-respect').value = config.maxRespect ?? ''; $('interval').value = config.intervalSeconds; $('api-interval').value = config.apiIntervalSeconds; }
     for (const id of ['min-respect', 'max-respect', 'interval', 'api-interval', 'api-key']) $(id).disabled = !permissions.configure;
@@ -45,22 +40,14 @@
     const snapshot = JSON.stringify(history);
     if (snapshot === historySnapshot) return;
     historySnapshot = snapshot;
-    const articles = history.map(row => {
-      const article = document.createElement('article'); article.className = 'chain-row';
-      const content = document.createElement('div'), title = document.createElement('strong'), info = document.createElement('p'), reason = document.createElement('p');
-      title.textContent = row.kind === 'respect-zero' ? 'respect 已清零 · ' : '已确认摧毁 · '; title.append(factionLink(row));
-      info.textContent = `最后存活 ${date(row.lastAliveAt)} · ${row.kind === 'respect-zero' ? '发现清零' : '发现摧毁'} ${date(row.detectedAt)} · respect ${row.previousRespect ?? '未知'} → ${row.respect}`;
-      reason.textContent = (row.kind === 'respect-zero' ? row.destroyedConfirmedAt ? '后续已确认摧毁：' + date(row.destroyedConfirmedAt) + '。' : '已触发清零提醒，API 尚未标记摧毁。' : '') + '原因未知；未判定为 Bonus 导致。'; content.append(title, info, reason); article.append(content, leaderLink(row)); return article;
-    });
-    if (!articles.length) { const empty = document.createElement('p'); empty.textContent = '暂无 respect 清零或确认摧毁记录。'; articles.push(empty); }
-    $('history').replaceChildren(...articles);
+    view.renderHistory(history);
   }
   async function refresh() {
     if (loading) { queued = true; return; }
     loading = true; const requestedOffset = offset, filter = $('monitor-filter').value;
     try {
       const data = await api('state?offset=' + requestedOffset + '&filter=' + filter);
-      if (requestedOffset === offset && filter === $('monitor-filter').value) render(data);
+      if (requestedOffset === offset && filter === $('monitor-filter').value) await render(data);
     } catch (error) { $('message').textContent = error.message; }
     finally { loading = false; if (queued) { queued = false; refresh(); } }
   }

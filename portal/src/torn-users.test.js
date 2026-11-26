@@ -83,14 +83,28 @@ test('QQ user alert includes player link/deadline, tests saved central settings;
   await notify({ ...settings, qq: { enabled: false } }, row); assert.equal(bodies.length, 1);
 });
 const until = async check => { const end = Date.now() + 2000; while (!check() && Date.now() < end) await new Promise(resolve => setTimeout(resolve, 5)); assert.ok(check()); };
+function installDomGlobals(w) {
+  const names = ['window', 'document', 'location', 'history', 'fetch', 'confirm', 'setInterval', 'clearInterval',
+    'queueMicrotask', 'Node', 'Element', 'SVGElement', 'HTMLElement', 'Text', 'Comment', 'DocumentFragment',
+    'Event', 'MutationObserver'];
+  const saved = new Map(names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]));
+  for (const name of names) { try { globalThis[name] = w[name]; } catch { /* keep the host value */ } }
+  return () => {
+    for (const [name, descriptor] of saved) {
+      try { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete globalThis[name]; } catch { /* keep the host value */ }
+    }
+  };
+}
 test('users tab renders safely, preserves dirty form, paginates and remains read-only for viewers', async () => {
   const dom = new JSDOM(fs.readFileSync(new URL('../public/torn-toolbox/chain/index.html', import.meta.url), 'utf8'), { runScripts: 'outside-only', url: 'https://test/torn-toolbox/chain/#users' });
   const w = dom.window, data = { ok: true, config: { ...usersConfig({ targets: [1] }), keyCount: 1 }, permissions: { configure: false, control: false, clear: false }, state: { rows: [{ id: 1, name: '<img src=x onerror=alert(1)>', status: 'Hospital', hospitalUntil: 2000, reminderAt: 1940, checkedAt: 1000 }], serverNow: 1000, running: true, rounds: 1 }, history: Array.from({ length: 21 }, (_, i) => ({ id: i + 1, name: 'User', hospitalUntil: 2000, detectedAt: 1940, remainingSeconds: 60, notification: 'disabled' })) };
   const calls = []; w.fetch = async (url, options) => { calls.push({ url, options }); return { ok: true, json: async () => structuredClone(data) }; };
+  const restore = installDomGlobals(w);
   try {
-    w.eval(fs.readFileSync(new URL('../public/torn-toolbox/chain/users.js', import.meta.url), 'utf8')); await until(() => !w.document.getElementById('users-view').hidden);
+    await import(new URL('../public/torn-toolbox/chain/users.js?ui-test=1', import.meta.url)); await until(() => !w.document.getElementById('users-view').hidden);
     assert.equal(w.document.querySelectorAll('#users-rows img').length, 0); assert.equal(w.document.getElementById('users-targets').disabled, true); assert.equal(w.document.getElementById('users-start').hidden, true);
-    assert.equal(w.document.querySelectorAll('#users-history article').length, 20); w.document.getElementById('users-next').click(); assert.equal(w.document.querySelectorAll('#users-history article').length, 1);
+    assert.equal(w.document.querySelectorAll('#users-history article').length, 20); w.document.getElementById('users-next').click();
+    await until(() => w.document.querySelectorAll('#users-history article').length === 1);
     assert.ok(calls.every(row => row.options.method === 'GET'));
-  } finally { w.close(); }
+  } finally { restore(); w.close(); }
 });
