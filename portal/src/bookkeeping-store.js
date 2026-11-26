@@ -34,7 +34,18 @@ function screenshotCheckpoint(raw) {
   return data.kind==='icost-screenshot-adjustment-v1' && data.checkpoint?{balanceCheckpoint:data.checkpoint}:{};
 }
 
+const stores = new WeakMap();
+
 export function createBookkeepingStore(db) {
+  const existing = stores.get(db);
+  if (existing) return existing;
+  if (db.inTransaction) return initializeBookkeepingStore(db);
+  const store = db.transaction(() => initializeBookkeepingStore(db)).immediate();
+  stores.set(db, store);
+  return store;
+}
+
+function initializeBookkeepingStore(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS bookkeeping_accounts (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, group_name TEXT NOT NULL,
@@ -61,12 +72,14 @@ export function createBookkeepingStore(db) {
   }
   if (!columns.has('account_type')) db.prepare("UPDATE bookkeeping_accounts SET account_type='信用卡' WHERE group_name LIKE '%信用%'").run();
   const catalog = createBookkeepingCatalog(db);
+  const selectBalanceEntries = db.prepare(`SELECT type,account_id,to_account_id,amount,to_amount,fee
+    FROM bookkeeping_entries WHERE user_id = ? AND affects_balance = 1`);
   function accounts(userId) {
     catalog.seed(userId);
     const list = db.prepare(`SELECT a.* FROM bookkeeping_accounts a LEFT JOIN bookkeeping_groups g ON g.user_id=a.user_id AND g.name=a.group_name
       WHERE a.user_id = ? ORDER BY g.sort_order,a.sort_order,a.rowid`).all(userId);
     const delta = new Map();
-    for (const e of db.prepare('SELECT * FROM bookkeeping_entries WHERE user_id = ? AND affects_balance = 1').all(userId)) {
+    for (const e of selectBalanceEntries.iterate(userId)) {
       const add = (accountId, amount) => { if (accountId) delta.set(accountId, (delta.get(accountId) || 0) + amount); };
       if (TRANSFER_TYPES.includes(e.type)) { add(e.account_id, -e.amount - e.fee); add(e.to_account_id, e.to_amount ?? e.amount); }
       else if (['支出', '已报销'].includes(e.type)) add(e.account_id, -e.amount - e.fee);

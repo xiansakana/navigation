@@ -11,7 +11,8 @@ test('chat UI creates, sends, resumes, stops, renames and archives with safe mar
   const c={id:'owned',title:'历史会话',project:'navigation',source:'qq',archived:false},conversations=[c];let records=[],counter=0,lastSent,failSend=false;
   const calls=[];
   w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
-  w.setInterval=()=>0;Object.defineProperty(w.crypto,'randomUUID',{value:crypto.randomUUID});
+  let poll;
+  w.setInterval=callback=>{poll=callback;return 1;};Object.defineProperty(w.crypto,'randomUUID',{value:crypto.randomUUID});
   w.fetch=async(url,options={})=>{
     const method=options.method || 'GET',path=url.replace('/api/codex-cli/conversations','').split('?')[0],body=options.body?JSON.parse(options.body):undefined;calls.push({path,method,body});
     if(!path&&method==='POST'){const value={...c,id:'new-'+(++counter),title:'新会话',source:'web'};conversations.push(value);return response({conversation:value});}
@@ -39,7 +40,13 @@ test('chat UI creates, sends, resumes, stops, renames and archives with safe mar
     $('archive-chat').click();await until(()=>$('archive-chat').textContent==='恢复会话');assert.equal($('send-chat').disabled,true);
     $('show-archived').checked=true;$('show-archived').dispatchEvent(new w.Event('change'));assert.match($('sessions').textContent,/我的工作/);
     $('archive-chat').click();await until(()=>$('archive-chat').textContent==='归档');
-    $('settings-tab').click();assert.equal($('settings-view').hidden,false);$('workspace-tab').click();assert.equal($('workspace').hidden,false);
+    $('settings-tab').click();assert.equal($('settings-view').hidden,false);
+    const beforeSettingsPoll=calls.length;
+    poll();
+    assert.equal(calls.length,beforeSettingsPoll);
+    conversations.at(-1).title='返回后已刷新';
+    $('workspace-tab').click();assert.equal($('workspace').hidden,false);
+    await until(()=>$('chat-title').textContent==='返回后已刷新');
     assert.ok($('workspace').hasAttribute('data-layout-container'));assert.ok(calls.some(call=>call.path==='/new-1/messages'));
   } finally {w.close();}
 });

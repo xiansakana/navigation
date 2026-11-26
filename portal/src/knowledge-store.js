@@ -44,7 +44,18 @@ export function metadata(raw) {
   return { title, topic, tags: [...new Set(tags.map(t => t.trim()).filter(Boolean))], sourceUrl };
 }
 
+const stores = new WeakMap();
+
 export function createKnowledgeStore(db) {
+  const existing = stores.get(db);
+  if (existing) return existing;
+  if (db.inTransaction) return initializeKnowledgeStore(db);
+  const store = db.transaction(() => initializeKnowledgeStore(db)).immediate();
+  stores.set(db, store);
+  return store;
+}
+
+function initializeKnowledgeStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS knowledge_documents (
     id TEXT PRIMARY KEY,user_id TEXT NOT NULL,title TEXT NOT NULL,topic TEXT NOT NULL DEFAULT '',tags_json TEXT NOT NULL DEFAULT '[]',
     source_url TEXT NOT NULL DEFAULT '',original_name TEXT NOT NULL,byte_size INTEGER NOT NULL,mime_type TEXT NOT NULL,fingerprint TEXT NOT NULL DEFAULT '',
@@ -77,13 +88,20 @@ export function createKnowledgeStore(db) {
   const devices = createKnowledgeDeviceStore(db);
   const sources = createSourceStore(db);
   const reanalysis = createReanalysisStore(db);
-  const getRow = (uid, key) => db.prepare('SELECT * FROM knowledge_documents WHERE user_id=? AND id=?').get(uid, key);
-  const read = row => row && ({ id: row.id, title: row.title, topic: row.topic, tags: JSON.parse(row.tags_json), sourceUrl: row.source_url,
-    visibility: row.visibility || 'private', originalName: row.original_name, bytes: row.byte_size, mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, modelSettings: JSON.parse(row.model_settings_json || '{}'), status: row.status,
-    stage: row.stage, reanalysis: reanalysis.get(row.user_id, row.id), processingPhase: row.processing_phase || '', progress: row.progress, error: row.error, duration: row.duration, language: row.language, notes: row.notes,
-    transcript: readableTranscript(JSON.parse(row.transcript_json)), frames: JSON.parse(row.frames_json), provenance: JSON.parse(row.provenance_json),
-    storage: sources.public(row.user_id, row.id), importState: imports.get(row.user_id, row.id)?.state || '',
-    sourceMedia: JSON.parse(imports.get(row.user_id, row.id)?.media_json || '{}'), revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at });
+  const selectDocument = db.prepare('SELECT * FROM knowledge_documents WHERE user_id=? AND id=?');
+  const selectFailed = db.prepare("SELECT id FROM knowledge_documents WHERE user_id=? AND status='failed' ORDER BY created_at,id");
+  const selectReserved = db.prepare("SELECT coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE status IN ('uploading','importing')");
+  const getRow = (uid, key) => selectDocument.get(uid, key);
+  const read = row => {
+    if (!row) return row;
+    const sourceImport = imports.get(row.user_id, row.id);
+    return { id: row.id, title: row.title, topic: row.topic, tags: JSON.parse(row.tags_json), sourceUrl: row.source_url,
+      visibility: row.visibility || 'private', originalName: row.original_name, bytes: row.byte_size, mimeType: row.mime_type, fingerprint: row.fingerprint, backend: row.backend, modelSettings: JSON.parse(row.model_settings_json || '{}'), status: row.status,
+      stage: row.stage, reanalysis: reanalysis.get(row.user_id, row.id), processingPhase: row.processing_phase || '', progress: row.progress, error: row.error, duration: row.duration, language: row.language, notes: row.notes,
+      transcript: readableTranscript(JSON.parse(row.transcript_json)), frames: JSON.parse(row.frames_json), provenance: JSON.parse(row.provenance_json),
+      storage: sources.public(row.user_id, row.id), importState: sourceImport?.state || '',
+      sourceMedia: JSON.parse(sourceImport?.media_json || '{}'), revision: row.revision, attempt: row.attempt, createdAt: row.created_at, updatedAt: row.updated_at };
+  };
   const get = (uid, key) => { const row = getRow(uid, key); return row && row.status !== 'deleting' ? read(row) : null; };
   const expire = uid => db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待GPU工作器恢复',error='',lease=NULL,worker_id='',processing_phase='',progress=0,updated_at=? WHERE user_id=? AND status='processing' AND heartbeat<?")
     .run(now(), uid, new Date(Date.now() - 15 * 60000).toISOString());
@@ -91,12 +109,12 @@ export function createKnowledgeStore(db) {
     .all(uid, new Date(Date.now() - 90000).toISOString())
     .map(r => ({ id: r.worker_id, label: r.label, lastSeen: r.last_seen, capabilities: JSON.parse(r.capabilities_json) }));
   const checkDiskSpace = (bytes, availableBytes) => {
-    const reserved = db.prepare("SELECT coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE status IN ('uploading','importing')").get().bytes;
+    const reserved = selectReserved.get().bytes;
     if (Number(bytes) * 3 + reserved * 2 + 5 * 1024 ** 3 > availableBytes) throw new Error('服务器可用空间不足');
   };
   return {
     failedDocuments(uid) {
-      return db.prepare("SELECT id FROM knowledge_documents WHERE user_id=? AND status='failed' ORDER BY created_at,id").all(uid);
+      return selectFailed.all(uid);
     },
     createUpload(uid, input, config, availableBytes) {
       return db.transaction(() => {

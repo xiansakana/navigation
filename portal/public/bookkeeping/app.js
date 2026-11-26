@@ -5,11 +5,11 @@
   const currencies = ['CNY', 'USD', 'HKD', 'JPY', 'MYR', 'EUR', 'GBP', 'SGD'];
   const types = ['支出', '收入', '转账', '还款', '借出', '收回', '退款入账', '已报销', '报销入账'];
   const transferTypes = ['转账', '还款', '借出', '收回'];
-  const icons = { 餐饮:'◡', 购物:'▱', 交通:'↗', 工资:'▤', 住房:'⌂', 娱乐:'♫', 通讯:'☎', 学习:'▥', 医疗:'✚', 转账:'⇄', 还款:'↩', 借出:'⇢', 收回:'⇠', 余额调整:'✎' };
   let me, state, activeTab = 'entries', pageSize = 100, pendingImport = null, snapshots = [], editing = null, loadSequence = 0;
   const now = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19); };
   const symbols={CNY:'¥',USD:'US$',HKD:'HK$',JPY:'JP¥',MYR:'RM',EUR:'€',GBP:'£',SGD:'S$'};
-  const money = (n,c='CNY') => (n<0?'-':'')+(symbols[c]||c+' ')+new Intl.NumberFormat('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(n));
+  const amountFormatter = new Intl.NumberFormat('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const money = (n,c='CNY') => (n<0?'-':'')+(symbols[c]||c+' ')+amountFormatter.format(Math.abs(n));
   const m = (n, c) => '<span data-money>' + esc(money(n, c)) + '</span>';
   const can = p => (me?.permissions || []).some(grant => grant === '*' || grant === 'bookkeeping:*' || grant === 'bookkeeping:' + p || (p.endsWith(':view') && grant === 'bookkeeping:' + p.replace(/:view$/, ':edit')));
   async function api(path, options = {}) {
@@ -48,32 +48,7 @@
     $('summary').innerHTML=summary;
     const statistics=state.analysis?.equivalentSummary||converted||state.summary;
     $('stats-summary').innerHTML=state.analysis?.billing.missingCurrencies.length?'<p class="bk-muted">统计范围历史汇率待补齐。</p>':summaryHtml(statistics,true);
-    $('count').textContent = state.count + ' 笔';
-    let lastDay = '';
-    const ledgerNote=can('accounts:view') && $('account').value && state.entries.some(e=>e.balanceEstimated)?(state.accounts.find(a=>a.id===$('account').value)?.investment?'<p class="bk-muted bk-ledger-note">证券现金按当前现金、记账流水和证券交收反推。持仓市值见资产页。</p>':'<p class="bk-muted bk-ledger-note">历史余额按当前余额、账单及余额调整反推；截图核对的调整余额按原币显示，其他反推或跨币种估算值标注 ≈。</p>'):'';
-    const openEntryId=revealedRow?.querySelector('[data-entry]')?.dataset.entry;
-    const openDirection=revealedRow?.classList.contains('bk-copy-revealed')?'copy':'edit';
-    $('entry-list').innerHTML = ledgerNote + (state.entries.map(e => {
-      const day = e.date.slice(0,10), title = [e.category,e.subcategory].filter(Boolean).join(' · ');
-      let heading = '';
-      if (day !== lastDay) {
-        lastDay=day;
-        const total=dayTotals.get(day)||{income:0,expense:0},net=Math.round((total.income-total.expense)*100)/100;
-        const daily=missing.length||!converted?'<span>CNY 合计待补齐汇率</span>':'<span class="bk-day-currency">CNY</span><span>收入 '+m(total.income,'CNY')+'</span><span>净支出 '+m(total.expense,'CNY')+'</span><span class="'+(net<0?'bk-expense':'bk-income')+'">结余 '+m(net,'CNY')+'</span>';
-        heading='<div class="bk-day" data-day="'+esc(day)+'"><span class="bk-day-date"><time datetime="'+esc(day)+'">'+esc(day)+'</time><span>'+esc(new Date(day+'T12:00:00').toLocaleDateString('zh-CN',{weekday:'long'}))+'</span></span><span class="bk-day-totals" aria-label="当日 CNY 合计">'+daily+'</span></div>';
-      }
-      const expense = ['支出','已报销'].includes(e.type), transfer = transferTypes.includes(e.type) || e.type === '余额调整';
-      const account = [e.accountName, e.toAccountName].filter(Boolean).join(' → ');
-      const subtitle = [e.date.slice(11,16), account, e.note || e.tags].filter(Boolean).join(' · ');
-      const balance=can('accounts:view') && $('account').value && e.balanceCurrency?'<small class="bk-ledger-balance">'+window.bookkeepingBalanceText(e,m,esc)+'</small>':'';
-      const copyable = can('entries:edit') && e.type !== '余额调整';
-      const copyAction = copyable ? '<button type="button" class="btn ghost bk-copy-action" data-copy-entry="'+esc(e.id)+'">复制</button>' : '';
-      const editActions = can('entries:edit') ? '<div class="bk-swipe-edit-actions"><button type="button" class="btn ghost" data-swipe-action="edit">编辑</button><button type="button" class="btn ghost bk-detail-delete" data-swipe-action="delete">删除</button></div>' : '';
-      return heading + '<div class="bk-entry-swipe">' + copyAction + editActions + '<button class="bk-entry" data-entry="' + e.id + '"><span class="bk-badge">' + (icons[e.type] || state.categoryTree?.find(c=>c.kind===(e.type==='收入'?'income':'expense') && c.name===(e.subcategory||e.category) && (e.subcategory?state.categoryTree.some(p=>p.id===c.parentId && p.name===e.category):!c.parentId))?.icon || icons[e.category] || '◈') + '</span><span class="bk-entry-main"><strong>' + esc(title) + '</strong><p>' + esc(subtitle) + '</p>' + (e.location ? '<p>⌖ ' + esc(e.location) + '</p>' : '') + '</span><span class="bk-entry-amount ' + (expense?'bk-expense':transfer?'bk-transfer':'bk-income') + '">' + m(expense?-e.amount:e.amount,e.currency) + (e.currency!=='CNY'?'<small>'+ (e.fxMissing?'CNY 等效待获取': '≈ '+m(expense?-e.cnyAmount:e.cnyAmount,'CNY')+' · 汇率日 '+esc(e.rateDate))+'</small>':'') + '<small>' + esc(e.type) + (e.historical?' · 历史':'') + '</small>' + balance + '</span></button></div>';
-    }).join('') || '<div class="bk-empty">还没有符合条件的账单<br>记下第一笔，或从 iCost 导入历史记录。</div>');
-    const openEntry=openEntryId && [...$('entry-list').querySelectorAll('[data-entry]')].find(button=>button.dataset.entry===openEntryId);
-    revealSwipe(openEntry ? openEntry.closest('.bk-entry-swipe') : null,openDirection);
-    $('more').classList.toggle('hidden', state.entries.length >= state.count);
+    entryList.render(state, {converted, missing, dayTotals});
     $('mini-categories').innerHTML = categoriesHtml(state.equivalentSummary?.categories || state.summary.categories,6,!!state.equivalentSummary); $('categories').innerHTML = categoriesHtml(statistics.categories,1000,true);
     $('income-categories').innerHTML=state.analysis?.billing.missingCurrencies.length?'<p class="bk-empty">缺少历史汇率，分类收入待折算。</p>':categoriesHtml(statistics.incomeCategories || [],1000,true,'income');
     renderStats();
@@ -143,6 +118,7 @@
   const analysis = window.createBookkeepingAnalysis({ $, esc, m, money, can, load, tab, getState:()=>state, periods });
   const management = window.createBookkeepingManagement({ $, esc, can, api, write, load, field, select, options, getState:()=>state, openEditor });
   const details = window.createBookkeepingDetails({ $, esc, m, can, api, getState:()=>state, getAccountId:()=>$('account').value, tab, openEditor, copyEntry, remove:removeEntry });
+  const entryList = window.createBookkeepingEntryList({ $, esc, m, can, transferTypes, getState:()=>state, openEditor, copyEntry, removeEntry, openDetails:details.open });
   async function removeEntry(item) {
     if(!item || !can('entries:edit'))return false;
     if(!window.confirm('删除这条账单？新账单会撤销对账户余额的影响。'))return false;
@@ -273,52 +249,6 @@
   $('close-editor').onclick=()=>$('editor').close();
   $('add-entry').onclick=()=>openEditor('entry'); $('add-account').onclick=()=>openEditor('account'); $('settings').onclick=()=>openEditor('settings');
   document.querySelector('.bk-tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)tab(b.dataset.tab);});
-  const entryList=$('entry-list');
-  let swipeStart=null, revealedRow=null, suppressSwipeClickUntil=0;
-  function revealSwipe(row, direction) {
-    revealedRow?.classList.remove('bk-copy-revealed','bk-edit-revealed');
-    revealedRow=row;
-    row?.classList.add(direction==='copy'?'bk-copy-revealed':'bk-edit-revealed');
-  }
-  entryList.addEventListener('pointerdown',event=>{
-    swipeStart=null;
-    const row=event.target.closest('.bk-entry-swipe');
-    if(event.pointerType!=='touch' || !row?.querySelector('[data-swipe-action]') || !event.target.closest('[data-entry]'))return;
-    swipeStart={row,x:event.clientX,y:event.clientY,id:event.pointerId};
-  });
-  entryList.addEventListener('pointercancel',()=>{swipeStart=null;});
-  entryList.addEventListener('pointerup',event=>{
-    if(swipeStart?.id!==event.pointerId)return;
-    const {row,x,y}=swipeStart;
-    swipeStart=null;
-    const dx=event.clientX-x;
-    if(Math.abs(dx)<45 || Math.abs(dx)<Math.abs(event.clientY-y)*1.5)return;
-    revealSwipe(dx<0 || row.querySelector('[data-copy-entry]')?row:null,dx>0?'copy':'edit');
-    suppressSwipeClickUntil=performance.now()+350;
-  });
-  entryList.addEventListener('click',async event=>{
-    const action=event.target.closest('[data-swipe-action]');
-    if(action){
-      const id=action.closest('.bk-entry-swipe').querySelector('[data-entry]').dataset.entry;
-      const item=state.entries.find(e=>e.id===id);
-      revealSwipe(null);
-      if(!item || !can('entries:edit'))return;
-      if(action.dataset.swipeAction==='edit')openEditor('entry',item);
-      else {
-        try {await removeEntry(item);} catch(error) {
-          $('error').textContent=error.message;
-          $('error').classList.remove('hidden');
-        }
-      }
-      return;
-    }
-    const copy=event.target.closest('[data-copy-entry]');
-    if(copy){revealSwipe(null);copyEntry(state.entries.find(e=>e.id===copy.dataset.copyEntry));return;}
-    const button=event.target.closest('[data-entry]');
-    if(!button || performance.now()<suppressSwipeClickUntil)return;
-    if(revealedRow?.isConnected){revealSwipe(null);return;}
-    details.open(state.entries.find(e=>e.id===button.dataset.entry));
-  });
   $('account-groups').addEventListener('click',e=>{
     const b=e.target.closest('button'); if(!b)return;
     if(b.dataset.accountLedger){analysis.clearFocus();periods.choose('all',false);for(const id of ['month','book','currency','type','category','search'])$(id).value='';$('account').value=b.dataset.accountLedger;tab('entries');load();}
