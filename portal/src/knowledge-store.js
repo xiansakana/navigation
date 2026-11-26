@@ -10,6 +10,7 @@ import { sourcePath, storageConfig } from './knowledge-storage.js';
 import { sourceKey, findSourceDuplicate, duplicateSourceError } from './knowledge-source-dedupe.js';
 import { createReanalysisStore } from './knowledge-reanalysis-store.js';
 import { asrSettings, readableTranscript } from './knowledge-asr.js';
+import { connectionStore } from './connection-store.js';
 
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
@@ -44,16 +45,7 @@ export function metadata(raw) {
   return { title, topic, tags: [...new Set(tags.map(t => t.trim()).filter(Boolean))], sourceUrl };
 }
 
-const stores = new WeakMap();
-
-export function createKnowledgeStore(db) {
-  const existing = stores.get(db);
-  if (existing) return existing;
-  if (db.inTransaction) return initializeKnowledgeStore(db);
-  const store = db.transaction(() => initializeKnowledgeStore(db)).immediate();
-  stores.set(db, store);
-  return store;
-}
+export const createKnowledgeStore = connectionStore(initializeKnowledgeStore);
 
 function initializeKnowledgeStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS knowledge_documents (

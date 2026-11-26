@@ -13,7 +13,7 @@ test('comments and thumbnails follow post audience and expiry, enforce roles and
   const moderator = { userId: 'moderator', permissions: ['blog:feed:view', 'blog:comment-manage:edit'] };
   try {
     initSchema(db); initSchema(db);
-    const post = createPost(db, author, '私密', false, { visibility: { audience: 'self' } });
+    const post = createPost(db, author, '私密', false, { visibility: { audience: 'self' }, tags: ['私人标签'] });
     const media = addMedia(db, post, author, { kind: 'image', mimeType: 'image/jpeg', url: 'https://example.test/a.jpg', storageKey: 'a.jpg', thumbnailData: Buffer.from([0xff, 0xd8]) });
     assert.equal(getVisibleMedia(db, media.id, reader, undefined, true), undefined);
     assert.deepEqual(Buffer.from(getVisibleMedia(db, media.id, author, undefined, true).thumbnailData), Buffer.from([0xff, 0xd8]));
@@ -28,7 +28,14 @@ test('comments and thumbnails follow post audience and expiry, enforce roles and
     assert.equal(commentAccess({ ...author, isGuest: true }).canComment, false);
     assert.equal(commentAccess({ permissions: ['blog:comment:edit'] }).canComment, false);
     assert.equal(createComment(db, post, { ...reader, isGuest: true }, 'guest').status, 403);
+    const publicPost = createPost(db, author, '另一篇', false, { tags: ['公开标签'] });
+    const visible = listPosts(db, null, 20, '', '', reader);
+    assert.deepEqual(visible.map(row => [row.id, row.tags, row.images.length, row.commentCount]), [[publicPost, ['公开标签'], 0, 0]]);
     changePost(db, post, author, '公开', false, { visibility: { audience: 'public' } });
+    const byId = new Map(listPosts(db, null, 20, '', '', reader).map(row => [row.id, row]));
+    assert.equal(byId.get(post).commentCount, 1);
+    assert.equal(byId.get(post).images[0].id, media.id);
+    assert.equal(byId.get(publicPost).commentCount, 0);
     const rendered = listComments(db, post, reader).comments[0];
     assert.equal(rendered.content, markdown);
     assert.equal(rendered.contentFormat, 'markdown');

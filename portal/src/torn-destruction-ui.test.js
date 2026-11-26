@@ -33,4 +33,18 @@ test('a background poll cannot overwrite a pending previous-page or filter choic
   respond(calls[5], { ...state(0), state: { ...state(0).state, factions: [], factionsTotal: 0 } });
   await until(() => d.querySelectorAll('#monitor-chains tr').length === 0);
   assert.equal(d.getElementById('monitor-page').textContent, '0–0 / 0');
+  d.getElementById('chain-view').hidden = true;
+  poll();
+  assert.equal(calls.length, 6);
+  d.getElementById('chain-view').hidden = false;
+  poll();
+  await until(() => calls.length === 7);
+  respond(calls[6], state(0));
+  await until(() => d.querySelectorAll('#monitor-chains tr').length === 50);
+  const row = d.querySelector('#monitor-chains tr');
+  poll();
+  await until(() => calls.length === 8);
+  respond(calls[7], { ...state(0), state: { ...state(0).state, rounds: 2 } });
+  await until(() => d.getElementById('status').textContent.includes('已完成 2 轮'));
+  assert.equal(d.querySelector('#monitor-chains tr'), row);
 });

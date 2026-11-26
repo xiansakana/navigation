@@ -4,14 +4,17 @@ import { startVideoUpload, findVideoUpload, writeVideoPart, finishVideoUpload, f
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { imageCacheHeaders, respondImageNotModified } from './blog-image-cache.js';
-import { normalizeVisibility, visibilityFilter, canViewPost } from './blog-visibility.js';
+import { normalizeVisibility, canViewPost } from './blog-visibility.js';
 import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission, loadRbac, findUserById, resolveUserPermissions } from './rbac.js';
 import { uploadImage, uploadVideo, normalizeMediaPosition, withBlogMediaResponse } from './blog-media-storage.js';
-import { normalizeContent, normalizeTags, normalizeLocation, renderMarkdown, contentSearchText, normalizeSearch } from './blog-content.js';
+import { normalizeContent, normalizeTags, normalizeLocation, contentSearchText, normalizeSearch } from './blog-content.js';
 import { parseCoordinates, resolveAddress } from './blog-address.js';
 import { commentAccess, listComments, createComment, deleteComment } from './blog-comments.js';
 import { removeUploadFiles } from './blog-media-process.js';
+import { getImage, listPosts, listVisibleTags, getVisibleMedia } from './blog-read.js';
+
+export { getImage, listPosts, listVisibleTags, getVisibleMedia } from './blog-read.js';
 
 const MAX_REQUEST_BYTES = 128 * 1024;
 
@@ -33,68 +36,6 @@ function transaction(db, operation) {
     db.exec('BEGIN');
     try { const result = operation(); db.exec('COMMIT'); return result; }
     catch (error) { db.exec('ROLLBACK'); throw error; }
-}
-
-export function getImage(db, id, session = {}) {
-    const parent = db.prepare('SELECT post_id FROM blog_images WHERE id = ?').get(id);
-    if (!parent || !canViewPost(db, parent.post_id, session)) return undefined;
-    return db.prepare('SELECT i.mime_type AS mimeType, i.image_data AS imageData FROM blog_images i JOIN blog_posts p ON p.id = i.post_id WHERE i.id = ?').get(id);
-}
-
-export function listPosts(db, before, limit = 20, tag = '', query = '', session = {}, now = new Date().toISOString()) {
-    const search = normalizeSearch(query);
-    if (search) {
-        const update = db.prepare('UPDATE blog_posts SET search_text = ? WHERE id = ?');
-        for (const row of db.prepare('SELECT id, content, content_format FROM blog_posts WHERE search_text IS NULL').all()) {
-            update.run(contentSearchText(row.content, row.content_format), row.id);
-        }
-    }
-    const cursor = before ? db.prepare('SELECT created_at, id FROM blog_posts WHERE id = ?').get(before) : null;
-    if (before && !cursor) return [];
-    const filter = visibilityFilter(session, 'blog_posts', now);
-    const conditions = [filter.sql];
-    const params = [...filter.params];
-    if (cursor) {
-        conditions.push('(created_at < ? OR (created_at = ? AND id < ?))');
-        params.push(cursor.created_at, cursor.created_at, cursor.id);
-    }
-    if (tag) {
-        conditions.push('EXISTS (SELECT 1 FROM blog_post_tags t WHERE t.post_id = blog_posts.id AND t.tag = ?)');
-        params.push(tag);
-    }
-    if (search) {
-        conditions.push(`(instr(search_text, ?) > 0 OR instr(lower(author_name), ?) > 0
-            OR EXISTS (SELECT 1 FROM blog_post_tags s WHERE s.post_id = blog_posts.id AND instr(lower(s.tag), ?) > 0)
-            OR instr(lower(COALESCE(json_extract(location_json, '$.label'), '')), ?) > 0)`);
-        params.push(search, search, search, search);
-    }
-    const rows = db.prepare(`SELECT id, author_id AS authorId, author_name AS authorName,
-        content, content_format AS contentFormat, location_json AS locationJson, audience, visibility_period AS period, visible_from AS startsAt, visible_until AS endsAt, created_at AS createdAt, updated_at AS updatedAt FROM blog_posts
-        ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''} ORDER BY created_at DESC, id DESC LIMIT ?`).all(...params, limit);
-    const tags = db.prepare('SELECT tag FROM blog_post_tags WHERE post_id = ? ORDER BY rowid');
-    const legacy = db.prepare('SELECT id, position FROM blog_images WHERE post_id = ? ORDER BY position, id');
-    const media = db.prepare('SELECT id, kind, url, position, mime_type AS mimeType, thumbnail_data IS NOT NULL AS thumbnailReady FROM blog_media WHERE post_id = ? ORDER BY position, id');
-    return rows.map(row => {
-        const items = media.all(row.id).map(item => ({ ...item, url: '/api/blog/media/' + item.id, thumbnailUrl: '/api/blog/media/' + item.id + '?thumbnail=1' }));
-        const oldImages = legacy.all(row.id).map(image => ({ id: image.id, kind: 'image', position: image.position, url: '/api/blog/images/' + image.id }));
-        const { locationJson, audience, period, startsAt, endsAt, ...post } = row;
-        const commentCount = commentAccess(session).canViewComments ? db.prepare('SELECT COUNT(*) AS count FROM blog_comments WHERE post_id = ?').get(row.id).count : 0;
-        return { ...post, commentCount, visibility: { audience, period, startsAt, endsAt }, location: locationJson ? JSON.parse(locationJson) : null, contentHtml: row.contentFormat === 'markdown' ? renderMarkdown(row.content) : null, content: normalizeContent(row.content, row.contentFormat, true), tags: tags.all(row.id).map(item => item.tag), images: [...oldImages, ...items.filter(item => item.kind === 'image')],
-            videos: items.filter(item => item.kind === 'video') };
-    });
-}
-
-
-export function listVisibleTags(db, session, now) {
-    const filter = visibilityFilter(session, 'p', now);
-    return db.prepare(`SELECT t.tag, COUNT(*) AS count FROM blog_post_tags t JOIN blog_posts p ON p.id = t.post_id
-        WHERE ${filter.sql} GROUP BY t.tag ORDER BY count DESC, t.tag`).all(...filter.params);
-}
-
-export function getVisibleMedia(db, id, session, now, thumbnail = false) {
-    const filter = visibilityFilter(session, 'p', now);
-    return db.prepare(`SELECT m.url, m.storage_key AS storageKey, m.mime_type AS mimeType ${thumbnail ? ', m.thumbnail_data AS thumbnailData' : ''} FROM blog_media m JOIN blog_posts p ON p.id = m.post_id
-        WHERE m.id = ? AND ${filter.sql}`).get(id, ...filter.params);
 }
 
 export function createPost(db, session, content, hasMedia = false, options = {}) {

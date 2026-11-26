@@ -295,8 +295,7 @@ $('delete-case').addEventListener('click', () => run(async () => {
 }));
 window.addEventListener('beforeunload', e => { if (dirty && can('cases:edit')) { e.preventDefault(); e.returnValue = ''; } });
 run(async () => {
-  const response = await fetch('/api/me'); const me = await response.json();
-  if (!response.ok || !me.ok) throw new Error('无法读取命理模块权限');
+  const me = await window.portalPage.user();
   permissions = me.permissions || [];
   if (me.isGuest) permissions = permissions.filter(p => ['mingli:view', 'mingli:chart:calculate'].includes(p));
   knowledgeCases.permissions(permissions);

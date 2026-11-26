@@ -6,8 +6,11 @@ import { bilibiliAccount, qualitySettings } from './knowledge-bilibili-account.j
 import { createKnowledgeStore, metadata, backendName, MAX_VIDEO_BYTES } from './knowledge-store.js';
 import { storageConfig, sourcePath } from './knowledge-storage.js';
 import { findSourceDuplicate } from './knowledge-source-dedupe.js';
+import { connectionStore } from './connection-store.js';
 
-export function createUploadQueue(db) {
+export const createUploadQueue = connectionStore(initializeUploadQueue);
+
+function initializeUploadQueue(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS knowledge_upload_queue (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,user_id TEXT NOT NULL,url TEXT NOT NULL,
     state TEXT NOT NULL DEFAULT 'pending',settings_json TEXT NOT NULL,document_id TEXT NOT NULL DEFAULT '',

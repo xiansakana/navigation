@@ -1,6 +1,7 @@
 (() => {
 const $=id=>document.getElementById(id); let dirty=false, permission={};
 let historyRows=[],historyPage=1,historyPageSize=20;
+let revision=0,activeReads=0,configuredRows,displayedResults,displayedHistory;
 function renderHistory(){
   const total=historyRows.length,pages=Math.max(1,Math.ceil(total/historyPageSize));
   historyPage=Math.min(historyPage,pages);
@@ -37,11 +38,59 @@ $('item-search').oninput=renderCatalog;
 document.addEventListener('click',event=>{if(!$('item-picker').contains(event.target))closePicker();});
 $('item-picker').addEventListener('keydown',event=>{if(event.key==='Escape'){closePicker();$('add').focus();}});
 
-async function refresh(){try{const d=await api('state');permission=d.permissions;if(!dirty){$('interval').value=d.config.intervalSeconds;$('apiInterval').value=d.config.apiIntervalSeconds;$('items').replaceChildren();d.config.items.forEach(row);}for(const id of ['keys','interval','apiInterval','save','add'])$(id).disabled=!permission.configure;$('add').disabled=!permission.configure||!permission.items;$('items').querySelectorAll('input,button').forEach(n=>n.disabled=!permission.configure);if(!permission.configure||!permission.items)closePicker();
-$('start').disabled=!permission.control||d.state.running||d.state.busy;$('stop').disabled=!permission.control||!d.state.running;$('clear').disabled=!permission.clear;
-$('status').textContent=`${d.state.running?'运行中':'已停止'} · 已保存 ${d.config.keyCount} 个Key · ${d.state.rounds}轮 · 下轮 ${d.state.nextScanAt?new Date(d.state.nextScanAt*1000).toLocaleTimeString():'—'} · ${d.state.error||d.state.notificationError||''}`;
-$('results').replaceChildren(...(d.state.rows||[]).map(r=>{const p=document.createElement('p');p.textContent=`${r.name||r.itemId} · ${r.source==='market'?'市场':'巴扎'} · ${r.error||'发现 '+r.matches+' 条低价'}`;return p;}));historyRows=d.history;renderHistory();}catch(e){$('message').textContent=e.message;}}
-$('form').oninput=()=>{dirty=true;};$('form').onsubmit=async e=>{e.preventDefault();try{const items=Array.from($('items').children,div=>Object.fromEntries(Array.from(div.querySelectorAll('input'),i=>[i.dataset.field,i.value])));await api('config','POST',{items,intervalSeconds:$('interval').value,apiIntervalSeconds:$('apiInterval').value,...($('keys').value.trim()?{apiKeys:$('keys').value.trim()}:{})});dirty=false;catalogLoaded=false;$('keys').value='';closePicker();$('message').textContent='已保存，请启动';await refresh();}catch(e){$('message').textContent=e.message;}};
+function renderState({config,state,history,permissions}){
+  permission=permissions;
+  if(!dirty){
+    $('interval').value=config.intervalSeconds;
+    $('apiInterval').value=config.apiIntervalSeconds;
+    const snapshot=JSON.stringify(config.items);
+    if(snapshot!==configuredRows){
+      configuredRows=snapshot;
+      $('items').replaceChildren();
+      config.items.forEach(row);
+    }
+  }
+  for(const id of ['keys','interval','apiInterval','save'])$(id).disabled=!permission.configure;
+  $('add').disabled=!permission.configure||!permission.items;
+  $('items').querySelectorAll('input,button').forEach(n=>n.disabled=!permission.configure);
+  if(!permission.configure||!permission.items)closePicker();
+  $('start').disabled=!permission.control||state.running||state.busy;
+  $('stop').disabled=!permission.control||!state.running;
+  $('clear').disabled=!permission.clear;
+  const nextScan=state.nextScanAt?new Date(state.nextScanAt*1000).toLocaleString('sv-SE'):'—';
+  $('status').textContent=`${state.running?'运行中':'已停止'} · 已保存 ${config.keyCount} 个Key · ${state.rounds}轮 · 下轮 ${nextScan} · ${state.error||state.notificationError||''}`;
+  const results=state.rows||[],resultsSnapshot=JSON.stringify(results);
+  if(resultsSnapshot!==displayedResults){
+    displayedResults=resultsSnapshot;
+    $('results').replaceChildren(...results.map(r=>{
+      const p=document.createElement('p');
+      p.textContent=`${r.name||r.itemId} · ${r.source==='market'?'市场':'巴扎'} · ${r.error||'发现 '+r.matches+' 条低价'}`;
+      return p;
+    }));
+  }
+  const historySnapshot=JSON.stringify(history);
+  if(historySnapshot!==displayedHistory){
+    displayedHistory=historySnapshot;
+    historyRows=history;
+    renderHistory();
+  }
+}
+async function refresh(){
+  const request=++revision;
+  activeReads++;
+  try{
+    const data=await api('state');
+    if(request===revision)renderState(data);
+  }catch(e){
+    if(request===revision)$('message').textContent=e.message;
+  }finally{
+    activeReads--;
+  }
+}
+$('form').oninput=()=>{dirty=true;};$('form').onsubmit=async e=>{e.preventDefault();try{const items=Array.from($('items').children,div=>Object.fromEntries(Array.from(div.querySelectorAll('input'),i=>[i.dataset.field,i.value])));await api('config','POST',{items,intervalSeconds:$('interval').value,apiIntervalSeconds:$('apiInterval').value,...($('keys').value.trim()?{apiKeys:$('keys').value.trim()}: {})});dirty=false;configuredRows=undefined;catalogLoaded=false;$('keys').value='';closePicker();$('message').textContent='已保存，请启动';await refresh();}catch(e){$('message').textContent=e.message;}};
 for(const id of ['start','stop','clear'])$(id).onclick=async()=>{if(id==='clear'&&!confirm('清空历史？去重保留。'))return;try{await api(id==='clear'?'history':id,id==='clear'?'DELETE':'POST');await refresh();}catch(e){$('message').textContent=e.message;}};
-refresh();setInterval(()=>{if(!document.hidden)refresh();},5000);
+function refreshVisible(){if(!document.hidden&&!activeReads)void refresh();}
+void refresh();
+document.addEventListener('visibilitychange',refreshVisible);
+setInterval(refreshVisible,5000);
 })();

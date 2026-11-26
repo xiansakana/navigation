@@ -1,6 +1,7 @@
 (() => {
   const $ = id => document.getElementById(id), date = value => value ? new Date(value * 1000).toLocaleString('sv-SE') : '—';
   let dirty = false, loading = false, queued = false, latest, offset = 0;
+  let rowsSnapshot, historySnapshot;
   async function api(path, method = 'GET', body) {
     const response = await fetch('/api/torn-chain/' + path, { method, credentials: 'same-origin', ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
     const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.error || '操作失败'); return data;
@@ -14,13 +15,17 @@
     offset = state.factionsOffset ?? 0;
     $('monitor-count').textContent = '(' + total + ')'; $('monitor-table').hidden = !rows.length; $('monitor-empty').hidden = !!rows.length;
     $('monitor-empty').textContent = $('monitor-filter').value === 'problem' ? '没有待确认的帮派。' : '尚无存活基线，请启动监控。';
-    $('monitor-chains').replaceChildren(...rows.map(row => {
+    const snapshot = JSON.stringify([rows, state.problems || []]);
+    if (snapshot !== rowsSnapshot) {
+      rowsSnapshot = snapshot;
+      $('monitor-chains').replaceChildren(...rows.map(row => {
       const tr = document.createElement('tr'); tr.dataset.factionId = row.id;
       const change = Number.isSafeInteger(row.previousRespect) ? row.respect - row.previousRespect : null;
       for (const [label, content] of [['帮派', factionLink(row)], ['Leader', leaderLink(row)], ['respect', row.respect.toLocaleString()], ['变化', change === null ? '基线' : (change > 0 ? '+' : '') + change], ['最近存活', date(row.lastAliveAt)], ['核验说明', problems.get(row.id) || (row.respect === 0 ? 'respect 已清零，尚未标记摧毁' : 'API 确认存活')]]) {
         const td = document.createElement('td'); td.dataset.label = label; if (typeof content === 'string') td.textContent = content; else td.append(content); tr.append(td);
       } return tr;
-    }));
+      }));
+    }
     $('monitor-page').textContent = `${total ? offset + 1 : 0}–${Math.min(offset + 50, total)} / ${total}`;
     $('monitor-prev').disabled = !offset; $('monitor-next').disabled = offset + 50 >= total;
   }
@@ -37,6 +42,9 @@
     $('coverage').textContent = `本轮列表 ${state.pages || 0} 页 · 跟踪 ${state.tracked || 0} · 核验 ${state.confirmed || 0} · 本次运行发现清零 ${state.zeroed || 0} · 其他摧毁告警 ${state.destroyed || 0} · 范围外已跳过 ${state.outsideRange || 0} · 待确认 ${state.failed || 0}${state.partial ? ' · 本轮未完成' : ''}${state.error ? ' · ' + state.error : ''}${state.notificationError ? ' · ' + state.notificationError : ''}` + (Number.isInteger(state.keyCount) ? ` · Key 可用 ${state.availableKeyCount}/${state.keyCount} · 账号 ${state.ownerCount}` : '') + (state.skippedKeys || []).map(row => ` · 已跳过 Key #${row.index}：${row.reason}`).join('');
     $('monitor-hint').textContent = state.detailsStale ? '本轮列表尚未完整；明确清零已即时处理，其余存活基线保留。' : '最新完整列表：' + date(state.detailsAt);
     renderRows(); $('count').textContent = '(' + history.length + ')';
+    const snapshot = JSON.stringify(history);
+    if (snapshot === historySnapshot) return;
+    historySnapshot = snapshot;
     const articles = history.map(row => {
       const article = document.createElement('article'); article.className = 'chain-row';
       const content = document.createElement('div'), title = document.createElement('strong'), info = document.createElement('p'), reason = document.createElement('p');
@@ -68,5 +76,12 @@
   $('clear-history').onclick = () => { if (confirm('清空摧毁记录？去重状态保留。')) action('history', 'DELETE'); };
   $('monitor-filter').onchange = () => { offset = 0; refresh(); };
   $('monitor-prev').onclick = () => { offset = Math.max(0, offset - 50); refresh(); }; $('monitor-next').onclick = () => { offset += 50; refresh(); };
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); }); setInterval(() => { if (!document.hidden) refresh(); }, 5000); refresh();
+  function refreshVisible() {
+    if (!document.hidden && !$('chain-view').hidden && !loading) void refresh();
+  }
+  document.addEventListener('visibilitychange', refreshVisible);
+  $('tab-chain').addEventListener('click', () => queueMicrotask(refreshVisible));
+  window.addEventListener('hashchange', () => queueMicrotask(refreshVisible));
+  setInterval(refreshVisible, 5000);
+  void refresh();
 })();

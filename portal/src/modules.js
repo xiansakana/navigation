@@ -20,14 +20,14 @@ export const PORTAL_MODULES = Object.freeze([
   { id: 'torn-shopping', title: '扫货助手', namespace: 'torn-shopping', runtime: 'torn-monitor-worker', tables: ['torn_shopping'], apiPrefix: '/api/torn-shopping/' },
   { id: 'torn-factions', title: '帮派筛选', namespace: 'torn-factions', runtime: 'torn-monitor-worker', tables: ['torn_faction_scans', 'torn_faction_rows', 'torn_faction_networth'], apiPrefix: '/api/torn-factions/' },
   { id: 'torn-chain', title: '监控', namespace: 'torn-chain', runtime: 'torn-monitor-worker', tables: ['torn_chain_monitors', 'torn_chain_notifications', 'torn_destruction_monitors', 'torn_destruction_observations'], apiPrefix: '/api/torn-chain/' },
-  { id: 'blog', title: '博客', namespace: 'blog', runtime: 'portal', tables: ['blog_posts'], apiPrefix: '/api/blog/', matches: blogApi },
-  { id: 'codex-cli', title: 'Codex CLI', namespace: 'codex-cli', runtime: 'qq-bot', tables: ['qq_codex_jobs'],
+  { id: 'blog', title: '博客', namespace: 'blog', runtime: 'portal + portal-background', heartbeat: 'portal_background_heartbeat', tables: ['blog_posts'], apiPrefix: '/api/blog/', matches: blogApi },
+  { id: 'codex-cli', title: 'Codex CLI', namespace: 'codex-cli', runtime: 'portal + codex-worker', heartbeat: 'codex_worker_heartbeat', tables: ['qq_codex_jobs'],
     path: '/codex-cli/', permission: 'codex-cli:view', icon: '⌘', sort: 9940, description: '会话工作台、任务进度、账户额度与服务器配置', apiPrefix: '/api/codex-cli/' },
   { id: 'knowledge', title: '知识库', namespace: 'knowledge', runtime: 'portal + knowledge-worker', tables: ['knowledge_documents'],
     path: '/knowledge/', permission: 'knowledge:view', icon: '📚', sort: 9950, description: '上传视频，积累可检索的完整学习笔记', apiPrefix: '/api/knowledge/' },
   { id: 'mingli', title: '命理', namespace: 'mingli', runtime: 'portal', tables: ['mingli_cases'],
     path: '/mingli/', permission: 'mingli:view', icon: '☯', sort: 9960, description: '八字排盘、大运流年与个人案例笔记', apiPrefix: '/api/mingli/' },
-  { id: 'bookkeeping', title: '记账', namespace: 'bookkeeping', runtime: 'portal', tables: ['bookkeeping_entries'],
+  { id: 'bookkeeping', title: '记账', namespace: 'bookkeeping', runtime: 'portal + portal-background', heartbeat: 'portal_background_heartbeat', tables: ['bookkeeping_entries'],
     path: '/bookkeeping/', permission: 'bookkeeping:view', icon: '📒', sort: 9970, description: 'iCost 账单、收支统计与多币种资产账户', apiPrefix: '/api/bookkeeping/' },
   { id: 'resources', title: '资源管理', namespace: 'resources', runtime: 'portal', tables: [],
     path: '/resources/', permission: 'service:resources:view', icon: '🖥️', sort: 9980, description: '服务器负载、服务状态与资源占用监控', apiPath: '/api/resources/metrics' },
@@ -53,7 +53,8 @@ export function moduleInventory(db, services = []) {
     if (module.id === 'knowledge' && tables.has('knowledge_worker_instances')) {
       return { online: db.prepare('SELECT COUNT(*) AS count FROM knowledge_worker_instances WHERE last_seen > ?').get(new Date(Date.now() - 120000).toISOString()).count, remote: true };
     }
-    const at = module.runtime === 'torn-monitor-worker' ? heartbeat('torn_monitor_worker_heartbeat') : ['blog', 'bookkeeping'].includes(module.id) ? heartbeat('portal_background_heartbeat') : module.id === 'codex-cli' ? heartbeat('codex_worker_heartbeat') : 0;
+    const key = module.heartbeat || (module.runtime === 'torn-monitor-worker' ? 'torn_monitor_worker_heartbeat' : '');
+    const at = key ? heartbeat(key) : 0;
     return at ? { online: Date.now() - at < 45000 ? 1 : 0, at, remote: false } : null;
   };
   const builtin = PORTAL_MODULES.map(module => ({ id: module.id, title: module.title, path: module.path || '/',

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { SOCIAL_ACCOUNT_GROUP } from './bookkeeping-scope.js';
 import { decorateInvestmentBalances, assertUnboundLedgerAccount, investmentRows } from '../../shared/investment-accounts.js';
 import { createBookkeepingCatalog, categoryKind } from './bookkeeping-catalog.js';
+import { connectionStore } from './connection-store.js';
 
 export const ENTRY_TYPES = ['支出', '收入', '转账', '还款', '借出', '收回', '退款入账', '已报销', '报销入账', '余额调整'];
 export const TRANSFER_TYPES = ['转账', '还款', '借出', '收回'];
@@ -34,16 +35,7 @@ function screenshotCheckpoint(raw) {
   return data.kind==='icost-screenshot-adjustment-v1' && data.checkpoint?{balanceCheckpoint:data.checkpoint}:{};
 }
 
-const stores = new WeakMap();
-
-export function createBookkeepingStore(db) {
-  const existing = stores.get(db);
-  if (existing) return existing;
-  if (db.inTransaction) return initializeBookkeepingStore(db);
-  const store = db.transaction(() => initializeBookkeepingStore(db)).immediate();
-  stores.set(db, store);
-  return store;
-}
+export const createBookkeepingStore = connectionStore(initializeBookkeepingStore);
 
 function initializeBookkeepingStore(db) {
   db.exec(`

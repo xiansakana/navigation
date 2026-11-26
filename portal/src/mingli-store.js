@@ -3,8 +3,11 @@ import { calculateChart } from './mingli-chart.js';
 import { prepareWenZhenImport } from './mingli-import.js';
 import { createMingliCategories } from './mingli-categories.js';
 import { caseFilterSql } from './mingli-filters.js';
+import { connectionStore } from './connection-store.js';
 
-export function createMingliStore(db) {
+export const createMingliStore = connectionStore(initializeMingliStore);
+
+function initializeMingliStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS mingli_cases (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL,
     birth_json TEXT NOT NULL, chart_json TEXT NOT NULL, tags_json TEXT NOT NULL,
@@ -19,13 +22,18 @@ export function createMingliStore(db) {
   const read = row => row && ({ id: row.id, name: row.name, birth: JSON.parse(row.birth_json),
     chart: JSON.parse(row.chart_json), tags: JSON.parse(row.tags_json), notes: row.notes,
     createdAt: row.created_at, updatedAt: row.updated_at, categoryId: row.category_id || null, categoryName: row.category_name || null, source: row.source_json ? JSON.parse(row.source_json) : null });
-  const get = (uid, id) => read(db.prepare(selectCases + ' WHERE user_id = ? AND id = ?').get(uid, id));
+  const selectCase = db.prepare(selectCases + ' WHERE user_id = ? AND id = ?');
+  const get = (uid, id) => read(selectCase.get(uid, id));
   return {
     get, categories,
     list(uid, { search = '', categoryId = '', filters = {}, offset = 0, limit = 30 } = {}) {
-      const pattern = '%' + String(search).slice(0, 100).replace(/[!%_]/g, '!$&') + '%';
-      let where = "user_id = ? AND (name LIKE ? ESCAPE '!' OR notes LIKE ? ESCAPE '!' OR tags_json LIKE ? ESCAPE '!')";
-      const args = [uid, pattern, pattern, pattern];
+      let where = 'user_id = ?';
+      const args = [uid];
+      if (search !== '') {
+        const pattern = '%' + String(search).slice(0, 100).replace(/[!%_]/g, '!$&') + '%';
+        where += " AND (name LIKE ? ESCAPE '!' OR notes LIKE ? ESCAPE '!' OR tags_json LIKE ? ESCAPE '!')";
+        args.push(pattern, pattern, pattern);
+      }
       if (categoryId === 'uncategorized') where += ' AND category_id IS NULL';
       else if (categoryId) {
         if (!/^[a-f0-9]{32}$/.test(categoryId)) throw new Error('分类筛选无效');
