@@ -6,6 +6,10 @@ import { resolveDataAccess } from './access-policy.js';
 import { portalTornRequest } from './torn-chain-monitor.js';
 import { factionConfig } from './torn-faction-analysis.js';
 import { createFactionStore, FactionScanner } from './torn-faction-scan.js';
+import { createPostgresFactionStore } from './torn-faction-postgres.js';
+import { portalPostgresDatabase } from './postgres.js';
+import { portalIdentity } from './postgres-rbac.js';
+import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
 
 export function canFactionScan(session, action = 'view') {
   const permissions = session?.dataAccess?.permissions || session?.permissions || [];
@@ -14,7 +18,14 @@ export function canFactionScan(session, action = 'view') {
 
 export function createFactionService({ store, request = portalTornRequest, authorize = () => true, scannerOptions = {} }) {
   const scanners = new Map();
-  const scanner = uid => { if (!scanners.has(uid)) scanners.set(uid, new FactionScanner({ uid, store, request, authorize: () => authorize(uid), ...scannerOptions })); return scanners.get(uid); };
+  const configFor = async uid => store.getConfig ? store.getConfig(uid) : (await store.get(uid)).config;
+  const scanner = async uid => {
+    if (!scanners.has(uid)) {
+      const { run } = await store.get(uid);
+      if (!scanners.has(uid)) scanners.set(uid, new FactionScanner({ uid, store, request, initialRun: run, authorize: () => authorize(uid), ...scannerOptions }));
+    }
+    return scanners.get(uid);
+  };
   return { scanners, async handle(req, res, url, session, json) {
     res.setHeader('Cache-Control', 'no-store');
     if (!canFactionScan(session)) return json(res, 403, { ok: false, error: '无权查看帮派筛选' });
@@ -23,9 +34,9 @@ export function createFactionService({ store, request = portalTornRequest, autho
     if (req.method !== 'GET' && (!action || !canFactionScan(session, action))) return json(res, 403, { ok: false, error: '无权修改帮派筛选' });
     if (!sameOriginWrite(req)) return json(res, 403, { ok: false, error: '不允许跨站操作' });
     try {
-      const monitor = scanner(uid);
+      const monitor = await scanner(uid);
       if (route === '/state' && req.method === 'GET') {
-        const { apiKey, apiKeys, ...config } = store.get(uid).config, { rows = [], ...state } = monitor.status();
+        const { apiKey, apiKeys, ...config } = await configFor(uid), { rows = [], ...state } = monitor.status();
         const filter = url.searchParams.get('filter') || 'all';
         if (!['all', 'match', 'excluded', 'unknown', 'waiting', 'scanning'].includes(filter)) throw new Error('结果筛选无效');
         const visible = filter === 'all' ? rows : rows.filter(row => row.status === filter);
@@ -35,28 +46,35 @@ export function createFactionService({ store, request = portalTornRequest, autho
         return json(res, 200, { ok: true, config: { ...config, hasKey: !!apiKey, keyCount: apiKeys.length }, state, counts, rows: visible.slice(offset, offset + limit), total: visible.length, offset, limit, permissions: { configure: canFactionScan(session, 'config:edit'), control: canFactionScan(session, 'control:edit') } });
       }
       if (route === '/config' && req.method === 'POST') {
-        const input = await readJson(req, 4096); factionConfig(input, store.get(uid).config);
-        monitor.stop(); await monitor.promise; store.save(uid, input); monitor.run = store.get(uid).run; return json(res, 200, { ok: true });
+        const input = await readJson(req, 4096); factionConfig(input, await configFor(uid));
+        monitor.stop(); await monitor.promise; await store.save(uid, input); monitor.run = (await store.get(uid)).run; return json(res, 200, { ok: true });
       }
-      if (route === '/start' && req.method === 'POST') { monitor.start(); return json(res, 200, { ok: true }); }
+      if (route === '/start' && req.method === 'POST') { await monitor.start(); return json(res, 200, { ok: true }); }
       if (route === '/stop' && req.method === 'POST') { monitor.stop(); return json(res, 200, { ok: true }); }
       if (route === '/reset' && req.method === 'POST') {
-        monitor.stop(); await monitor.promise; monitor.run = {}; store.saveRun(uid, {}); return json(res, 200, { ok: true });
+        monitor.stop(); await monitor.promise; await store.saveRun(uid, {}); monitor.run = {}; return json(res, 200, { ok: true });
       }
       return json(res, 404, { ok: false, error: 'Not Found' });
     } catch (error) { return json(res, error.status || 400, { ok: false, error: error.message }); }
   } };
 }
 
-let service;
+let service, initialization;
 export const factionJobs = () => service?.scanners || new Map();
 export async function handleFactionApi(req, res, url, session, json, config) {
   if (!canFactionScan(session)) return json(res, 403, { ok: false, error: '无权查看帮派筛选' });
-  service ||= createFactionService({ store: createFactionStore(getDatabase()), authorize: uid => {
-    const current = resolveSessionUser({ userId: uid }, config);
+  const authorize = async uid => {
+    const current = resolveSessionUser({ userId: uid }, config, await portalIdentity.load(config));
     if (!current || current.rbac?.accessPolicy?.modules?.['torn-factions']?.enabled === false || current.rbac?.accessPolicy?.modules?.['torn-chain']?.enabled === false) return false;
     try { resolveDataAccess(current.rbac, { userId: uid }, 'torn-factions', 'self', 'write', config.services); resolveDataAccess(current.rbac, { userId: uid }, 'torn-chain', 'self', 'read', config.services); } catch { return false; }
     return canFactionScan({ userId: uid, permissions: current.permissions, isGuest: current.user.username === (config.auth?.guestUsername || 'guest') }, 'control:edit');
-  } });
-  return service.handle(req, res, url, session, json);
+  };
+  initialization ||= (async () => {
+    const databaseUrl = process.env.NAVIGATION_TORN_POSTGRES_URL;
+    const db = databaseUrl && portalPostgresDatabase(databaseUrl);
+    if (db) await verifyPostgresSchema(db);
+    service = createFactionService({ store: db ? createPostgresFactionStore(db) : createFactionStore(getDatabase()), authorize });
+    return service;
+  })().catch(error => { initialization = undefined; throw error; });
+  return (await initialization).handle(req, res, url, session, json);
 }

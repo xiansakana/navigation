@@ -19,7 +19,7 @@ import { sendMessage } from './napcat.js';
 import { sendEmail } from './email.js';
 import { sendSlack } from './slack.js';
 import { createWatchdogStore, startLoginWatchdog } from './watchdog.js';
-import { getPostgresMonitoring } from './postgres.js';
+import { getPostgresCodexIdentity, getPostgresMonitoring } from './postgres.js';
 import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
 import { startTiboResetMonitor } from './tibo-reset-monitor.js';
 import { createBusinessService } from './business.js';
@@ -136,7 +136,7 @@ export function createNotificationServer(initialConfig, options) {
             return sendThrough(currentConfig, channel, { ...target, message: message }, options);
         }
     }) : null;
-    var codex = createCodexService({getConfig:()=>config,executeJobs:!config.codex?.externalExecutor,
+    var codex = createCodexService({getConfig:()=>config,executeJobs:!config.codex?.externalExecutor,readRbac: options?.readCodexRbac,
         send:(c,target,message)=>(options?.sendQq || sendMessage)(c.napcat,target,message)});
     if(options?.startMonitors)codex.start();
     var receiver = createQqCommandReceiver({getConfig:()=>config,request:options?.bookkeepingFetch || fetch,onEvent:codex.receive,
@@ -246,7 +246,8 @@ async function main() {
     var config = loadConfig();
     var host = config.server.host || '127.0.0.1';
     var port = config.server.port || 8787;
-    var server = createNotificationServer(config, { startMonitors: true, monitoringDb: await getPostgresMonitoring() });
+    const [monitoringDb, readCodexRbac] = await Promise.all([getPostgresMonitoring(), getPostgresCodexIdentity()]);
+    var server = createNotificationServer(config, { startMonitors: true, monitoringDb, readCodexRbac });
     for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
         server.codexService.stop(); server.bookkeepingReceiver.stop(); server.close();
         const wait = setInterval(() => {if(!server.codexService.status().running){clearInterval(wait);process.exit(0);}},100);

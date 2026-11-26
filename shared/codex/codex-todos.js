@@ -118,10 +118,12 @@ export function createTodoScheduler({store,getConfig,authorize,readUsage=readCod
   return {async tick(){
     if(store.hasActiveJobs(includeQQ()))return;
     const time=now(),rows=store.todos.due(time);if(!rows.length)return;
-    const row=rows.find(todo=>{
-      if(authorize(todo))return true;
-      store.todos.fail(todo,'账号、项目、会话或自动执行权限已撤销','paused');return false;
-    });if(!row)return;
+    let row;
+    for (const todo of rows) {
+      if(await authorize(todo)) {row=todo;break;}
+      store.todos.fail(todo,'账号、项目、会话或自动执行权限已撤销','paused');
+    }
+    if(!row)return;
     let gate;
     try {
       if(cached&&cached.nextCheckAt>time)gate=cached;
@@ -129,9 +131,16 @@ export function createTodoScheduler({store,getConfig,authorize,readUsage=readCod
     } catch {gate={available:false,reason:'额度查询暂不可用，将自动复查',nextCheckAt:time+60000,resetAt:0};}
     if(!gate.available){cached=gate;store.todos.defer(gate.reason,gate.nextCheckAt,gate.resetAt,time);return;}
     cached=null;
+    let runtime;
     try {
-      const catalog=await readCatalog(getConfig()),runtime=resolveRuntime(getConfig(),JSON.parse(row.runtime_json),catalog);
-      if(!authorize(row)){store.todos.fail(row,'自动执行授权已撤销','paused');return;}
+      const catalog=await readCatalog(getConfig());
+      runtime=resolveRuntime(getConfig(),JSON.parse(row.runtime_json),catalog);
+    } catch {
+      store.todos.fail(row,'无法开始任务，请检查模型设置、会话状态与服务器连接后重试');
+      return;
+    }
+    if(!await authorize(row)){store.todos.fail(row,'自动执行授权已撤销','paused');return;}
+    try {
       store.todos.promote(row,runtime,now(),includeQQ());
     } catch {store.todos.fail(row,'无法开始任务，请检查模型设置、会话状态与服务器连接后重试');}
   }};

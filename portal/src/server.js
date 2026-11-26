@@ -615,6 +615,8 @@ async function handleRequest(req, res) {
             try {
                 await identity.ready(); await checkMingliPostgres(); await checkBlogPostgres();
                 if (resourcesDb) await verifyPostgresSchema(resourcesDb);
+                const tornUrl = process.env.NAVIGATION_TORN_POSTGRES_URL || process.env.NAVIGATION_TORN_USERS_POSTGRES_URL;
+                if (tornUrl) await verifyPostgresSchema(portalPostgresDatabase(tornUrl));
             }
             catch { return json(res, 503, { ok: false, service: 'portal' }); }
         }

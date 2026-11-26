@@ -86,32 +86,50 @@ export function companySignals(kind, rule, data, now) {
   const side = percent > rule.high ? 'high' : percent < rule.low ? 'low' : null;
   return side ? [{ ...base, key: 'stock:' + p.id + ':' + side, percent, total, capacity, side, message: `库存 ${total} / ${capacity}（${percent.toFixed(1)}%），${side === 'high' ? '超过上限 ' + rule.high : '低于下限 ' + rule.low}%，请检查单价、广告或补货。` }] : [];
 }
+export const defaultCompanyConfig = () => ({ rules: COMPANY_RULES, watchers: [], intervalSeconds: 60 });
+
+export function readCompanyNotify(notify, kind, watcherId) {
+  const saved = notify[kind] || DEFAULT_CHAIN_NOTIFY;
+  const selected = watcherId && Object.hasOwn(saved.watchers || {}, watcherId) ? saved.watchers[watcherId] : saved;
+  return structuredClone({ qq: selected.qq, slack: selected.slack, targets: selected.targets });
+}
+
+export function updateCompanyNotify(notify, kind, value, watcherId) {
+  const settings = chainNotifySettings(value), old = notify[kind] || DEFAULT_CHAIN_NOTIFY;
+  notify[kind] = watcherId ? { ...old, watchers: { ...old.watchers, [watcherId]: settings } } : { ...settings, watchers: old.watchers || {} };
+}
+
+export function commitCompanySignals(saved, slot, signals, kind, watcher, now, data) {
+  const old = new Set(saved.runtime[slot] || []);
+  const fresh = signals.filter(row => !old.has(row.key)).map(row => ({ ...row, kind, watcherId: watcher.id, watcherLabel: watcher.label, detectedAt: now }));
+  // Training and salary keys persist across recovery, restarts and setting changes.
+  saved.runtime[slot] = kind === 'stock' ? signals.map(row => row.key) : [...new Set([...old, ...signals.map(row => row.key)])].slice(-10000);
+  if (kind === 'salary' && data) fresh.unshift(...trackSalaryReturns(saved, slot, fresh, data, now));
+  saved.history = [...saved.history, ...fresh].slice(-200);
+  return fresh;
+}
+
 export function createCompanyAlertsStore(db) {
   db.exec("CREATE TABLE IF NOT EXISTS torn_company_alerts(user_id TEXT PRIMARY KEY, config TEXT NOT NULL, runtime TEXT NOT NULL DEFAULT '{}', history TEXT NOT NULL DEFAULT '[]', notify TEXT NOT NULL DEFAULT '{}')");
   const get = uid => {
-    if (!db.prepare('SELECT 1 FROM torn_company_alerts WHERE user_id=?').get(uid)) db.prepare('INSERT OR IGNORE INTO torn_company_alerts(user_id,config) VALUES(?,?)').run(uid, JSON.stringify({ rules: COMPANY_RULES, watchers: [], intervalSeconds: 60 }));
+    if (!db.prepare('SELECT 1 FROM torn_company_alerts WHERE user_id=?').get(uid)) db.prepare('INSERT OR IGNORE INTO torn_company_alerts(user_id,config) VALUES(?,?)').run(uid, JSON.stringify(defaultCompanyConfig()));
     const row = db.prepare('SELECT * FROM torn_company_alerts WHERE user_id=?').get(uid);
     return Object.fromEntries(['config', 'runtime', 'history', 'notify'].map(k => [k, JSON.parse(row[k])]));
   };
   return { get,
     save(uid, config) { get(uid); db.prepare('UPDATE torn_company_alerts SET config=? WHERE user_id=?').run(JSON.stringify(config), uid); },
     getNotify(uid, kind, watcherId) {
-      const saved = get(uid).notify[kind] || structuredClone(DEFAULT_CHAIN_NOTIFY);
-      const selected = watcherId && Object.hasOwn(saved.watchers || {}, watcherId) ? saved.watchers[watcherId] : saved;
-      return { qq: selected.qq, slack: selected.slack, targets: selected.targets };
+      return readCompanyNotify(get(uid).notify, kind, watcherId);
     },
     saveNotify(uid, kind, value, watcherId) {
-      const n = get(uid).notify, settings = chainNotifySettings(value), old = n[kind] || structuredClone(DEFAULT_CHAIN_NOTIFY);
-      n[kind] = watcherId ? { ...old, watchers: { ...old.watchers, [watcherId]: settings } } : { ...settings, watchers: old.watchers || {} };
-      db.prepare('UPDATE torn_company_alerts SET notify=? WHERE user_id=?').run(JSON.stringify(n), uid);
+      const { notify } = get(uid);
+      updateCompanyNotify(notify, kind, value, watcherId);
+      db.prepare('UPDATE torn_company_alerts SET notify=? WHERE user_id=?').run(JSON.stringify(notify), uid);
     },
     commit: db.transaction((uid, slot, signals, kind, watcher, now, data) => {
-      const saved = get(uid), old = new Set(saved.runtime[slot] || []);
-      const fresh = signals.filter(r => !old.has(r.key)).map(r => ({ ...r, kind, watcherId: watcher.id, watcherLabel: watcher.label, detectedAt: now }));
-      // Training and salary keys persist across temporary recovery, restarts and setting changes.
-      saved.runtime[slot] = kind === 'stock' ? signals.map(r => r.key) : [...new Set([...old, ...signals.map(r => r.key)])].slice(-10000);
-      if (kind === 'salary' && data) fresh.unshift(...trackSalaryReturns(saved, slot, fresh, data, now));
-      saved.history.push(...fresh); db.prepare('UPDATE torn_company_alerts SET runtime=?,history=? WHERE user_id=?').run(JSON.stringify(saved.runtime), JSON.stringify(saved.history.slice(-200)), uid);
+      const saved = get(uid);
+      const fresh = commitCompanySignals(saved, slot, signals, kind, watcher, now, data);
+      db.prepare('UPDATE torn_company_alerts SET runtime=?,history=? WHERE user_id=?').run(JSON.stringify(saved.runtime), JSON.stringify(saved.history), uid);
       return fresh;
     }).immediate
   };
@@ -124,8 +142,17 @@ export class CompanyAlertsMonitor extends ChainMonitor {
   }
   start() {
     if (this.running || this.busy) throw new Error('监控正在运行或停止中');
-    if (!this.authorize()) throw new Error('无权启动');
-    this.config = this.store.get(this.uid).config;
+    const begin = allowed => {
+      if (!allowed) throw new Error('无权启动');
+      const saved = this.store.get(this.uid);
+      return saved?.then ? saved.then(data => this.startConfigured(data.config)) : this.startConfigured(saved.config);
+    };
+    const allowed = this.authorize();
+    return allowed?.then ? allowed.then(begin) : begin(allowed);
+  }
+  startConfigured(config) {
+    if (this.running || this.busy) throw new Error('监控正在运行或停止中');
+    this.config = config;
     this.config.apiKeys = this.config.watchers.map(w => w.apiKey);
     if (!this.config.watchers.length) throw new Error('请先选择公司账号并保存');
     this.running = true; this.controller = new AbortController(); this.promise = this.scan();
@@ -133,23 +160,32 @@ export class CompanyAlertsMonitor extends ChainMonitor {
   async scan() {
     if (!this.running || this.busy) return;
     this.busy = true; const signal = this.controller.signal;
-    const check = () => { signal.throwIfAborted(); if (!this.running || !this.authorize()) throw new Error('监控已停止或权限已变更'); };
+    const check = async () => {
+      signal.throwIfAborted();
+      if (!this.running || !await this.authorize()) {
+        this.stop();
+        throw new Error('监控已停止或权限已变更');
+      }
+      signal.throwIfAborted();
+    };
     this.state.rows = []; this.state.error = '';
     try {
       for (const watcher of this.config.watchers) {
         let profile;
         for (const kind of COMPANY_ALERT_KINDS) {
-          const rule = this.config.rules[kind]; if (!rule.enabled || !this.authorizeKind(kind)) continue;
+          const rule = this.config.rules[kind]; if (!rule.enabled || !await this.authorizeKind(kind)) continue;
           try {
-            check();
+            await check();
             const request = path => this.requestWithRetry(path, watcher.apiKey, signal);
             profile ||= (await request('company/profile')).profile;
             const data = { profile };
             if (kind === 'salary') data.employees = (await request('company/employees')).employees;
             if (kind === 'stock') data.stock = (await request('company/stock')).stock;
-            check(); const signals = companySignals(kind, rule, data, this.now());
-            const fresh = this.store.commit(this.uid, watcher.id + ':' + kind, signals, kind, watcher, this.now(), data);
-            for (const row of fresh) { check(); try { await this.notify(row); } catch { this.state.notificationError = '提醒已记录，投递失败；请检查通知管理（不自动重发）'; } }
+            await check();
+            if (!await this.authorizeKind(kind)) continue;
+            const signals = companySignals(kind, rule, data, this.now());
+            const fresh = await this.store.commit(this.uid, watcher.id + ':' + kind, signals, kind, watcher, this.now(), data);
+            for (const row of fresh) { await check(); try { await this.notify(row); } catch { this.state.notificationError = '提醒已记录，投递失败；请检查通知管理（不自动重发）'; } }
             this.state.rows.push({ kind, watcherId: watcher.id, label: watcher.label, companyName: profile.name, matches: signals.length, checkedAt: this.now(), ...(kind === 'training' ? { trains: profile.trains, rating: profile.rating } : {}) });
           } catch (e) { if (signal.aborted) throw e; this.state.rows.push({ kind, watcherId: watcher.id, error: this.safeError(e) }); }
         }
@@ -158,7 +194,7 @@ export class CompanyAlertsMonitor extends ChainMonitor {
     } catch (e) { if (!signal.aborted) this.state.error = this.safeError(e); }
     finally {
       this.busy = false;
-      if (this.running && !signal.aborted && this.authorize()) { this.state.nextScanAt = this.now() + this.config.intervalSeconds; this.timer = this.schedule(() => { this.promise = this.scan(); }, this.config.intervalSeconds * 1000); this.timer?.unref?.(); } else this.stop();
+      if (this.running && !signal.aborted) { this.state.nextScanAt = this.now() + this.config.intervalSeconds; this.timer = this.schedule(() => { this.promise = this.scan(); }, this.config.intervalSeconds * 1000); this.timer?.unref?.(); } else this.stop();
     }
   }
   stop() { super.stop(); this.request.release?.('company-alerts:' + this.uid); }

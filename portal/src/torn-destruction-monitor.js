@@ -21,6 +21,30 @@ function factionRow(row, now) {
   if (!Number.isSafeInteger(row?.id) || row.id <= 0 || !Number.isSafeInteger(row.respect) || row.respect < 0 || typeof row.is_destroyed !== 'boolean' || !Number.isSafeInteger(row.leader?.id) || row.leader.id <= 0) throw new Error('API 帮派资料缺少有效 respect、摧毁状态或 Leader');
   return { id: row.id, name: String(row.name || row.id).slice(0, 160), respect: row.respect, leaderId: row.leader.id, leaderName: String(row.leader.name || row.leader.id).slice(0, 160), isDestroyed: row.is_destroyed, checkedAt: now };
 }
+export function applyDestructionObservation(row, old, readHistory) {
+  // A stale API cache must never revive a destroyed faction.
+  if (old?.isDestroyed || old?.checkedAt > row.checkedAt) return null;
+  let event = null;
+  let history;
+  const zero = row.respect === 0 && old?.lastAliveAt && !old.zeroHandled;
+  if (old?.lastAliveAt && !old.zeroHandled && (zero || row.isDestroyed)) {
+    event = { kind: zero ? 'respect-zero' : 'destruction', id: row.id, name: old.name, leaderId: old.leaderId, leaderName: old.leaderName,
+      previousRespect: old.respect > 0 ? old.respect : old.lastPositiveRespect ?? null, respect: row.respect,
+      lastAliveAt: old.lastAliveAt, detectedAt: row.checkedAt, cause: 'unknown', isDestroyed: row.isDestroyed,
+      ...(row.isDestroyed ? { destroyedConfirmedAt: row.checkedAt } : {}) };
+    history = [...readHistory(), event].slice(-200);
+  } else if (row.isDestroyed && old?.zeroHandled) {
+    const saved = readHistory();
+    const found = saved.find(item => item.id === row.id && item.kind === 'respect-zero');
+    if (found && !found.destroyedConfirmedAt) {
+      history = saved.map(item => item === found ? { ...item, isDestroyed: true, destroyedConfirmedAt: row.checkedAt } : item);
+    }
+  }
+  return { event, history, observation: { ...row, previousRespect: old?.respect ?? null,
+    zeroHandled: !!old?.zeroHandled || row.respect === 0 || row.isDestroyed,
+    lastPositiveRespect: row.respect > 0 ? row.respect : old?.lastPositiveRespect ?? (old?.respect > 0 ? old.respect : null),
+    lastAliveAt: row.isDestroyed ? old?.lastAliveAt || null : row.checkedAt } };
+}
 export function createDestructionStore(db) {
   const legacy = createChainStore(db);
   db.exec(`CREATE TABLE IF NOT EXISTS torn_destruction_monitors(user_id TEXT PRIMARY KEY, config_json TEXT NOT NULL, history_json TEXT NOT NULL DEFAULT '[]');
@@ -36,32 +60,11 @@ export function createDestructionStore(db) {
   const write = db.prepare('INSERT INTO torn_destruction_observations(user_id,faction_id,row_json) VALUES(?,?,?) ON CONFLICT(user_id,faction_id) DO UPDATE SET row_json=excluded.row_json');
   const observeRow = (uid, row) => {
     const saved = observation.get(uid, row.id), old = saved && JSON.parse(saved.row_json);
-    // Destruction is irreversible. A stale live API cache must not revive a dead faction.
-    if (old?.isDestroyed || old?.checkedAt > row.checkedAt) return null;
-    let event = null;
-    // An observed zero is actionable before Torn marks the faction destroyed.
-    // First-seen zeros are baseline-only; existing pre-upgrade live zeros are
-    // handled once on their next verification. Never reset this durable marker.
-    const zero = row.respect === 0 && old?.lastAliveAt && !old.zeroHandled;
-    if (old?.lastAliveAt && !old.zeroHandled && (zero || row.isDestroyed)) {
-      event = { kind: zero ? 'respect-zero' : 'destruction', id: row.id, name: old.name, leaderId: old.leaderId, leaderName: old.leaderName,
-        previousRespect: old.respect > 0 ? old.respect : old.lastPositiveRespect ?? null, respect: row.respect,
-        lastAliveAt: old.lastAliveAt, detectedAt: row.checkedAt, cause: 'unknown', isDestroyed: row.isDestroyed,
-        ...(row.isDestroyed ? { destroyedConfirmedAt: row.checkedAt } : {}) };
-      const { history } = get(uid); history.push(event);
-      db.prepare('UPDATE torn_destruction_monitors SET history_json=? WHERE user_id=?').run(JSON.stringify(history.slice(-200)), uid);
-    } else if (row.isDestroyed && old?.zeroHandled) {
-      const { history } = get(uid), found = history.find(item => item.id === row.id && item.kind === 'respect-zero');
-      if (found && !found.destroyedConfirmedAt) {
-        found.isDestroyed = true; found.destroyedConfirmedAt = row.checkedAt;
-        db.prepare('UPDATE torn_destruction_monitors SET history_json=? WHERE user_id=?').run(JSON.stringify(history), uid);
-      }
-    }
-    write.run(uid, row.id, JSON.stringify({ ...row, previousRespect: old?.respect ?? null,
-      zeroHandled: !!old?.zeroHandled || row.respect === 0 || row.isDestroyed,
-      lastPositiveRespect: row.respect > 0 ? row.respect : old?.lastPositiveRespect ?? (old?.respect > 0 ? old.respect : null),
-      lastAliveAt: row.isDestroyed ? old?.lastAliveAt || null : row.checkedAt }));
-    return event;
+    const result = applyDestructionObservation(row, old, () => get(uid).history);
+    if (!result) return null;
+    if (result.history) db.prepare('UPDATE torn_destruction_monitors SET history_json=? WHERE user_id=?').run(JSON.stringify(result.history), uid);
+    write.run(uid, row.id, JSON.stringify(result.observation));
+    return result.event;
   };
   // Acquire the write lock before reading: deferred read-to-write upgrades in
   // WAL mode can fail immediately with SQLITE_BUSY_SNAPSHOT.
@@ -85,13 +88,30 @@ export class DestructionMonitor extends ChainMonitor {
     this.state = { running: false, rounds: 0, pages: 0, tracked: 0, confirmed: 0, destroyed: 0, zeroed: 0, failed: 0, partial: false, error: '', lastScanAt: null, nextScanAt: null, retryAt: null, retryAttempt: 0, retryMessage: '', chains: [], detailsAt: null, detailsStale: false };
   }
   status() {
-    const config = this.store.get(this.uid).config;
-    return { ...super.status(), kind: 'destruction', factions: this.store.observations(this.uid).filter(row => !row.isDestroyed && (inRespectRange(row, config) || row.respect === 0 && row.zeroHandled)).sort((a, b) => a.respect - b.respect || a.id - b.id) };
+    const saved = this.store.get(this.uid);
+    return saved?.then ? saved.then(data => this.statusWithConfig(data.config)) : this.statusWithConfig(saved.config);
+  }
+  runtimeStatus() { return super.status(); }
+  statusWithConfig(config) {
+    const present = rows => ({ ...this.runtimeStatus(), kind: 'destruction', factions: rows
+      .filter(row => !row.isDestroyed && (inRespectRange(row, config) || row.respect === 0 && row.zeroHandled))
+      .sort((a, b) => a.respect - b.respect || a.id - b.id) });
+    const rows = this.store.observations(this.uid);
+    return rows?.then ? rows.then(present) : present(rows);
   }
   start() {
     if (this.running || this.busy) throw new Error('监控正在运行或上次请求尚未结束');
-    if (!this.authorize()) throw new Error('无权启动监控');
-    this.config = this.store.get(this.uid).config;
+    const begin = allowed => {
+      if (!allowed) throw new Error('无权启动监控');
+      const saved = this.store.get(this.uid);
+      return saved?.then ? saved.then(data => this.startConfigured(data.config)) : this.startConfigured(saved.config);
+    };
+    const allowed = this.authorize();
+    return allowed?.then ? allowed.then(begin) : begin(allowed);
+  }
+  startConfigured(config) {
+    if (this.running || this.busy) throw new Error('监控正在运行或上次请求尚未结束');
+    this.config = config;
     if (!this.config.apiKeys.length) throw new Error('请先保存 Public API Key');
     this.resetKeys(); this.state.error = ''; this.state.notificationError = ''; this.state.rounds = 0; this.state.destroyed = 0; this.state.zeroed = 0;
     this.running = true; this.controller = new AbortController(); this.promise = this.scan();
@@ -99,9 +119,10 @@ export class DestructionMonitor extends ChainMonitor {
   searchPath(filters, offset = 0) { return 'faction/search?limit=100&offset=' + offset + '&filters=' + encodeURIComponent(filters.join(',')); }
   async persist(operation, signal, check) {
     for (let attempt = 0; ; attempt++) {
-      check();
-      try { return operation(); }
+      await check();
+      try { return await operation(); }
       catch (error) {
+        if (error.code && !/^SQLITE_/.test(error.code)) throw Object.assign(new Error('监控数据库暂不可用'), { databaseUnavailable: true });
         if (!/^SQLITE_(BUSY|LOCKED)(_|$)/.test(error.code || '') || attempt >= 4) throw error;
         this.state.databaseRetries++;
         await this.wait(250 * 2 ** attempt, undefined, { signal });
@@ -119,31 +140,36 @@ export class DestructionMonitor extends ChainMonitor {
   async scan() {
     if (!this.running || this.busy) return;
     this.busy = true; const signal = this.controller.signal;
-    const valid = () => this.running && !signal.aborted && this.authorize();
-    const check = () => { if (!valid()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true }); };
+    const valid = () => this.running && !signal.aborted;
+    const check = async () => {
+      let allowed;
+      try { allowed = valid() && await this.authorize(); }
+      catch { throw Object.assign(new Error('无法核验监控授权'), { databaseUnavailable: true }); }
+      if (!allowed || !valid()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true });
+    };
     Object.assign(this.state, { pages: 0, confirmed: 0, failed: 0, outsideRange: 0, partial: false, error: '', detailsStale: true, problems: [], priorityChecked: 0, databaseRetries: 0 });
     try {
-      check(); await this.prepareKeys(signal); check();
-      const observed = new Map(this.store.observations(this.uid).filter(row => !row.isDestroyed && (inRespectRange(row, this.config) || row.respect === 0 && row.zeroHandled)).map(row => [row.id, row]));
+      await check(); await this.prepareKeys(signal); await check();
+      const observed = new Map((await this.store.observations(this.uid)).filter(row => !row.isDestroyed && (inRespectRange(row, this.config) || row.respect === 0 && row.zeroHandled)).map(row => [row.id, row]));
       const deliver = async event => {
         if (!event) return;
         if (event.kind === 'respect-zero') this.state.zeroed++; else this.state.destroyed++;
-        check();
+        await check();
         try { await this.notify(event); }
         catch { this.state.notificationError = '清零/摧毁记录已保存，通知投递失败；请检查通知管理（不自动重发）'; }
       };
 
       const persist = operation => this.persist(operation, signal, check);
       const verify = async old => {
-        check();
+        await check();
         try {
-          const data = await this.api(this.searchPath(['id:=:' + old.id]), signal); check();
+          const data = await this.api(this.searchPath(['id:=:' + old.id]), signal); await check();
           if (!Array.isArray(data.search) || data.search.length !== 1 || data.search[0].id !== old.id) throw new Error('API 未确认该帮派状态，保留最后存活记录');
           const row = factionRow(data.search[0], this.now());
           await deliver(await persist(() => this.store.observe(this.uid, row)));
           this.state.confirmed++;
         } catch (error) {
-          if (error.fatal || !valid() || /^SQLITE_(BUSY|LOCKED)/.test(error.code || '')) throw error;
+          if (error.fatal || error.databaseUnavailable || !valid() || /^SQLITE_(BUSY|LOCKED)/.test(error.code || '')) throw error;
           this.state.failed++; this.state.error = this.safeError(error); this.state.problems.push({ id: old.id, reason: this.safeError(error) });
         }
       };
@@ -152,7 +178,7 @@ export class DestructionMonitor extends ChainMonitor {
         // This small, independent query runs before and during the full listing.
         // Rotate pages if more than 100 live zero-respect factions exist.
         try {
-          const data = await this.api(this.searchPath(['notDestroyed', 'respect:=:0'], this.zeroOffset), signal); check();
+          const data = await this.api(this.searchPath(['notDestroyed', 'respect:=:0'], this.zeroOffset), signal); await check();
           if (!Array.isArray(data.search)) throw new Error('API 未返回清零帮派列表');
           const next = this.nextOffset(data, this.zeroOffset);
           for (const item of data.search) {
@@ -163,7 +189,7 @@ export class DestructionMonitor extends ChainMonitor {
           }
           this.zeroOffset = next ?? 0;
         } catch (error) {
-          if (error.fatal || !valid() || /^SQLITE_(BUSY|LOCKED)/.test(error.code || '')) throw error;
+          if (error.fatal || error.databaseUnavailable || !valid() || /^SQLITE_(BUSY|LOCKED)/.test(error.code || '')) throw error;
           this.state.failed++; this.state.error = this.safeError(error);
         }
         // Rotate five IDs within the lowest 100 tracked positive factions. ID
@@ -183,12 +209,11 @@ export class DestructionMonitor extends ChainMonitor {
       const filters = ['notDestroyed', 'respect:>=:' + this.config.minRespect, ...(this.config.maxRespect === null ? [] : ['respect:<=:' + this.config.maxRespect])];
       const current = new Map(), visited = new Set(), rawSeen = new Set(); let offset = 0, path = this.searchPath(filters);
       while (path) {
-        check(); if (visited.has(path) || visited.size >= 1000) throw new Error('帮派分页未完成，本轮不更新基线，稍后自动重试');
-        visited.add(path); const data = await this.api(path, signal); check();
+        await check(); if (visited.has(path) || visited.size >= 1000) throw new Error('帮派分页未完成，本轮不更新基线，稍后自动重试');
+        visited.add(path); const data = await this.api(path, signal); await check();
         if (!Array.isArray(data.search)) throw new Error('API 未返回帮派列表');
         let added = 0;
         for (const item of data.search) {
-          check();
           const row = factionRow(item, this.now());
           if (!rawSeen.has(row.id)) added++; rawSeen.add(row.id);
           // Explicit zero evidence does not depend on a complete listing.
@@ -206,8 +231,8 @@ export class DestructionMonitor extends ChainMonitor {
         path = next === null ? null : this.searchPath(filters, offset);
         if (path && this.state.pages % 10 === 0) await priority();
       }
-      check();
-      const missing = this.store.observations(this.uid).filter(row => !row.isDestroyed && (inRespectRange(row, this.config) || row.respect === 0 && row.zeroHandled) && !current.has(row.id));
+      await check();
+      const missing = (await this.store.observations(this.uid)).filter(row => !row.isDestroyed && (inRespectRange(row, this.config) || row.respect === 0 && row.zeroHandled) && !current.has(row.id));
       // The store rejects older snapshots after independent verification.
       // Bounded immediate transactions avoid thousands of lock upgrades and
       // let controls/other monitors run between batches.
@@ -215,7 +240,7 @@ export class DestructionMonitor extends ChainMonitor {
       for (let i = 0; i < baseline.length; i += 100) {
         const batch = baseline.slice(i, i + 100);
         await persist(() => this.store.observeBatch(this.uid, batch));
-        await yieldLoop(undefined, { signal }); check();
+        await yieldLoop(undefined, { signal });
       }
       this.state.tracked = current.size + missing.length; this.state.detailsStale = false; this.state.detailsAt = this.now();
       for (const old of missing.sort((a, b) => a.respect - b.respect || a.id - b.id)) {

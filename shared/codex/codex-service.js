@@ -37,38 +37,48 @@ export function codexEvent(event) {
 export function authorizedCodexUser(config, qq, db) {
   const user = config.allowedUsers?.find(u => String(u.qqId) === String(qq));
   if (!user?.userId) return null;
-  const rbac = loadRbacBlob(db), account = rbac?.users?.find(u => u.id === user.userId);
+  return authorizedBinding(user, loadRbacBlob(db));
+}
+
+function authorizedBinding(user, rbac) {
+  const account = rbac?.users?.find(u => u.id === user.userId);
   if (rbac?.accessPolicy?.modules?.['qq-codex']?.enabled === false) return null;
   if (!account || account.enabled === false || account.username === 'guest' || !hasPermission(resolveUserPermissions(rbac, account), 'qq-codex:execute')) return null;
   return user;
 }
 const help = 'QQ Codex（私聊 / 授权群中@机器人）\ncodex 项目：列出可用项目\ncodex 模型 [模型ID/默认]：查看或切换模型\ncodex 强度 [强度值/默认]：查看或切换推理强度\n私聊可直接发附件。群聊请单独@机器人，再在2分钟内发下一条附件；或同条@机器人并附图/文件。每条附件后接收窗口关闭。再@机器人发送codex处理要求。\ncodex 上传附件 / codex 取消上传：开启或关闭附件接收窗口\ncodex 附件 / codex 清空附件：查看或清空待处理附件\ncodex navigation 你的任务：执行任务\ncodex 你的任务：使用默认项目\ncodex 状态：查看当前及最近结果\ncodex 额度：查询5小时、周剩余额度和北京时间重置时间\ncodex 结果：重新读取最近完整结果\ncodex 停止：停止自己的任务\ncodex 同步 [项目]：从Git同步代码和AGENTS.md\ncodex 新会话 [项目]：开始独立的新会话\n群号和结果发送方式可在通知管理的QQ Codex区域配置。群聊会话与私聊隔离。代码通过Git同步，自己的会话可在Navigation的Codex CLI工作台查看和续聊。任务结果返回Git提交；电脑 git pull --ff-only 即可取回代码。';
 
-export function createCodexService({ getConfig, send, store: injectedStore, authorize, authorizeWeb, authorizeTodo, readUsage, execute = executeCodex, readCatalog = readCodexCatalog, prepareMedia = prepareCodexMedia, sendArtifact = sendCodexArtifact, formatReply, executeJobs = true, deliverReplies = true, log = console }) {
+export function createCodexService({ getConfig, send, store: injectedStore, authorize, authorizeWeb, authorizeTodo, readRbac, readUsage, execute = executeCodex, readCatalog = readCodexCatalog, prepareMedia = prepareCodexMedia, sendArtifact = sendCodexArtifact, formatReply, executeJobs = true, deliverReplies = true, log = console }) {
   let store = injectedStore, timer, controller, busy = false, delivering = false, stopped = true;
   const receivers=new Map();
   const settings = () => getConfig().codex || {};
   const storage = () => store ||= createCodexStore(getDatabase(), { formatReply });
-  const userFor = qq => authorize ? authorize(qq) : authorizedCodexUser(settings(), qq, getDatabase());
+  const loadIdentity = readRbac || (() => loadRbacBlob(getDatabase()));
+  const identity = async snapshot => snapshot !== undefined ? snapshot : loadIdentity();
+  const userFor = async (qq, snapshot) => {
+    if (authorize) return authorize(qq);
+    const bound = settings().allowedUsers?.find(user => String(user.qqId) === String(qq));
+    return bound?.userId ? authorizedBinding(bound, await identity(snapshot)) : null;
+  };
   let todoScheduler;
-  function todoAllowed(todo) {
-    const user=userFor(todo.qq_id);
+  async function todoAllowed(todo, snapshot) {
+    const user=await userFor(todo.qq_id, snapshot);
     if(!user||user.userId!==todo.user_id||!user.projects?.includes(todo.project))return false;
     if(todo.conversation_id){const c=storage().conversations.get(todo.user_id,todo.conversation_id);if(!c||c.archived||c.project!==todo.project||c.group_id&&!storage().settings(todo.user_id).groups.includes(c.group_id))return false;}
     if(authorizeTodo)return authorizeTodo(todo);
-    const rbac=loadRbacBlob(getDatabase()),account=rbac?.users?.find(u=>u.id===todo.user_id);
+    const rbac=await identity(snapshot),account=rbac?.users?.find(u=>u.id===todo.user_id);
     if (rbac?.accessPolicy?.modules?.['codex-cli']?.enabled === false) return false;
     return account&&account.enabled!==false&&['codex-cli:view','codex-cli:todos:view','codex-cli:todos:run','codex-cli:sessions:view','codex-cli:sessions:create','codex-cli:messages:send'].every(p=>hasPermission(resolveUserPermissions(rbac,account),p));
   }
-  function jobUser(job) {
-    const user=userFor(job.qq_id);
+  async function jobUser(job, snapshot) {
+    const user=await userFor(job.qq_id, snapshot);
     if(job.origin!=='web')return getConfig().channels?.qq?.enabled ? user : null;
-    if(job.todo_id){const todo=storage().todos.get(job.user_id,job.todo_id);if(!todo||todo.state==='paused'||!todoAllowed(todo))return null;}
+    if(job.todo_id){const todo=storage().todos.get(job.user_id,job.todo_id);if(!todo||todo.state==='paused'||!await todoAllowed(todo, snapshot))return null;}
     const conversation=storage().conversations.get(job.user_id,job.conversation_id);
-    const rbac=authorizeWeb ? null : loadRbacBlob(getDatabase()),account=rbac?.users?.find(u=>u.id===job.user_id);
+    const rbac=authorizeWeb ? null : await identity(snapshot),account=rbac?.users?.find(u=>u.id===job.user_id);
     if (rbac?.accessPolicy?.modules?.['codex-cli']?.enabled === false) return null;
     const permissions=account ? resolveUserPermissions(rbac,account) : [];
-    const webAllowed=authorizeWeb ? authorizeWeb(job) : account&&account.enabled!==false&&['codex-cli:view','codex-cli:sessions:view','codex-cli:messages:send'].every(p=>hasPermission(permissions,p));
+    const webAllowed=authorizeWeb ? await authorizeWeb(job) : account&&account.enabled!==false&&['codex-cli:view','codex-cli:sessions:view','codex-cli:messages:send'].every(p=>hasPermission(permissions,p));
     if(!conversation || conversation.archived || conversation.group_id&&!storage().settings(job.user_id).groups.includes(conversation.group_id)
       || !webAllowed)return null;
     return user;
@@ -76,7 +86,7 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
   async function receiveEvent(raw) {
     const event = codexEvent(raw), config = settings();
     if (!event || !config.enabled || !getConfig().channels?.qq?.enabled) return false;
-    const user = userFor(event.qqId);
+    const user = await userFor(event.qqId);
     if (!user) return true;
     const s = storage(), group = event.groupId;
     if (group && !s.settings(user.userId).groups.includes(group)) return true;
@@ -142,7 +152,7 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
     if(outcome?.control){
       try{
         const catalog=await readCatalog(config),[command,value]=outcome.control.split(/\s+/);
-        const fresh=userFor(event.qqId);
+        const fresh=await userFor(event.qqId);
         if(!settings().enabled||!getConfig().channels?.qq?.enabled||!fresh||fresh.userId!==user.userId||group&&!s.settings(user.userId).groups.includes(group))return true;
         const previous=s.runtime(user.userId,group);
         let next=previous;
@@ -175,7 +185,7 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
     try {
       const s = storage(), row = s.pendingReply();
       if (!row) return;
-      const user = userFor(row.qq_id);
+      const user = await userFor(row.qq_id);
       if (!user || user.userId !== row.user_id || (row.group_id || row.source_group_id) && !s.settings(row.user_id).groups.includes(row.group_id || row.source_group_id)) { s.delivered(row.id); return; }
       const toGroup = row.group_id && !(row.full_result && s.settings(row.user_id).groupReply !== 'group');
       try {
@@ -190,35 +200,42 @@ export function createCodexService({ getConfig, send, store: injectedStore, auth
   async function tick() {
     if (!executeJobs || busy || stopped || !settings().enabled) return;
     busy = true;
-    let job, session = '', heartbeat, heartbeatFailure='', busySince=0;
+    let job, session = '', heartbeat, heartbeatFailure='', busySince=0, checking=false;
     try {
+      let snapshot = readRbac ? await loadIdentity() : undefined;
       const s = storage(); job = s.claim({includeQQ:!!getConfig().channels?.qq?.enabled});
       if(!job){
         todoScheduler ||= createTodoScheduler({store:s,getConfig:settings,authorize:todoAllowed,readUsage,readCatalog,includeQQ:()=>!!getConfig().channels?.qq?.enabled});
-        await todoScheduler.tick();job=s.claim({includeQQ:!!getConfig().channels?.qq?.enabled});
+        await todoScheduler.tick();
+        snapshot = readRbac ? await loadIdentity() : undefined;
+        job=s.claim({includeQQ:!!getConfig().channels?.qq?.enabled});
       }
       if (!job) return;
-      const user = jobUser(job);
+      const user = await jobUser(job, snapshot);
       if (!user || user.userId !== job.user_id || !user.projects?.includes(job.project) || job.group_id && !s.settings(job.user_id).groups.includes(job.group_id)) throw Object.assign(new Error('账号或项目授权已撤销'),{code:'CODEX_AUTH_REVOKED'});
       controller = new AbortController();
-      heartbeat = setInterval(() => {
-        if(controller.signal.aborted)return;
+      const currentController = controller;
+      heartbeat = setInterval(async () => {
+        if(checking || currentController.signal.aborted || controller !== currentController)return;
+        checking = true;
         try {
-          const u = jobUser(job);
-          if(s.cancelled(job.id)){log.info?.('[codex] '+job.id+' 主动停止');controller.abort();return;}
+          const u = await jobUser(job, readRbac ? await loadIdentity() : undefined);
+          if(controller !== currentController || currentController.signal.aborted)return;
+          if(s.cancelled(job.id)){log.info?.('[codex] '+job.id+' 主动停止');currentController.abort();return;}
           if(!settings().enabled||!u||u.userId!==job.user_id||!u.projects?.includes(job.project)||job.group_id&&!s.settings(job.user_id).groups.includes(job.group_id)){
-            heartbeatFailure='执行授权已撤销或服务已停用';controller.abort();return;
+            heartbeatFailure='执行授权已撤销或服务已停用';currentController.abort();return;
           }
-          if(!s.touch(job.id)){heartbeatFailure='任务已失去执行权';controller.abort();return;}
+          if(!s.touch(job.id)){heartbeatFailure='任务已失去执行权';currentController.abort();return;}
           busySince=0;
         } catch(error) {
+          if(controller !== currentController || currentController.signal.aborted)return;
           if(databaseBusy(error)){
             if(!busySince){busySince=Date.now();log.warn?.('[codex] '+job.id+' 心跳数据库繁忙，继续重试');}
             if(Date.now()-busySince<30000)return;
             heartbeatFailure='数据库持续繁忙，任务已中断，已有修改保留';
           }else heartbeatFailure='任务状态检查失败，已有修改保留';
-          controller.abort();
-        }
+          currentController.abort();
+        } finally { checking = false; }
       }, 1000);
       const media = job.origin==='web' || ['__usage__','__sync__'].includes(job.prompt) ? undefined : await prepareMedia(settings(),job,getConfig().napcat,{signal:controller.signal});
       const sessionId=job.origin==='web' ? s.conversations.get(job.user_id,job.conversation_id)?.session_id : s.session(job.user_id, job.project, job.group_id || '');

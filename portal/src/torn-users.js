@@ -85,7 +85,7 @@ export async function handleTornUsersApi(req, res, url, session, json, config) {
     return !!ctx && canTornUsers(ctx, action) && (action !== 'notify:edit' || canTornUsers(ctx, 'notify:view'));
   };
   initialization ||= (async () => {
-    const url = process.env.NAVIGATION_TORN_USERS_POSTGRES_URL;
+    const url = process.env.NAVIGATION_TORN_POSTGRES_URL || process.env.NAVIGATION_TORN_USERS_POSTGRES_URL;
     const db = url && portalPostgresDatabase(url);
     if (db) await verifyPostgresSchema(db);
     service = createTornUsersService({ store: db ? createPostgresUsersStore(db) : createUsersStore(getDatabase()),

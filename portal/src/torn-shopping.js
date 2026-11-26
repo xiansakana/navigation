@@ -6,6 +6,10 @@ import { integrationConfig } from '../../shared/runtime-config.js';
 import { createChainNotifier } from './torn-chain-notifications.js';
 import { ShoppingMonitor, createShoppingStore, shoppingConfig } from './torn-shopping-monitor.js';
 import { portalTornRequest } from './torn-chain-monitor.js';
+import { createPostgresShoppingStore } from './torn-shopping-postgres.js';
+import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
+import { portalPostgresDatabase } from './postgres.js';
+import { portalIdentity } from './postgres-rbac.js';
 
 export function canTornShopping(session, action = 'view') {
   const permissions = session?.dataAccess?.permissions || session?.permissions || [];
@@ -17,8 +21,8 @@ export function createTornShoppingService({ store, request = portalTornRequest, 
   const monitors = new Map(), catalog = new Map();
   const monitor = uid => {
     if (!monitors.has(uid)) monitors.set(uid, new Monitor({ uid, store, request, authorize: () => authorize(uid), notify: async row => {
-      if (!authorizeNotify(uid)) return;
-      await sendNotification(store.getNotify(uid), row);
+      if (!await authorizeNotify(uid)) return;
+      await sendNotification(await store.getNotify(uid), row);
     }, ...monitorOptions }));
     return monitors.get(uid);
   };
@@ -33,24 +37,24 @@ export function createTornShoppingService({ store, request = portalTornRequest, 
       if (!sameOriginWrite(req)) return json(res, 403, { ok: false, error: '不允许跨站操作' });
       try {
         if (route.startsWith('/notifications') && !canTornShopping(session, 'notify:view')) return json(res, 403, { ok: false, error: '无权访问扫货通知配置' });
-        if (route === '/notifications' && req.method === 'GET') return json(res, 200, { ok: true, settings: store.getNotify(uid), permissions: { save: canTornShopping(session, 'notify:edit'), test: canTornShopping(session, 'notify:test:edit') } });
-        if (route === '/notifications' && req.method === 'PUT') { store.saveNotify(uid, await readJson(req, 16384)); return json(res, 200, { ok: true, settings: store.getNotify(uid) }); }
+        if (route === '/notifications' && req.method === 'GET') return json(res, 200, { ok: true, settings: await store.getNotify(uid), permissions: { save: canTornShopping(session, 'notify:edit'), test: canTornShopping(session, 'notify:test:edit') } });
+        if (route === '/notifications' && req.method === 'PUT') { await store.saveNotify(uid, await readJson(req, 16384)); return json(res, 200, { ok: true, settings: await store.getNotify(uid) }); }
         if (route === '/notifications/test' && req.method === 'POST') {
-          const settings = store.getNotify(uid);
+          const settings = await store.getNotify(uid);
           if (!settings.qq.enabled && !settings.slack.enabled) throw new Error('请先保存并启用至少一个通知渠道');
           const result = await sendNotification(settings, null);
           return json(res, 200, { ok: true, result });
         }
         if (route === '/items' && req.method === 'GET') {
           if (!canTornShopping(session, 'items:view')) return json(res,403,{ok:false,error:'无权查询物品目录'});
-          const { apiKeys } = store.get(uid).config;
+          const { apiKeys, apiIntervalSeconds } = (await store.get(uid)).config;
           if (!apiKeys.length) throw new Error('请先填写并保存 API Key，再选择物品');
           const signature = apiKeys.join(','), cached = catalog.get(uid);
           if (cached && cached.signature === signature && Date.now()-cached.at < 86400000) return json(res,200,{ok:true,items:cached.items});
           let data;
           try {
             for (const key of apiKeys) {
-              try { data = await request('torn/items',key,undefined,{scope:'shopping-catalog:'+uid,spacingMs:store.get(uid).config.apiIntervalSeconds*1000}); break; }
+              try { data = await request('torn/items',key,undefined,{scope:'shopping-catalog:'+uid,spacingMs:apiIntervalSeconds*1000}); break; }
               catch (error) { if (![1,2,10,13,16,18].includes(error.apiCode)) throw error; }
             }
           } catch { throw new Error('物品目录读取失败，请检查 Key 权限或稍后重试'); }
@@ -62,37 +66,44 @@ export function createTornShoppingService({ store, request = portalTornRequest, 
           catalog.set(uid,{signature,at:Date.now(),items}); return json(res,200,{ok:true,items});
         }
         if (route === '/state' && req.method === 'GET') {
-          const { config: { apiKey, apiKeys, ...config }, history } = store.get(uid);
+          const { config: { apiKey, apiKeys, ...config }, history } = await store.get(uid);
           const state = monitor(uid).status();
           return json(res, 200, { ok: true, config: { ...config, hasKey: !!apiKey, keyCount: apiKeys.length }, state, history: [...history].reverse(), permissions: { items: canTornShopping(session, 'items:view'), configure: canTornShopping(session, 'config:edit'), control: canTornShopping(session, 'control:edit'), clear: canTornShopping(session, 'history:edit') } });
         }
         if (route === '/config' && req.method === 'POST') {
-          const input = await readJson(req, 65536); validateConfig(input, store.get(uid).config);
-          const current = monitor(uid); current.stop(); await current.promise; store.save(uid, input);
+          const input = await readJson(req, 65536); validateConfig(input, (await store.get(uid)).config);
+          const current = monitor(uid); current.stop(); await current.promise; await store.save(uid, input);
           return json(res, 200, { ok: true });
         }
-        if (route === '/start' && req.method === 'POST') { monitor(uid).start(); return json(res, 200, { ok: true }); }
+        if (route === '/start' && req.method === 'POST') { await monitor(uid).start(); return json(res, 200, { ok: true }); }
         if (route === '/stop' && req.method === 'POST') { monitor(uid).stop(); return json(res, 200, { ok: true }); }
-        if (route === '/history' && req.method === 'DELETE') { store.clear(uid); return json(res, 200, { ok: true }); }
+        if (route === '/history' && req.method === 'DELETE') { await store.clear(uid); return json(res, 200, { ok: true }); }
         return json(res, 404, { ok: false, error: 'Not Found' });
       } catch (error) { return json(res, error.status || 400, { ok: false, error: error.message }); }
     }
   };
 }
 
-let service;
+let service, initialization;
 export const shoppingJobs = () => service?.monitors || new Map();
 export async function handleTornShoppingApi(req, res, url, session, json, config) {
   if (!canTornShopping(session)) return json(res, 403, { ok: false, error: '请登录并获取扫货助手权限' });
-  const authorized = (uid, action) => {
-    const current = resolveSessionUser({ userId: uid }, config);
+  const authorized = async (uid, action) => {
+    const current = resolveSessionUser({ userId: uid }, config, await portalIdentity.load(config));
     if (current?.rbac?.accessPolicy?.modules?.['torn-shopping']?.enabled === false) return false;
     const ctx = current && { userId: uid, permissions: current.permissions, isGuest: current.user.username === (config.auth?.guestUsername || 'guest') };
     return !!ctx && canTornShopping(ctx, action) && (action !== 'notify:edit' || canTornShopping(ctx, 'notify:view'));
   };
-  service ||= createTornShoppingService({ store: createShoppingStore(getDatabase()), authorize: uid => authorized(uid, 'control:edit'), authorizeNotify: uid => authorized(uid, 'notify:edit'), sendNotification: async (settings, row) => {
-    const endpoint = config.services?.find(item => item.id === 'notifications')?.internalUrl || 'http://127.0.0.1:8787';
-    return createChainNotifier({ endpoint, testMessage: '[Torn 扫货助手] 测试通知 · 配置正常', token: integrationConfig().notifyToken })(settings, row);
-  } });
-  return service.handle(req, res, url, session, json);
+  initialization ||= (async () => {
+    const url = process.env.NAVIGATION_TORN_POSTGRES_URL;
+    const db = url && portalPostgresDatabase(url);
+    if (db) await verifyPostgresSchema(db);
+    service = createTornShoppingService({ store: db ? createPostgresShoppingStore(db) : createShoppingStore(getDatabase()),
+      authorize: uid => authorized(uid, 'control:edit'), authorizeNotify: uid => authorized(uid, 'notify:edit'), sendNotification: async (settings, row) => {
+        const endpoint = config.services?.find(item => item.id === 'notifications')?.internalUrl || 'http://127.0.0.1:8787';
+        return createChainNotifier({ endpoint, testMessage: '[Torn 扫货助手] 测试通知 · 配置正常', token: integrationConfig().notifyToken })(settings, row);
+      } });
+    return service;
+  })().catch(error => { initialization = undefined; throw error; });
+  return (await initialization).handle(req, res, url, session, json);
 }

@@ -47,29 +47,46 @@ export class ShoppingMonitor extends ChainMonitor {
     super({ ...options, request }); this.bazaar = options.bazaar || bazaarListings; this.state.rows = []; }
   start() {
     if (this.running || this.busy) throw new Error('监控正在运行或停止中');
-    if (!this.authorize()) throw new Error('无权启动'); this.config = this.store.get(this.uid).config;
+    const begin = authorized => {
+      if (!authorized) throw new Error('无权启动');
+      const saved = this.store.get(this.uid);
+      return saved?.then ? saved.then(data => this.startConfigured(data.config)) : this.startConfigured(saved.config);
+    };
+    const authorized = this.authorize();
+    return authorized?.then ? authorized.then(begin) : begin(authorized);
+  }
+  startConfigured(config) {
+    if (this.running || this.busy) throw new Error('监控正在运行或停止中');
+    this.config = config;
     if (!this.config.apiKeys.length || !this.config.items.length) throw new Error('请先保存Key和监控物品');
     this.resetKeys(); this.running = true; this.controller = new AbortController(); this.promise = this.scan();
   }
   async scan() {
     if (!this.running || this.busy) return; this.busy = true; const signal = this.controller.signal;
-    const check = () => { signal.throwIfAborted(); if (!this.running || !this.authorize()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true }); };
+    const authorized = async () => {
+      try { return await this.authorize(); } catch { return false; }
+    };
+    const check = async () => {
+      signal.throwIfAborted();
+      if (!this.running || !await authorized()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true });
+      signal.throwIfAborted();
+    };
     this.state.rows = []; this.state.error = '';
     try {
       await this.prepareKeys(signal);
       for (const item of this.config.items) for (const source of ['market', 'bazaar']) {
-        if (item[source] === null) continue; check();
+        if (item[source] === null) continue; await check();
         try {
           let rows;
           if (source === 'market') { const d = await this.api('market/' + item.id + '/itemmarket?limit=100&sort=ASC', signal); rows = d.itemmarket?.listings; }
           else rows = await this.bazaar(item.id, signal);
-          check(); const lows = lowListings(rows, source, item[source], item);
+          await check(); const lows = lowListings(rows, source, item[source], item);
           this.state.rows.push({ itemId: item.id, name: item.name, source, matches: lows.length, checkedAt: this.now() });
-          for (const row of lows) { check(); row.detectedAt = this.now(); if (this.store.record(this.uid, row)) { try { await this.notify(row); } catch { this.state.notificationError = '记录已保存，通知失败，请检查QQ配置（不自动重发）'; } } }
+          for (const row of lows) { await check(); row.detectedAt = this.now(); if (await this.store.record(this.uid, row)) { try { await this.notify(row); } catch { this.state.notificationError = '记录已保存，通知失败，请检查QQ配置（不自动重发）'; } } }
         } catch (error) { if (error.fatal || signal.aborted) throw error; this.state.rows.push({ itemId: item.id, source, error: this.safeError(error) }); }
       }
       this.state.rounds++; this.state.lastScanAt = this.now();
     } catch (error) { if (!signal.aborted) { this.state.error = this.safeError(error); if (error.fatal) this.stop(); } }
-    finally { this.busy = false; if (this.running && !signal.aborted && this.authorize()) { this.state.nextScanAt = this.now() + this.config.intervalSeconds; this.timer = this.schedule(() => { this.promise = this.scan(); }, this.config.intervalSeconds * 1000); this.timer?.unref?.(); } else this.stop(); }
+    finally { this.busy = false; if (this.running && !signal.aborted && await authorized() && this.running && !signal.aborted) { this.state.nextScanAt = this.now() + this.config.intervalSeconds; this.timer = this.schedule(() => { this.promise = this.scan(); }, this.config.intervalSeconds * 1000); this.timer?.unref?.(); } else this.stop(); }
   }
 }

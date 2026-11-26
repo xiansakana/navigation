@@ -75,7 +75,8 @@ export function createTornWorkerRuntime({ runs, dispatch, sessionFor, jobs, conf
         const pending = [];
         const active = jobs();
         for (const row of rows) {
-          const state = row.desired && active[row.module]?.get(row.user_id)?.status();
+          const job = row.desired && active[row.module]?.get(row.user_id);
+          const state = job && (job.runtimeStatus ? job.runtimeStatus() : job.status());
           if (!state || state.running || state.busy) continue;
           const error = state.error || '任务已停止';
           if (runs.clearIfUnchanged) pending.push(runs.clearIfUnchanged(row, error));

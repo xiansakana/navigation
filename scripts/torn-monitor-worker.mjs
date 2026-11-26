@@ -21,7 +21,7 @@ import { portalIdentity } from '../portal/src/postgres-rbac.js';
 
 process.env.NAVIGATION_PROCESS_ROLE = 'torn-monitor-worker';
 const config = loadConfig(), db = getDatabase(), controller = new AbortController();
-const postgresUrl = process.env.NAVIGATION_TORN_USERS_POSTGRES_URL;
+const postgresUrl = process.env.NAVIGATION_TORN_POSTGRES_URL || process.env.NAVIGATION_TORN_USERS_POSTGRES_URL;
 const runDb = postgresUrl ? portalPostgresDatabase(postgresUrl) : db;
 if (postgresUrl) await verifyPostgresSchema(runDb);
 const startedAt = Date.now(), seen = new Map();

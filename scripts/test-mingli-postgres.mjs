@@ -10,6 +10,7 @@ import { createSessionCookie, resolveRequestUser, verifyLogin } from '../portal/
 import { handleAdminApi } from '../portal/src/admin-api.js';
 import { requestDataAccess } from '../portal/src/data-access.js';
 import { createPostgresRbacStore } from '../shared/db/postgres/rbac-store.js';
+import { createCodexService } from '../shared/codex/codex-service.js';
 import { verifyPostgresSchema } from '../shared/db/postgres/readiness.js';
 import { startAccessPortal } from '../portal/src/test-fixtures/access-portal.js';
 import { moduleInventoryPostgres } from '../portal/src/modules.js';
@@ -20,6 +21,12 @@ import { createTornRunStore } from '../portal/src/torn-worker-runs.js';
 import { createTornWorkerRuntime, tickTornWorker } from '../portal/src/torn-worker-runtime.js';
 import { createCodexAuthMonitor } from '../qq-bot/src/codex-auth-monitor.js';
 import { createWatchdogStore, startLoginWatchdog } from '../qq-bot/src/watchdog.js';
+import { createPostgresShoppingStore } from '../portal/src/torn-shopping-postgres.js';
+import { ShoppingMonitor } from '../portal/src/torn-shopping-monitor.js';
+import { createPostgresDestructionStore } from '../portal/src/torn-destruction-postgres.js';
+import { createPostgresCompanyAlertsStore } from '../portal/src/torn-company-alerts-postgres.js';
+import { createPostgresFactionStore } from '../portal/src/torn-faction-postgres.js';
+import { FactionScanner } from '../portal/src/torn-faction-scan.js';
 
 async function verifyQqMonitoring(db) {
   let restarts = 0, now = 1000000, usageReads = 0, sent = 0;
@@ -102,6 +109,27 @@ async function verifyTornUsers(db) {
   } finally { await runtime.close(); }
 }
 
+async function verifyTornShopping(db) {
+  const uid = 'shopping-owner', store = createPostgresShoppingStore(db);
+  await store.save(uid, { apiKey: 'b'.repeat(16), items: [{ id: 7, name: 'test item', market: 100 }] });
+  let sent = 0;
+  const job = new ShoppingMonitor({ uid, store, authorize: async () => true, schedule: () => null, cancel: () => {},
+    request: async () => ({ itemmarket: { listings: [{ price: 50, amount: 1 }] } }),
+    notify: async () => { sent++; } });
+  try {
+    await job.start(); await job.promise;
+    await job.scan();
+    assert.equal(sent, 1);
+    const saved = await store.get(uid);
+    assert.equal(saved.history[0].price, 50);
+    assert.equal((await store.get('another-shopper')).history.length, 0);
+    await store.clear(uid);
+    await job.scan();
+    assert.equal(sent, 1);
+    assert.equal((await store.get(uid)).history.length, 0);
+  } finally { job.stop(); }
+}
+
 async function verifyBlog(db, app, member, outsider) {
   const uid = member.id, foreign = outsider.id;
   const post = await app.request('/api/blog/posts', {
@@ -170,16 +198,99 @@ async function verifyBlog(db, app, member, outsider) {
   assert.equal((await db.query("SELECT count(*) FROM navigation.blog_media_cleanup WHERE storage_key=$1 AND kind='object'", [file.storageKey])).rows[0].count, '1');
 }
 
+async function verifyTornDestruction(db) {
+  const first = createPostgresDestructionStore(db);
+  const second = createPostgresDestructionStore(db);
+  const uid = 'torn-destruction-fixture';
+  await db.query('INSERT INTO navigation.torn_chain_monitors(user_id,config_json) VALUES($1,$2)', [
+    uid, JSON.stringify({ apiKey: 'fixtureskey12345', apiIntervalSeconds: 3 }),
+  ]);
+  assert.equal((await first.get(uid)).config.apiIntervalSeconds, 3);
+  const alive = { id: 2468, respect: 10, name: 'fixture', leaderId: 12, leaderName: 'fixture-leader', isDestroyed: false, checkedAt: 100 };
+  assert.equal(await first.observe(uid, alive), null);
+  const zero = { ...alive, respect: 0, checkedAt: 101 };
+  const events = await Promise.all([first.observe(uid, zero), second.observe(uid, zero)]);
+  assert.deepEqual(events.filter(Boolean).map(event => event.kind), ['respect-zero']);
+  await second.observe(uid, { ...zero, isDestroyed: true, checkedAt: 102 });
+  assert.equal(await first.observe(uid, { ...alive, checkedAt: 103 }), null);
+  assert.equal((await first.get(uid)).history[0].destroyedConfirmedAt, 102);
+  assert.equal((await second.observations(uid))[0].isDestroyed, true);
+  assert.deepEqual(await second.observations('other-torn-destruction-fixture'), []);
+  await first.clear(uid);
+  assert.deepEqual((await second.get(uid)).history, []);
+}
+
+async function verifyTornCompanyAlerts(db) {
+  const first = createPostgresCompanyAlertsStore(db);
+  const second = createPostgresCompanyAlertsStore(db);
+  const uid = 'torn-company-alerts-fixture';
+  const watcher = { id: 'fixture', label: 'Company fixture' };
+  const signals = [{ key: 'training:fixture', message: 'Fixture event' }];
+  const commit = store => store.commit(uid, 'fixture:training', signals, 'training', watcher, 100);
+  const results = await Promise.all([commit(first), commit(second)]);
+  assert.equal(results.flat().length, 1);
+  assert.equal((await second.get(uid)).history[0].watcherId, watcher.id);
+  assert.deepEqual(await commit(second), []);
+  assert.deepEqual((await first.get('other-company-alerts-fixture')).history, []);
+}
+
+async function verifyTornFactionScan(db) {
+  const first = createPostgresFactionStore(db);
+  const restarted = createPostgresFactionStore(db);
+  const uid = 'torn-faction-scan-fixture', today = 21000;
+  await first.save(uid, { apiKey: 'fixturekey123456' });
+  await first.savePoints(uid, 101, [
+    { day: today - 1, timestamp: (today - 1) * 86400, value: 50 },
+    { day: today - 2, timestamp: (today - 2) * 86400, value: 40 },
+  ]);
+  const rows = [{ id: 3, respect: 8, status: 'excluded' }];
+  const checkpoint = { rows, cursor: 1, today, listComplete: true, currentFaction: 3 };
+  await first.saveRun(uid, checkpoint);
+  const saved = await restarted.get(uid);
+  assert.deepEqual(saved.run, checkpoint);
+  const scanner = new FactionScanner({
+    uid, store: restarted, initialRun: saved.run, now: () => today * 86400,
+    authorize: async () => true,
+    request: () => { throw new Error('A completed checkpoint made an unexpected external request'); },
+  });
+  await scanner.start();
+  await scanner.promise;
+  assert.equal(scanner.status().stage, '本次列表扫描完成');
+  assert.equal((await restarted.points(uid, 101, today - 2, today - 1)).size, 2);
+  assert.equal((await restarted.get('other-faction-fixture')).run.rows.length, 0);
+  await restarted.saveRun(uid, {});
+  assert.equal((await first.get(uid)).run.rows.length, 0);
+}
+
 async function verifyRbac(db) {
   const lowLevel = createPostgresRbacStore(db);
   const writer = createPortalPostgresRbac(db);
   const reader = createPortalPostgresRbac(db);
   const config = { auth: { anonymousGuest: false, sessionSecret: 'isolated-postgres-test-only' }, services: [] };
   await assert.rejects(() => reader.load(config), { status: 503 });
-  const member = { id: 'member', username: 'member', roleIds: [], enabled: true, ...createPasswordRecord('fixture-passphrase') };
+  const member = { id: 'member', username: 'member', roleIds: ['codex'], enabled: true, ...createPasswordRecord('fixture-passphrase') };
   const outsider = { id: 'member-b', username: 'member-b', roleIds: [], enabled: true };
   const admin = { id: 'admin', username: 'admin', roleIds: ['role_admin'], enabled: true };
-  await lowLevel.save({ roles: [{ id: 'role_admin', name: '管理员', permissions: ['*'] }], users: [member, admin, outsider] });
+  await lowLevel.save({
+    roles: [{ id: 'role_admin', name: '管理员', permissions: ['*'] }, { id: 'codex', name: 'Codex', permissions: ['qq-codex:execute'] }],
+    users: [member, admin, outsider],
+  });
+  const replies = [];
+  const codex = createCodexService({
+    getConfig: () => ({
+      channels: { qq: { enabled: true } },
+      codex: { enabled: true, allowedUsers: [{ qqId: '123456', userId: member.id }] },
+    }),
+    readRbac: () => lowLevel.load(),
+    store: { transaction: callback => callback(), event: () => true, reply: (...args) => replies.push(args) },
+  });
+  const receiveCodexHelp = messageId => codex.receive({
+    post_type: 'message', message_type: 'private', message_id: messageId, user_id: 123456, self_id: 999999,
+    message: [{ type: 'text', data: { text: 'codex 帮助' } }],
+  });
+  assert.equal(await receiveCodexHelp(1), true);
+  assert.equal(replies.length, 1);
+  assert.equal(replies[0][0], member.id);
   const identity = await reader.load(config);
   assert.equal(verifyLogin('member', 'fixture-passphrase', config, identity).id, member.id);
   const cookie = createSessionCookie(member.id, config.auth.sessionSecret).split(';')[0];
@@ -204,6 +315,8 @@ async function verifyRbac(db) {
   const fresh = await reader.load(config);
   assert.equal(resolveRequestUser(req, config, fresh), null);
   assert.equal(verifyLogin('member', 'fixture-passphrase', config, fresh), null);
+  assert.equal(await receiveCodexHelp(2), true);
+  assert.equal(replies.length, 1);
   await db.query("UPDATE navigation.rbac_snapshot SET payload = payload WHERE id = 1");
   assert.equal(await lowLevel.revision(), before + 2n);
   const enabled = await writer.load(config);
@@ -268,6 +381,10 @@ test('Mingli HTTP entry point uses PostgreSQL for owner-scoped cases, categories
     schemaCreated = true;
     assert.deepEqual(await verifyPostgresSchema(db), { database: database.name, version: '001-initial' });
     await verifyTornUsers(db);
+    await verifyTornShopping(db);
+    await verifyTornDestruction(db);
+    await verifyTornCompanyAlerts(db);
+    await verifyTornFactionScan(db);
     await verifyQqMonitoring(db);
     await verifyRbac(db);
     const store = createMingliPostgresStore(db);

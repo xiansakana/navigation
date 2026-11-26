@@ -3,7 +3,7 @@ import { createCodexService } from '../qq-bot/src/codex.js';
 import { getDatabase, closeDatabase } from '../shared/db/index.js';
 import {createCodexAuthMonitor} from '../qq-bot/src/codex-auth-monitor.js';
 import {setTimeout as delay} from 'node:timers/promises';
-import { getPostgresMonitoring } from '../qq-bot/src/postgres.js';
+import { getPostgresCodexIdentity, getPostgresMonitoring } from '../qq-bot/src/postgres.js';
 
 loadConfig();
 const databaseBusy=error=>/^SQLITE_BUSY(?:_|$)/.test(error?.code||'');
@@ -17,10 +17,10 @@ for(;;){
   }
 }
 // Execute the durable queue independently of QQ transport; delivery stays in qq-bot.
-const service = createCodexService({ getConfig: loadConfig, executeJobs: true, deliverReplies: false });
+const [monitoringDb, readRbac] = await Promise.all([getPostgresMonitoring(), getPostgresCodexIdentity()]);
+const service = createCodexService({ getConfig: loadConfig, executeJobs: true, deliverReplies: false, readRbac });
 service.start();
 const authController=new AbortController();
-const monitoringDb = await getPostgresMonitoring();
 const authMonitor=createCodexAuthMonitor({db: monitoringDb || db,getConfig:loadConfig,signal:authController.signal});
 void authMonitor.tick();
 const authTimer=setInterval(()=>void authMonitor.tick(),60000);
