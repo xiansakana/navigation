@@ -1,4 +1,5 @@
 **/node_modules/
+stock-manage/public/generated/
 **/__pycache__/
 **/*.log
 **/config.json

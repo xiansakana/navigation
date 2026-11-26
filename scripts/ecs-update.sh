@@ -163,6 +163,7 @@ if should_run stock-manage; then
     echo "==> stock-manage"
     cd "$ROOT/stock-manage"
     npm install --production
+    npm run build
     if pm2 describe stock-manage >/dev/null 2>&1; then
         TRUST_PROXY=1 pm2 restart stock-manage --update-env
     else

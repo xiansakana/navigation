@@ -21,6 +21,7 @@ jobs:
           for service in portal stock-manage qqq-dip qq-bot torn-toolbox-desktop; do
             npm ci --prefix "$service"
           done
+      - run: npm run typecheck --prefix stock-manage && npm run build --prefix stock-manage
       - run: npm test
       - run: npm run test:backup
       - run: python3 -m unittest discover -s portal/workers -p 'test_*.py'

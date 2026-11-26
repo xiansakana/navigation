@@ -13,6 +13,7 @@ fi
 
 echo "==> 安装依赖..."
 npm install --production
+npm run build
 
 if [ ! -f config.json ]; then
     cp config.example.json config.json

@@ -734,6 +734,7 @@ function closeModal(layerEl) {
   const target = layerEl || root.querySelector('.sm-modal-backdrop:last-of-type');
   if (!target) return;
   if (target === window._tradeHistoryLayer) {
+    target.disposeTradeTable?.();
     window._refreshTradeModal = null;
     window._tradeHistoryLayer = null;
   }
@@ -1524,40 +1525,38 @@ function renderTradeListTab(trades, loadError) {
   const start = (ui.tradePage - 1) * ui.tradePageSize;
   const pageRows = all.slice(start, start + ui.tradePageSize);
 
-  return `
+  const rows = pageRows.map((trade) => {
+    const asset = tradeAssetType(trade);
+    const currency = trade.currency || (looksLikeAShare(trade.symbol) ? 'CNY' : 'USD');
+    const other = trade.type === 'other';
+    return {
+      id: trade.id,
+      date: formatLocalDateTime(trade.trade_date),
+      direction: typeLabel(trade),
+      historical: Boolean(trade.historicalBackfill),
+      assetType: TRADE_ASSET_TYPES[asset],
+      symbol: trade.symbol,
+      name: trade.name || '',
+      account: showAccounts ? accountNames.get(trade.account_id) || '待归属' : '',
+      currency,
+      shares: other ? '—' : formatQuantity(trade.shares),
+      price: other ? '—' : formatPrice(trade.reinvestedDividend ? trade.reinvestmentNav : trade.price,
+        currency, asset === 'fund' ? fundPriceDigits(trade.symbol) : 3),
+      amount: tradeAmountLabel(trade),
+      commission: fmtCommission(trade.commission, currency)
+    };
+  });
+  const html = `
     ${renderTradeFilters()}
     <div class="sm-trade-modal-scroll">
-      <div class="sm-table-wrap sm-table-wrap--modal">
-        <table class="sm-table">
-          <thead><tr>
-            <th>时间</th><th>交易方向</th><th>类型</th><th>代码</th><th class="sm-trade-name">名称</th><th>币种</th><th>股数</th><th>价格</th><th>金额</th><th>手续费</th><th>操作</th>
-          </tr></thead>
-          <tbody>${pageRows.length ? pageRows.map((t) => `
-            <tr>
-              <td data-label="时间">${formatLocalDateTime(t.trade_date)}</td>
-              <td data-label="交易方向">${escapeHtml(typeLabel(t))}${t.historicalBackfill ? '<div class="hint">历史补录</div>' : ''}</td>
-              <td data-label="类型">${TRADE_ASSET_TYPES[tradeAssetType(t)]}</td>
-              <td data-label="代码">${escapeHtml(t.symbol)}</td>
-              <td data-label="名称" class="sm-trade-name">${escapeHtml(t.name || '')}${showAccounts ? `<div class="sm-trade-account-name">${escapeHtml(accountNames.get(t.account_id) || '待归属')}</div>` : ''}</td>
-              <td data-label="币种">${escapeHtml(t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
-              <td data-label="股数">${t.type === 'other' ? '—' : formatQuantity(t.shares)}</td>
-              <td data-label="价格">${t.type === 'other' ? '—' : formatPrice(t.reinvestedDividend ? t.reinvestmentNav : t.price, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'), tradeAssetType(t) === 'fund' ? fundPriceDigits(t.symbol) : 3)}</td>
-              <td data-label="金额">${tradeAmountLabel(t)}</td>
-              <td data-label="手续费">${fmtCommission(t.commission, t.currency || (looksLikeAShare(t.symbol) ? 'CNY' : 'USD'))}</td>
-              <td data-label="操作">${can('trade', 'edit') ? `
-                <button type="button" class="btn link" data-edit="${t.id}">编辑</button>
-                <button type="button" class="btn link" data-del="${t.id}">删除</button>` : '—'}
-              </td>
-            </tr>`).join('') : `<tr><td colspan="11" class="empty">${loadError ? `<span role="alert">${escapeHtml(loadError)}</span>` : '暂无记录'}</td></tr>`}
-          </tbody>
-        </table>
-      </div>
+      <div class="sm-table-wrap sm-table-wrap--modal" data-trade-table></div>
     </div>
     ${renderPagination({ page: ui.tradePage, pages, label: '交易记录分页', pageNumbers: true, extra: `
       <select id="page-size" aria-label="每页条数">
         ${[10, 20, 50, 100].map((n) => `<option value="${n}" ${ui.tradePageSize === n ? 'selected' : ''}>${n} 条/页</option>`).join('')}
       </select>
       <span class="sm-muted">共 ${total} 条</span>` })}`;
+  return { html, model: { rows, canEdit: can('trade', 'edit'), error: loadError } };
 }
 
 async function renderTradeSummaryTab() {
@@ -1623,8 +1622,13 @@ async function renderTradeModalBody(trades, loadError) {
       ${can('export') ? '<button type="button" class="btn ghost sm-btn-sm" id="modal-export">导出 xlsx</button>' : ''}
       <button type="button" class="btn ghost sm-btn-sm sm-trade-filter-toggle" data-filter-toggle aria-expanded="${ui.tradeFilterOpen ? 'true' : 'false'}">筛选条件${activeTradeFilterCount() ? `（${activeTradeFilterCount()}）` : ''}</button>
     </div>`;
-  const content = ui.tradeTab === 'review' && can('trade-review') ? await renderTradeReviewTab() : ui.tradeTab === 'summary' ? await renderTradeSummaryTab() : renderTradeListTab(trades, loadError);
-  return `<div class="sm-trade-modal-content">${tabs}${content}</div>`;
+  if (ui.tradeTab === 'list') {
+    const { html, model } = renderTradeListTab(trades, loadError);
+    return { html: `<div class="sm-trade-modal-content">${tabs}${html}</div>`, model };
+  }
+  const content = ui.tradeTab === 'review' && can('trade-review')
+    ? await renderTradeReviewTab() : await renderTradeSummaryTab();
+  return { html: `<div class="sm-trade-modal-content">${tabs}${content}</div>` };
 }
 
 async function renderTradeReviewTab() {
@@ -1672,8 +1676,18 @@ async function openTradeHistoryModal(symbol = '') {
       }
     }
     if (revision !== refreshRevision || !box.isConnected) return;
-    const html = await renderTradeModalBody(trades, loadError);
+    const { html, model } = await renderTradeModalBody(trades, loadError);
+    let mountTradeTable;
+    if (model) {
+      try {
+        ({ mountTradeTable } = await import('./generated/trade-table.js?v=vue-trades-1'));
+      } catch {
+        // Keep filters and tabs available if the optional table bundle fails.
+      }
+    }
     if (revision !== refreshRevision || !box.isConnected) return;
+    layer.disposeTradeTable?.();
+    layer.disposeTradeTable = undefined;
     if ($('[data-tab].active', box)?.dataset.tab === ui.tradeTab) {
       const template = document.createElement('template');
       template.innerHTML = html;
@@ -1689,6 +1703,15 @@ async function openTradeHistoryModal(symbol = '') {
       });
     } else {
       box.innerHTML = html;
+    }
+    const table = $('[data-trade-table]', box);
+    if (table && mountTradeTable) {
+      layer.disposeTradeTable = mountTradeTable(table, model);
+    } else if (table) {
+      const error = document.createElement('p');
+      error.setAttribute('role', 'alert');
+      error.textContent = '交易列表加载失败，请刷新页面后重试。';
+      table.append(error);
     }
     listTrades = trades;
     const accountFilter = $('#trade-account-filter', box);
