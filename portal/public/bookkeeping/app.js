@@ -1,3 +1,5 @@
+import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
+
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -118,7 +120,7 @@
   const analysis = window.createBookkeepingAnalysis({ $, esc, m, money, can, load, tab, getState:()=>state, periods });
   const management = window.createBookkeepingManagement({ $, esc, can, api, write, load, field, select, options, getState:()=>state, openEditor });
   const details = window.createBookkeepingDetails({ $, esc, m, can, api, getState:()=>state, getAccountId:()=>$('account').value, tab, openEditor, copyEntry, remove:removeEntry });
-  const entryList = window.createBookkeepingEntryList({ $, esc, m, can, transferTypes, getState:()=>state, openEditor, copyEntry, removeEntry, openDetails:details.open });
+  const entryList = createBookkeepingEntryList({ $, esc, m, money, can, transferTypes, getState:()=>state, openEditor, copyEntry, removeEntry, openDetails:details.open });
   async function removeEntry(item) {
     if(!item || !can('entries:edit'))return false;
     if(!window.confirm('删除这条账单？新账单会撤销对账户余额的影响。'))return false;

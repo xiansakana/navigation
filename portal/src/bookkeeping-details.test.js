@@ -5,6 +5,14 @@ import { JSDOM } from 'jsdom';
 import { summarize } from './bookkeeping-store.js';
 import { analyzeBookkeeping } from './bookkeeping-analysis.js';
 
+let viewEpoch = 0;
+function installDomGlobals(w) {
+  const names = ['window', 'document', 'location', 'history', 'fetch', 'confirm', 'setInterval', 'clearInterval',
+    'queueMicrotask', 'Node', 'Element', 'SVGElement', 'HTMLElement', 'Text', 'Comment', 'DocumentFragment',
+    'Event', 'MutationObserver', 'getComputedStyle', 'FormData', 'Blob', 'File', 'FileReader'];
+  for (const name of names) { try { globalThis[name] = w[name]; } catch { /* keep the host value */ } }
+}
+
 async function fixture(extra={},permissions=['*'],{additionalEntries=[],pageLimit=Infinity}={}) {
   const html=fs.readFileSync(new URL('../public/bookkeeping/index.html',import.meta.url),'utf8');
   const dom=new JSDOM(html,{url:'http://localhost/bookkeeping/',runScripts:'outside-only'}),w=dom.window;
@@ -47,7 +55,10 @@ async function fixture(extra={},permissions=['*'],{additionalEntries=[],pageLimi
     } else throw new Error('Unexpected request '+url);
     return {ok:true,json:async()=>JSON.parse(JSON.stringify(data))};
   };
-  for(const name of ['periods','period-dock','scope','analysis','management','details','entry-list','app'])w.eval(fs.readFileSync(new URL('../public/bookkeeping/'+name+'.js',import.meta.url),'utf8'));
+  for(const name of ['periods','period-dock','scope','analysis','management','details'])w.eval(fs.readFileSync(new URL('../public/bookkeeping/'+name+'.js',import.meta.url),'utf8'));
+  w.__bookkeepingViewEpoch = String(++viewEpoch);
+  installDomGlobals(w);
+  await import(new URL('../public/bookkeeping/app.js?details-fixture=' + viewEpoch, import.meta.url));
   const wait=async condition=>{
     const deadline=performance.now()+2000;
     while(!condition()){
