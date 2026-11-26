@@ -15,19 +15,37 @@ import { factionJobs } from '../portal/src/torn-factions.js';
 import { portalTornRequest } from '../portal/src/torn-chain-monitor.js';
 import { bazaarListings } from '../portal/src/torn-shopping-monitor.js';
 import { installWorkerApi } from '../torn-toolbox-desktop/src/torn-api.js';
+import { portalPostgresDatabase } from '../portal/src/postgres.js';
+import { verifyPostgresSchema } from '../shared/db/postgres/readiness.js';
+import { portalIdentity } from '../portal/src/postgres-rbac.js';
 
 process.env.NAVIGATION_PROCESS_ROLE = 'torn-monitor-worker';
 const config = loadConfig(), db = getDatabase(), controller = new AbortController();
+const postgresUrl = process.env.NAVIGATION_TORN_USERS_POSTGRES_URL;
+const runDb = postgresUrl ? portalPostgresDatabase(postgresUrl) : db;
+if (postgresUrl) await verifyPostgresSchema(runDb);
 const startedAt = Date.now(), seen = new Map();
 let stopping = false, ready = false;
 installWorkerApi(portalTornRequest, bazaarListings, controller.signal);
-const runtime = createTornWorkerRuntime({ runs: createTornRunStore(db), config,
+const runtime = createTornWorkerRuntime({ runs: createTornRunStore(runDb), config,
   jobs: () => ({ 'torn-company-alerts': companyAlertJobs(), 'torn-shopping': shoppingJobs(), 'torn-chain': destructionJobs(), 'torn-factions': factionJobs(), 'torn-users': userJobs() }),
-  sessionFor: uid => { const current = resolveSessionUser({ userId: uid }, config); return current && { userId: current.user.id, permissions: current.permissions, isGuest: current.user.username === (config.auth?.guestUsername || 'guest') }; },
+  sessionFor: async uid => {
+    const current = resolveSessionUser({ userId: uid }, config, await portalIdentity.load(config));
+    return current && { userId: current.user.id, permissions: current.permissions, isGuest: current.user.username === (config.auth?.guestUsername || 'guest') };
+  },
   dispatch: (req, res, url, session, deps) => moduleApiHandler(url.pathname)(req, res, url, session, deps)
 });
 const json = (res, status, body) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
 const server = http.createServer(async (req, res) => {
+  if (req.method === 'GET' && req.url === '/readyz') {
+    if (!ready || stopping) return json(res, 503, { ok: false });
+    try {
+      if (postgresUrl) await verifyPostgresSchema(runDb);
+      else db.prepare('SELECT 1').get();
+      await portalIdentity.ready();
+      return json(res, 200, { ok: true });
+    } catch { return json(res, 503, { ok: false }); }
+  }
   if (req.method === 'GET' && req.url === '/healthz') return json(res, ready && !stopping ? 200 : 503, { ok: ready && !stopping, startedAt, pid: process.pid });
   if (req.method !== 'POST' || req.url !== '/dispatch') return json(res, 404, { ok: false });
   if (stopping || !ready) return json(res, 503, { ok: false, error: '监控进程正在启动或停止' });
@@ -45,7 +63,13 @@ const company = await import('../torn-toolbox-desktop/src/server-company.js');
 const undercut = await import('../torn-toolbox-desktop/src/server-undercut.js');
 await runtime.resume();
 ready = true;
-const timer = setInterval(() => tickTornWorker(runtime, db), 5000);
+let ticking = false;
+const timer = setInterval(async () => {
+  if (ticking) return;
+  ticking = true;
+  try { await tickTornWorker(runtime, runDb); }
+  finally { ticking = false; }
+}, 5000);
 console.log('Torn monitor worker ready (six monitors; control on loopback :' + tornWorkerPort(config) + ')');
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => {
   if (stopping) return;
@@ -54,6 +78,6 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => {
   server.close(); company.server.close(); undercut.server.close();
   company.monitor.stop(); undercut.monitor.stop(); controller.abort();
   await runtime.close();
-  while (company.monitor.checking || undercut.monitor.checking) await delay(50);
+  while (ticking || company.monitor.checking || undercut.monitor.checking) await delay(50);
   closeDatabase(); process.exit(0);
 });

@@ -5,7 +5,7 @@ import { hasPermission } from './rbac.js';
 import { calculateChart } from './mingli-chart.js';
 import { createMingliStore } from './mingli-store.js';
 import { createMingliPostgresStore } from './mingli-postgres.js';
-import { createPostgresDatabase } from './postgres.js';
+import { portalPostgresDatabase } from './postgres.js';
 import { parseCaseFilters } from './mingli-filters.js';
 import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
 import { canKnowledge } from './knowledge.js';
@@ -15,7 +15,7 @@ let postgresStore;
 function activeCaseStore() {
   const postgres = process.env.NAVIGATION_MINGLI_POSTGRES_URL;
   if (!postgres) return createMingliStore(getDatabase());
-  postgresDatabase ||= createPostgresDatabase(postgres);
+  postgresDatabase ||= portalPostgresDatabase(postgres);
   return postgresStore ||= verifyPostgresSchema(postgresDatabase).then(() => createMingliPostgresStore(postgresDatabase)).catch(error => {
     postgresStore = undefined;
     throw error;

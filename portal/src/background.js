@@ -4,14 +4,17 @@ import { startMediaCleanup } from './blog-media-cleanup.js';
 import { startAssetHistory } from './bookkeeping-asset-history.js';
 import { startThumbnailWorker, activeMediaJobs } from './blog-media-process.js';
 import { resumeVideoJobs, activeVideoJobs } from './blog.js';
+import { getBlogPostgresRepository } from './blog-postgres-runtime.js';
 
 process.env.NAVIGATION_PROCESS_ROLE = 'background';
 const config = loadConfig(), db = getDatabase();
-const cleanup = startMediaCleanup(db);
+const blogDb = (await getBlogPostgresRepository())?.db || db;
+const cleanup = startMediaCleanup(blogDb);
 const history = startAssetHistory(db);
-const thumbnails = startThumbnailWorker(db);
-resumeVideoJobs(db, config);
-const videos = setInterval(() => resumeVideoJobs(db, config), 10000);
+const thumbnails = startThumbnailWorker(blogDb);
+const resumeBlog = () => resumeVideoJobs(blogDb, config).catch(error => console.error('[blog video worker]', error.code || error.name));
+void resumeBlog();
+const videos = setInterval(resumeBlog, 10000);
 const heartbeat = setInterval(() => {
   db.prepare("INSERT OR REPLACE INTO meta(key,value) VALUES('portal_background_heartbeat',?)").run(String(Date.now()));
 }, 10000);

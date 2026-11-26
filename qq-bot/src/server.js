@@ -18,7 +18,9 @@ import { loadConfig, saveConfig, publicConfig, applyPublicConfig } from './confi
 import { sendMessage } from './napcat.js';
 import { sendEmail } from './email.js';
 import { sendSlack } from './slack.js';
-import { startLoginWatchdog } from './watchdog.js';
+import { createWatchdogStore, startLoginWatchdog } from './watchdog.js';
+import { getPostgresMonitoring } from './postgres.js';
+import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
 import { startTiboResetMonitor } from './tibo-reset-monitor.js';
 import { createBusinessService } from './business.js';
 
@@ -119,6 +121,7 @@ function channelStatus(config) {
 export function createNotificationServer(initialConfig, options) {
     var config = initialConfig || loadConfig();
     var watchdog = options?.startMonitors ? startLoginWatchdog(() => config, {
+        store: options.monitoringDb ? createWatchdogStore(options.monitoringDb) : undefined,
         ...options?.watchdog,
         send: (channel, message, meta) => sendThrough(config, channel, { message, ...meta }, options)
     }) : null;
@@ -143,6 +146,12 @@ export function createNotificationServer(initialConfig, options) {
     if (serveUiAsset(req, res)) return;
         var url = new URL(req.url, 'http://127.0.0.1');
         try {
+            if (req.method === 'GET' && url.pathname === '/readyz') {
+                try {
+                    if (options?.monitoringDb) await verifyPostgresSchema(options.monitoringDb);
+                    return json(res, 200, { ok: true });
+                } catch { return json(res, 503, { ok: false }); }
+            }
             if (req.method === 'GET' && url.pathname === '/health') {
                 return json(res, 200, { ok: true, channels: channelStatus(config), bookkeeping:receiver.status(), codex:codex.status(), qqLogin: watchdog?.status() || null });
             }
@@ -237,7 +246,7 @@ async function main() {
     var config = loadConfig();
     var host = config.server.host || '127.0.0.1';
     var port = config.server.port || 8787;
-    var server = createNotificationServer(config, { startMonitors: true });
+    var server = createNotificationServer(config, { startMonitors: true, monitoringDb: await getPostgresMonitoring() });
     for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
         server.codexService.stop(); server.bookkeepingReceiver.stop(); server.close();
         const wait = setInterval(() => {if(!server.codexService.status().running){clearInterval(wait);process.exit(0);}},100);

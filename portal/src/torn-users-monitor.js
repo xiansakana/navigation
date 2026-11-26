@@ -60,27 +60,43 @@ export class UsersMonitor extends ChainMonitor {
     const request = (path, key, signal, policy) => options.request(path, key, signal, { ...policy, scope: 'users:' + options.uid });
     request.release = () => options.request.release?.('users:' + options.uid);
     super({ ...options, request });
-    this.state.kind = 'users'; this.state.rows = this.store.get(this.uid).observations;
+    this.state.kind = 'users'; this.state.rows = options.initialObservations ?? this.store.get(this.uid).observations;
   }
   status() { return { ...super.status(), rows: this.state.rows.map(row => ({ ...row })), serverNow: this.now() }; }
   start() {
     if (this.running || this.busy) throw new Error('监控正在运行或停止中');
-    if (!this.authorize()) throw new Error('无权启动用户监控');
-    this.config = this.store.get(this.uid).config;
+    const begin = authorized => {
+      if (!authorized) throw new Error('无权启动用户监控');
+      const saved = this.store.get(this.uid);
+      return saved?.then ? saved.then(data => this.startConfigured(data.config)) : this.startConfigured(saved.config);
+    };
+    const authorized = this.authorize();
+    return authorized?.then ? authorized.then(begin) : begin(authorized);
+  }
+  startConfigured(config) {
+    if (this.running || this.busy) throw new Error('监控正在运行或停止中');
+    this.config = config;
     if (!this.config.apiKeys.length || !this.config.targets.length) throw new Error('请先保存 API Keys 和监控用户');
     this.resetKeys(); this.running = true; this.controller = new AbortController(); this.state.notificationError = ''; this.promise = this.scan();
   }
   async scan() {
     if (!this.running || this.busy) return;
     this.busy = true; const signal = this.controller.signal;
-    const check = () => { signal.throwIfAborted(); if (!this.running || !this.authorize()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true }); };
+    const authorized = async () => {
+      try { return await this.authorize(); } catch { return false; }
+    };
+    const check = async () => {
+      signal.throwIfAborted();
+      if (!this.running || !await authorized()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true });
+      signal.throwIfAborted();
+    };
     this.state.rows = []; this.state.error = '';
     try {
       await this.prepareKeys(signal);
       for (const target of this.config.targets) {
-        check();
+        await check();
         try {
-          const { profile } = await this.api('user/' + target.id + '/profile', signal); check();
+          const { profile } = await this.api('user/' + target.id + '/profile', signal); await check();
           if (profile?.id !== target.id || typeof profile.name !== 'string' || typeof profile.status?.state !== 'string') throw new Error('用户状态数据无效');
           const hospital = profile.status.state === 'Hospital', until = profile.status.until;
           if (hospital && (!Number.isSafeInteger(until) || until <= 0)) throw new Error('出院时间未知');
@@ -88,16 +104,16 @@ export class UsersMonitor extends ChainMonitor {
           this.state.rows.push(row);
           if (hospital && until > now && now >= row.reminderAt) {
             const alert = { ...row, kind: 'user-hospital', leadMinutes: this.config.leadMinutes, remainingSeconds: until - now, detectedAt: now, link: 'https://www.torn.com/profiles.php?XID=' + target.id };
-            if (this.store.record(this.uid, alert)) {
-              try { const result = await this.notify(alert); this.store.delivered(this.uid, alert, result?.skipped ? 'disabled' : 'sent'); }
-              catch { this.store.delivered(this.uid, alert, 'failed'); this.state.notificationError = '提醒记录已保存，通知失败；请检查通知管理（不自动重发）'; }
+            if (await this.store.record(this.uid, alert)) {
+              try { const result = await this.notify(alert); await this.store.delivered(this.uid, alert, result?.skipped ? 'disabled' : 'sent'); }
+              catch { await this.store.delivered(this.uid, alert, 'failed'); this.state.notificationError = '提醒记录已保存，通知失败；请检查通知管理（不自动重发）'; }
             }
           }
         } catch (error) {
           if (error.fatal || signal.aborted) throw error;
           this.state.rows.push({ id: target.id, status: 'unknown', error: this.safeError(error), checkedAt: this.now() });
         }
-        this.store.observe(this.uid, this.state.rows);
+        await this.store.observe(this.uid, this.state.rows);
       }
       this.state.rounds++; this.state.lastScanAt = this.now();
     } catch (error) {
@@ -105,11 +121,11 @@ export class UsersMonitor extends ChainMonitor {
         this.state.error = this.safeError(error);
         // Invalid keys/permission changes cannot recover without configuration.
         // Rate limits and network failures retry next round using the shared cooldown.
-        if (!this.keys?.length || !this.authorize()) this.stop();
+        if (!this.keys?.length || !await authorized()) this.stop();
       }
     } finally {
       this.busy = false;
-      if (this.running && !signal.aborted && this.authorize()) {
+      if (this.running && !signal.aborted && await authorized() && this.running && !signal.aborted) {
         const now = this.now(), deadlines = this.state.rows.map(row => row.reminderAt).filter(at => Number.isFinite(at) && at > now);
         const seconds = Math.max(1, Math.min(this.config.intervalSeconds, ...deadlines.map(at => at - now)));
         this.state.nextScanAt = now + seconds;

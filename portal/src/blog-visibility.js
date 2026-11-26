@@ -3,6 +3,25 @@ import { hasPermission } from './rbac.js';
 const audiences = new Set(['public', 'members', 'self']);
 const durations = { '3d': 3, '1m': 30, '6m': 180 };
 
+export function blogAccess(session) {
+  const permissions = session.permissions || [];
+  const postPermission = !session.isGuest && hasPermission(permissions, 'blog:post:edit');
+  const managePermission = !session.isGuest && hasPermission(permissions, 'blog:manage:edit');
+  return {
+    canView: session.isGuest || hasPermission(permissions, 'blog:feed:view') || postPermission || managePermission,
+    canPost: postPermission && session.dataAccess?.writable !== false,
+    canManage: managePermission && session.dataAccess?.writable !== false,
+  };
+}
+
+export function postWriteAccess(row, session) {
+  if (!row) return { status: 404, error: '文章不存在' };
+  if (session.dataAccess && session.dataAccess.scope !== 'public' && row.author_id !== session.dataAccess.ownerId) return { status: 404, error: '文章不属于当前数据范围' };
+  const { canPost, canManage } = blogAccess(session);
+  if (!canManage && !(canPost && row.author_id === session.userId)) return { status: 403, error: '无权修改这篇文章' };
+  return { status: 200 };
+}
+
 export function normalizeVisibility(value, createdAt = new Date().toISOString()) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('可见范围参数无效');
   const audience = value.audience ?? 'public';

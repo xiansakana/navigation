@@ -62,6 +62,7 @@ jobs:
         env:
           PGPORT: ${{ job.services.postgres.ports[5432] }}
       - run: npm ci --prefix portal
+      - run: npm ci --prefix qq-bot
       - run: node --test scripts/test-mingli-postgres.mjs
         env:
           PGPORT: ${{ job.services.postgres.ports[5432] }}

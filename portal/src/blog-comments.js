@@ -9,6 +9,14 @@ export function commentAccess(session) {
   const canComment = Boolean(session.userId) && !session.isGuest;
   return { canViewComments: hasPermission(permissions, 'blog:comment:view') || canComment || canManageComments, canComment, canManageComments };
 }
+
+export function parseCommentContent(value) {
+  if (typeof value !== 'string') return { error: '请输入评论内容' };
+  const content = value.trim().normalize('NFC');
+  if (!content || content.length > 2000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(content)) return { error: '评论请输入 1–2000 字' };
+  if (!renderMarkdown(content)) return { error: '请输入有效的评论内容' };
+  return { content };
+}
 export function listComments(db, postId, session, before) {
   if (!commentAccess(session).canViewComments || !canViewPost(db, postId, session)) return { status: 404, error: '评论不可见' };
   let cursor;
@@ -27,10 +35,8 @@ export function listComments(db, postId, session, before) {
 export function createComment(db, postId, session, value) {
   if (!commentAccess(session).canComment) return { status: 403, error: '无权发表评论' };
   if (!canViewPost(db, postId, session)) return { status: 404, error: '博客不存在或不可见' };
-  if (typeof value !== 'string') return { status: 400, error: '请输入评论内容' };
-  const content = value.trim().normalize('NFC');
-  if (!content || content.length > 2000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(content)) return { status: 400, error: '评论请输入 1–2000 字' };
-  if (!renderMarkdown(content)) return { status: 400, error: '请输入有效的评论内容' };
+  const { content, error } = parseCommentContent(value);
+  if (error) return { status: 400, error };
   const last = db.prepare('SELECT created_at FROM blog_comments WHERE author_id = ? ORDER BY created_at DESC LIMIT 1').get(session.userId);
   if (last && Date.now() - Date.parse(last.created_at) < 2000) return { status: 429, error: '评论太快，请稍后再试' };
   const id = crypto.randomUUID().replaceAll('-', '');

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { deleteStoredMedia, abortStoredUpload } from './blog-media-storage.js';
 import { removeUploadFiles } from './blog-media-process.js';
+import { readBlogMediaRow, readBlogMediaRows, writeBlogMediaRow } from './blog-media-db.js';
 
 export function enqueueMediaCleanup(db, items, userId, kind = 'object') {
   const now = new Date().toISOString();
@@ -20,21 +21,21 @@ export async function drainMediaCleanup(db, operations = {}, now = new Date()) {
   const remove = operations.remove || deleteStoredMedia;
   const abort = operations.abort || abortStoredUpload;
   try {
-    const jobs = db.prepare('SELECT * FROM blog_media_cleanup WHERE next_at <= ? ORDER BY created_at LIMIT 8').all(now.toISOString());
+    const jobs = await readBlogMediaRows(db, 'SELECT * FROM blog_media_cleanup WHERE next_at <= ? ORDER BY created_at LIMIT 8', now.toISOString());
     let cursor = 0;
     await Promise.all(Array.from({ length: Math.min(2, jobs.length) }, async () => {
       while (cursor < jobs.length) {
         const job = jobs[cursor++];
-        const canDelete = () => !db.prepare('SELECT 1 FROM blog_media WHERE storage_key = ? LIMIT 1').get(job.storage_key);
+        const canDelete = async () => !await readBlogMediaRow(db, 'SELECT 1 FROM blog_media WHERE storage_key = ? LIMIT 1', job.storage_key);
         try {
           if (job.kind === 'local') await removeUploadFiles(job.multipart_id);
           else if (job.kind === 'multipart') await abort({ storageKey: job.storage_key, multipartId: job.multipart_id });
-          else if (canDelete()) await remove([{ storageKey: job.storage_key }], { canDelete });
-          db.prepare('DELETE FROM blog_media_cleanup WHERE id = ?').run(job.id);
+          else if (await canDelete()) await remove([{ storageKey: job.storage_key }], { canDelete });
+          await writeBlogMediaRow(db, 'DELETE FROM blog_media_cleanup WHERE id = ?', job.id);
         } catch (error) {
           const delay = Math.min(3600000, 30000 * 2 ** Math.min(job.attempts, 7));
-          db.prepare('UPDATE blog_media_cleanup SET attempts = attempts + 1, last_error = ?, next_at = ? WHERE id = ?')
-            .run(String(error.message || '清理失败').slice(0, 500), new Date(Math.max(Date.now(), now.getTime()) + delay).toISOString(), job.id);
+          await writeBlogMediaRow(db, 'UPDATE blog_media_cleanup SET attempts = attempts + 1, last_error = ?, next_at = ? WHERE id = ?',
+            String(error.message || '清理失败').slice(0, 500), new Date(Math.max(Date.now(), now.getTime()) + delay).toISOString(), job.id);
         }
       }
     }));

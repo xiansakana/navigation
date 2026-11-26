@@ -1,33 +1,14 @@
 import pg from 'pg';
+import { createPostgresPool } from '../../shared/db/postgres/pool.js';
 
 const { Pool } = pg;
+const configured = new Map();
+
+export function portalPostgresDatabase(connectionString) {
+  if (!configured.has(connectionString)) configured.set(connectionString, createPostgresDatabase(connectionString));
+  return configured.get(connectionString);
+}
 
 export function createPostgresDatabase(connectionString) {
-  const pool = new Pool({
-    connectionString,
-    application_name: 'navigation-portal',
-    connectionTimeoutMillis: 5000,
-    statement_timeout: 15000,
-    max: 4,
-  });
-  pool.on('error', error => console.error('[postgres idle client]', error.code || error.name));
-  return {
-    query: (sql, values) => pool.query(sql, values),
-    close: () => pool.end(),
-    async transaction(run, { readOnly = false } = {}) {
-      const client = await pool.connect();
-      let rollbackError;
-      try {
-        await client.query(readOnly ? 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY' : 'BEGIN');
-        const result = await run(client);
-        await client.query('COMMIT');
-        return result;
-      } catch (error) {
-        try { await client.query('ROLLBACK'); } catch (cause) { rollbackError = cause; }
-        throw error;
-      } finally {
-        client.release(rollbackError);
-      }
-    },
-  };
+  return createPostgresPool(Pool, connectionString, 'navigation-portal');
 }

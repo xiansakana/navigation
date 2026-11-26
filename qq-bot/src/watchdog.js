@@ -5,6 +5,17 @@ import { getDatabase } from '../../shared/db/connection.js';
 
 const execFileAsync = promisify(execFile);
 export function createWatchdogStore(db) {
+  if (db.query) return {
+    asynchronous: true,
+    async read() {
+      const { rows } = await db.query("SELECT state_json FROM navigation.notification_service_health WHERE id='qq-login'");
+      return rows[0] ? JSON.parse(rows[0].state_json) : {};
+    },
+    write(state) {
+      return db.query(`INSERT INTO navigation.notification_service_health(id,state_json) VALUES('qq-login',$1)
+        ON CONFLICT (id) DO UPDATE SET state_json=excluded.state_json`, [JSON.stringify(state)]);
+    },
+  };
   db.exec('CREATE TABLE IF NOT EXISTS notification_service_health (id TEXT PRIMARY KEY, state_json TEXT NOT NULL)');
   return {
     read() { const row = db.prepare('SELECT state_json FROM notification_service_health WHERE id=?').get('qq-login'); return row ? JSON.parse(row.state_json) : {}; },
@@ -32,14 +43,20 @@ export function startLoginWatchdog(configOrGetter, hooks = {}) {
   };
   const store = hooks.store || createWatchdogStore(getDatabase());
   const now = hooks.now || Date.now;
-  const state = { failCount: 0, lastRestartAt: null, incident: null, events: [], ...store.read() };
+  const state = { failCount: 0, lastRestartAt: null, incident: null, events: [], ...(!store.asynchronous && store.read()) };
   let inFlight = false, stopped = false, timer, startup;
-  const persist = () => store.write(state);
-  function event(kind) {
+  let loaded = !store.asynchronous, pendingWrite = Promise.resolve();
+  const persist = () => {
+    if (!store.asynchronous) return store.write(state);
+    const snapshot = structuredClone(state);
+    pendingWrite = pendingWrite.catch(() => {}).then(() => store.write(snapshot));
+    return pendingWrite;
+  };
+  async function event(kind) {
     const incident = state.incident;
     if (state.events.some(e => e.incidentId === incident.id && e.kind === kind)) return;
     state.events.push({ incidentId: incident.id, kind, at: now(), sent: [], nextAttemptAt: 0 });
-    state.events = state.events.slice(-20); persist();
+    state.events = state.events.slice(-20); await persist();
   }
   async function deliverAlerts() {
     const channels = loginAlertChannels(getConfig()).filter(c => c.ready);
@@ -56,10 +73,10 @@ export function startLoginWatchdog(configOrGetter, hooks = {}) {
         try {
           if (!hooks.send) throw new Error('missing sender');
           await hooks.send(c.id, message, { subject: labels[e.kind] });
-          e.sent.push(c.id); persist();
+          e.sent.push(c.id); await persist();
         } catch { state.alertError = '部分独立告警渠道投递失败，将于 5 分钟后重试'; }
       }));
-      e.nextAttemptAt = now() + 300000; persist();
+      e.nextAttemptAt = now() + 300000; await persist();
     }
     const pending = state.events.some(e => !(e.kind !== 'recovered' && state.events.some(other => other.incidentId === e.incidentId && other.kind === 'recovered')) && channels.some(c => !e.sent.includes(c.id)));
     if (channels.length && !pending) state.alertError = '';
@@ -68,6 +85,10 @@ export function startLoginWatchdog(configOrGetter, hooks = {}) {
     if (stopped || inFlight) return;
     inFlight = true;
     try {
+      if (!loaded) {
+        Object.assign(state, await store.read());
+        loaded = true;
+      }
       const config = getConfig();
       if (config.napcat?.watchdog?.enabled !== true) return;
       if (state.lastRestartAt !== null && now() - state.lastRestartAt < opts.settleMs) return;
@@ -84,28 +105,28 @@ export function startLoginWatchdog(configOrGetter, hooks = {}) {
       state.lastCheckedAt = new Date(now()).toISOString();
       if (state.online) {
         state.failCount = 0;
-        if (state.incident && !state.incident.recoveredAt) { state.incident.recoveredAt = now(); event('recovered'); }
+        if (state.incident && !state.incident.recoveredAt) { state.incident.recoveredAt = now(); await event('recovered'); }
       } else {
         state.failCount++;
         if (state.failCount >= opts.failBeforeRestart) {
           if (!state.incident || state.incident.recoveredAt) state.incident = { id: 'qq-' + now(), startedAt: now(), recoveredAt: null };
-          event('offline');
-          if (state.lastRestartAt !== null && state.lastRestartAt >= state.incident.startedAt) event('recovery_failed');
+          await event('offline');
+          if (state.lastRestartAt !== null && state.lastRestartAt >= state.incident.startedAt) await event('recovery_failed');
         }
       }
-      persist();
+      await persist();
       await deliverAlerts();
       if (stopped || state.online || state.failCount < opts.failBeforeRestart) return;
       if (state.lastRestartAt !== null && now() - state.lastRestartAt < opts.cooldownMs) return;
-      state.lastRestartAt = now(); persist();
+      state.lastRestartAt = now(); await persist();
       try {
         const configured = config.napcat.watchdog.restartCommand;
         const command = Array.isArray(configured) && configured.length ? configured.map(String) : ['docker', 'restart', 'napcat'];
         if (hooks.restart) await hooks.restart(command);
         else await execFileAsync(command[0], command.slice(1), { timeout: 60000 });
         state.failCount = 0;
-      } catch { state.lastError = 'NapCat 自动重启失败'; event('recovery_failed'); await deliverAlerts(); }
-      persist();
+      } catch { state.lastError = 'NapCat 自动重启失败'; await event('recovery_failed'); await deliverAlerts(); }
+      await persist();
     } finally { inFlight = false; }
   }
   if (hooks.schedule !== false) {

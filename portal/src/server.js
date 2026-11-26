@@ -3,7 +3,9 @@ import { portalIdentity as identity } from './postgres-rbac.js';
 import { instrumentRequest } from '../../shared/request-log.js';
 import { moduleApiHandler } from './module-api.js';
 import { tornToolboxAccess } from './torn-toolbox-access.js';
-import { moduleInventory, findModuleApi, TORN_MONITOR_ASSETS } from './modules.js';
+import { moduleInventory, moduleInventoryPostgres, findModuleApi, TORN_MONITOR_ASSETS } from './modules.js';
+import { portalPostgresDatabase } from './postgres.js';
+import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
 import { requestDataAccess, scopedSession, availableDataAccess, scopeCookie, auditDataAccess, stripPortalIdentity } from './data-access.js';
 import { accessModules, modulePolicy, moduleForPath } from './access-policy.js';
 import { readJson, sameOriginWrite } from '../../shared/http.js';
@@ -55,6 +57,7 @@ import { wantsJsonResponse, renderErrorPage, sendHtml } from './error-page.js';
 import { handleOAuthStart, handleOAuthCallback, listOAuthProviders } from './oauth.js';
 import { getPiclistStatus, savePiclistConfig, restartPiclist } from './piclist-admin.js';
 import { resumeVideoJobs } from './blog.js';
+import { checkBlogPostgres, getBlogPostgresRepository } from './blog-postgres-runtime.js';
 import { startThumbnailWorker } from './blog-media-process.js';
 import { createResourceMonitor, canViewResources } from './resources.js';
 import { canBookkeep } from './bookkeeping.js';
@@ -73,7 +76,15 @@ const readIdentity = () => identity.load(config);
 sessionSecret(config);
 if (config.runtime?.externalWorkers) process.env.NAVIGATION_EXTERNAL_WORKERS = '1';
 const loginLimiter = createLoginLimiter();
-const resourceMonitor = createResourceMonitor({ moduleReader: () => moduleInventory(getDatabase(), config.services || []) });
+const resourcesDb = process.env.NAVIGATION_RESOURCES_POSTGRES_URL
+    ? portalPostgresDatabase(process.env.NAVIGATION_RESOURCES_POSTGRES_URL) : null;
+const resourceMonitor = createResourceMonitor({
+    async moduleReader() {
+        if (!resourcesDb) return moduleInventory(getDatabase(), config.services || []);
+        await verifyPostgresSchema(resourcesDb);
+        return moduleInventoryPostgres(resourcesDb, config.services);
+    },
+});
 
 function json(res, status, body) {
     var text = JSON.stringify(body);
@@ -601,7 +612,10 @@ async function handleRequest(req, res) {
     if (req.method === 'GET' && ['/healthz', '/readyz'].includes(new URL(req.url, 'http://localhost').pathname)) {
         if (req.url.startsWith('/readyz')) {
             getDatabase().prepare('SELECT 1').get();
-            try { await identity.ready(); await checkMingliPostgres(); }
+            try {
+                await identity.ready(); await checkMingliPostgres(); await checkBlogPostgres();
+                if (resourcesDb) await verifyPostgresSchema(resourcesDb);
+            }
             catch { return json(res, 503, { ok: false, service: 'portal' }); }
         }
         return json(res, 200, { ok: true, service: 'portal' });
@@ -866,12 +880,15 @@ server.on('upgrade', async function(req, socket, head) {
 var host = config.server?.host || '127.0.0.1';
 var port = config.server?.port || 8080;
 
-server.listen(port, host, function() {
+server.listen(port, host, async function() {
     if (!config.runtime?.externalWorkers) {
-    startMediaCleanup(getDatabase());
-    startAssetHistory(getDatabase());
-    resumeVideoJobs(getDatabase(), config);
-    startThumbnailWorker(getDatabase());
+        try {
+            const db = getDatabase(), blogDb = (await getBlogPostgresRepository())?.db || db;
+            startMediaCleanup(blogDb);
+            startAssetHistory(db);
+            await resumeVideoJobs(blogDb, config);
+            startThumbnailWorker(blogDb);
+        } catch (error) { console.error('[portal background start]', error.code || error.name); }
     }
     startKnowledgeImports(getDatabase(), knowledgeDirectory, async (uid, batch = false) => {
         const ctx = resolveSessionUser({ userId: uid }, config, await readIdentity());

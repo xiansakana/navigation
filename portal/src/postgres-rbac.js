@@ -2,7 +2,7 @@ import { copyRbac, revisionKey } from '../../shared/db/rbac-store.js';
 import { createPostgresRbacStore } from '../../shared/db/postgres/rbac-store.js';
 import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
 import { configServicesKey, loadRbac, saveRbac, syncRbacPermissions } from './rbac.js';
-import { createPostgresDatabase } from './postgres.js';
+import { portalPostgresDatabase } from './postgres.js';
 
 export function createPortalPostgresRbac(db) {
   const rbac = createPostgresRbacStore(db);
@@ -41,7 +41,7 @@ export function createPortalPostgresRbac(db) {
 
 export function createPortalIdentityRepository(connectionString) {
   if (!connectionString) return { load: loadRbac, save: saveRbac, ready: () => undefined };
-  const db = createPostgresDatabase(connectionString);
+  const db = portalPostgresDatabase(connectionString);
   const repository = createPortalPostgresRbac(db);
   async function ready() {
     await verifyPostgresSchema(db);

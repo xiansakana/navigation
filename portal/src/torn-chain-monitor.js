@@ -233,18 +233,21 @@ export class ChainMonitor {
     throw this.noKeys();
   }
   async requestWithRetry(path, key, signal) {
-    const check = () => { if (!this.running || signal?.aborted || !this.authorize()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true }); };
+    const check = async () => {
+      if (!this.running || signal?.aborted || !await this.authorize()) throw Object.assign(new Error('监控已停止或权限已变更'), { fatal: true });
+      signal?.throwIfAborted();
+    };
     for (let attempt = 0; ; attempt++) {
-      check();
-      try { const data = await this.request(path, key, signal, { scope: 'chain:' + this.uid, spacingMs: (this.config.apiIntervalSeconds ?? 2) * 1000 }); check(); return data; }
+      await check();
+      try { const data = await this.request(path, key, signal, { scope: 'chain:' + this.uid, spacingMs: (this.config.apiIntervalSeconds ?? 2) * 1000 }); await check(); return data; }
       catch (error) {
-        check();
+        await check();
         const limited = ![8, 9].includes(error.apiCode) && (error.apiCode === 5 || error.rateLimited);
         if (!limited && (!error.transient || error.fatal)) throw error;
         if (attempt >= 3) throw Object.assign(new Error((limited ? 'Torn API 持续限流' : 'Torn API 网络或服务持续异常') + '，自动重试 3 次后停止；已保存记录保留，请稍后继续'), { fatal: true });
         const ms = limited ? Math.max(65000 * 2 ** attempt, Number(error.retryAfterMs) || 0) : 10000 * 2 ** attempt;
         Object.assign(this.state, { retryAt: this.now() + Math.ceil(ms / 1000), retryAttempt: attempt + 1, retryMessage: (limited ? '限流冷却' : '网络或服务异常') + '，等待自动重试（' + (attempt + 1) + '/3）', nextScanAt: null });
-        try { await this.wait(ms, undefined, { signal }); check(); }
+        try { await this.wait(ms, undefined, { signal }); await check(); }
         finally { Object.assign(this.state, { retryAt: null, retryAttempt: 0, retryMessage: '' }); }
       }
     }

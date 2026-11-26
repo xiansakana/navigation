@@ -35,6 +35,14 @@ Portal 的命理个人案例已接入异步 PostgreSQL 查询和事务。独立�
 
 GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访客拒绝、不同账号的数据隔离、分类约束、条件筛选、批量归类及并发导入。待其余业务适配后再执行全站切换。
 
+隔离环境的 Portal 和 `portal-background` 同时设置 `NAVIGATION_BLOG_POSTGRES_URL`，可验证博客、评论、旧媒体记录、视频分片和媒体清理共用同一数据库。对象存储和临时视频文件继续沿用既有路径。视频编码与清理维持单个后台工作进程的部署方式。
+
+资源管理通过 `NAVIGATION_RESOURCES_POSTGRES_URL` 验证模块计数和任务状态，响应只包含聚合指标。同一个 Portal 进程中接到相同数据库的模块复用连接池。
+
+隔离环境通过 `NAVIGATION_TORN_USERS_POSTGRES_URL` 验证 Torn 用户监控配置、出院提醒去重、工作器心跳和启停意图。Torn 其余监控的业务存储仍须完成迁移后才能启用生产配置。
+
+`NAVIGATION_QQ_MONITOR_POSTGRES_URL` 用于隔离验证 QQ 登录监控、重启冷却记录、Codex 登录告警去重和工作器心跳。Codex 会话与任务队列的存储仍由各自的迁移阶段处理。
+
 隔离环境可用 `NAVIGATION_RBAC_POSTGRES_URL` 为 Portal 选择 PostgreSQL 身份源。密码与 OAuth 登录、角色和数据策略管理、数据空间、以及 Portal 访问审计使用这一来源。真实 Portal 集成测试覆盖密码登录、撤权、已有会话和跨用户范围访问。Codex、QQ 和 Torn 的独立进程也接入统一身份源后，才能切换生产配置。迁移文件包含数据库版本标记，Portal 在任一已配置数据库不可用或版本不匹配时报告未就绪。SQLite 数据库入口拒绝全站 PostgreSQL 配置，防止切换时静默写入 SQLite。
 
 ## PostgreSQL 备份与恢复

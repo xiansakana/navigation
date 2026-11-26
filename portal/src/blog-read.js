@@ -12,6 +12,18 @@ function groupByPost(rows) {
     return groups;
 }
 
+export function presentBlogPosts(rows, tagRows, legacyRows, mediaRows, commentRows) {
+    const tags = groupByPost(tagRows), legacy = groupByPost(legacyRows), media = groupByPost(mediaRows);
+    const counts = new Map(commentRows.map(row => [row.postId, Number(row.count)]));
+    return rows.map(row => {
+        const items = (media.get(row.id) || []).map(item => ({ ...item, position: Number(item.position), url: '/api/blog/media/' + item.id, thumbnailUrl: '/api/blog/media/' + item.id + '?thumbnail=1' }));
+        const oldImages = (legacy.get(row.id) || []).map(image => ({ id: image.id, kind: 'image', position: Number(image.position), url: '/api/blog/images/' + image.id }));
+        const { locationJson, audience, period, startsAt, endsAt, ...post } = row;
+        return { ...post, commentCount: counts.get(row.id) || 0, visibility: { audience, period, startsAt, endsAt }, location: locationJson ? JSON.parse(locationJson) : null, contentHtml: row.contentFormat === 'markdown' ? renderMarkdown(row.content) : null, content: normalizeContent(row.content, row.contentFormat, true), tags: (tags.get(row.id) || []).map(item => item.tag), images: [...oldImages, ...items.filter(item => item.kind === 'image')],
+            videos: items.filter(item => item.kind === 'video') };
+    });
+}
+
 export function getImage(db, id, session = {}) {
     const parent = db.prepare('SELECT post_id FROM blog_images WHERE id = ?').get(id);
     if (!parent || !canViewPost(db, parent.post_id, session)) return undefined;
@@ -51,20 +63,14 @@ export function listPosts(db, before, limit = 20, tag = '', query = '', session 
     if (!rows.length) return [];
     const ids = JSON.stringify(rows.map(row => row.id));
     const pageIds = 'post_id IN (SELECT value FROM json_each(?))';
-    const tags = groupByPost(db.prepare(`SELECT post_id AS postId, tag FROM blog_post_tags WHERE ${pageIds} ORDER BY rowid`).all(ids));
-    const legacy = groupByPost(db.prepare(`SELECT post_id AS postId, id, position FROM blog_images WHERE ${pageIds} ORDER BY position, id`).all(ids));
-    const media = groupByPost(db.prepare(`SELECT post_id AS postId, id, kind, position, mime_type AS mimeType, thumbnail_data IS NOT NULL AS thumbnailReady
-        FROM blog_media WHERE ${pageIds} ORDER BY position, id`).all(ids));
+    const tags = db.prepare(`SELECT post_id AS postId, tag FROM blog_post_tags WHERE ${pageIds} ORDER BY rowid`).all(ids);
+    const legacy = db.prepare(`SELECT post_id AS postId, id, position FROM blog_images WHERE ${pageIds} ORDER BY position, id`).all(ids);
+    const media = db.prepare(`SELECT post_id AS postId, id, kind, position, mime_type AS mimeType, thumbnail_data IS NOT NULL AS thumbnailReady
+        FROM blog_media WHERE ${pageIds} ORDER BY position, id`).all(ids);
     const counts = commentAccess(session).canViewComments
-        ? new Map(db.prepare(`SELECT post_id AS postId, COUNT(*) AS count FROM blog_comments WHERE ${pageIds} GROUP BY post_id`).all(ids).map(row => [row.postId, row.count]))
-        : new Map();
-    return rows.map(row => {
-        const items = (media.get(row.id) || []).map(item => ({ ...item, url: '/api/blog/media/' + item.id, thumbnailUrl: '/api/blog/media/' + item.id + '?thumbnail=1' }));
-        const oldImages = (legacy.get(row.id) || []).map(image => ({ id: image.id, kind: 'image', position: image.position, url: '/api/blog/images/' + image.id }));
-        const { locationJson, audience, period, startsAt, endsAt, ...post } = row;
-        return { ...post, commentCount: counts.get(row.id) || 0, visibility: { audience, period, startsAt, endsAt }, location: locationJson ? JSON.parse(locationJson) : null, contentHtml: row.contentFormat === 'markdown' ? renderMarkdown(row.content) : null, content: normalizeContent(row.content, row.contentFormat, true), tags: (tags.get(row.id) || []).map(item => item.tag), images: [...oldImages, ...items.filter(item => item.kind === 'image')],
-            videos: items.filter(item => item.kind === 'video') };
-    });
+        ? db.prepare(`SELECT post_id AS postId, COUNT(*) AS count FROM blog_comments WHERE ${pageIds} GROUP BY post_id`).all(ids)
+        : [];
+    return presentBlogPosts(rows, tags, legacy, media, counts);
 }
 
 

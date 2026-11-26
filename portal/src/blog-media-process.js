@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readBlogMediaRows, writeBlogMediaRow } from './blog-media-db.js';
 
 export const mediaWorkRoot = process.env.BLOG_MEDIA_WORK_ROOT || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../data/blog-media');
 export function uploadDirectory(id) {
@@ -86,7 +87,7 @@ export async function backfillThumbnails(db) {
   if (thumbnailsBusy) return;
   thumbnailsBusy = true;
   try {
-    const items = db.prepare('SELECT id, url, kind FROM blog_media WHERE thumbnail_data IS NULL AND thumbnail_attempts < 3 LIMIT 2').all();
+    const items = await readBlogMediaRows(db, 'SELECT id, url, kind FROM blog_media WHERE thumbnail_data IS NULL AND thumbnail_attempts < 3 LIMIT 2');
     for (const item of items) {
       await withMediaProcessor(async () => {
         const directory = uploadDirectory(item.id);
@@ -100,8 +101,8 @@ export async function backfillThumbnails(db) {
           const input = path.join(directory, 'thumbnail-source');
           await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(input));
           const bytes = await makeThumbnail(input, path.join(directory, 'thumbnail.jpg'));
-          db.prepare('UPDATE blog_media SET thumbnail_data = ? WHERE id = ?').run(bytes, item.id);
-        } catch { db.prepare('UPDATE blog_media SET thumbnail_attempts = thumbnail_attempts + 1 WHERE id = ?').run(item.id); }
+          await writeBlogMediaRow(db, 'UPDATE blog_media SET thumbnail_data = ? WHERE id = ?', bytes, item.id);
+        } catch { await writeBlogMediaRow(db, 'UPDATE blog_media SET thumbnail_attempts = thumbnail_attempts + 1 WHERE id = ?', item.id); }
         finally { await removeUploadFiles(item.id); }
       });
     }

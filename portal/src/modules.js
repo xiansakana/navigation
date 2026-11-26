@@ -57,16 +57,58 @@ export function moduleInventory(db, services = []) {
     const at = key ? heartbeat(key) : 0;
     return at ? { online: Date.now() - at < 45000 ? 1 : 0, at, remote: false } : null;
   };
+  return describeInventory(services, worker, tasks,
+    table => tables.has(table) ? db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count : 0);
+}
+
+function describeInventory(services, worker, tasks, count) {
   const builtin = PORTAL_MODULES.map(module => ({ id: module.id, title: module.title, path: module.path || '/',
     runtime: module.runtime, type: 'builtin', status: 'registered',
     worker: worker(module),
     // Counts and states only; never send amounts, prompts, personal rows or settings.
     tasks: module.id === 'knowledge' ? tasks('knowledge_documents', 'status') : module.id === 'codex-cli' ? tasks('qq_codex_jobs', 'state') : {},
-    records: module.tables.reduce((sum, table) => sum + (tables.has(table) ? db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count : 0), 0) }));
+    records: module.tables.reduce((sum, table) => sum + count(table), 0) }));
   return builtin.concat(services.filter(service => !PORTAL_MODULES.some(module => module.id === service.id)).map(service => ({
     id: service.id, title: service.title || service.id, path: service.path || '', type: service.type,
     runtime: ['torn-company', 'torn-undercut'].includes(service.id) ? 'torn-monitor-worker' : service.type === 'external' ? 'external' : service.id, status: service.enabled === false ? 'disabled' : 'registered', tasks: {}, records: null
   })));
+}
+
+export function moduleInventoryPostgres(db, services = []) {
+  return db.transaction(async client => {
+    const { rows } = await client.query("SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname='navigation'");
+    const tables = new Set(rows.map(row => row.tablename));
+    const counted = [...new Set(PORTAL_MODULES.flatMap(module => module.tables))].filter(table => tables.has(table));
+    const counts = new Map();
+    const qualified = table => {
+      if (!/^[a-z_][a-z0-9_]*$/.test(table)) throw new Error('Invalid module table name');
+      return 'navigation.' + table;
+    };
+    if (counted.length) {
+      const selects = counted.map((table, i) => `SELECT $${i + 1}::text AS table_name,COUNT(*) AS count FROM ${qualified(table)}`);
+      const results = await client.query(selects.join(' UNION ALL '), counted);
+      for (const item of results.rows) counts.set(item.table_name, Number(item.count));
+    }
+    const heartbeatKeys = ['portal_background_heartbeat', 'codex_worker_heartbeat', 'torn_monitor_worker_heartbeat'];
+    const heartbeatRows = tables.has('meta')
+      ? (await client.query('SELECT key,value FROM navigation.meta WHERE key=ANY($1::text[])', [heartbeatKeys])).rows : [];
+    const heartbeat = new Map(heartbeatRows.map(row => [row.key, Number(row.value)]));
+    const knowledge = tables.has('knowledge_worker_instances')
+      ? (await client.query('SELECT COUNT(*) AS count FROM navigation.knowledge_worker_instances WHERE last_seen > $1',
+        [new Date(Date.now() - 120000).toISOString()])).rows[0] : null;
+    const taskCounts = new Map();
+    for (const [table, field] of [['knowledge_documents', 'status'], ['qq_codex_jobs', 'state']]) {
+      if (!tables.has(table)) continue;
+      const states = await client.query(`SELECT ${field} AS state,COUNT(*) AS count FROM ${qualified(table)} GROUP BY ${field}`);
+      taskCounts.set(table, Object.fromEntries(states.rows.map(row => [row.state, Number(row.count)])));
+    }
+    const worker = module => {
+      if (module.id === 'knowledge' && knowledge) return { online: Number(knowledge.count), remote: true };
+      const at = heartbeat.get(module.heartbeat || (module.runtime === 'torn-monitor-worker' ? 'torn_monitor_worker_heartbeat' : ''));
+      return at ? { online: Date.now() - at < 45000 ? 1 : 0, at, remote: false } : null;
+    };
+    return describeInventory(services, worker, table => taskCounts.get(table) || {}, table => counts.get(table) || 0);
+  }, { readOnly: true });
 }
 
 // Native monitor page assets must bypass the toolbox proxy as one allowlisted bundle.

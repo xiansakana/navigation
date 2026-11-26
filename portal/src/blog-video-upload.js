@@ -5,6 +5,7 @@ import path from 'node:path';
 import { uploadDirectory, removeUploadFiles, joinVideoParts, compressVideo, makeThumbnail, withMediaProcessor } from './blog-media-process.js';
 import { CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { videoStorage, normalizeMediaPosition, uploadCompressedVideo } from './blog-media-storage.js';
+import { readBlogMediaRow, readBlogMediaRows, writeBlogMediaRow } from './blog-media-db.js';
 
 export const VIDEO_CHUNK_BYTES = 8 * 1024 * 1024;
 
@@ -21,16 +22,22 @@ export async function startVideoUpload(db, postId, userId, size, mimeType, posit
   try {
     const disk = await fsp.statfs(uploadDirectory(id));
     if (disk.bavail * disk.bsize < size * 2 + 512 * 1024 * 1024) throw new Error('服务器临时空间不足，请稍后上传');
-    db.prepare('INSERT INTO blog_video_uploads (id, post_id, user_id, mime_type, byte_size, storage_key, multipart_id, created_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, postId, userId, mimeType, size, `blog/video/${new Date().toISOString().slice(0, 10)}/${id}.mp4`, 'local', new Date().toISOString(), position);
+    const insert = (client) => writeBlogMediaRow(client, 'INSERT INTO blog_video_uploads (id, post_id, user_id, mime_type, byte_size, storage_key, multipart_id, created_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      id, postId, userId, mimeType, size, `blog/video/${new Date().toISOString().slice(0, 10)}/${id}.mp4`, 'local', new Date().toISOString(), position);
+    if (db.query) {
+      await db.transaction(async client => {
+        if (!await readBlogMediaRow(client, 'SELECT id FROM blog_posts WHERE id=? FOR SHARE', postId)) throw new Error('博客不存在');
+        await insert(client);
+      });
+    } else insert(db);
     return { id, chunkBytes: VIDEO_CHUNK_BYTES };
   } catch (error) { await removeUploadFiles(id); throw error; }
 }
 
 export function findVideoUpload(db, id, session) {
-  const row = db.prepare('SELECT * FROM blog_video_uploads WHERE id = ? AND user_id = ?').get(id, session.userId);
-  if (!row || session.isGuest) return null;
-  return row;
+  if (session.isGuest) return null;
+  const row = readBlogMediaRow(db, 'SELECT * FROM blog_video_uploads WHERE id = ? AND user_id = ?', id, session.userId);
+  return db.query ? row.then(found => found || null) : row || null;
 }
 
 export function validateVideoPart(upload, number, bytes) {
@@ -59,10 +66,16 @@ export async function writeVideoPart(db, upload, number, req) {
     await fsp.mkdir(directory, { recursive: true });
     const temporary = path.join(directory, `${number}-${crypto.randomUUID()}.tmp`);
     await fsp.writeFile(temporary, bytes);
-    await fsp.rename(temporary, path.join(directory, String(number)));
-    if (!db.prepare('SELECT 1 FROM blog_video_uploads WHERE id = ?').get(upload.id)) { await removeUploadFiles(upload.id); throw new Error('视频上传已取消'); }
-    db.prepare('INSERT INTO blog_video_parts (upload_id, part_number, etag, byte_size) VALUES (?, ?, ?, ?) ON CONFLICT(upload_id, part_number) DO UPDATE SET etag = excluded.etag, byte_size = excluded.byte_size')
-      .run(upload.id, number, crypto.createHash('sha256').update(bytes).digest('hex'), size);
+    const publish = () => fsp.rename(temporary, path.join(directory, String(number)));
+    try {
+      if (!db.query) await publish();
+      await recordPart(db, upload.id, number, crypto.createHash('sha256').update(bytes).digest('hex'), size, db.query ? publish : undefined);
+    }
+    catch (error) {
+      await fsp.rm(temporary, { force: true }).catch(() => {});
+      if (error.code === 'BLOG_UPLOAD_CANCELLED') await removeUploadFiles(upload.id);
+      throw error;
+    }
     return;
   }
   const storage = videoStorage(upload.mime_type, upload.storage_key);
@@ -70,24 +83,42 @@ export async function writeVideoPart(db, upload, number, req) {
     const result = await storage.client.send(new UploadPartCommand({ Bucket: storage.bucket, Key: storage.key, UploadId: upload.multipart_id,
       PartNumber: number, Body: bytes, ContentLength: bytes.length }));
     if (!result.ETag) throw new Error('视频分段上传失败');
-    if (!db.prepare('SELECT 1 FROM blog_video_uploads WHERE id = ?').get(upload.id)) throw new Error('视频上传已取消');
-    db.prepare('INSERT INTO blog_video_parts (upload_id, part_number, etag, byte_size) VALUES (?, ?, ?, ?) ON CONFLICT(upload_id, part_number) DO UPDATE SET etag = excluded.etag, byte_size = excluded.byte_size')
-      .run(upload.id, number, result.ETag, size);
+    await recordPart(db, upload.id, number, result.ETag, size);
   } finally { storage.release(); }
 }
 
-export function completedVideoParts(db, upload) {
-  const rows = db.prepare('SELECT part_number, etag, byte_size FROM blog_video_parts WHERE upload_id = ? ORDER BY part_number').all(upload.id);
+async function recordPart(db, id, number, etag, size, publish) {
+  const insert = 'INSERT INTO blog_video_parts (upload_id, part_number, etag, byte_size) VALUES (?, ?, ?, ?) ON CONFLICT(upload_id, part_number) DO UPDATE SET etag = excluded.etag, byte_size = excluded.byte_size';
+  const failure = () => Object.assign(new Error('视频上传已取消'), { code: 'BLOG_UPLOAD_CANCELLED' });
+  if (!db.query) {
+    if (!readBlogMediaRow(db, 'SELECT 1 FROM blog_video_uploads WHERE id = ?', id)) throw failure();
+    return writeBlogMediaRow(db, insert, id, number, etag, size);
+  }
+  return db.transaction(async client => {
+    const upload = await readBlogMediaRow(client, 'SELECT state FROM blog_video_uploads WHERE id=? FOR UPDATE', id);
+    if (!upload) throw failure();
+    if (upload.state !== 'uploading') throw new Error('视频已经开始处理');
+    if (publish) await publish();
+    await writeBlogMediaRow(client, insert, id, number, etag, size);
+  });
+}
+
+function validateCompletedParts(rows, upload) {
   if (rows.length !== Math.ceil(upload.byte_size / VIDEO_CHUNK_BYTES) || rows.some((row, index) => row.part_number !== index + 1)
     || rows.reduce((total, row) => total + row.byte_size, 0) !== upload.byte_size) throw new Error('视频分段尚未上传完成');
   return rows.map(row => ({ PartNumber: row.part_number, ETag: row.etag }));
 }
 
+export function completedVideoParts(db, upload) {
+  const rows = readBlogMediaRows(db, 'SELECT part_number, etag, byte_size FROM blog_video_parts WHERE upload_id = ? ORDER BY part_number', upload.id);
+  return db.query ? rows.then(parts => validateCompletedParts(parts, upload)) : validateCompletedParts(rows, upload);
+}
+
 export async function finishVideoUpload(db, upload) {
-  const parts = completedVideoParts(db, upload);
+  const parts = await completedVideoParts(db, upload);
   return withMediaProcessor(async () => {
-    const update = (state, progress) => db.prepare('UPDATE blog_video_uploads SET state = ?, progress = ? WHERE id = ?').run(state, progress, upload.id);
-    if (!db.prepare('SELECT 1 FROM blog_video_uploads WHERE id = ?').get(upload.id)) throw new Error('视频上传已取消');
+    const update = (state, progress) => writeBlogMediaRow(db, "UPDATE blog_video_uploads SET state = ?, progress = ? WHERE id = ? AND state IN ('queued','compressing','storing')", state, progress, upload.id);
+    if (!await readBlogMediaRow(db, 'SELECT 1 FROM blog_video_uploads WHERE id = ?', upload.id)) throw new Error('视频上传已取消');
     const directory = uploadDirectory(upload.id);
     let input;
     if (upload.multipart_id === 'local') input = await joinVideoParts(upload, parts);
@@ -102,33 +133,45 @@ export async function finishVideoUpload(db, upload) {
         await pipeline(response.Body, fs.createWriteStream(input));
       } finally { storage.release(); }
     }
-    update('compressing', 0);
+    await update('compressing', 0);
     const output = path.join(directory, 'compressed.mp4');
-    await compressVideo(input, output, percent => update('compressing', percent));
+    let progress = Promise.resolve();
+    const report = (state, percent) => {
+      progress = progress.then(() => update(state, percent)).catch(error => {
+        console.error('[blog video progress]', error.code || error.name);
+      });
+    };
+    await compressVideo(input, output, percent => report('compressing', percent));
+    await progress;
     const thumbnailData = await makeThumbnail(output, path.join(directory, 'thumbnail.jpg'));
-    if (!db.prepare('SELECT 1 FROM blog_video_uploads WHERE id = ?').get(upload.id)) throw new Error('视频上传已取消');
-    update('storing', 0);
+    if (!await readBlogMediaRow(db, 'SELECT 1 FROM blog_video_uploads WHERE id = ?', upload.id)) throw new Error('视频上传已取消');
+    await update('storing', 0);
     const key = upload.multipart_id === 'local' ? upload.storage_key : undefined;
-    const item = await uploadCompressedVideo(output, percent => update('storing', percent), key);
+    const item = await uploadCompressedVideo(output, percent => report('storing', percent), key);
+    await progress;
     return { ...item, thumbnailData };
   });
 }
 
 export function forgetVideoUpload(db, id) {
+  if (db.query) return db.transaction(async client => {
+    await writeBlogMediaRow(client, 'DELETE FROM blog_video_uploads WHERE id = ?', id);
+    await writeBlogMediaRow(client, 'DELETE FROM blog_video_parts WHERE upload_id = ?', id);
+  });
   db.prepare('DELETE FROM blog_video_parts WHERE upload_id = ?').run(id);
   db.prepare('DELETE FROM blog_video_uploads WHERE id = ?').run(id);
 }
 
 export async function abortVideoUpload(db, upload) {
   if (upload.multipart_id === 'local' || upload.state === 'done') {
-    forgetVideoUpload(db, upload.id); await removeUploadFiles(upload.id); return;
+    await forgetVideoUpload(db, upload.id); await removeUploadFiles(upload.id); return;
   }
   const storage = videoStorage(upload.mime_type, upload.storage_key);
   try {
     await storage.client.send(new AbortMultipartUploadCommand({ Bucket: storage.bucket, Key: storage.key, UploadId: upload.multipart_id }));
-    forgetVideoUpload(db, upload.id);
+    await forgetVideoUpload(db, upload.id);
   } catch (error) {
-    if (error.name === 'NoSuchUpload') forgetVideoUpload(db, upload.id);
+    if (error.name === 'NoSuchUpload') await forgetVideoUpload(db, upload.id);
     else throw error;
   } finally { storage.release(); }
 }

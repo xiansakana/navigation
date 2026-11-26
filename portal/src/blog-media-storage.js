@@ -169,7 +169,7 @@ export async function deleteMediaVersions(client, bucket, key, canDelete = () =>
     const versions = [], markers = [];
     let keyMarker, versionIdMarker;
     do {
-        if (!canDelete(key)) return;
+        if (!await canDelete(key)) return;
         const page = await client.send(new ListObjectVersionsCommand({ Bucket: bucket, Prefix: key, KeyMarker: keyMarker, VersionIdMarker: versionIdMarker }));
         versions.push(...(page.Versions || []).filter(item => item.Key === key));
         markers.push(...(page.DeleteMarkers || []).filter(item => item.Key === key));
@@ -179,7 +179,7 @@ export async function deleteMediaVersions(client, bucket, key, canDelete = () =>
     } while (true);
     // Delete data versions before hide markers; never delete objects sharing a prefix.
     for (const item of [...versions, ...markers]) {
-        if (!canDelete(key)) return;
+        if (!await canDelete(key)) return;
         if (!item.VersionId) throw new Error('媒体版本编号缺失');
         await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key, VersionId: item.VersionId }));
     }

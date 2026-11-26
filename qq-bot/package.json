@@ -16,6 +16,7 @@
     "marked": "15.0.12",
     "node-notifier": "^10.0.1",
     "nodemailer": "10.1.7",
+    "pg": "8.23.1",
     "ws": "^8.22.0"
   },
   "overrides": {

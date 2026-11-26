@@ -12,6 +12,163 @@ import { requestDataAccess } from '../portal/src/data-access.js';
 import { createPostgresRbacStore } from '../shared/db/postgres/rbac-store.js';
 import { verifyPostgresSchema } from '../shared/db/postgres/readiness.js';
 import { startAccessPortal } from '../portal/src/test-fixtures/access-portal.js';
+import { moduleInventoryPostgres } from '../portal/src/modules.js';
+import { createPostgresBlogRepository } from '../portal/src/blog-postgres.js';
+import { createPostgresUsersStore } from '../portal/src/torn-users-postgres.js';
+import { UsersMonitor } from '../portal/src/torn-users-monitor.js';
+import { createTornRunStore } from '../portal/src/torn-worker-runs.js';
+import { createTornWorkerRuntime, tickTornWorker } from '../portal/src/torn-worker-runtime.js';
+import { createCodexAuthMonitor } from '../qq-bot/src/codex-auth-monitor.js';
+import { createWatchdogStore, startLoginWatchdog } from '../qq-bot/src/watchdog.js';
+
+async function verifyQqMonitoring(db) {
+  let restarts = 0, now = 1000000, usageReads = 0, sent = 0;
+  const settings = {
+    napcat: { watchdog: { enabled: true, failBeforeRestart: 1, cooldownMs: 600000, settleMs: 1 } },
+    codex: { enabled: true }, channels: { email: { enabled: true, smtp: { host: 'fixture' }, to: 'fixture@example.invalid' } },
+  };
+  const store = createWatchdogStore(db);
+  const hooks = { store, schedule: false, now: () => now,
+    getStatus: async () => ({ online: false }), restart: async () => { restarts++; } };
+  const first = startLoginWatchdog(settings, hooks);
+  await first.tick(); first.stop();
+  assert.equal(restarts, 1);
+  now += 1000;
+  const next = startLoginWatchdog(settings, hooks);
+  await next.tick(); next.stop();
+  assert.equal(restarts, 1);
+  assert.ok((await store.read()).incident.id);
+  const auth = () => createCodexAuthMonitor({ db, now: () => now, getConfig: () => settings,
+    readUsage: async () => { usageReads++; throw Object.assign(new Error('fixture'), { code: 'CODEX_AUTH_REQUIRED' }); },
+    send: async () => { sent++; } });
+  await Promise.all([auth().tick(), auth().tick()]);
+  assert.equal(usageReads, 1);
+  assert.equal(sent, 1);
+  now += 300000;
+  await auth().tick();
+  assert.equal(usageReads, 2);
+  assert.equal(sent, 1);
+}
+
+async function verifyTornUsers(db) {
+  const uid = 'torn-owner', store = createPostgresUsersStore(db);
+  const event = { id: 1, hospitalUntil: 1030 };
+  await store.save(uid, { apiKey: 'a'.repeat(16), targets: [1] });
+  const first = await Promise.all([store.record(uid, event), store.record(uid, event)]);
+  assert.deepEqual(first.sort(), [false, true]);
+  assert.equal((await store.get('torn-other')).history.length, 0);
+  const observers = new Map();
+  let allowed = true, dispatched = 0, notifications = 0;
+  const instance = new UsersMonitor({
+    uid, store, initialObservations: [], authorize: async () => allowed,
+    request: async () => ({ profile: { id: 1, name: 'Fixture', status: { state: 'Hospital', until: 1030 } } }),
+    now: () => 1000, schedule: () => null, cancel: () => {},
+    notify: async () => { notifications++; },
+  });
+  const runs = createTornRunStore(db);
+  await runs.set('torn-users', uid, true);
+  const stale = (await runs.list())[0];
+  await runs.set('torn-users', uid, true);
+  await runs.clearIfUnchanged(stale, 'stale reconciliation');
+  assert.equal((await runs.list())[0].desired, 1);
+  const runtime = createTornWorkerRuntime({ runs, config: {},
+    sessionFor: async userId => ({ userId, permissions: ['*'] }),
+    jobs: () => ({ 'torn-users': observers }),
+    dispatch: async (req, res, url, session, { json }) => {
+      assert.equal(session.userId, uid);
+      if (url.pathname.endsWith('/start')) {
+        dispatched++;
+        observers.set(uid, instance);
+        await instance.start();
+      } else if (url.pathname.endsWith('/stop')) instance.stop();
+      return json(res, 200, { ok: true });
+    },
+  });
+  try {
+    await runtime.resume();
+    await instance.promise;
+    assert.equal(dispatched, 1);
+    assert.equal(notifications, 0);
+    assert.equal((await store.get(uid)).observations[0].id, 1);
+    assert.equal(await tickTornWorker(runtime, db), true);
+    const resource = (await moduleInventoryPostgres(db)).find(module => module.id === 'torn-users');
+    assert.equal(resource.worker.online, 1);
+    await runtime.dispatch({ method: 'POST', path: '/api/torn-users/stop', session: { userId: uid }, body: {} });
+    assert.equal((await runs.list())[0].desired, 0);
+    await runtime.resume();
+    assert.equal(dispatched, 1);
+    allowed = false;
+    await assert.rejects(() => instance.start(), /无权启动/);
+  } finally { await runtime.close(); }
+}
+
+async function verifyBlog(db, app, member, outsider) {
+  const uid = member.id, foreign = outsider.id;
+  const post = await app.request('/api/blog/posts', {
+    uid, method: 'POST', body: {
+      content: '**原生博客** <script>不执行</script>', contentFormat: 'markdown', tags: ['迁移验证'],
+      visibility: { audience: 'self' },
+    },
+  });
+  assert.equal(post.status, 201, JSON.stringify(post.data));
+  const id = post.data.id;
+  const inventory = await moduleInventoryPostgres(db);
+  assert.equal(inventory.find(module => module.id === 'blog').records, 1);
+  assert.doesNotMatch(JSON.stringify(inventory), /原生博客|不执行/);
+  const feed = '/api/blog/posts?q=' + encodeURIComponent('原生博客');
+  const visible = await app.request(feed, { uid });
+  assert.equal(visible.status, 200, JSON.stringify(visible.data));
+  assert.equal(visible.data.posts[0].id, id);
+  assert.match(visible.data.posts[0].contentHtml, /<strong>原生博客<\/strong>/);
+  assert.doesNotMatch(visible.data.posts[0].contentHtml, /<script>/);
+  assert.equal((await app.request(feed, { uid: foreign })).data.posts.length, 0);
+  const legacy = 'a'.repeat(32);
+  await db.query(`INSERT INTO navigation.blog_images (id,post_id,author_id,mime_type,image_data,position,created_at)
+    VALUES ($1,$2,$3,'image/png',$4,0,$5)`, [legacy, id, uid, Buffer.from([1, 2, 3]), new Date().toISOString()]);
+  assert.equal((await app.request('/api/blog/images/' + legacy, { uid: foreign })).status, 404);
+  assert.equal((await app.request('/api/blog/images/' + legacy, { uid })).status, 200);
+  const comments = '/api/blog/posts/' + id + '/comments';
+  assert.equal((await app.request(comments, { uid: foreign, method: 'POST', body: { content: '私密文章' } })).status, 404);
+  assert.equal((await app.request('/api/blog/posts/' + id, {
+    uid, method: 'PUT', body: { content: '已公开', tags: ['公开'], visibility: { audience: 'public' } },
+  })).status, 200);
+  const replies = await Promise.all([
+    app.request(comments, { uid: foreign, method: 'POST', body: { content: '评论一' } }),
+    app.request(comments, { uid: foreign, method: 'POST', body: { content: '评论二' } }),
+  ]);
+  assert.deepEqual(replies.map(result => result.status).sort(), [201, 429]);
+  const stored = await app.request(comments, { uid });
+  assert.equal(stored.data.comments.length, 1);
+  assert.equal(stored.data.comments[0].canDelete, true);
+
+  const video = await app.request('/api/blog/posts/' + id + '/video-uploads', { uid, method: 'POST', body: { size: 12, mimeType: 'video/mp4' } });
+  assert.equal(video.status, 201, JSON.stringify(video.data));
+  const upload = '/api/blog/video-uploads/' + video.data.id;
+  assert.equal((await app.request(upload, { uid: foreign })).status, 404);
+  const part = await fetch(app.baseUrl + upload + '/parts/1', {
+    method: 'PUT', headers: { Cookie: app.cookie(uid), 'Content-Type': 'application/octet-stream' },
+    body: Buffer.from([0, 0, 0, 12, 102, 116, 121, 112, 0, 0, 0, 0]),
+  });
+  assert.equal(part.status, 200, await part.text());
+  const child = await db.query('SELECT byte_size FROM navigation.blog_video_parts WHERE upload_id=$1', [video.data.id]);
+  assert.equal(child.rows[0].byte_size, '12');
+  assert.equal((await app.request(upload, { uid, method: 'DELETE' })).status, 200);
+  assert.equal((await db.query('SELECT 1 FROM navigation.blog_video_parts WHERE upload_id=$1', [video.data.id])).rowCount, 0);
+  const queued = await app.request('/api/blog/posts/' + id + '/video-uploads', { uid, method: 'POST', body: { size: 12, mimeType: 'video/mp4' } });
+  assert.equal(queued.status, 201);
+  const { rows: [uploadRow] } = await db.query("UPDATE navigation.blog_video_uploads SET state='storing' WHERE id=$1 RETURNING *", [queued.data.id]);
+  const repository = createPostgresBlogRepository(db);
+  const file = { kind: 'video', mimeType: 'video/mp4', url: 'https://example.invalid/video.mp4', storageKey: uploadRow.storage_key, thumbnailData: Buffer.from([0xff, 0xd8]) };
+  const result = await Promise.all([1, 2].map(() => repository.completeVideo(uploadRow, {
+    userId: uid, permissions: ['blog:post:edit'],
+  }, file)));
+  assert.deepEqual(result.map(row => row.status).sort(), [201, 404]);
+  const mediaId = result.find(row => row.status === 201).id;
+  assert.equal((await app.request('/api/blog/media/' + mediaId + '?thumbnail=1', { uid })).status, 200);
+  assert.equal((await app.request('/api/blog/posts/' + id, { uid, method: 'DELETE' })).status, 200);
+  assert.equal((await app.request(comments, { uid: foreign })).status, 404);
+  assert.equal((await db.query("SELECT count(*) FROM navigation.blog_media_cleanup WHERE storage_key=$1 AND kind='object'", [file.storageKey])).rows[0].count, '1');
+}
 
 async function verifyRbac(db) {
   const lowLevel = createPostgresRbacStore(db);
@@ -20,8 +177,9 @@ async function verifyRbac(db) {
   const config = { auth: { anonymousGuest: false, sessionSecret: 'isolated-postgres-test-only' }, services: [] };
   await assert.rejects(() => reader.load(config), { status: 503 });
   const member = { id: 'member', username: 'member', roleIds: [], enabled: true, ...createPasswordRecord('fixture-passphrase') };
+  const outsider = { id: 'member-b', username: 'member-b', roleIds: [], enabled: true };
   const admin = { id: 'admin', username: 'admin', roleIds: ['role_admin'], enabled: true };
-  await lowLevel.save({ roles: [{ id: 'role_admin', name: '管理员', permissions: ['*'] }], users: [member, admin] });
+  await lowLevel.save({ roles: [{ id: 'role_admin', name: '管理员', permissions: ['*'] }], users: [member, admin, outsider] });
   const identity = await reader.load(config);
   assert.equal(verifyLogin('member', 'fixture-passphrase', config, identity).id, member.id);
   const cookie = createSessionCookie(member.id, config.auth.sessionSecret).split(';')[0];
@@ -57,7 +215,10 @@ async function verifyRbac(db) {
   dsn.hostname = process.env.PGHOST || '127.0.0.1';
   dsn.port = process.env.PGPORT || '5432';
   dsn.pathname = '/' + process.env.PGDATABASE;
-  const running = await startAccessPortal({ extraEnv: { NAVIGATION_RBAC_POSTGRES_URL: dsn.toString(), NAVIGATION_MINGLI_POSTGRES_URL: dsn.toString() } });
+  const running = await startAccessPortal({ extraEnv: {
+    NAVIGATION_RBAC_POSTGRES_URL: dsn.toString(), NAVIGATION_MINGLI_POSTGRES_URL: dsn.toString(),
+    NAVIGATION_BLOG_POSTGRES_URL: dsn.toString(), NAVIGATION_RESOURCES_POSTGRES_URL: dsn.toString(),
+  } });
   try {
     assert.equal((await fetch(running.baseUrl + '/readyz')).status, 200);
     const login = () => fetch(running.baseUrl + '/api/login', {
@@ -81,6 +242,7 @@ async function verifyRbac(db) {
       await new Promise(resolve => setTimeout(resolve, 25));
     }
     assert.deepEqual(audit, { actor_id: member.id, owner_id: member.id, status: '201' });
+    await verifyBlog(db, running, member, outsider);
     const adminWrite = await running.request('/api/admin/users', {
       uid: admin.id, method: 'POST', body: { id: member.id, username: member.username, enabled: false, roleIds: [] },
     });
@@ -105,6 +267,8 @@ test('Mingli HTTP entry point uses PostgreSQL for owner-scoped cases, categories
     });
     schemaCreated = true;
     assert.deepEqual(await verifyPostgresSchema(db), { database: database.name, version: '001-initial' });
+    await verifyTornUsers(db);
+    await verifyQqMonitoring(db);
     await verifyRbac(db);
     const store = createMingliPostgresStore(db);
     const session = (userId, isGuest = false) => ({ userId, isGuest, permissions: ['*'] });

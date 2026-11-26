@@ -40,7 +40,7 @@ export async function startAccessPortal({ extraEnv = {} } = {}) {
   store.saveEntry(b.id, { date: '2026-10-24T12:00:00', type: '支出', amount: 3, accountId: account });
   let output = '';
   const child = spawn(process.execPath, [fileURLToPath(new URL('../server.js', import.meta.url))], { windowsHide: true,
-    env: { ...process.env, ...extraEnv, PORTAL_CONFIG_PATH: configFile, NAVIGATION_EXTERNAL_WORKERS: '1', KNOWLEDGE_DATA_DIR: path.join(root, 'knowledge'), NODE_TEST_CONTEXT: 'fixture' } });
+    env: { ...process.env, ...extraEnv, PORTAL_CONFIG_PATH: configFile, NAVIGATION_EXTERNAL_WORKERS: '1', KNOWLEDGE_DATA_DIR: path.join(root, 'knowledge'), BLOG_MEDIA_WORK_ROOT: path.join(root, 'blog-media'), NODE_TEST_CONTEXT: 'fixture' } });
   child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { output += data; });
   const baseUrl = 'http://127.0.0.1:' + port;
   const cleanup = async () => {
