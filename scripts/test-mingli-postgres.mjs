@@ -40,6 +40,7 @@ import { createPostgresQuantStore } from '../stock-manage/src/quant-store.js';
 import { createPostgresQuantBacktestStore } from '../stock-manage/src/quant-backtest-store.js';
 import { createPostgresKnowledgeLeases } from '../portal/src/knowledge-postgres-leases.js';
 import { createPostgresKnowledgeDeviceStore } from '../portal/src/knowledge-devices.js';
+import { createPostgresKnowledgeSourceStore } from '../portal/src/knowledge-source-store.js';
 
 async function verifyQqMonitoring(db) {
   let restarts = 0, now = 1000000, usageReads = 0, sent = 0;
@@ -384,6 +385,20 @@ async function verifyKnowledgeLeases(db) {
     await db.query(`INSERT INTO navigation.knowledge_documents(id,user_id,title,original_name,byte_size,mime_type,backend,status,created_at,updated_at)
       VALUES($1,$2,$1,'fixture.mp4',100,'video/mp4','codex','queued',$3,$3)`, [id, uid, stamp]);
   }
+  const sources = createPostgresKnowledgeSourceStore(db);
+  await sources.add(uid, 'knowledge-a', 'fixtures/a.mp4');
+  await sources.enqueue(uid, 'knowledge-a');
+  const archivalJobs = (await Promise.all([sources.claim(), createPostgresKnowledgeSourceStore(db).claim()])).filter(Boolean);
+  assert.equal(archivalJobs.length, 1);
+  const [archive] = archivalJobs;
+  assert.equal(archive.document_id, 'knowledge-a');
+  assert.equal(archive.attempts, 0);
+  assert.equal(await sources.update({ ...archive, user_id: 'other' }, { state: 'ready' }), false);
+  assert.equal(await sources.update({ ...archive, lease: 'other' }, { state: 'ready' }), false);
+  await assert.rejects(() => sources.deleting(uid, archive.document_id), { status: 409 });
+  assert.equal(await sources.update(archive, { state: 'ready', upload_ms: 42 }), true);
+  await sources.release(archive);
+  assert.equal((await sources.public(uid, archive.document_id)).timings.uploadMs, 42);
   const first = createPostgresKnowledgeLeases(db), second = createPostgresKnowledgeLeases(db);
   const claim = store => store.claim(uid, ['codex'], workerId);
   const acquisitions = (await Promise.all([claim(first), claim(second)])).filter(Boolean);
