@@ -68,6 +68,32 @@ test('account balances use integer cents, transfers and refunds; changes reverse
     const adjustment=s.adjust('a',a,{date,balance:1000});assert.equal(s.accounts('a')[0].balance,1000);s.removeEntry('a',adjustment);assert.equal(s.accounts('a')[0].balance,909.8);
   } finally { db.close(); }
 });
+
+test('editing a purchase can post and update one dated refund without changing the purchase amount',()=>{
+  const {db,store}=setup();
+  try{
+    const u='a',accountId=store.saveAccount(u,{name:'银行卡',balance:100});
+    const id=store.saveEntry(u,{date,type:'支出',amount:15,accountId,category:'购物',discount:3});
+    const refundDate='2026-10-12T11:15:00';
+    const original=()=>store.entries(u).find(e=>e.id===id);
+    store.saveEntry(u,{...original(),refund:10},id);
+    assert.equal(store.accounts(u)[0].balance,85);
+    assert.throws(()=>store.saveEntry(u,{...original(),refund:16,refundDate},id),/不超过原支出/);
+    assert.equal(store.entries(u).length,1);
+    const post=()=>store.saveEntry(u,{...original(),refund:10,refundDate},id);
+    post(); post();
+    const refund=store.entries(u).find(e=>e.type==='退款入账');
+    assert.deepEqual([refund.date,refund.amount,refund.accountId,refund.category],[refundDate,10,accountId,'购物']);
+    assert.equal(original().refundPostedAt,refundDate);
+    assert.equal(store.entries(u).length,2);
+    assert.equal(store.accounts(u)[0].balance,95);
+    assert.equal(summarize(store.entries(u)).totals.CNY.expense,5);
+    store.saveEntry(u,{...original(),refund:15,refundDate},id);
+    assert.equal(store.entries(u).find(e=>e.type==='退款入账').id,refund.id);
+    assert.equal(store.accounts(u)[0].balance,100);
+    assert.equal(original().amount,15);
+  }finally{db.close();}
+});
 test('user isolation guards IDs, settings and account deletion',()=>{
   const {db,store:s}=setup();try{
     const aid=s.saveAccount('a',{name:'资产',balance:20});

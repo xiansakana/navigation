@@ -160,16 +160,42 @@ function initializeBookkeepingStore(db) {
     catalog.ensureCategory(userId, categoryKind(e.type), e.category, e.subcategory);
     return eid;
   }
+  const refundSource = eid => 'linked-refund:v1:' + eid;
   function saveEntry(userId, input, eid) {
     return db.transaction(() => {
       const old = eid && db.prepare('SELECT * FROM bookkeeping_entries WHERE user_id=? AND id=?').get(userId, eid);
       if (eid && !old) fail('账单不存在');
       const normalized = normalizeEntry(userId, input, old?.affects_balance === 0, old ? [old.account_id,old.to_account_id] : [], old);
       catalog.validateEntry(userId, normalized, old);
+      if (old?.source_key?.startsWith('linked-refund:v1:') &&
+        (normalized.type !== old.type || normalized.amount !== old.amount || normalized.date !== old.date ||
+          normalized.accountId !== old.account_id || normalized.currency !== old.currency)) fail('请在原支出中修改已关联的退款');
+      const linked = old && db.prepare('SELECT * FROM bookkeeping_entries WHERE user_id=? AND source_key=?').get(userId, refundSource(eid));
+      if (linked && (!['支出', '已报销'].includes(normalized.type) || !input.refundDate &&
+        (normalized.amount < linked.amount || normalized.refund !== linked.amount))) {
+        fail('请先核对这笔账单关联的退款');
+      }
+      let refund;
+      if (input.refundDate) {
+        if (!old || !['支出', '已报销'].includes(normalized.type) || !normalized.accountId) fail('请为原支出选择账户后再记录退款');
+        if (normalized.refund <= 0 || normalized.refund > normalized.amount) fail('退款金额必须大于零且不超过原支出');
+        const date = entryDate(input.refundDate);
+        if (date < normalized.date) fail('退款到账时间不能早于原支出');
+        refund = normalizeEntry(userId, {
+          type: '退款入账', date, amount: normalized.refund / 100, currency: normalized.currency,
+          accountId: normalized.accountId, category: normalized.category, subcategory: normalized.subcategory,
+          book: normalized.book, note: text('退款 · ' + (normalized.note || normalized.category), 5000)
+        }, false, [normalized.accountId]);
+      }
       let raw=old?.raw?JSON.parse(old.raw):null;
       if(raw?.kind==='icost-screenshot-adjustment-v1' && (normalized.type!==old.type || normalized.date!==old.date || normalized.amount!==old.amount || normalized.currency!==old.currency || normalized.accountId!==old.account_id || normalized.fee!==old.fee))raw={...raw,checkpoint:null};
       if (old) db.prepare('DELETE FROM bookkeeping_entries WHERE user_id=? AND id=?').run(userId, eid);
-      return insertEntry(userId, normalized, { id: eid, historical: old?.affects_balance === 0, sourceKey: old?.source_key, raw });
+      const saved = insertEntry(userId, normalized, { id: eid, historical: old?.affects_balance === 0, sourceKey: old?.source_key, raw });
+      if (refund) {
+        if (linked) db.prepare('DELETE FROM bookkeeping_entries WHERE user_id=? AND id=?').run(userId, linked.id);
+        insertEntry(userId, refund, { id: linked?.id, sourceKey: refundSource(saved) });
+      }
+      return saved;
     })();
   }
   function entries(userId, filter = {}) {
@@ -194,14 +220,16 @@ function initializeBookkeepingStore(db) {
       clauses.push('(' + fields.map(field => field + ' LIKE ?').join(' OR ') + ')');
       args.push(...fields.map(() => '%' + text(filter.q) + '%'));
     }
-    return db.prepare(`SELECT e.*,a.name AS account_name,b.name AS to_account_name FROM bookkeeping_entries e
+    return db.prepare(`SELECT e.*,a.name AS account_name,b.name AS to_account_name,r.date AS refund_posted_at FROM bookkeeping_entries e
       LEFT JOIN bookkeeping_accounts a ON a.id=e.account_id AND a.user_id=e.user_id
       LEFT JOIN bookkeeping_accounts b ON b.id=e.to_account_id AND b.user_id=e.user_id
+      LEFT JOIN bookkeeping_entries r ON r.user_id=e.user_id AND r.source_key=('linked-refund:v1:' || e.id) AND r.type='退款入账'
       WHERE ${clauses.join(' AND ')} ORDER BY e.date DESC,e.rowid DESC`).all(...args).map(e => ({
       id: e.id, date: e.date, type: e.type, amount: e.amount / 100, currency: e.currency, category: e.category, subcategory: e.subcategory,
       accountId: e.account_id, toAccountId: e.to_account_id, toAmount: e.to_amount == null ? null : e.to_amount / 100,
       accountName: e.account_name, toAccountName: e.to_account_name, note: e.note, book: e.book, tags: e.tags, location: e.location,
       refund: e.refund / 100, discount: e.discount / 100, fee: e.fee / 100, historical: !e.affects_balance,
+      ...(e.refund_posted_at ? {refundPostedAt: e.refund_posted_at} : {}),
       ...(e.source_key && e.raw && JSON.parse(e.raw).reviewedBalance === 'history' ? { reviewedHistory: true } : {}),
       ...(e.type==='余额调整'?screenshotCheckpoint(e.raw):{})
     }));

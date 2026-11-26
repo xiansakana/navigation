@@ -171,7 +171,8 @@
     let html = '';
     if (mode === 'entry') {
       $('editor-title').textContent = detailGroup ? '修改'+window.bookkeepingDetailGroups[detailGroup].label : item.id ? '编辑账单' : isCopy ? '复制账单' : '记一笔';
-      html = select('type','类型',item.type==='余额调整'?[...types,'余额调整']:types,item.type||'支出') + field('amount','金额',item.amount??'','type="number" step="0.01" required') + select('currency','货币',currencies,item.currency||'CNY') + field('date','日期与时间',item.date||now(),'type="datetime-local" step="1" required') + select('category','一级分类',[],item.category) + select('subcategory','二级分类',[],item.subcategory,'无二级分类') + select('accountId','付款 / 收款账户',accountOptions(),item.accountId,'未关联账户') + select('toAccountId','转入账户',accountOptions(),item.toAccountId,'请选择') + field('toAmount','实际到账金额',item.toAmount??'','type="number" min="0.01" step="0.01"') + field('fee','手续费（付款币种）',item.fee||0,'type="number" min="0" step="0.01"') + field('book','账本',item.book||$('book').value||'个人账本','required') + field('tags','标签',item.tags) + '<label><span class="bk-location-heading">位置 <small id="location-status"></small></span><span class="bk-location-input"><input name="location" aria-label="位置" value="'+esc(item.location)+'"><button type="button" id="location-retry" class="btn ghost" aria-label="重新获取当前位置" title="重新获取当前位置">⌖</button></span></label>' + field('refund','退款信息（辅助字段）',item.refund||0,'type="number" min="0" step="0.01"') + field('discount','优惠信息（辅助字段）',item.discount||0,'type="number" min="0" step="0.01"') + '<label class="full">备注<textarea name="note" maxlength="5000">' + esc(item.note) + '</textarea></label><datalist id="category-suggestions">' + state.categories.map(c => '<option value="'+esc(c)+'">').join('') + '</datalist>';
+      html = select('type','类型',item.type==='余额调整'?[...types,'余额调整']:types,item.type||'支出') + field('amount','金额',item.amount??'','type="number" step="0.01" required') + select('currency','货币',currencies,item.currency||'CNY') + field('date','日期与时间',item.date||now(),'type="datetime-local" step="1" required') + select('category','一级分类',[],item.category) + select('subcategory','二级分类',[],item.subcategory,'无二级分类') + select('accountId','付款 / 收款账户',accountOptions(),item.accountId,'未关联账户') + select('toAccountId','转入账户',accountOptions(),item.toAccountId,'请选择') + field('toAmount','实际到账金额',item.toAmount??'','type="number" min="0.01" step="0.01"') + field('fee','手续费（付款币种）',item.fee||0,'type="number" min="0" step="0.01"') + field('book','账本',item.book||$('book').value||'个人账本','required') + field('tags','标签',item.tags) + '<label><span class="bk-location-heading">位置 <small id="location-status"></small></span><span class="bk-location-input"><input name="location" aria-label="位置" value="'+esc(item.location)+'"><button type="button" id="location-retry" class="btn ghost" aria-label="重新获取当前位置" title="重新获取当前位置">⌖</button></span></label>' + field('refund','退款金额',item.refund||0,'type="number" min="0" step="0.01"') + field('discount','优惠信息（辅助字段）',item.discount||0,'type="number" min="0" step="0.01"') + '<label class="full">备注<textarea name="note" maxlength="5000">' + esc(item.note) + '</textarea></label><datalist id="category-suggestions">' + state.categories.map(c => '<option value="'+esc(c)+'">').join('') + '</datalist>';
+      if (item.id && ['支出','已报销'].includes(item.type)) html += field('refundDate','退款实际到账时间',item.refundPostedAt||'','type="datetime-local" step="1"');
       if (item.historical) html += '<p class="bk-form-hint">这是历史导入记录，编辑或删除不会改变资产基准。原导出的跨币种转账没有到账金额。</p>';
     } else if (mode === 'account') {
       $('editor-title').textContent = item.id?'编辑账户':'新增账户';
@@ -228,7 +229,17 @@
     if(opened.mode==='entry'){await locationCapture?.wait();if(editing!==opened || !$('editor').open)return;}
     const input = Object.fromEntries(new FormData(event.target)); const { mode,item } = editing; $('save-item').disabled=true;
     try {
-      if (mode==='entry') { if (!input.toAmount) delete input.toAmount; await write('/entries'+(item.id?'/'+item.id:''),input,item.id?'PUT':'POST'); }
+      if (mode==='entry') {
+        if (!input.toAmount) delete input.toAmount;
+        const canPostRefund=event.target.elements.refundDate && (!opened.detailGroup||opened.detailGroup==='refund');
+        if (!canPostRefund) delete input.refundDate;
+        else if ((opened.detailGroup==='refund'||Number(input.refund)!==Number(item.refund||0)) && Number(input.refund)>0 && !input.refundDate) {
+          throw new Error('请选择退款实际到账时间');
+        }
+        else if (!opened.detailGroup && Number(input.refund)===Number(item.refund||0) &&
+          (input.refundDate||'')===(item.refundPostedAt||'')) delete input.refundDate;
+        await write('/entries'+(item.id?'/'+item.id:''),input,item.id?'PUT':'POST');
+      }
       else if (mode==='account') { input.included=event.target.elements.included.checked; await write('/accounts'+(item.id?'/'+item.id:''),input,item.id?'PUT':'POST'); }
       else if (mode==='adjust') await write('/accounts/'+item.id+'/adjust',input);
       else { const rates={ CNY:1 }, budgets={...state.settings.budgets}; for(const c of currencies) if(input['rate_'+c]) rates[c]=Number(input['rate_'+c]); budgets[input.budgetMonth]=Number(input.budget); await write('/settings',{rates,budgets},'PUT'); }
