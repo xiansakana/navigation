@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
 import { loadConfig } from '../portal/src/config.js';
 import { getDatabase, loadRbacBlob } from '../shared/db/index.js';
 import { createSessionCookie } from '../portal/src/auth.js';
@@ -13,9 +14,19 @@ if (config.runtime?.tornMonitorWorker) {
 const admin = loadRbacBlob(db)?.users?.find(user => user.enabled && user.roleIds?.includes('role_admin'));
 if (!admin) throw new Error('No active administrator');
 const base = `http://127.0.0.1:${config.server?.port || 8080}`;
-for (const route of ['/healthz', '/readyz']) {
-  const response = await fetch(base + route);
-  if (!response.ok || !(await response.json()).ok) throw new Error('Portal readiness check failed');
+const deadline = Date.now() + 15_000;
+while (true) {
+  try {
+    for (const route of ['/healthz', '/readyz']) {
+      const timeLeft = Math.max(1, deadline - Date.now());
+      const response = await fetch(base + route, { signal: AbortSignal.timeout(Math.min(timeLeft, 2000)) });
+      if (!response.ok || !(await response.json()).ok) throw new Error(`Unexpected response from ${route}`);
+    }
+    break;
+  } catch (error) {
+    if (Date.now() >= deadline) throw new Error('Portal readiness check failed', { cause: error });
+    await delay(Math.min(250, deadline - Date.now()));
+  }
 }
 const cookie = createSessionCookie(admin.id, sessionSecret(config)).split(';')[0];
 const response = await fetch(base + '/api/resources/metrics', { headers: { Cookie: cookie } });
