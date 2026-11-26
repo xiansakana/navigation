@@ -38,6 +38,8 @@ import { FactionScanner } from '../portal/src/torn-faction-scan.js';
 import { createPostgresUndercutStore } from '../torn-toolbox-desktop/src/undercut-store.js';
 import { createPostgresQuantStore } from '../stock-manage/src/quant-store.js';
 import { createPostgresQuantBacktestStore } from '../stock-manage/src/quant-backtest-store.js';
+import { createPostgresKnowledgeLeases } from '../portal/src/knowledge-postgres-leases.js';
+import { createPostgresKnowledgeDeviceStore } from '../portal/src/knowledge-devices.js';
 
 async function verifyQqMonitoring(db) {
   let restarts = 0, now = 1000000, usageReads = 0, sent = 0;
@@ -364,6 +366,52 @@ async function verifyTornWorkerProcess(db, dsn, uid) {
   }
 }
 
+async function verifyKnowledgeLeases(db) {
+  const uid = 'knowledge-lease-fixture', stamp = new Date().toISOString();
+  const devices = createPostgresKnowledgeDeviceStore(db);
+  const pairing = await devices.start('Worker fixture');
+  assert.equal((await devices.inspect(pairing.userCode)).label, 'Worker fixture');
+  assert.equal(await devices.approve(uid, pairing.userCode), true);
+  const polls = await Promise.all([devices.poll(pairing.deviceCode, async owner => owner === uid), devices.poll(pairing.deviceCode, async owner => owner === uid)]);
+  assert.deepEqual(polls.map(result => result.status).sort(), ['approved', 'expired']);
+  const { token, deviceId: workerId } = polls.find(result => result.status === 'approved');
+  assert.equal((await devices.authenticate(token)).user_id, uid);
+  const capabilities = { media: { ready: true, detail: 'cuda' }, codex: { ready: true }, pipeline: { version: 1 } };
+  await db.query(`INSERT INTO navigation.knowledge_worker_instances(user_id,worker_id,last_seen,label,capabilities_json)
+    VALUES($1,$2,$3,'Fixture',$4)`, [uid, workerId, stamp, JSON.stringify(capabilities)]);
+  await db.query(`INSERT INTO navigation.knowledge_settings(user_id,pipeline_json) VALUES($1,'{"mediaConcurrency":1,"summaryConcurrency":1}')`, [uid]);
+  for (const id of ['knowledge-a', 'knowledge-b']) {
+    await db.query(`INSERT INTO navigation.knowledge_documents(id,user_id,title,original_name,byte_size,mime_type,backend,status,created_at,updated_at)
+      VALUES($1,$2,$1,'fixture.mp4',100,'video/mp4','codex','queued',$3,$3)`, [id, uid, stamp]);
+  }
+  const first = createPostgresKnowledgeLeases(db), second = createPostgresKnowledgeLeases(db);
+  const claim = store => store.claim(uid, ['codex'], workerId);
+  const acquisitions = (await Promise.all([claim(first), claim(second)])).filter(Boolean);
+  assert.equal(acquisitions.length, 1);
+  const [job] = acquisitions;
+  assert.equal(job.row.id, 'knowledge-a');
+  assert.equal(await first.progress('other-knowledge-owner', job.row.id, job.lease, 'spurious', 10), false);
+  await assert.rejects(() => first.phase(uid, job.row.id, job.lease, 'summary'), { status: 409 });
+  assert.equal(await first.phase(uid, job.row.id, job.lease, 'summary_wait'), true);
+  assert.equal(await first.phase(uid, job.row.id, job.lease, 'summary'), true);
+  const next = await claim(second);
+  assert.equal(next.row.id, 'knowledge-b');
+  assert.equal(await second.phase(uid, next.row.id, next.lease, 'summary_wait'), true);
+  assert.equal(await second.phase(uid, next.row.id, next.lease, 'summary'), false);
+  await db.query("UPDATE navigation.knowledge_documents SET heartbeat='2000-01-01T00:00:00.000Z' WHERE id=$1", [job.row.id]);
+  assert.equal(await first.progress(uid, job.row.id, job.lease, 'expired', 90), false);
+  const recovered = await claim(createPostgresKnowledgeLeases(db));
+  assert.equal(recovered.row.id, job.row.id);
+  assert.notEqual(recovered.lease, job.lease);
+  assert.equal(Number(recovered.row.attempt), 2);
+  assert.equal((await devices.list(uid))[0].online, true);
+  assert.equal(await devices.revoke('other-knowledge-owner', workerId), false);
+  assert.equal(await devices.revoke(uid, workerId), true);
+  assert.equal(await devices.authenticate(token), undefined);
+  assert.equal(await first.progress(uid, recovered.row.id, recovered.lease, 'revoked', 90), false);
+  assert.equal(await claim(second), null);
+}
+
 async function verifyQuant(db) {
   const uid = 'quant-fixture', outsider = 'quant-fixture-other';
   const first = createPostgresQuantStore({}, db), second = createPostgresQuantStore({}, db);
@@ -517,6 +565,7 @@ test('Mingli HTTP entry point uses PostgreSQL for owner-scoped cases, categories
     await verifyTornFactionScan(db);
     await verifyTornUndercut(db);
     await verifyQuant(db);
+    await verifyKnowledgeLeases(db);
     await verifyQqMonitoring(db);
     await verifyRbac(db);
     const store = createMingliPostgresStore(db);

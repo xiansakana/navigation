@@ -1,6 +1,89 @@
 import crypto from 'node:crypto';
 
 const hash = value => crypto.createHash('sha256').update(String(value)).digest('hex');
+const labelOf = label => String(label || 'Windows 视频工作器').trim().slice(0, 80);
+const deviceListRow = ({ capabilities_json, ...device }) => ({
+  ...device, online: !device.revokedAt && !!device.lastSeen && Date.now() - Date.parse(device.lastSeen) < 90000,
+  capabilities: JSON.parse(capabilities_json || '{}'),
+});
+
+export function createPostgresKnowledgeDeviceStore(db) {
+  return {
+    start(label) {
+      return db.transaction(async client => {
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended('knowledge:pairing', 0))");
+        const time = Date.now();
+        await client.query('DELETE FROM navigation.knowledge_worker_pairings WHERE expires<$1', [time]);
+        const { rows: [row] } = await client.query('SELECT count(*) AS n FROM navigation.knowledge_worker_pairings');
+        if (Number(row.n) >= 1000) throw Object.assign(new Error('配对请求过多，请稍后重试'), { status: 429 });
+        const deviceCode = crypto.randomBytes(32).toString('hex'), userCode = crypto.randomBytes(4).toString('hex').toUpperCase();
+        await client.query('INSERT INTO navigation.knowledge_worker_pairings(secret_hash,user_code,label,expires) VALUES($1,$2,$3,$4)',
+          [hash(deviceCode), userCode, labelOf(label), time + 600000]);
+        return { deviceCode, userCode, expiresIn: 600, interval: 5 };
+      });
+    },
+    async inspect(code) {
+      const { rows: [row] } = await db.query(`SELECT label,expires FROM navigation.knowledge_worker_pairings
+        WHERE user_code=$1 AND expires>$2 AND consumed=0 AND user_id IS NULL`, [String(code).toUpperCase(), Date.now()]);
+      return row ? { label: row.label, expiresAt: new Date(Number(row.expires)).toISOString() } : null;
+    },
+    async approve(uid, code) {
+      const result = await db.query(`UPDATE navigation.knowledge_worker_pairings SET user_id=$1
+        WHERE user_code=$2 AND expires>$3 AND user_id IS NULL AND consumed=0`, [uid, String(code).toUpperCase(), Date.now()]);
+      return result.rowCount === 1;
+    },
+    async poll(secret, authorize, label = '') {
+      const secretHash = hash(secret);
+      const { rows: [preview] } = await db.query(`SELECT user_id FROM navigation.knowledge_worker_pairings
+        WHERE secret_hash=$1 AND expires>$2 AND consumed=0 AND last_poll<=$3`, [secretHash, Date.now(), Date.now() - 2000]);
+      const approvedUid = preview?.user_id && await authorize(preview.user_id) ? preview.user_id : null;
+      return db.transaction(async client => {
+        const { rows: [pair] } = await client.query('SELECT * FROM navigation.knowledge_worker_pairings WHERE secret_hash=$1 FOR UPDATE', [secretHash]);
+        const time = Date.now();
+        if (!pair || Number(pair.expires) <= time || Number(pair.consumed)) return { status: 'expired' };
+        if (Number(pair.last_poll) > time - 2000) return { status: 'slow_down' };
+        await client.query('UPDATE navigation.knowledge_worker_pairings SET last_poll=$2 WHERE secret_hash=$1', [pair.secret_hash, time]);
+        if (!pair.user_id || pair.user_id !== preview?.user_id) return { status: 'pending' };
+        if (pair.user_id !== approvedUid) return { status: 'denied' };
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended('knowledge:devices:' || $1, 0))", [pair.user_id]);
+        const { rows: [row] } = await client.query('SELECT count(*) AS n FROM navigation.knowledge_worker_devices WHERE user_id=$1 AND revoked_at IS NULL', [pair.user_id]);
+        if (Number(row.n) >= 20) return { status: 'device_limit' };
+        const deviceId = crypto.randomBytes(16).toString('hex'), token = 'nkw_' + crypto.randomBytes(32).toString('hex');
+        const tokenHash = hash(token);
+        await client.query('INSERT INTO navigation.knowledge_worker_devices(id,user_id,label,token_hash,created_at) VALUES($1,$2,$3,$4,$5)',
+          [deviceId, pair.user_id, String(label || pair.label).trim().slice(0, 80), tokenHash, new Date().toISOString()]);
+        await client.query('INSERT INTO navigation.knowledge_workers(user_id,token_hash) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING',
+          [pair.user_id, 'device-only:' + tokenHash]);
+        await client.query('UPDATE navigation.knowledge_worker_pairings SET consumed=1 WHERE secret_hash=$1', [pair.secret_hash]);
+        return { status: 'approved', token, deviceId };
+      });
+    },
+    async authenticate(token) {
+      const { rows: [row] } = await db.query('SELECT id,user_id,label FROM navigation.knowledge_worker_devices WHERE token_hash=$1 AND revoked_at IS NULL', [hash(token)]);
+      return row;
+    },
+    async list(uid) {
+      const { rows } = await db.query(`SELECT d.id,d.label,d.created_at AS "createdAt",d.revoked_at AS "revokedAt",
+          i.last_seen AS "lastSeen",i.capabilities_json FROM navigation.knowledge_worker_devices d
+        LEFT JOIN navigation.knowledge_worker_instances i ON i.user_id=d.user_id AND i.worker_id=d.id
+        WHERE d.user_id=$1 ORDER BY d.created_at DESC`, [uid]);
+      return rows.map(deviceListRow);
+    },
+    revoke(uid, id) {
+      return db.transaction(async client => {
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended('knowledge:worker:' || $1, 0))", [uid]);
+        const time = new Date().toISOString();
+        const result = await client.query('UPDATE navigation.knowledge_worker_devices SET revoked_at=$3 WHERE user_id=$1 AND id=$2 AND revoked_at IS NULL', [uid, id, time]);
+        if (!result.rowCount) return false;
+        await client.query('DELETE FROM navigation.knowledge_worker_instances WHERE user_id=$1 AND worker_id=$2', [uid, id]);
+        await client.query(`UPDATE navigation.knowledge_documents SET status='failed',stage='处理设备已停用',
+          error='请使用其他工作器重试',lease=NULL,updated_at=$3 WHERE user_id=$1 AND worker_id=$2 AND status='processing'`, [uid, id, time]);
+        return true;
+      });
+    },
+  };
+}
+
 export function createKnowledgeDeviceStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS knowledge_worker_devices (
     id TEXT PRIMARY KEY,user_id TEXT NOT NULL,label TEXT NOT NULL,token_hash TEXT NOT NULL UNIQUE,
@@ -15,7 +98,7 @@ export function createKnowledgeDeviceStore(db) {
       if (db.prepare('SELECT count(*) n FROM knowledge_worker_pairings').get().n >= 1000) throw Object.assign(new Error('配对请求过多，请稍后重试'), { status: 429 });
       const deviceCode = crypto.randomBytes(32).toString('hex'), userCode = crypto.randomBytes(4).toString('hex').toUpperCase();
       db.prepare('INSERT INTO knowledge_worker_pairings(secret_hash,user_code,label,expires) VALUES (?,?,?,?)')
-        .run(hash(deviceCode), userCode, String(label || 'Windows 视频工作器').trim().slice(0, 80), Date.now() + 600000);
+        .run(hash(deviceCode), userCode, labelOf(label), Date.now() + 600000);
       return { deviceCode, userCode, expiresIn: 600, interval: 5 };
     },
     inspect(code) {
@@ -47,7 +130,7 @@ export function createKnowledgeDeviceStore(db) {
     list(uid) {
       return db.prepare(`SELECT d.id,d.label,d.created_at AS createdAt,d.revoked_at AS revokedAt,i.last_seen AS lastSeen,i.capabilities_json
         FROM knowledge_worker_devices d LEFT JOIN knowledge_worker_instances i ON i.user_id=d.user_id AND i.worker_id=d.id WHERE d.user_id=? ORDER BY d.created_at DESC`).all(uid)
-        .map(({ capabilities_json, ...d }) => ({ ...d, online: !d.revokedAt && !!d.lastSeen && Date.now() - Date.parse(d.lastSeen) < 90000, capabilities: JSON.parse(capabilities_json || '{}') }));
+        .map(deviceListRow);
     },
     revoke(uid, id) {
       return db.transaction(() => {
