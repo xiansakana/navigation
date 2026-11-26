@@ -6,7 +6,7 @@ import { createKnowledgeDeviceStore } from './knowledge-devices.js';
 import { createLocalInputStore } from './knowledge-local-store.js';
 import { createImportStore } from './knowledge-import-store.js';
 import { pipelineSettings } from './knowledge-pipeline.js';
-import { storageConfig } from './knowledge-storage.js';
+import { sourcePath, storageConfig } from './knowledge-storage.js';
 import { sourceKey, findSourceDuplicate, duplicateSourceError } from './knowledge-source-dedupe.js';
 import { createReanalysisStore } from './knowledge-reanalysis-store.js';
 import { asrSettings, readableTranscript } from './knowledge-asr.js';
@@ -90,7 +90,37 @@ export function createKnowledgeStore(db) {
   const onlineWorkers = uid => db.prepare('SELECT worker_id,label,last_seen,capabilities_json FROM knowledge_worker_instances WHERE user_id=? AND last_seen>?')
     .all(uid, new Date(Date.now() - 90000).toISOString())
     .map(r => ({ id: r.worker_id, label: r.label, lastSeen: r.last_seen, capabilities: JSON.parse(r.capabilities_json) }));
+  const checkDiskSpace = (bytes, availableBytes) => {
+    const reserved = db.prepare("SELECT coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE status IN ('uploading','importing')").get().bytes;
+    if (Number(bytes) * 3 + reserved * 2 + 5 * 1024 ** 3 > availableBytes) throw new Error('服务器可用空间不足');
+  };
   return {
+    failedDocuments(uid) {
+      return db.prepare("SELECT id FROM knowledge_documents WHERE user_id=? AND status='failed' ORDER BY created_at,id").all(uid);
+    },
+    createUpload(uid, input, config, availableBytes) {
+      return db.transaction(() => {
+        checkDiskSpace(input.bytes, availableBytes);
+        const created = this.create(uid, input);
+        if (config) {
+          sources.add(uid, created.id, sourcePath(config, uid, created));
+          created.storage = sources.public(uid, created.id);
+        }
+        return created;
+      }).immediate();
+    },
+    createLinkImport(uid, input, url, selection, config, availableBytes) {
+      return db.transaction(() => {
+        checkDiskSpace(input.bytes, availableBytes);
+        const duplicate = this.duplicateSource(uid, url);
+        if (duplicate) throw duplicateSourceError(duplicate);
+        const created = this.create(uid, input);
+        imports.add(uid, created.id, url, selection);
+        if (config) sources.add(uid, created.id, sourcePath(config, uid, created));
+        db.prepare("UPDATE knowledge_documents SET status='importing',stage='等待下载B站视频' WHERE user_id=? AND id=?").run(uid, created.id);
+        return get(uid, created.id);
+      }).immediate();
+    },
     get, getRow, expire, sources, devices, localInputs, imports, reanalysis, codexCalls:createKnowledgeCodexCalls(db),
     settings(uid) { const row = db.prepare('SELECT * FROM knowledge_settings WHERE user_id=?').get(uid); return { backend: row?.backend || 'codex', ...modelSettings({}, JSON.parse(row?.model_settings_json || '{}')), ...pipelineSettings({}, JSON.parse(row?.pipeline_json || '{}')) }; },
     saveSettings(uid, raw) {

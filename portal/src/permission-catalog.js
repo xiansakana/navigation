@@ -1,0 +1,290 @@
+export const STOCK_MANAGE_SERVICE_ID = 'stock-manage';
+export const QQQ_DIP_SERVICE_ID = 'qqq-dip';
+export const NOTIFICATIONS_SERVICE_ID = 'notifications';
+
+export const STOCK_MANAGE_HOLDINGS_COLUMNS = [
+    { key: 'type', name: '类型' },
+    { key: 'account', name: '账户' },
+    { key: 'symbol', name: '代码' },
+    { key: 'name', name: '名称' },
+    { key: 'shares', name: '股数' },
+    { key: 'cost', name: '成本' },
+    { key: 'price', name: '现价' },
+    { key: 'pnl', name: '盈亏' },
+    { key: 'pnlPct', name: '盈亏比例' },
+    { key: 'dailyPnl', name: '当日盈亏' },
+    { key: 'dailyPnlPct', name: '当日盈亏比例' },
+    { key: 'position', name: '持仓' },
+    { key: 'weight', name: '仓位 / 占比' },
+    { key: 'optinfo', name: '期权信息' },
+    { key: 'note', name: '备注' },
+    { key: 'actions', name: '操作' }
+];
+
+export const STOCK_MANAGE_FEATURES = [
+    { feature: 'tab-quant', name: '进入量化分析', action: 'view', permissionPath: ['量化分析'] },
+    { feature: 'quant-settings', name: '读取用户量化设置', action: 'view', permissionPath: ['量化分析', '通用数据'] },
+    { feature: 'quant-history', name: '查看 K 线', action: 'view', permissionPath: ['量化分析', '通用数据'] },
+    { feature: 'quant-watchlist', name: '保存分析标的', action: 'edit', permissionPath: ['量化分析', '分析标的'] },
+    { feature: 'quant-dashboard', name: '进入量化仪表盘', action: 'view', permissionPath: ['量化分析', '量化仪表盘'] },
+    { feature: 'quant-analysis-run', name: '运行量化分析', action: 'edit', permissionPath: ['量化分析', '量化仪表盘'] },
+    { feature: 'quant-strategy', name: '进入策略参数页', action: 'view', permissionPath: ['量化分析', '策略参数页'] },
+    { feature: 'quant-config', name: '保存策略参数', action: 'edit', permissionPath: ['量化分析', '策略参数页'] },
+    { feature: 'quant-backtest', name: '进入历史回测页', action: 'view', permissionPath: ['量化分析', '历史回测页'] },
+    { feature: 'quant-backtest-run', name: '运行历史回测', action: 'edit', permissionPath: ['量化分析', '历史回测页'] },
+    { feature: 'quant-backtest-delete', name: '删除回测记录', action: 'edit', permissionPath: ['量化分析', '历史回测页'] },
+    { feature: 'quant-paper', name: '进入模拟盘页', action: 'view', permissionPath: ['量化分析', '模拟盘'] },
+    { feature: 'quant-paper-settings', name: '保存模拟盘设置', action: 'edit', permissionPath: ['量化分析', '模拟盘'] },
+    { feature: 'quant-paper-sync', name: '执行模拟盘同步', action: 'edit', permissionPath: ['量化分析', '模拟盘'] },
+    { feature: 'quant-paper-reset', name: '重置模拟盘', action: 'edit', permissionPath: ['量化分析', '模拟盘'] },
+    { feature: 'dashboard', name: '显示看板', action: 'view', permissionPath: ['持仓', '看板'] },
+    { feature: 'pnl', name: '查询盈亏', action: 'view', permissionPath: ['持仓', '看板'] },
+    { feature: 'pnl-toggle', name: '盈亏显隐', action: 'view', permissionPath: ['持仓', '看板'] },
+    { feature: 'trades', name: '交易记录', action: 'view', permissionPath: ['持仓', '交易记录'] },
+    { feature: 'accounts', name: '查看证券账户', action: 'view', permissionPath: ['持仓', '账户管理'] },
+    { feature: 'dip-funds', name: '划拨/释放抄底专用资金', action: 'edit', permissionPath: ['持仓', '账户管理', '抄底资金池'] },
+    { feature: 'dip-spend', name: '使用抄底专用资金成交', action: 'edit', permissionPath: ['持仓', '账户管理', '抄底资金池'] },
+    { feature: 'accounts', name: '管理证券账户及绑定', action: 'edit', permissionPath: ['持仓', '账户管理'] },
+    { feature: 'trade-review', name: '交易复盘', action: 'view', permissionPath: ['持仓', '交易记录', '交易复盘'] },
+    { feature: 'export', name: '导出交易', action: 'view', permissionPath: ['持仓', '交易记录'] },
+    { feature: 'import', name: '导入交易', action: 'edit', permissionPath: ['持仓', '交易记录'] },
+    { feature: 'columns', name: '列数据显隐控制', action: 'view', permissionPath: ['持仓', '持仓明细'] },
+    { feature: 'trade', name: '记一笔', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
+    { feature: 'refresh', name: '刷新价格', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
+    { feature: 'cash', name: '查看现金', action: 'view', permissionPath: ['持仓', '资金'] },
+    { feature: 'cash', name: '编辑现金', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
+    { feature: 'meta', name: '编辑持仓分组', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
+    { feature: 'holding-note', name: '编辑持仓备注', action: 'edit', permissionPath: ['持仓', '持仓操作'] },
+    { feature: 'fund-holdings', name: '管理场外基金持仓及净值', action: 'edit', permissionPath: ['持仓', '持仓明细', '场外基金'] },
+    { feature: 'row-trade', name: '行内买卖/记录', action: 'edit', permissionPath: ['持仓', '持仓操作'] }
+].concat(STOCK_MANAGE_HOLDINGS_COLUMNS.map(function(col) {
+    return {
+        feature: 'col-' + col.key,
+        name: col.name,
+        action: 'view',
+        featureGroup: 'holdings-field',
+        permissionPath: ['持仓', '持仓明细字段'],
+        columnKey: col.key
+    };
+}));
+
+export function stockManageFeaturePermissionId(feature, action) {
+    return 'service:' + STOCK_MANAGE_SERVICE_ID + ':' + feature + ':' + action;
+}
+
+export function buildStockManagePermissions() {
+    return STOCK_MANAGE_FEATURES.map(function(item) {
+        return {
+            id: stockManageFeaturePermissionId(item.feature, item.action),
+            name: item.featureGroup === 'holdings-field' ? ('字段·' + item.name) : item.name,
+            group: '股票管理',
+            serviceId: STOCK_MANAGE_SERVICE_ID,
+            feature: item.feature,
+            action: item.action,
+            featureGroup: item.featureGroup || null,
+            columnKey: item.columnKey || null,
+            permissionPath: item.permissionPath || null
+        };
+    });
+}
+
+export const QQQ_DIP_FEATURES = [
+    { feature: 'tab-monitor', name: '进入抄底监控', action: 'view', permissionPath: ['抄底监控'] },
+    { feature: 'docs', name: '手册预览', action: 'view', permissionPath: ['抄底监控', '行情与规则'] },
+    { feature: 'buy-preview', name: '预览买入', action: 'view', permissionPath: ['抄底监控', '行情与规则'] },
+    { feature: 'refresh', name: '刷新行情', action: 'edit', permissionPath: ['抄底监控', '行情与规则'] },
+    { feature: 'monitor-control', name: '开始/停止监听', action: 'edit', permissionPath: ['抄底监控', '行情与规则'] },
+    { feature: 'cash', name: '弹药现金录入', action: 'edit', permissionPath: ['抄底监控', '资金与仓位'] },
+    { feature: 'cash', name: '查看抄底资金', action: 'view', permissionPath: ['抄底监控', '资金与仓位'] },
+    { feature: 'lots', name: '查看抄底仓位金额', action: 'view', permissionPath: ['抄底监控', '资金与仓位'] },
+    { feature: 'lots-edit', name: '登记/删除仓位', action: 'edit', permissionPath: ['抄底监控', '资金与仓位'] },
+    { feature: 'settings', name: '规则开关', action: 'edit', permissionPath: ['抄底监控', '规则执行'] },
+    { feature: 'tier-exec', name: '登记分腿实际成交/取消待执行计划', action: 'edit', permissionPath: ['抄底监控', '规则执行'] },
+    { feature: 'cny-routing', name: '调整未成交人民币抄底标的', action: 'edit', permissionPath: ['抄底监控', '规则执行'] },
+    { feature: 'actions', name: '查看操作记录', action: 'view', permissionPath: ['抄底监控', '操作记录'] },
+    { feature: 'actions-note', name: '手动记一笔', action: 'edit', permissionPath: ['抄底监控', '操作记录'] },
+    { feature: 'tab-qq', name: '进入 QQ 提醒', action: 'view', permissionPath: ['QQ 提醒'] },
+    { feature: 'qq-config', name: '查看 QQ 配置', action: 'view', permissionPath: ['QQ 提醒', '通知配置'] },
+    { feature: 'qq-save', name: '保存 QQ 配置', action: 'edit', permissionPath: ['QQ 提醒', '通知配置'] },
+    { feature: 'qq-test', name: '测试 QQ 通知', action: 'edit', permissionPath: ['QQ 提醒', '通知配置'] },
+    { feature: 'qq-monitor', name: '监听控制', action: 'edit', permissionPath: ['QQ 提醒', '监听控制'] }
+];
+
+export function qqqDipFeaturePermissionId(feature, action) {
+    return 'service:' + QQQ_DIP_SERVICE_ID + ':' + feature + ':' + action;
+}
+
+export function buildQqqDipPermissions() {
+    return QQQ_DIP_FEATURES.map(function(item) {
+        return {
+            id: qqqDipFeaturePermissionId(item.feature, item.action),
+            name: item.name,
+            group: '抄底监控',
+            serviceId: QQQ_DIP_SERVICE_ID,
+            feature: item.feature,
+            action: item.action,
+            permissionPath: item.permissionPath || null
+        };
+    });
+}
+
+var NOTIFICATION_FEATURES = [
+    { feature: 'config', name: '查看渠道与业务提醒配置', action: 'view', permissionPath: ['通知配置'] },
+    { feature: 'slack-test', name: '发送 Slack 测试', action: 'edit', permissionPath: ['Slack 通知'] },
+    { feature: 'business-save', name: '保存业务提醒配置', action: 'edit', permissionPath: ['业务提醒'] },
+    { feature: 'business-test', name: '发送业务提醒测试', action: 'edit', permissionPath: ['业务提醒'] }
+];
+
+export function buildNotificationPermissions() {
+    return NOTIFICATION_FEATURES.map(function(item) {
+        return {
+            id: 'service:' + NOTIFICATIONS_SERVICE_ID + ':' + item.feature + ':' + item.action,
+            name: item.name,
+            group: '通知管理',
+            serviceId: NOTIFICATIONS_SERVICE_ID,
+            feature: item.feature,
+            action: item.action,
+            permissionPath: item.permissionPath
+        };
+    });
+}
+
+export const SYSTEM_PERMISSIONS = [
+    ...['view', 'config:edit', 'control:edit', ...['salary', 'training', 'stock'].flatMap(k => [k + ':view', k + ':edit', k + ':notify:view', k + ':notify:edit', k + ':notify:test:edit'])].map(id => {
+        const names = { salary: '扣工资', training: '员工训练', stock: '库存' }, kind = id.split(':')[0], notification = id.includes(':notify:');
+        return { id: 'torn-company-alerts:' + id, name: (names[kind] || '公司经营提醒') + ' · ' + id, group: notification ? '通知管理' : 'Torn 工具箱', serviceId: notification ? 'notifications' : 'torn-company', action: id.endsWith('edit') ? 'edit' : 'view', permissionPath: notification ? ['首页','通知管理','业务提醒','公司监听',names[kind],id] : ['首页','Torn 工具箱','公司监听',names[kind] || '监控配置',id] };
+    }),
+    ...[
+        ['view', '查看自己的帮派筛选列表与结果', [], 'view'],
+        ['config:edit', '配置自己的 Leader networth 筛选', ['保存配置'], 'edit'],
+        ['control:edit', '启动、暂停和重置自己的帮派筛选批次', ['扫描控制'], 'edit']
+    ].map(([id, name, parts, action]) => ({ id: 'torn-factions:' + id, name, group: 'Torn 工具箱', serviceId: 'torn-toolbox', action, permissionPath: ['首页', 'Torn 工具箱', '监控', '帮派筛选', ...parts] })),
+    { id: 'admin:data-policy:view', name: '查看模块授权和数据范围', group: '系统', action: 'view', resource: 'admin:data-policy', permissionPath: ['权限管理', '模块与数据范围'] },
+    { id: 'admin:data-policy:edit', name: '配置模块授权和数据范围', group: '系统', action: 'edit', resource: 'admin:data-policy', permissionPath: ['权限管理', '模块与数据范围', '保存'] },
+    ...[
+        ['view', '查看扫货助手', []],
+        ['items:view', '查询物品目录', ['监控配置', '物品选择']],
+        ['config:edit', '保存扫货条件和 API Keys', ['监控配置', '保存配置']],
+        ['control:edit', '启动或停止扫货监控', ['监控控制']],
+        ['history:edit', '清空低价记录', ['低价记录', '清空']],
+        ['notify:view', '查看扫货通知配置', []],
+        ['notify:edit', '保存扫货通知配置', ['保存配置']],
+        ['notify:test:edit', '测试扫货通知', ['发送测试']]
+    ].map(([id,name,parts])=>({id:'torn-shopping:'+id,name,group:id.startsWith('notify:')?'通知管理':'Torn 工具箱',serviceId:id.startsWith('notify:')?'notifications':'torn-toolbox',action:id.endsWith('edit')?'edit':'view',permissionPath:id.startsWith('notify:')?['首页','通知管理','业务提醒','扫货助手',...parts]:['首页','Torn 工具箱','扫货助手',...parts]})),
+    ...[
+        ['view', '查看用户监控', []], ['config:edit', '保存监控用户、提前时间和 API Keys', ['监控配置', '保存']],
+        ['control:edit', '启动或停止用户监控', ['监控控制']], ['history:edit', '清空出院提醒记录', ['提醒记录', '清空']],
+        ['notify:view', '查看用户出院通知配置', []], ['notify:edit', '保存用户出院通知配置', ['保存配置']], ['notify:test:edit', '测试用户出院通知', ['发送测试']]
+    ].map(([id,name,parts])=>({id:'torn-users:'+id,name,group:id.startsWith('notify:')?'通知管理':'Torn 工具箱',serviceId:id.startsWith('notify:')?'notifications':'torn-toolbox',action:id.endsWith('edit')?'edit':'view',permissionPath:id.startsWith('notify:')?['首页','通知管理','业务提醒','用户出院',...parts]:['首页','Torn 工具箱','监控','用户监控',...parts]})),
+    ...[
+        ['view', '查看自己的监控', [], 'view'],
+        ['config:edit', '保存自己的 respect 范围和 API Keys', ['配置'], 'edit'],
+        ['control:edit', '启动或停止自己的监控', ['监控控制'], 'edit'],
+        ['history:edit', '清空自己的 帮派清零/摧毁记录', ['清零 / 摧毁记录', '清空'], 'edit']
+    ].map(([id, name, parts, action]) => ({ id: 'torn-chain:' + id, name, group: 'Torn 工具箱', serviceId: 'torn-toolbox', action, permissionPath: ['首页', 'Torn 工具箱', '监控', '帮派摧毁监控', ...parts] })),
+    ...[
+        ['notify:view', '查看自己的 帮派清零/摧毁通知配置', 'view', []],
+        ['notify:edit', '保存自己的 帮派清零/摧毁通知配置', 'edit', ['保存配置']],
+        ['notify:test:edit', '测试自己的 帮派清零/摧毁通知', 'edit', ['发送测试']]
+    ].map(([id, name, action, parts]) => ({ id: 'torn-chain:' + id, name, action, group: '通知管理', serviceId: 'notifications', permissionPath: ['首页', '通知管理', '业务提醒', '帮派清零 / 摧毁', ...parts] })),
+    ...[
+        ['view','进入Codex CLI模块',[],'view'],
+        ['usage:view','查看服务器账户额度',['账户与额度'],'view'],
+        ['settings:edit','保存服务器Codex默认设置',['服务器默认设置','保存'],'edit'],
+        ['runtime:edit','保存自己的QQ模型和强度',['我的QQ设置','保存'],'edit'],
+        ['sessions:view','查看自己的Codex会话',['会话工作台'],'view'],
+        ['sessions:server:view','查看服务器全部CLI会话',['会话工作台','服务器全部会话'],'view'],
+        ['sessions:create','新建Codex会话',['会话工作台','新建会话'],'create'],
+        ['messages:send','发送消息并执行Codex任务',['会话工作台','发送消息'],'execute'],
+        ['sessions:manage','重命名与归档自己的会话',['会话工作台','管理会话'],'edit'],
+        ['tasks:stop','停止自己的Codex任务',['会话工作台','停止任务'],'execute'],
+        ['todos:view','查看自己的指令待办',['Todo'],'view'],
+        ['todos:edit','新增编辑与删除指令待办',['Todo','管理待办'],'edit'],
+        ['todos:run','启用待办自动执行或重试',['Todo','自动执行'],'execute'],
+        ['todos:order','调整待办执行顺序',['Todo','调整顺序'],'edit'],
+        ['todos:stop','暂停待办与停止执行',['Todo','暂停'],'execute']
+    ].map(([id,name,parts,action])=>({id:'codex-cli:'+id,name,group:'Codex CLI',serviceId:'codex-cli',action,permissionPath:['首页','Codex CLI',...parts]})),
+    { id: 'qq-codex:settings:view', name: '查看自己的QQ Codex群聊设置', group: '通知管理', serviceId: NOTIFICATIONS_SERVICE_ID, action: 'view', permissionPath: ['首页', '通知管理', 'QQ Codex'] },
+    { id: 'qq-codex:settings:edit', name: '配置自己的QQ Codex群聊', group: '通知管理', serviceId: NOTIFICATIONS_SERVICE_ID, action: 'edit', permissionPath: ['首页', '通知管理', 'QQ Codex', '保存群聊配置'] },
+    { id: 'qq-codex:execute', name: '通过QQ执行Codex任务', group: '通知管理', serviceId: NOTIFICATIONS_SERVICE_ID, action: 'edit', permissionPath: ['首页', '通知管理', 'QQ Codex', '执行任务'] },
+    ...[
+        ['view', '进入和检索自己的知识库', []],
+        ['notes:view', '查看、搜索和分页浏览自己的学习笔记', ['笔记']],
+        ['storage:edit', '重试保存自己的原视频', ['笔记', '原视频', '重试保存']],
+        ['source:view', '回看自己的原视频', ['笔记', '原视频']],
+        ['transcript:view', '查看和搜索时间线转写', ['笔记', '时间线转写']],
+        ['transcript:script:view', '切换简体与原始转写文字', ['笔记', '时间线转写', '文字显示']],
+        ['asr:edit', '设置语音模型、语言与术语提示', ['处理设置', '语音转写', '保存设置']],
+        ['frames:view', '查看关键画面', ['笔记', '关键画面']],
+        ['upload:edit', '上传视频和继续上传', ['上传视频']],
+        ['import:edit', '解析和导入B站视频链接', ['上传视频', '链接导入']],
+        ['bilibili:view', '查看自己的B站绑定状态', ['处理设置', 'B站账号']],
+        ['bilibili:edit', '扫码绑定和解除自己的B站账号', ['处理设置', 'B站账号', '绑定管理']],
+        ['quality:edit', '设置默认视频清晰度和降级策略', ['处理设置', '视频清晰度']],
+        ['local-input:edit', '将上传的视频直送本机GPU处理', ['上传视频', '本机GPU直送']],
+        ['process:edit', '生成笔记和重试失败任务', ['生成笔记']],
+        ['process:batch:edit', '一键重试自己全部失败的笔记任务', ['笔记', '失败任务', '一键重试全部失败']],
+        ['reanalysis:edit', '重新分析自己的已有笔记', ['笔记', '重新分析']],
+        ['reanalysis:batch:edit', '批量重新分析自己的已有笔记', ['笔记', '重新分析', '批量重新分析']],
+        ['history:view', '查看自己笔记的历史正文', ['笔记', '历史版本']],
+        ['history:restore', '恢复自己笔记的历史版本', ['笔记', '历史版本', '恢复']],
+        ['notes:edit', '编辑标题、分类、标签和笔记', ['笔记', '编辑']],
+        ['publish:edit', '公开和撤回自己笔记的正文', ['笔记', '可见范围']],
+        ['publish:batch:edit', '批量设置自己笔记的可见范围', ['笔记', '可见范围', '批量设置']],
+        ['concurrency:edit', '设置视频转写和总结并发数', ['处理设置', '并发设置']],
+        ['queue:view', '查看自己的上传队列', ['上传队列', '查看']],
+        ['queue:edit', '添加批量视频任务', ['上传队列', '添加任务']],
+        ['queue:manage', '重试和取消等待任务', ['上传队列', '管理任务']],
+        ['delete:edit', '删除自己的视频和笔记', ['笔记', '删除']],
+        ['export:view', '导出自己的 Markdown 笔记', ['笔记', '导出']],
+        ['settings:edit', '切换默认总结后端', ['设置', '总结后端']],
+        ['model:edit', '设置视频总结模型和推理强度', ['设置', '总结模型和推理强度']],
+        ['worker:edit', '生成或轮换旧版共享工作器凭据', ['设置', '高级设置', '旧版凭据']],
+        ['devices:view', '查看自己的视频处理设备', ['设置', '处理设备']],
+        ['devices:install', '下载安装视频工作器', ['设置', '处理设备', '安装并连接']],
+        ['devices:install-zip', '下载ZIP脚本安装包并连接设备', ['设置', '处理设备', '安装并连接', 'ZIP脚本安装包']],
+        ['devices:edit', '绑定或停用自己的处理设备', ['设置', '处理设备', '管理设备']]
+    ].map(([action, name, parts]) => ({ id: 'knowledge:' + action, name, group: '知识库', serviceId: 'knowledge', action: action.endsWith(':edit') || action.startsWith('devices:install') ? 'edit' : 'view', permissionPath: ['首页', '知识库', ...parts] })),
+    { id: 'mingli:categories:view', name: '查看分类和分类筛选', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '案例库', '分类管理'] },
+    { id: 'mingli:categories:edit', name: '新增、重命名和删除分类', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '分类管理', '编辑分类'] },
+    { id: 'mingli:cases:classify', name: '设置和批量移动案例分类', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '设置分类'] },
+    { id: 'mingli:cases:import', name: '预览并导入问真案例', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '导入案例'] },
+    { id: 'mingli:view', name: '进入命理模块', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理'] },
+    { id: 'mingli:chart:calculate', name: '八字排盘', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '八字排盘'] },
+    { id: 'mingli:cases:view', name: '查看和搜索自己的案例', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '案例库'] },
+    { id: 'mingli:cases:filter', name: '高级筛选自己的案例', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '案例库', '高级筛选'] },
+    { id: 'mingli:knowledge:view', name: '查看、分页检索自动归集的知识库案例和来源', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '知识库案例'] },
+    { id: 'mingli:knowledge:filter', name: '高级筛选知识库案例', group: '命理', serviceId: 'mingli', action: 'view', permissionPath: ['首页', '命理', '知识库案例', '高级筛选'] },
+    { id: 'mingli:cases:edit', name: '保存案例和编辑笔记', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '保存案例'] },
+    { id: 'mingli:cases:delete', name: '删除自己的案例', group: '命理', serviceId: 'mingli', action: 'edit', permissionPath: ['首页', '命理', '案例库', '删除案例'] },
+    { id: 'bookkeeping:location:edit', name: '获取记账当前位置', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '明细与统计', '记一笔', '当前位置'] },
+    { id: 'bookkeeping:qq:edit', name: '绑定 QQ 和使用指令记账', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', 'QQ记账'] },
+    { id: 'bookkeeping:view', name: '查看记账明细与统计', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '明细与统计'] },
+    { id: 'bookkeeping:entries:edit', name: '新增、编辑和删除账单', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '明细与统计', '记一笔'] },
+    { id: 'bookkeeping:accounts:view', name: '查看资产账户', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '资产'] },
+    { id: 'bookkeeping:accounts:returns:view', name: '查看证券收益走势', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '资产', '证券收益走势'] },
+    { id: 'bookkeeping:accounts:edit', name: '管理账户及余额调整', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '资产', '管理账户'] },
+    { id: 'bookkeeping:import:edit', name: '预览并导入 iCost 账单', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '导入导出', '导入'] },
+    { id: 'bookkeeping:export:view', name: '导出账单', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '导入导出', '导出'] },
+    { id: 'bookkeeping:settings:edit', name: '设置预算及折算汇率', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '统计', '预算与汇率'] },
+    { id: 'bookkeeping:fx:edit', name: '更新参考汇率', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '统计', '预算与汇率'] },
+    { id: 'bookkeeping:analysis:view', name: '查看趋势、消费总结与统计穿透', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '统计', '趋势与消费分析'] },
+    { id: 'bookkeeping:categories:view', name: '查看分类管理', group: '记账', serviceId: 'bookkeeping', action: 'view', permissionPath: ['首页', '记账', '分类管理'] },
+    { id: 'bookkeeping:categories:edit', name: '新增、编辑、排序、停用和合并分类', group: '记账', serviceId: 'bookkeeping', action: 'edit', permissionPath: ['首页', '记账', '分类管理'] },
+    { id: 'service:resources:view', name: '查看资源管理', group: '资源管理', serviceId: 'resources', action: 'view', permissionPath: ['首页', '资源管理'] },
+    { id: 'service:resources:edit', name: '访问资源管理监控', group: '资源管理', serviceId: 'resources', action: 'edit', permissionPath: ['首页', '资源管理', '编辑'] },
+    { id: 'blog:feed:view', name: '查看和搜索博客动态', group: '博客', serviceId: 'blog', feature: 'feed', action: 'view', permissionPath: ['首页', '博客'] },
+    { id: 'blog:post:edit', name: '发布和编辑自己的博客（含可见范围、标签与富文本）', group: '博客', serviceId: 'blog', feature: 'post', action: 'edit', permissionPath: ['首页', '博客', '我的文章'] },
+    { id: 'blog:manage:edit', name: '查看和管理所有博客（含私密及可见时间外动态）', group: '博客', serviceId: 'blog', feature: 'manage', action: 'edit', permissionPath: ['首页', '博客', '所有文章'] },
+    { id: 'blog:comment:view', name: '查看评论', group: '博客', serviceId: 'blog', feature: 'comment', action: 'view', permissionPath: ['首页', '博客', '评论'] },
+    { id: 'blog:comment:edit', name: '发表评论及管理自己博客的评论（登录用户默认拥有）', group: '博客', serviceId: 'blog', feature: 'comment', action: 'edit', permissionPath: ['首页', '博客', '评论'] },
+    { id: 'blog:comment-manage:edit', name: '管理可见博客的评论', group: '博客', serviceId: 'blog', feature: 'comment-manage', action: 'edit', permissionPath: ['首页', '博客', '评论管理'] },
+    { id: 'admin:access:view', name: '查看管理后台', group: '系统', action: 'view', resource: 'admin:access' },
+    { id: 'admin:access:edit', name: '编辑管理后台', group: '系统', action: 'edit', resource: 'admin:access' },
+    { id: 'admin:users:view', name: '查看用户', group: '系统', action: 'view', resource: 'admin:users' },
+    { id: 'admin:users:edit', name: '编辑用户', group: '系统', action: 'edit', resource: 'admin:users' },
+    { id: 'admin:roles:view', name: '查看角色', group: '系统', action: 'view', resource: 'admin:roles' },
+    { id: 'admin:roles:edit', name: '编辑角色', group: '系统', action: 'edit', resource: 'admin:roles' },
+    { id: 'admin:menus:view', name: '查看菜单', group: '系统', action: 'view', resource: 'admin:menus' },
+    { id: 'admin:menus:edit', name: '编辑菜单', group: '系统', action: 'edit', resource: 'admin:menus' }
+];

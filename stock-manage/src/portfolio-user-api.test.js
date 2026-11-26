@@ -65,6 +65,20 @@ test('real API rejects anonymous access and scopes portfolio, updates, import, e
     }
     assert.ok(ready);
     assert.equal((await call('/portfolio')).status, 401);
+    assert.equal((await call('/quant/settings')).status, 401);
+    const quantDenied = await fetch(base + '/quant/settings', {
+      method: 'PUT',
+      headers: {
+        'x-portal-user-id': 'a', 'x-portal-permissions': Buffer.from('["service:stock-manage:quant-settings:view"]').toString('base64url'),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ symbols: ['QQQ'], period: '6m' })
+    });
+    assert.equal(quantDenied.status, 403);
+    const quantSaved = await call('/quant/settings', 'a', 'PUT', { symbols: ['QQQ'], period: '6m', userId: 'b' });
+    assert.equal(quantSaved.status, 200);
+    assert.deepEqual((await (await call('/quant/settings', 'a')).json()).symbols, ['QQQ']);
+    assert.notDeepEqual((await (await call('/quant/settings', 'b')).json()).symbols, ['QQQ']);
     assert.deepEqual(await (await call('/fund-reinvestment/nav?symbol=022951.OF&date=2026-11-06','a')).json(),
       {nav:1.6656,date:'2026-11-05'});
     assert.equal(await (await call('/fund-reinvestment/nav?symbol=022951.OF&date=2026-11-10','a')).json(),null);

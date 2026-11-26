@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { getDatabase, closeDatabase } from '../../shared/db/index.js';
 import { createKnowledgeStore } from './knowledge-store.js';
-import { handleKnowledgeWorkerApi } from './knowledge.js';
+import { handleKnowledgeWorkerApi } from './knowledge-worker-api.js';
 
 async function stopWorker(child) {
   if (!child || child.exitCode != null || child.signalCode != null) return;

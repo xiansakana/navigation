@@ -3,12 +3,11 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { getDatabase } from '../../shared/db/index.js';
-import { storageConfig, sourcePath, proxySource } from './knowledge-storage.js';
+import { storageConfig } from './knowledge-storage.js';
 import { hasPermission } from './rbac.js';
 import { createKnowledgeStore, CHUNK_BYTES, MAX_VIDEO_BYTES, MODEL_FIELDS } from './knowledge-store.js';
-import { knowledgeWorkerPackage, sendWorkerPackage } from './knowledge-worker-package.js';
+import { sendWorkerPackage } from './knowledge-worker-package.js';
 import { sendWorkerExe } from './knowledge-worker-exe.js';
 import { inspectBilibili, inspectBilibiliQuality, qualityLabel } from './knowledge-bilibili.js';
 import { bilibiliAccount, qualitySettings } from './knowledge-bilibili-account.js';
@@ -16,35 +15,17 @@ import { handlePublicKnowledge, handleKnowledgeVisibility, handleKnowledgeBatchV
 import { createUploadQueue } from './knowledge-upload-queue.js';
 import { duplicateSourceError } from './knowledge-source-dedupe.js';
 import { retryKnowledgeDocument } from './knowledge-retry.js';
-import { failureMessage } from '../public/knowledge/failure.js';
 import { reanalysisTargets, scheduleReanalysis } from './knowledge-reanalysis.js';
 import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
 import { ASR_FIELDS } from './knowledge-asr.js';
 
-const root = () => path.resolve(process.env.KNOWLEDGE_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/knowledge'));
-export function knowledgeDirectory(id) {
-  if (!/^[a-f0-9]{32}$/.test(id)) throw new Error('文档编号无效');
-  return path.join(root(), id);
-}
+import { body, bytes, lock, stream, serveSource, knowledgeRoot, knowledgeDirectory, knowledgeFailure } from './knowledge-http.js';
+
 export function canKnowledge(session, action = 'view') {
   return !!session?.userId && (!session.isGuest || ['view', 'notes:view'].includes(action))
     && hasPermission(session.permissions || [], 'knowledge:' + action);
 }
-async function bytes(req, max) {
-  const chunks = []; let size = 0;
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > max) { const e = new Error('请求超过大小限制'); e.status = 413; throw e; }
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
-async function body(req, max = 1024 * 1024) {
-  try { return JSON.parse((await bytes(req, max)).toString('utf8')); }
-  catch (e) { if (e.status) throw e; throw new Error('请求体不是合法 JSON'); }
-}
-const locks = new Map();
-const pairingRates = new Map();
+
 const importRequests = new Map();
 async function inspectImport(uid, url) {
   const time = Date.now();
@@ -53,168 +34,6 @@ async function inspectImport(uid, url) {
   if (rate.busy || rate.count >= 20 || importRequests.size > 10000) throw Object.assign(new Error('视频信息读取过于频繁，请稍后重试'), { status: 429 });
   rate.count++; rate.busy = true; importRequests.set(uid, rate);
   try { const cookie = await bilibiliAccount(getDatabase()).credentials(uid); return await inspectBilibili(url, { cookie }); } finally { rate.busy = false; }
-}
-async function lock(key, fn) {
-  const previous = locks.get(key) || Promise.resolve();
-  const pending = previous.catch(() => {}).then(fn);
-  locks.set(key, pending);
-  try { return await pending; } finally { if (locks.get(key) === pending) locks.delete(key); }
-}
-function stream(req, res, file, type, attachment = '') {
-  if (!fs.existsSync(file)) { res.writeHead(404); return res.end(); }
-  const size = fs.statSync(file).size;
-  const headers = { 'Content-Type': type, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Accept-Ranges': 'bytes' };
-  if (attachment) headers['Content-Disposition'] = "attachment; filename*=UTF-8''" + encodeURIComponent(attachment);
-  let start = 0, end = size - 1, status = 200;
-  if (req.headers.range) {
-    const match = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range);
-    start = match ? Number(match[1]) : -1; end = match && match[2] ? Math.min(size - 1, Number(match[2])) : size - 1;
-    if (start < 0 || start > end || start >= size) { res.writeHead(416, { 'Content-Range': 'bytes */' + size }); return res.end(); }
-    headers['Content-Range'] = `bytes ${start}-${end}/${size}`; status = 206;
-  }
-  headers['Content-Length'] = end - start + 1;
-  res.writeHead(status, headers);
-  const input = fs.createReadStream(file, { start, end });
-  input.on('error', () => res.destroy()); res.on('close', () => input.destroy()); input.pipe(res);
-}
-async function serveSource(req, res, store, uid, id) {
-  const source = store.sources.get(uid, id), item = store.get(uid, id);
-  // Link imports may be processed while 115 archives in parallel. If its cache
-  // was cleaned between claim and GET, verified/ready storage below is available.
-  const local = path.join(knowledgeDirectory(id), 'source');
-  if (item.importState === 'done' && fs.existsSync(local)) return stream(req, res, local, item.mimeType);
-  if (source && ['ready', 'verified'].includes(source.state)) return proxySource(req, res, uid, source, item.mimeType);
-  return stream(req, res, path.join(knowledgeDirectory(id), 'source'), item.mimeType);
-}
-export function validateKnowledgeResult(raw) {
-  if (!raw || typeof raw !== 'object' || !Number.isFinite(raw.duration) || raw.duration <= 0 || raw.duration > 14400) throw new Error('视频时长无效或超过4小时');
-  if (typeof raw.notes !== 'string' || raw.notes.trim().length < 40 || raw.notes.length > 500000) throw new Error('总结为空或过长');
-  if (!Array.isArray(raw.transcript) || raw.transcript.length > 30000) throw new Error('转写数据无效');
-  let previous = -1;
-  const transcript = raw.transcript.map(s => {
-    if (!Number.isFinite(s.start) || !Number.isFinite(s.end) || s.start < 0 || s.start < previous || s.end < s.start || s.end > raw.duration + 2 || typeof s.text !== 'string' || s.text.length > 12000) throw new Error('转写时间戳或文本无效');
-    previous = s.start;
-    if (s.rawText !== undefined && (typeof s.rawText !== 'string' || s.rawText.length > 12000)) throw new Error('原始转写文字无效');
-    return { start: s.start, end: s.end, text: s.rawText ?? s.text };
-  });
-  if (!Array.isArray(raw.frames) || raw.frames.length > 36) throw new Error('画面数量超过限制');
-  const frames = raw.frames.map((f, i) => {
-    if (!Number.isFinite(f.time) || f.time < 0 || f.time > raw.duration || typeof f.data !== 'string' || f.data.length > 600000) throw new Error('画面数据无效');
-    const data = Buffer.from(f.data, 'base64');
-    if (data.length < 20 || data.length > 450000 || data[0] !== 255 || data[1] !== 216 || data[2] !== 255) throw new Error('画面不是有效 JPEG');
-    return { time: f.time, name: `frame-${i + 1}.jpg`, data };
-  });
-  const provenance = { backend: String(raw.provenance?.backend || '').slice(0, 30), model: String(raw.provenance?.model || '').slice(0, 120),
-    reasoningEffort: String(raw.provenance?.reasoningEffort || '').slice(0, 20),
-    asrModel: String(raw.provenance?.asrModel || '').slice(0, 120), vision: raw.provenance?.vision === true, generatedAt: new Date().toISOString(),
-    warnings: Array.isArray(raw.provenance?.warnings) ? raw.provenance.warnings.slice(0, 10).map(s => String(s).slice(0, 300)) : [] };
-  return { duration: raw.duration, language: String(raw.language || '').slice(0, 30), notes: raw.notes.trim(), transcript, frames, provenance };
-}
-
-function knowledgeFailure(res, json, error, showDuplicate = false) {
-  if (error.code === 'KNOWLEDGE_CAPACITY') return json(res, 409, { ok: false, code: error.code, error: error.message });
-  if (/^SQLITE_(BUSY|LOCKED)/.test(error.code || '')) {
-    res.setHeader('Retry-After', '1');
-    return json(res, 503, { ok: false, code: 'KNOWLEDGE_BUSY', retryable: true, error: '知识库正在写入，请稍后重试' });
-  }
-  return json(res, error.status || 400, { ok: false, ...(error.code === 'KNOWLEDGE_DUPLICATE_SOURCE' ? { code: error.code, ...(showDuplicate ? { duplicate: error.duplicate } : {}) } : {}), error: error.code?.startsWith('SQLITE_') ? '知识库存储失败' : error.message });
-}
-
-export async function handleKnowledgeWorkerApi(req, res, url, json, authorize = () => false) {
-  try { return await workerApi(req, res, url, json, authorize); }
-  catch (e) { return knowledgeFailure(res, json, e); }
-}
-async function workerApi(req, res, url, json, authorize) {
-  res.setHeader('Cache-Control', 'no-store');
-  const route = url.pathname.slice('/api/knowledge/worker'.length), method = req.method;
-  const store = createKnowledgeStore(getDatabase());
-  if (['/pair/start', '/pair/poll'].includes(route) && method === 'POST') {
-    try {
-      const raw = await body(req, 1024);
-      if (route === '/pair/start') {
-        const key = req.socket.remoteAddress || 'unknown', time = Date.now();
-        for (const [ip, r] of pairingRates) if (r.until < time) pairingRates.delete(ip);
-        const rate = pairingRates.get(key) || { count: 0, until: time + 60000 };
-        if (++rate.count > 30 || pairingRates.size > 10000) return json(res, 429, { ok: false, error: '配对请求过多，请稍后重试' });
-        pairingRates.set(key, rate);
-        return json(res, 200, { ok: true, ...store.devices.start(raw.label) });
-      }
-      if (!/^[a-f0-9]{64}$/.test(raw.deviceCode || '')) return json(res, 400, { ok: false, error: '配对请求无效' });
-      return json(res, 200, { ok: true, ...store.devices.poll(raw.deviceCode, authorize, raw.label) });
-    } catch (e) { return json(res, e.status || 400, { ok: false, error: e.message }); }
-  }
-  const token = /^Bearer (nkw_[a-f0-9]{64})$/.exec(req.headers.authorization || '')?.[1];
-  if (!token) return json(res, 401, { ok: false, error: '工作器凭据无效' });
-  const uid = store.workerUser(token), device = store.devices.authenticate(token);
-  if (!uid) return json(res, 401, { ok: false, error: '工作器凭据已撤销' });
-  if (!authorize(uid)) return json(res, 403, { ok: false, error: '账号已停用或知识库处理权限已撤销' });
-  try {
-    if (route === '/package' && method === 'GET') return sendWorkerPackage(res);
-    if (route === '/release' && method === 'GET') { const { version, sha256, bytes } = knowledgeWorkerPackage(); return json(res, 200, { ok: true, version, sha256, bytes }); }
-    if (route === '/heartbeat' && method === 'POST') { const raw = await body(req, 4096); store.heartbeatWorker(uid, device ? { ...raw, workerId: device.id, label: device.label } : raw); const { mediaConcurrency, summaryConcurrency } = store.settings(uid); return json(res, 200, { ok: true, pipeline: { mediaConcurrency, summaryConcurrency } }); }
-    if (route === '/local-input' && method === 'POST') {
-      const raw = await body(req, 4096), workerId = device?.id || raw.workerId;
-      if (raw.action === 'forget') { store.localInputs.forget(uid, raw.documentId, workerId); return json(res, 200, { ok: true }); }
-      return json(res, 200, { ok: true, ...store.localInputs.verify(uid, raw.documentId, workerId, raw.ticket, raw.sha256) });
-    }
-    if (route === '/claim' && method === 'POST') {
-      const raw = await body(req, 4096);
-      const backends = Array.isArray(raw.backends) ? raw.backends.filter(b => ['codex', 'openai'].includes(b)) : [];
-      return json(res, 200, { ok: true, job: store.claim(uid, backends, device?.id || (typeof raw.workerId === 'string' ? raw.workerId : ''), Array.isArray(raw.localDocuments) ? raw.localDocuments.slice(0, 200).filter(id => /^[a-f0-9]{32}$/.test(id)) : []) });
-    }
-    const match = /^\/jobs\/([a-f0-9]{32})\/(source|evidence|progress|phase|complete|fail|codex)$/.exec(route);
-    if (!match) return json(res, 404, { ok: false, error: '工作器接口不存在' });
-    const [, id, action] = match, lease = req.headers['x-knowledge-lease'];
-    return await lock(id, async () => {
-      if (!store.leased(uid, id, lease)) return json(res, 409, { ok: false, error: '任务已删除、过期或由其他工作器领取' });
-      if(action==='codex'&&method==='POST'){
-        const input=await body(req,3*1024*1024);
-        if(!store.leased(uid,id,lease))return json(res,409,{ok:false,error:'任务已过期'});
-        const doc=store.getRow(uid,id);if(doc.backend!=='codex')return json(res,400,{ok:false,error:'此任务未使用Codex'});
-        store.codexCalls.record(uid,doc,input);return json(res,200,{ok:true});
-      }
-      if (action === 'source' && method === 'GET') return serveSource(req, res, store, uid, id);
-      if (action === 'evidence' && method === 'GET') {
-        const d = store.get(uid, id), run = store.reanalysis.get(uid, id);
-        if (run?.state !== 'pending' || run.mode !== 'reuse') return json(res, 409, { ok: false, error: '此任务未请求复用素材' });
-        const frames = [];
-        for (const f of d.frames) {
-          if (!/^[a-z0-9.-]+\.jpg$/.test(f.name)) throw new Error('画面文件名无效');
-          frames.push({ ...f, data: (await fsp.readFile(path.join(knowledgeDirectory(id), f.name))).toString('base64') });
-        }
-        return json(res, 200, { ok: true, evidence: { duration: d.duration, language: d.language, transcript: d.transcript, frames, asrModel: d.provenance.asrModel || '', warnings: ['本次复用已有转写与抽样画面，未重新提取原视频。'] } });
-      }
-      if (action === 'phase' && method === 'POST') {
-        const input = await body(req, 1024);
-        return json(res, 200, { ok: true, accepted: store.phase(uid, id, lease, input.phase) });
-      }
-      if (action === 'progress' && method === 'POST') {
-        const input = await body(req, 4096); store.progress(uid, id, lease, input.stage, input.progress); return json(res, 200, { ok: true });
-      }
-      if (action === 'fail' && method === 'POST') {
-        const input = await body(req, 4096); store.fail(uid, id, lease, failureMessage(String(input.error || '工作器处理失败'), String(input.stage || store.getRow(uid, id)?.stage || '').slice(0, 120))); return json(res, 200, { ok: true });
-      }
-      if (action === 'complete' && method === 'POST') {
-        const raw = await body(req, 18 * 1024 * 1024), result = validateKnowledgeResult(raw);
-        const directory = knowledgeDirectory(id);
-        await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
-        const run = store.reanalysis.get(uid, id);
-        if (run?.state === 'pending') {
-          for (let i = 0; i < result.frames.length; i++) {
-            const oldName = raw.frames[i].name || result.frames[i].name;
-            const name = `frame-${run.runId}-${i + 1}.jpg`;
-            if (/^[a-z0-9.-]+\.jpg$/.test(oldName)) result.notes = result.notes.split('/frames/' + oldName).join('/frames/' + name);
-            result.frames[i].name = name;
-          }
-        }
-        for (const f of result.frames) await fsp.writeFile(path.join(directory, f.name), f.data);
-        result.frames = result.frames.map(({ data, ...f }) => f);
-        if (!store.finish(uid, id, lease, result)) return json(res, 409, { ok: false, error: '任务已过期' });
-        return json(res, 200, { ok: true });
-      }
-      return json(res, 405, { ok: false, error: '不支持此请求方法' });
-    });
-  } catch (e) { return knowledgeFailure(res, json, e); }
 }
 
 export async function handleKnowledgeApi(req, res, url, session, json) {
@@ -311,22 +130,18 @@ async function knowledgeApi(req, res, url, session, json) {
       const playback = await inspectBilibiliQuality(info, selection, { cookie });
       if (route === '/imports/preview') return json(res, 200, { ok: true, metadata: { ...info, playback } });
       if (!playback.canImport) throw new Error(playback.reason);
-      await fsp.mkdir(root(), { recursive: true, mode: 0o700 });
-      const disk = await fsp.statfs(root());
-      const reserved = getDatabase().prepare("SELECT coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE status IN ('uploading','importing')").get().bytes;
-      if (MAX_VIDEO_BYTES * 3 + reserved * 2 + 5 * 1024 ** 3 > disk.bavail * disk.bsize) throw new Error('服务器可用空间不足');
-      const config = storageConfig(uid);
-      const item = getDatabase().transaction(() => {
-        const duplicate = store.duplicateSource(uid, info.sourceUrl);
-        if (duplicate) throw duplicateSourceError(duplicate);
-        const created = store.create(uid, { title: input.title === undefined ? info.title : input.title, topic: input.topic === undefined ? info.topic : input.topic,
-          tags: input.tags === undefined ? info.tags : input.tags, sourceUrl: input.sourceUrl === undefined ? info.sourceUrl : input.sourceUrl,
-          bytes: MAX_VIDEO_BYTES, mimeType: 'video/mp4', originalName: info.title.replace(/[\\/:*?"<>|]/g, '-') + '.mp4', backend: input.backend || store.settings(uid).backend });
-        store.imports.add(uid, created.id, info.sourceUrl, selection);
-        if (config) store.sources.add(uid, created.id, sourcePath(config, uid, created));
-        getDatabase().prepare("UPDATE knowledge_documents SET status='importing',stage='等待下载B站视频' WHERE user_id=? AND id=?").run(uid, created.id);
-        return store.get(uid, created.id);
-      }).immediate();
+      await fsp.mkdir(knowledgeRoot(), { recursive: true, mode: 0o700 });
+      const disk = await fsp.statfs(knowledgeRoot());
+      const item = store.createLinkImport(uid, {
+        title: input.title === undefined ? info.title : input.title,
+        topic: input.topic === undefined ? info.topic : input.topic,
+        tags: input.tags === undefined ? info.tags : input.tags,
+        sourceUrl: input.sourceUrl === undefined ? info.sourceUrl : input.sourceUrl,
+        bytes: MAX_VIDEO_BYTES,
+        mimeType: 'video/mp4',
+        originalName: info.title.replace(/[\\/:*?"<>|]/g, '-') + '.mp4',
+        backend: input.backend || store.settings(uid).backend
+      }, info.sourceUrl, selection, storageConfig(uid), disk.bavail * disk.bsize);
       return json(res, 202, { ok: true, document: item });
     }
     if (route === '/worker-install') {
@@ -365,7 +180,7 @@ async function knowledgeApi(req, res, url, session, json) {
     if (route === '/documents/retry-failed' && method === 'POST') {
       if (!canKnowledge(session, 'process:edit') || !canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '需要查看笔记和生成笔记权限' });
       await body(req, 4096);
-      const db = getDatabase(), failed = db.prepare("SELECT id FROM knowledge_documents WHERE user_id=? AND status='failed' ORDER BY created_at,id").all(uid);
+      const db = getDatabase(), failed = store.failedDocuments(uid);
       const results = [];
       for (const { id } of failed) {
         try { results.push({ id, accepted: retryKnowledgeDocument(db, store, uid, id, action => canKnowledge(session, action)) }); }
@@ -384,15 +199,9 @@ async function knowledgeApi(req, res, url, session, json) {
       if (!canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '上传视频还需生成笔记权限' });
       const duplicate = store.duplicateSource(uid, input.sourceUrl);
       if (duplicate) throw duplicateSourceError(duplicate);
-      await fsp.mkdir(root(), { recursive: true, mode: 0o700 });
-      const disk = await fsp.statfs(root());
-      if (Number(input.bytes) * 3 + 5 * 1024 ** 3 + getDatabase().prepare("SELECT coalesce(sum(byte_size),0) AS bytes FROM knowledge_documents WHERE status IN ('uploading','importing')").get().bytes * 2 > disk.bavail * disk.bsize) throw new Error('服务器可用空间不足');
-      const config = storageConfig(uid);
-      const item = getDatabase().transaction(() => {
-        const created = store.create(uid, input);
-        if (config) { store.sources.add(uid, created.id, sourcePath(config, uid, created)); created.storage = store.sources.public(uid, created.id); }
-        return created;
-      }).immediate();
+      await fsp.mkdir(knowledgeRoot(), { recursive: true, mode: 0o700 });
+      const disk = await fsp.statfs(knowledgeRoot());
+      const item = store.createUpload(uid, input, storageConfig(uid), disk.bavail * disk.bsize);
       try { await fsp.mkdir(knowledgeDirectory(item.id), { recursive: true, mode: 0o700 }); }
       catch (e) { store.remove(uid, item.id); throw e; }
       return json(res, 201, { ok: true, document: item, chunkBytes: CHUNK_BYTES });

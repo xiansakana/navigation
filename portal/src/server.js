@@ -60,7 +60,9 @@ import { createResourceMonitor, canViewResources } from './resources.js';
 import { canBookkeep } from './bookkeeping.js';
 import { canMingli } from './mingli.js';
 import { canTornChain } from './torn-chain.js';
-import { canKnowledge, handleKnowledgeWorkerApi, knowledgeDirectory } from './knowledge.js';
+import { canKnowledge } from './knowledge.js';
+import { handleKnowledgeWorkerApi } from './knowledge-worker-api.js';
+import { knowledgeDirectory } from './knowledge-http.js';
 import { startKnowledgeImports } from './knowledge-import.js';
 import { canCodexCli } from './codex-cli.js';
 
