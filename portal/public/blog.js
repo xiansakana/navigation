@@ -22,6 +22,20 @@
     var shortcut = document.getElementById('blog-shortcut');
     var state = { userId: '', canPost: false, canManage: false, lastId: null, loading: false,
         pending: [], posts: new Map(), editing: null, tag: '', tags: [], search: '', refreshPending: false, preparing: 0 };
+    var feedPosts = [], feedView;
+    var feedViewReady = import('./generated/blog-feed-view.js?v=1').then(function(mod) {
+        feedView = mod.mountBlogFeed(feed, {
+            editItems: editItems,
+            renderGallery: function(host, items) { window.renderBlogGallery(host, items); },
+            locationSource: function() { return window.createBlogLocationSource(); },
+            resolveAddress: function(location) { return window.resolveBlogAddress(location); }
+        });
+    });
+    function renderFeed(empty) {
+        var model = { posts: feedPosts, userId: state.userId, canPost: state.canPost, canManage: state.canManage,
+            canViewComments: state.canViewComments, empty: empty };
+        if (feedView) feedView.render(model); else feedViewReady.then(function() { feedView?.render(model); });
+    }
 
     function loadEditor() {
         return window.portalPage.loadScript('/blog-rich-editor.js?v=blog-unified-1');
@@ -133,92 +147,6 @@
         return button;
     }
 
-    function renderPost(post) {
-        var article = document.createElement('article');
-        article.className = 'blog-post';
-        article.dataset.id = post.id;
-        var avatar = document.createElement('span');
-        avatar.className = 'blog-avatar';
-        avatar.textContent = (post.authorName || '?').slice(0, 1).toUpperCase();
-        var main = document.createElement('div');
-        main.className = 'blog-post-main';
-        var meta = document.createElement('div');
-        meta.className = 'blog-post-meta';
-        var author = document.createElement('strong');
-        author.textContent = post.authorName;
-        var time = document.createElement('time');
-        time.dateTime = post.createdAt;
-        time.className = 'blog-published-time';
-        time.textContent = '发布于 ' + new Date(post.createdAt).toLocaleString('sv-SE');
-        meta.append(author, time);
-        if (new Date(post.updatedAt).getTime() > new Date(post.createdAt).getTime()) {
-            var editedTime = document.createElement('time');
-            editedTime.className = 'blog-edited-time';
-            editedTime.dateTime = post.updatedAt;
-            editedTime.textContent = '最后编辑于 ' + new Date(post.updatedAt).toLocaleString('sv-SE');
-            meta.appendChild(editedTime);
-        }
-        var body = document.createElement('div');
-        body.className = 'blog-post-content';
-        if (post.contentFormat === 'html' || post.contentFormat === 'markdown') { body.classList.add('blog-rich-content'); body.innerHTML = post.contentFormat === 'markdown' ? post.contentHtml : post.content; }
-        else body.textContent = post.content;
-        var visibility = post.visibility || { audience: 'public' };
-        var scope = document.createElement('span'); scope.className = 'blog-visibility-badge';
-        scope.textContent = { public: '公开动态', members: '仅登录用户', self: '仅自己（管理员可见）' }[visibility.audience];
-        if (visibility.startsAt) scope.textContent += ' · ' + new Date(visibility.startsAt).toLocaleString('sv-SE') + ' 起可见';
-        if (visibility.endsAt) scope.textContent += ' · ' + new Date(visibility.endsAt).toLocaleString('sv-SE') + ' 到期';
-        if (visibility.startsAt && new Date(visibility.startsAt) > new Date()) scope.textContent += '（尚未开放）';
-        if (visibility.endsAt && new Date(visibility.endsAt) <= new Date()) scope.textContent += '（已到期）';
-        meta.appendChild(scope);
-        main.append(meta, body);
-        if (post.location) {
-            var location = document.createElement(post.location.latitude != null ? 'a' : 'span');
-            location.className = 'blog-post-location';
-            location.textContent = '📍 ' + (post.location.label || '正在解析位置地址…');
-            if (post.location.latitude != null) {
-                location.href = 'https://www.openstreetmap.org/?mlat=' + post.location.latitude + '&mlon=' + post.location.longitude + '#map=15/' + post.location.latitude + '/' + post.location.longitude;
-                location.target = '_blank'; location.rel = 'noopener noreferrer';
-            }
-            main.appendChild(location);
-            if (post.location.latitude != null) {
-                main.appendChild(window.createBlogLocationSource());
-                if (!post.location.label) window.resolveBlogAddress(post.location).then(function(label) {
-                    if (!location.isConnected) return;
-                    location.textContent = '📍 ' + (label || '地址暂不可用');
-                    if (label) post.location.label = label;
-                });
-            }
-        }
-        var postTags = document.createElement('div');
-        postTags.className = 'blog-post-tags';
-        (post.tags || []).forEach(function(tag) {
-            var tagButton = document.createElement('button'); tagButton.type = 'button'; tagButton.className = 'blog-tag';
-            tagButton.textContent = '#' + tag; tagButton.dataset.tag = tag; postTags.appendChild(tagButton);
-        });
-        main.appendChild(postTags);
-        var items = editItems(post);
-        if (items.length) {
-            var gallery = document.createElement('div'); gallery.className = 'blog-post-images';
-            window.renderBlogGallery(gallery, items); main.appendChild(gallery);
-        }
-        var footer = document.createElement('div'); footer.className = 'blog-post-footer'; main.appendChild(footer);
-        if (state.canViewComments) {
-            var comments = document.createElement('div'); comments.className = 'blog-comments';
-            var toggle = actionButton('评论 (' + (post.commentCount || 0) + ')', 'comments', post.id);
-            toggle.setAttribute('aria-expanded', 'false');
-            var content = document.createElement('div'); content.className = 'blog-comments-content'; content.hidden = true;
-            footer.appendChild(toggle); comments.appendChild(content); main.appendChild(comments);
-        }
-        if (state.canManage || (state.canPost && post.authorId === state.userId)) {
-            var actions = document.createElement('div');
-            actions.className = 'blog-actions';
-            actions.append(actionButton('编辑', 'edit', post.id), actionButton('删除', 'delete', post.id));
-            footer.append(actions);
-        }
-        article.append(avatar, main);
-        return article;
-    }
-
     async function load(reset) {
         if (state.editing) return;
         if (state.loading) { if (reset) state.refreshPending = true; return; }
@@ -239,7 +167,7 @@
             state.tags = data.tags || [];
             tagEditor.suggestions(state.tags);
             renderTagFilter();
-            if (reset) { feed.replaceChildren(); state.posts.clear(); }
+            if (reset) { state.posts.clear(); feedPosts = []; }
             state.userId = data.userId;
             state.isGuest = data.isGuest;
             state.canPost = data.canPost;
@@ -250,13 +178,8 @@
             write.classList.toggle('hidden', !canCompose || Boolean(richEditor));
             shortcut.textContent = state.canPost ? '写博客' : '查看动态';
             shortcut.classList.remove('hidden');
-            data.posts.forEach(function(post) { state.posts.set(post.id, post); feed.appendChild(renderPost(post)); });
-            if (reset && !data.posts.length) {
-                var empty = document.createElement('p');
-                empty.className = 'blog-empty';
-                empty.textContent = state.search ? '没有找到匹配的博客，试试其他关键词或清空搜索。' : state.tag ? '这个标签下还没有动态。' : '还没有动态，写下第一篇吧。';
-                feed.appendChild(empty);
-            }
+            data.posts.forEach(function(post) { state.posts.set(post.id, post); feedPosts.push(post); });
+            renderFeed(state.search ? '没有找到匹配的博客，试试其他关键词或清空搜索。' : state.tag ? '这个标签下还没有动态。' : '还没有动态，写下第一篇吧。');
             state.lastId = data.posts.length ? data.posts.at(-1).id : null;
             more.classList.toggle('hidden', data.posts.length < 20);
             searchStatus.textContent = (state.search || state.tag ? '当前筛选' : '全部动态') + '：已显示 ' + state.posts.size + ' 篇' + (data.posts.length === 20 ? '，可加载更多' : '');
@@ -613,7 +536,7 @@
         var now = Date.now(), expired = false;
         state.posts.forEach(function(post, id) {
             if (!state.canManage && (state.isGuest || post.authorId !== state.userId) && post.visibility?.endsAt && Date.parse(post.visibility.endsAt) <= now) {
-                feed.querySelector('[data-id="' + id + '"]')?.remove(); state.posts.delete(id); expired = true;
+                feedPosts = feedPosts.filter(function(item) { return item.id !== id; }); state.posts.delete(id); expired = true;
             }
         });
         if (expired) {
