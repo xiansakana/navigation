@@ -22,21 +22,13 @@
     <div class="login-card" data-skeleton="form" data-skeleton-key="page">
         <h1>服务导航</h1>
         <p class="subtitle">密码登录，或使用 GitHub / Google 注册（默认仍为游客权限，管理员可在后台分配角色）</p>
-        <div class="oauth-buttons" id="oauth-buttons" hidden></div>
-        <p class="oauth-divider" id="oauth-divider" hidden>或</p>
-        <form id="login-form">
-            <label for="username">用户名</label>
-            <input id="username" name="username" autocomplete="username" required>
-            <label for="password">密码</label>
-            <input id="password" name="password" type="password" autocomplete="current-password" required>
-            <button type="submit" class="btn primary">登录</button>
-            <p class="error" id="error" hidden></p>
-        </form>
+        <div id="login-view"></div>
+        <noscript>请启用 JavaScript 后登录。</noscript>
     </div>
     <script src="/skeleton/skeleton.js?v=1"></script>
     <script src="/theme.js"></script>
     <script src="/toast.js"></script>
     <script src="/dialog.js"></script>
-    <script src="/login.js?v=skeleton-20261004"></script>
+    <script src="/login.js?v=vue-login-1"></script>
 </body>
 </html>
