@@ -1,4 +1,6 @@
 import { createApp, h } from 'vue';
+export { mountTradeEditor } from './trade-editor';
+export { mountTradeFilters } from './trade-filters';
 
 interface TradeRow {
   id: string;

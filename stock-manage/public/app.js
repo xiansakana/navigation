@@ -735,9 +735,11 @@ function closeModal(layerEl) {
   if (!target) return;
   if (target === window._tradeHistoryLayer) {
     target.disposeTradeTable?.();
+    target.disposeTradeFilters?.();
     window._refreshTradeModal = null;
     window._tradeHistoryLayer = null;
   }
+  target.disposeTradeEditor?.();
   target.remove();
 }
 
@@ -818,44 +820,29 @@ function openModal(title, bodyHtml, footHtml, onSubmit, opts = {}) {
   return layer;
 }
 
-function tradeFormFields(trade = {}) {
-  const type = trade.reinvestedDividend ? 'reinvest' : trade.type || trade.prefillType || 'buy';
-  const dt = toDatetimeLocalValue(trade.trade_date || Date.now());
+function tradeEditorModel(trade, recordingAt) {
   const fund = tradeAssetType(trade) === 'fund';
-  const currency = trade.currency
-    || (looksLikeHongKong(trade.symbol) ? 'HKD' : (fund || looksLikeAShare(trade.symbol)) ? 'CNY' : 'USD');
-  return `
-    <form id="trade-form" class="sm-form-grid">
-      <label>类型<select name="type" id="trade-type">
-        <option value="buy" ${type === 'buy' ? 'selected' : ''}>买入</option>
-        <option value="sell" ${type === 'sell' ? 'selected' : ''}>卖出</option>
-        <option value="reinvest" ${type === 'reinvest' ? 'selected' : ''}>红利再投资</option>
-        <option value="other" ${type === 'other' ? 'selected' : ''}>其它收支</option>
-      </select></label>
-      ${(state.investmentAccounts || []).length ? `<label>证券账户<select name="account_id" required aria-describedby="trade-account-hint"><option value="">请选择实际归属账户</option>${state.investmentAccounts.map((a) => `<option value="${a.id}" ${a.id === (trade.account_id || selectedAccountId) ? 'selected' : ''}>${escapeHtml(a.name)} · ${a.currency}</option>`).join('')}</select><small class="hint" id="trade-account-hint" data-trade-account-hint aria-live="polite"></small></label>` : ''}
-      <label class="field-other ${type !== 'other' ? 'hidden' : ''}">其它类别<input name="other_category" value="${escapeHtml(trade.other_category)}"></label>
-      ${!trade.id && can('dip-spend', 'edit') ? '<label>资金用途<select name="funding"><option value="ordinary">普通可用现金</option><option value="dip">抄底专用资金（卖出则回补资金池）</option></select></label>' : ''}
-      <div>
-        <label>代码<input name="symbol" id="trade-symbol" autocomplete="off" aria-describedby="trade-instrument-status" value="${escapeHtml(trade.symbol)}"></label>
-        <div id="trade-instrument-status" class="hint" data-instrument-status aria-live="polite"></div>
-        <div class="sm-instrument-choices" data-instrument-choices></div>
-      </div>
-      <label>名称<input name="name" value="${escapeHtml(trade.name)}" placeholder="输入代码后自动填入"></label>
-      <label>币种<select name="currency" id="trade-currency">
-        <option value="USD" ${currency === 'USD' ? 'selected' : ''}>USD 美元</option>
-        <option value="CNY" ${currency === 'CNY' ? 'selected' : ''}>CNY 人民币</option>
-        <option value="HKD" ${currency === 'HKD' ? 'selected' : ''}>HKD 港币</option>
-      </select></label>
-      <label class="field-trade ${type === 'other' ? 'hidden' : ''}"><span data-trade-shares-label>数量</span><input name="shares" type="number" step="any" value="${trade.shares ?? ''}"></label>
-      <label class="field-trade field-price"><span data-trade-price-label>价格</span><input name="price" type="number" step="${fund ? (fundPriceDigits(trade.symbol) === 5 ? '0.00001' : '0.0001') : '0.001'}" value="${priceInputValue(trade.price, fund ? fundPriceDigits(trade.symbol) : 3)}"></label>
-      <label class="field-reinvestment hidden">折算净值（选填）<input name="reinvestmentNav" type="number" step="any" min="0" value="${escapeHtml(trade.reinvestmentNav ?? '')}"><small class="hint" data-reinvestment-status aria-live="polite">可按确认日期自动查找，也可填写基金公告指定日期的单位净值。</small></label>
-      <label class="field-other-amt ${type !== 'other' ? 'hidden' : ''}">金额<input name="total_amount" type="number" step="any" value="${trade.total_amount ?? ''}"></label>
-      <label>手续费<input name="commission" type="number" step="any" value="${trade.commission ?? 0}"></label>
-      <label>时间<input name="trade_date" type="datetime-local" value="${dt}"></label>
-      <label class="field-historical"><span><input name="historicalBackfill" type="checkbox" ${trade.historicalBackfill ? 'checked' : ''}> 补录历史交易</span>
-        <small class="hint">仅勾选已计入账户余额的交易。补录会更新持仓和盈亏，不重记资金流水；若已绑定记账账户，会按当前估值拆分现金与持仓，保持记账总额不变。</small>
-      </label>
-    </form>`;
+  const digits = fund ? fundPriceDigits(trade.symbol) : 3;
+  return {
+    type: trade.reinvestedDividend ? 'reinvest' : trade.type || trade.prefillType || 'buy',
+    currency: trade.currency || (looksLikeHongKong(trade.symbol) ? 'HKD' : (fund || looksLikeAShare(trade.symbol)) ? 'CNY' : 'USD'),
+    accountId: trade.account_id || selectedAccountId || '',
+    accounts: state.investmentAccounts || [],
+    canChooseFunding: !trade.id && can('dip-spend', 'edit'),
+    historical: Boolean(trade.historicalBackfill),
+    priceStep: digits === 5 ? '0.00001' : digits === 4 ? '0.0001' : '0.001',
+    values: {
+      trade_date: toDatetimeLocalValue(trade.trade_date || recordingAt),
+      symbol: trade.symbol,
+      name: trade.name,
+      shares: trade.shares,
+      price: priceInputValue(trade.price, digits),
+      other_category: trade.other_category,
+      total_amount: trade.total_amount,
+      reinvestmentNav: trade.reinvestmentNav,
+      commission: trade.commission ?? 0
+    }
+  };
 }
 
 function bindTradeForm(root) {
@@ -958,10 +945,20 @@ function bindReinvestmentNav(form) {
   return lookup;
 }
 
-function openTradeModal(trade = {}) {
+function loadTradeComponents() {
+  return import('./generated/trade-table.js?v=vue-trades-2');
+}
+
+async function openTradeModal(trade = {}) {
+  if (document.querySelector('#trade-form')) return;
+  let mountTradeEditor;
+  try { ({ mountTradeEditor } = await loadTradeComponents()); }
+  catch { toastErr('交易表单加载失败，请稍后重试'); return; }
+  if (document.querySelector('#trade-form')) return;
   const recordingAt = new Date().toISOString();
-  const initialDateValue = toDatetimeLocalValue(trade.trade_date || recordingAt);
-  const layer = openModal(trade.id ? '编辑交易' : '记一笔', tradeFormFields(trade), null, async (modal) => {
+  const model = tradeEditorModel(trade, recordingAt);
+  const initialDateValue = model.values.trade_date;
+  const layer = openModal(trade.id ? '编辑交易' : '记一笔', '', null, async (modal) => {
     const form = modal.querySelector('#trade-form');
     if (!await resolveInstrument()) throw new Error('请先确认代码对应的标的');
     const account = form.elements.account_id;
@@ -977,7 +974,9 @@ function openTradeModal(trade = {}) {
     applyPortfolio(data);
     return trade.id ? '交易已更新' : '交易已保存';
   }, { reload: false });
-  bindTradeForm(layer.querySelector('.sm-modal-body'));
+  const container = layer.querySelector('.sm-modal-body');
+  layer.disposeTradeEditor = mountTradeEditor(container, model);
+  bindTradeForm(container);
   const resolveReinvestmentNav = bindReinvestmentNav($('#trade-form', layer));
   const resolveInstrument = bindTradeInstrument($('#trade-form', layer), {
     resolve: symbol => api('/instruments/resolve?' + new URLSearchParams({ symbol })),
@@ -1473,32 +1472,8 @@ function filteredTrades(trades) {
   }).sort((a, b) => new Date(b.trade_date) - new Date(a.trade_date));
 }
 
-function renderTradeFilters({ summary = false, showAccount = true } = {}) {
-  return `<div class="sm-trade-filters ${ui.tradeFilterOpen ? 'is-open' : ''}">
-      <div class="sm-trade-filter-fields">
-      ${showAccount && can('accounts') && state.investmentAccounts?.length ? `<select id="trade-account-filter" aria-label="证券账户">
-        <option value="">全部账户</option>
-        <option value="unassigned">待归属交易</option>
-        ${state.investmentAccounts.map((a) => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)} · ${escapeHtml(a.currency)}</option>`).join('')}
-      </select>` : ''}
-      <input placeholder="代码" data-filter="symbol" value="${escapeHtml(ui.tradeFilter.symbol)}">
-      ${summary ? '' : `<select data-filter="type" aria-label="交易方向">
-        <option value="all">全部方向</option>
-        <option value="buy" ${ui.tradeFilter.type === 'buy' ? 'selected' : ''}>买入</option>
-        <option value="sell" ${ui.tradeFilter.type === 'sell' ? 'selected' : ''}>卖出</option>
-        <option value="other" ${ui.tradeFilter.type === 'other' ? 'selected' : ''}>其它</option>
-      </select>`}
-      <select data-filter="assetType" aria-label="证券类型">
-        <option value="all">全部证券类型</option>
-        ${Object.entries(TRADE_ASSET_TYPES).map(([key, label]) => `<option value="${key}" ${ui.tradeFilter.assetType === key ? 'selected' : ''}>${label}</option>`).join('')}
-      </select>
-      <input placeholder="其它类别" data-filter="otherCategory" value="${escapeHtml(ui.tradeFilter.otherCategory)}">
-      <input type="date" data-filter="start" value="${ui.tradeFilter.start}">
-      <span class="sm-muted">至</span>
-      <input type="date" data-filter="end" value="${ui.tradeFilter.end}">
-      <button type="button" class="btn ghost sm-btn-sm" id="filter-reset">重置</button>
-      </div>
-    </div>`;
+function renderTradeFilters() {
+  return `<div class="sm-trade-filters ${ui.tradeFilterOpen ? 'is-open' : ''}" data-trade-filters></div>`;
 }
 
 function activeTradeFilterCount(summary = ui.tradeTab !== 'list') {
@@ -1585,7 +1560,7 @@ async function renderTradeSummaryTab() {
   }), { buy: 0, sell: 0, fee: 0, pnl: 0, other: 0 });
 
   return `
-    ${renderTradeFilters({ summary: true })}
+    ${renderTradeFilters()}
     <div class="sm-trade-modal-scroll">
       <div class="sm-table-wrap sm-table-wrap--modal">
         <table class="sm-table">
@@ -1637,7 +1612,7 @@ async function renderTradeReviewTab() {
   for (const [key, value] of Object.entries(ui.tradeFilter)) {
     if (key !== 'type' && value && value !== 'all') query.set(key, value);
   }
-  const filters = renderTradeFilters({ summary: true, showAccount: false });
+  const filters = renderTradeFilters();
   try {
     const report = await api('/trades/review?' + query);
     return `${filters}<div class="sm-trade-modal-scroll sm-review">${renderTradeReview(report, ui.reviewCurrency, pnlVisible)}</div>`;
@@ -1677,14 +1652,9 @@ async function openTradeHistoryModal(symbol = '') {
     }
     if (revision !== refreshRevision || !box.isConnected) return;
     const { html, model } = await renderTradeModalBody(trades, loadError);
-    let mountTradeTable;
-    if (model) {
-      try {
-        ({ mountTradeTable } = await import('./generated/trade-table.js?v=vue-trades-1'));
-      } catch {
-        // Keep filters and tabs available if the optional table bundle fails.
-      }
-    }
+    let components;
+    try { components = await loadTradeComponents(); }
+    catch { /* The tab shell can still show a load error. */ }
     if (revision !== refreshRevision || !box.isConnected) return;
     layer.disposeTradeTable?.();
     layer.disposeTradeTable = undefined;
@@ -1702,16 +1672,28 @@ async function openTradeHistoryModal(symbol = '') {
         if (el.value !== value) el.value = value;
       });
     } else {
+      layer.disposeTradeFilters?.();
+      layer.disposeTradeFilters = undefined;
       box.innerHTML = html;
     }
     const table = $('[data-trade-table]', box);
-    if (table && mountTradeTable) {
-      layer.disposeTradeTable = mountTradeTable(table, model);
+    if (table && components) {
+      layer.disposeTradeTable = components.mountTradeTable(table, model);
     } else if (table) {
       const error = document.createElement('p');
       error.setAttribute('role', 'alert');
       error.textContent = '交易列表加载失败，请刷新页面后重试。';
       table.append(error);
+    }
+    const filters = $('[data-trade-filters]', box);
+    if (filters && components && !layer.disposeTradeFilters) {
+      layer.disposeTradeFilters = components.mountTradeFilters(filters, {
+        accountId: ui.tradeAccountId,
+        accounts: ui.tradeTab !== 'review' && can('accounts') ? state.investmentAccounts || [] : [],
+        assetTypes: TRADE_ASSET_TYPES,
+        summary: ui.tradeTab !== 'list',
+        values: ui.tradeFilter
+      });
     }
     listTrades = trades;
     const accountFilter = $('#trade-account-filter', box);
