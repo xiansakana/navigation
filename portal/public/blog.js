@@ -37,6 +37,11 @@
         if (feedView) feedView.render(model); else feedViewReady.then(function() { feedView?.render(model); });
     }
 
+    function feedEmptyText() {
+        return state.search ? '没有找到匹配的博客，试试其他关键词或清空搜索。' : state.tag ? '这个标签下还没有动态。' : '还没有动态，写下第一篇吧。';
+    }
+    function restoreFeed() { renderFeed(feedEmptyText()); }
+
     function loadEditor() {
         return window.portalPage.loadScript('/blog-rich-editor.js?v=blog-unified-1');
     }
@@ -179,7 +184,7 @@
             shortcut.textContent = state.canPost ? '写博客' : '查看动态';
             shortcut.classList.remove('hidden');
             data.posts.forEach(function(post) { state.posts.set(post.id, post); feedPosts.push(post); });
-            renderFeed(state.search ? '没有找到匹配的博客，试试其他关键词或清空搜索。' : state.tag ? '这个标签下还没有动态。' : '还没有动态，写下第一篇吧。');
+            renderFeed(feedEmptyText());
             state.lastId = data.posts.length ? data.posts.at(-1).id : null;
             more.classList.toggle('hidden', data.posts.length < 20);
             searchStatus.textContent = (state.search || state.tag ? '当前筛选' : '全部动态') + '：已显示 ' + state.posts.size + ' 篇' + (data.posts.length === 20 ? '，可加载更多' : '');
@@ -464,9 +469,13 @@
         if (!button) return;
         if (state.preparing) return;
         if (button.dataset.action === 'cancel') {
-            release(state.editing.pending); state.editing.editor.destroy(); state.editing = null; return load(true);
+            if (!state.editing) { restoreFeed(); load(true); return; }
+            release(state.editing.pending); state.editing.editor.destroy(); state.editing = null;
+            restoreFeed();
+            return load(true);
         }
         if (state.saving) return;
+        if (!state.editing) { restoreFeed(); return; }
         state.saving = true;
         var unlock = lockEditor(button.closest('.blog-post'));
         try {
@@ -481,11 +490,13 @@
                 body: JSON.stringify({ content: editing.editor.content(), contentFormat: editing.editor.format(), visibility: visibility, location: await editing.location.value({ wait: false }), tags: tags,
                     keepMediaIds: editing.keepMediaIds }) });
             release(editing.pending); editing.editor.destroy(); state.editing = null;
+            restoreFeed();
             await load(true);
             window.portalToast?.success(saved.cleanupPending ? '保存成功，移除的媒体将在后台清理' : '保存成功');
         } catch (error) {
             if (error.uploaded?.length) {
-                release(state.editing.pending); state.editing?.editor.destroy(); state.editing = null; await load(true);
+                if (state.editing) release(state.editing.pending);
+                state.editing?.editor.destroy(); state.editing = null; restoreFeed(); await load(true);
                 window.portalToast?.error('部分媒体已上传，请重新编辑文章：' + error.message);
             } else window.portalToast?.error(error.message);
         }
