@@ -65,3 +65,5 @@ GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访�
 - 将 RBAC 版本更新、账务事务、上传配额和任务领取迁移到 PostgreSQL 的事务与锁机制。对并发读取、写入、回滚和跨用户数据隔离做 PostgreSQL 集成测试。
 - 建立 PostgreSQL 备份并验证实际恢复，更新 ECS 服务的启动与健康检查。单独保留 SQLite 一致性备份以支持正式切换前回退。
 - 上述检查通过后，在停写窗口导入最终快照并验证记录数、归属和关键业务行为，再切换应用连接。恢复生产写入后，回退前需处理 PostgreSQL 中新增的写入。
+
+维护窗口开始前，确认源站 HTTPS 已由 `scripts/sync-blog-upload-nginx.py` 安装维护开关。创建 `/run/navigation/maintenance` 并确认公网 HTTPS 返回 503，再停止所有业务写入。维护期间从 ECS 本机访问 Portal 的回环端口执行就绪和业务验收。允许业务恢复写入后移除标记，通过公网验证首页、登录及核心 API。

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Allow streaming blog media uploads through the existing origin HTTPS site."""
+"""Configure streaming uploads and a maintenance switch on the origin HTTPS site."""
 import pathlib
 import re
 import subprocess
@@ -39,9 +39,26 @@ BLOCK = BLOCK.replace('    # END navigation blog media upload', r'''    location
         proxy_buffering off;
     }
     # END navigation blog media upload''')
+MAINTENANCE = '''    # BEGIN navigation maintenance
+    if (-f /run/navigation/maintenance) {
+        return 503 "Navigation is temporarily unavailable for maintenance. Please try again later.";
+    }
+    # END navigation maintenance
+'''
 
 
 def patch(text):
+    marker = '    # BEGIN navigation maintenance'
+    end = '    # END navigation maintenance'
+    if marker in text or end in text:
+        if text.count(marker) != 1 or text.count(end) != 1 or text.index(marker) >= text.index(end):
+            raise ValueError('Invalid maintenance config markers')
+        text = re.sub(re.escape(marker) + r'.*?' + re.escape(end) + r'\n?', lambda _: MAINTENANCE, text, count=1, flags=re.S)
+    else:
+        anchor = '    location / {'
+        if text.count(anchor) != 1:
+            raise ValueError('Expected one origin proxy location; refusing to change nginx config')
+        text = text.replace(anchor, MAINTENANCE + '\n' + anchor, 1)
     if START in text:
         if text.count(START) != 1 or text.count(END) != 1:
             raise ValueError('Invalid blog upload config markers')
