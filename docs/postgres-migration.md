@@ -41,7 +41,7 @@ GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访�
 
 隔离环境通过 `NAVIGATION_TORN_POSTGRES_URL` 验证 Torn 用户监控、扫货助手、帮派摧毁监控、帮派筛选、公司提醒、压价监控的断点、通知设置和提醒去重，以及工作器心跳和启停意图。独立公司管理的既有文件型状态由公司工作器保存。
 
-`NAVIGATION_QQ_MONITOR_POSTGRES_URL` 用于隔离验证 QQ 登录监控、重启冷却记录、Codex 登录告警去重和工作器心跳。Codex 会话与任务队列的存储仍由各自的迁移阶段处理。
+`NAVIGATION_QQ_MONITOR_POSTGRES_URL` 用于隔离验证 QQ 登录监控、重启冷却记录、Codex 登录告警去重和工作器心跳。Codex PostgreSQL 仓库已通过隔离测试，覆盖会话 API、任务进度、Web 与 QQ 入队、并发领取、队列上限、执行中断以及结果和回执原子写入。上线前仍需让待办、QQ 消息入口、会话 API 的生产配置与工作器统一使用这套存储。
 
 股票服务通过 `NAVIGATION_QUANT_POSTGRES_URL` 验证量化设置、模拟盘和回测记录的读写。量化状态使用同一账号行锁串行更新，行情请求在事务外完成。实盘组合、记账关联和抄底资金仍须完成迁移。
 

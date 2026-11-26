@@ -1,5 +1,20 @@
 import crypto from 'node:crypto';
 
+const activityLabels = { command_execution: '执行命令', file_change: '更新文件', mcp_tool_call: '调用工具', web_search: '搜索资料', todo_list: '更新计划', reasoning: '分析任务' };
+
+export function codexProgress(event) {
+  if (event.type === 'turn.started') return { kind: 'status', text: 'Codex 已开始处理' };
+  if (event.type === 'item.completed' && event.item?.type === 'agent_message') {
+    const text = String(event.item.text || '').slice(0, 20000);
+    return text ? { kind: 'message', text } : null;
+  }
+  const label = activityLabels[event.item?.type];
+  if (!['item.started', 'item.completed'].includes(event.type) || typeof label !== 'string') return null;
+  let text = label + (event.type === 'item.completed' ? ' · 完成' : ' · 进行中');
+  if (event.item.type === 'todo_list') text += '\n' + (event.item.items || []).slice(0, 20).map(item => (item.completed ? '✓ ' : '○ ') + String(item.text).slice(0, 200)).join('\n');
+  return { kind: 'activity', text };
+}
+
 // Only threads linked to this application's authenticated owner are exposed.
 export function createConversationStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS codex_conversations (
@@ -75,17 +90,10 @@ export function createConversationStore(db) {
       db.prepare('UPDATE codex_conversations SET session_id=?,updated_at=? WHERE user_id=? AND id=?').run(sessionId,Date.now(),job.user_id,id || '');
     },
     progress(job,event) {
-      const labels={command_execution:'执行命令',file_change:'更新文件',mcp_tool_call:'调用工具',web_search:'搜索资料',todo_list:'更新计划',reasoning:'分析任务'};
-      let kind='',text='';
-      if(event.type==='turn.started'){kind='status';text='Codex 已开始处理';}
-      if(event.type==='item.completed'&&event.item?.type==='agent_message'){kind='message';text=String(event.item.text || '').slice(0,20000);}
-      else if(['item.started','item.completed'].includes(event.type)&&labels[event.item?.type]){
-        kind='activity';text=labels[event.item.type]+(event.type==='item.completed'?' · 完成':' · 进行中');
-        if(event.item.type==='todo_list')text+='\n'+(event.item.items || []).slice(0,20).map(i=>(i.completed?'✓ ':'○ ')+String(i.text).slice(0,200)).join('\n');
-      }
-      if(!kind||!text)return;
+      const progress=codexProgress(event);
+      if(!progress)return;
       if(db.prepare('SELECT count(*) AS n FROM codex_job_progress WHERE job_id=?').get(job.id).n>=150)return;
-      db.prepare('INSERT INTO codex_job_progress(job_id,kind,text,created_at) VALUES(?,?,?,?)').run(job.id,kind,text,Date.now());
+      db.prepare('INSERT INTO codex_job_progress(job_id,kind,text,created_at) VALUES(?,?,?,?)').run(job.id,progress.kind,progress.text,Date.now());
     },
     stop(uid,id) {
       const jobs=db.prepare("SELECT id,state FROM qq_codex_jobs WHERE user_id=? AND conversation_id=? AND state IN ('queued','running')").all(uid,id);

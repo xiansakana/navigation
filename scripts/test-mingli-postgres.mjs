@@ -18,6 +18,9 @@ import { handleAdminApi } from '../portal/src/admin-api.js';
 import { requestDataAccess } from '../portal/src/data-access.js';
 import { createPostgresRbacStore } from '../shared/db/postgres/rbac-store.js';
 import { createCodexService } from '../shared/codex/codex-service.js';
+import { createPostgresCodexQueue } from '../shared/codex/codex-postgres-queue.js';
+import { createPostgresCodexConversations } from '../shared/codex/codex-postgres-conversations.js';
+import { handleCodexConversationsApi } from '../portal/src/codex-conversations.js';
 import { verifyPostgresSchema } from '../shared/db/postgres/readiness.js';
 import { startAccessPortal } from '../portal/src/test-fixtures/access-portal.js';
 import { moduleInventoryPostgres } from '../portal/src/modules.js';
@@ -427,6 +430,68 @@ async function verifyKnowledgeLeases(db) {
   assert.equal(await claim(second), null);
 }
 
+async function verifyCodexQueue(db) {
+  const first = createPostgresCodexQueue(db), second = createPostgresCodexQueue(db);
+  const uid = 'postgres-codex-fixture', qq = '12345678';
+  const conversations = createPostgresCodexConversations(db);
+  const request = (method, route = '', data, owner = uid) => handleCodexConversationsApi({
+    method, headers: { host: 'localhost' },
+    async *[Symbol.asyncIterator]() { if (data) yield Buffer.from(JSON.stringify(data)); },
+  }, {}, new URL('http://localhost/api/codex-cli/conversations' + route), { userId: owner, permissions: ['*'] },
+  (_, status, body) => ({ status, body }), {
+    setup: () => ({ config: {}, configured: true, enabled: true, projects: ['navigation'], qqId: qq }),
+    store: { conversations, settings: async () => ({ groups: [] }) },
+  });
+  const created = await request('POST', '', { project: 'navigation' });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const { id: conversation } = created.body.conversation;
+  assert.equal((await request('GET', '/' + conversation, undefined, 'other-user')).status, 404);
+  const input = { prompt: 'fixture task', runtime: {}, requestId: 'fixture-event' };
+  const verified = await Promise.all([first.enqueueWeb(uid, qq, conversation, input), second.enqueueWeb(uid, qq, conversation, input)]);
+  assert.equal(verified[0], verified[1]);
+  await assert.rejects(() => first.enqueueWeb('other-user', qq, conversation, input), /会话不存在/);
+  await assert.rejects(() => second.enqueueWeb(uid, qq, conversation, { ...input, requestId: 'other' }), /本轮完成/);
+  assert.equal((await request('PATCH', '/' + conversation, { archived: true })).status, 400);
+  const qqJob = await first.enqueueQQ(uid, qq, 'fixture-qq-job', 'navigation', 'fixture message');
+  const claims = await Promise.all([first.claim({ includeQQ: false }), second.claim({ includeQQ: false })]);
+  assert.equal(claims.filter(Boolean).length, 1);
+  const web = claims.find(Boolean);
+  assert.equal(web.id, verified[0]);
+  assert.equal(await second.claim(), null);
+  assert.equal(await first.recordRuntime({ ...web, user_id: 'other-user' }, { model: 'fixture-model' }), false);
+  assert.equal(await first.recordRuntime(web, { model: 'fixture-model' }), true);
+  assert.equal(await conversations.progress({ ...web, user_id: 'other-user' }, { type: 'turn.started' }), false);
+  assert.equal(await conversations.progress(web, { type: 'turn.started' }), true);
+  assert.equal(await first.stopConversation('other-user', conversation), 0);
+  assert.equal(await second.cancelled(web), false);
+  assert.equal(await first.finish(web, { state: 'succeeded', result: 'complete', sessionId: 'fixture-session' }), true);
+  assert.equal(await second.finish(web, { state: 'failed', result: 'duplicate completion' }), false);
+  assert.equal((await db.query('SELECT session_id FROM navigation.codex_conversations WHERE id=$1', [conversation])).rows[0].session_id, 'fixture-session');
+  const detail = (await request('GET', '/' + conversation)).body.jobs[0];
+  assert.equal(detail.state, 'succeeded');
+  assert.equal(detail.progress[0].kind, 'status');
+  assert.equal(await conversations.progress(web, { type: 'turn.started' }), false);
+  const old = await second.claim();
+  assert.equal(old.id, qqJob);
+  assert.equal(await first.touch({ ...old, user_id: 'other-user' }), false);
+  await db.query('UPDATE navigation.qq_codex_jobs SET heartbeat=0 WHERE id=$1', [old.id]);
+  assert.equal(await createPostgresCodexQueue(db).claim(), null);
+  assert.equal((await db.query('SELECT state FROM navigation.qq_codex_jobs WHERE id=$1', [old.id])).rows[0].state, 'failed');
+  assert.equal((await db.query('SELECT id FROM navigation.qq_codex_outbox WHERE user_id=$1', [uid])).rowCount, 1);
+  assert.equal(await first.finish(old, { state: 'succeeded', result: 'late completion' }), false);
+  const stopped = await second.enqueueWeb(uid, qq, conversation, { ...input, requestId: 'cancelled' });
+  assert.equal(await first.stopConversation(uid, conversation), 1);
+  assert.equal(await second.cancelled({ id: stopped, user_id: uid }), true);
+  assert.equal(await first.claim(), null);
+  await Promise.all(Array.from({ length: 5 }, (_, index) => second.enqueueQQ(uid, qq, 'fixture-capacity-' + index, 'navigation', 'queue fixture')));
+  await assert.rejects(() => first.enqueueQQ(uid, qq, 'fixture-overflow', 'navigation', 'overflow'), /队列已满/);
+  assert.equal(await first.cancelQQ('other-user'), 0);
+  assert.equal(await first.cancelQQ(uid), 5);
+  const list = await request('GET');
+  assert.equal(list.status, 200, JSON.stringify(list.body));
+  assert.equal(list.body.conversations.length, 7);
+}
+
 async function verifyQuant(db) {
   const uid = 'quant-fixture', outsider = 'quant-fixture-other';
   const first = createPostgresQuantStore({}, db), second = createPostgresQuantStore({}, db);
@@ -580,6 +645,7 @@ test('Mingli HTTP entry point uses PostgreSQL for owner-scoped cases, categories
     await verifyTornFactionScan(db);
     await verifyTornUndercut(db);
     await verifyQuant(db);
+    await verifyCodexQueue(db);
     await verifyKnowledgeLeases(db);
     await verifyQqMonitoring(db);
     await verifyRbac(db);
