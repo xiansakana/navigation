@@ -1,4 +1,12 @@
 var state = { rbac: null, me: null };
+var tableView;
+var tableViewReady = import('./generated/admin-tables-view.js?v=1').then(function(mod) {
+    tableView = mod.mountAdminTables({
+        users: document.querySelector('#users-table tbody'),
+        roles: document.getElementById('roles-list'),
+        menus: document.querySelector('#menus-table tbody')
+    }, { roleName: roleName, permName: permName, canEdit: canEdit });
+});
 
 async function api(path, options) {
     var resp = await fetch('/api/' + path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, options || {}));
@@ -345,59 +353,12 @@ function switchTab(name) {
     });
 }
 
-function renderUsers() {
-    var tbody = document.querySelector('#users-table tbody');
-    tbody.innerHTML = '';
-    (state.rbac.users || []).forEach(function(user) {
-        var tr = document.createElement('tr');
-        var roles = (user.roleIds || []).map(roleName).join('、') || '—';
-        var actions = canEdit('users')
-            ? '<button type="button" class="btn ghost sm-btn" data-edit-user="' + esc(user.id) + '">编辑</button>'
-                + (user.id === 'usr_admin' ? '' : '<button type="button" class="btn ghost sm-btn danger" data-del-user="' + esc(user.id) + '">删除</button>')
-            : '<span class="sm-muted">只读</span>';
-        tr.innerHTML = '<td>' + esc(user.username) + '</td>'
-            + '<td>' + esc(roles) + '</td>'
-            + '<td><span class="admin-badge ' + (user.enabled ? 'on' : 'off') + '">' + (user.enabled ? '启用' : '禁用') + '</span></td>'
-            + '<td class="admin-actions">' + actions + '</td>';
-        tbody.appendChild(tr);
-    });
-}
-
-function renderRoles() {
-    var root = document.getElementById('roles-list');
-    root.innerHTML = '';
-    (state.rbac.roles || []).forEach(function(role) {
-        var card = document.createElement('article');
-        card.className = 'admin-role-card';
-        var perms = (role.permissions || []).slice(0, 10).map(function(id) {
-            return id === '*' ? '全部权限' : permName(id);
-        }).join(' · ');
-        if ((role.permissions || []).length > 10) perms += ' …';
-        var actions = canEdit('roles')
-            ? '<button type="button" class="btn ghost sm-btn" data-edit-role="' + esc(role.id) + '">编辑</button>'
-                + ((role.id === 'role_admin' || role.id === 'role_user') ? '' : '<button type="button" class="btn ghost sm-btn danger" data-del-role="' + esc(role.id) + '">删除</button>')
-            : '<span class="sm-muted">只读</span>';
-        card.innerHTML = '<div class="admin-role-head">'
-            + '<h3>' + esc(role.name) + '</h3>'
-            + '<div class="admin-actions">' + actions + '</div></div>'
-            + '<p>' + esc(role.description || '') + '</p>'
-            + '<div class="admin-role-perms">' + esc(perms || '无权限') + '</div>';
-        root.appendChild(card);
-    });
-}
-
-function renderMenus() {
-    var tbody = document.querySelector('#menus-table tbody');
-    tbody.innerHTML = '';
-    (state.rbac.menus || []).forEach(function(menu, index) {
-        var tr = document.createElement('tr');
-        var disabled = canEdit('menus') ? '' : ' disabled';
-        tr.innerHTML = '<td><input type="number" class="admin-input-sm menu-sort" data-id="' + esc(menu.id) + '" value="' + esc(menu.sort != null ? menu.sort : (index + 1) * 10) + '"' + disabled + '></td>'
-            + '<td><input type="text" class="admin-input-sm menu-icon" data-id="' + esc(menu.id) + '" value="' + esc(menu.icon || '') + '"' + disabled + '></td>'
-            + '<td><input type="text" class="admin-input-md menu-title" data-id="' + esc(menu.id) + '" value="' + esc(menu.title || '') + '"' + disabled + '></td>'
-            + '<td><code>' + esc(menu.permission || '') + '</code></td>'
-            + '<td><input type="checkbox" class="menu-enabled" data-id="' + esc(menu.id) + '" ' + (menu.enabled !== false ? 'checked' : '') + disabled + '></td>';
-        tbody.appendChild(tr);
+async function renderTables() {
+    await tableViewReady;
+    tableView.update({
+        users: state.rbac.users || [],
+        roles: state.rbac.roles || [],
+        menus: state.rbac.menus || []
     });
 }
 
@@ -460,9 +421,7 @@ async function reload() {
     var data = await api('admin/rbac');
     state.rbac = data.rbac;
     state.me = data.me;
-    renderUsers();
-    renderRoles();
-    renderMenus();
+    await renderTables();
     renderPermissions();
     applyEditMode();
 }

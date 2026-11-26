@@ -13,6 +13,13 @@ const advancedFilters = createCaseFilters(action => run(() => action(() => loadC
 const knowledgeCases = createKnowledgeCases({ run, api, tab });
 let categoryData = { categories: [], total: 0, uncategorized: 0 };
 const selectedCases = new Set();
+let caseItems = [], caseView, caseViewReady;
+function renderCaseList(emptyText) {
+  if (!caseViewReady) caseViewReady = import('../generated/mingli-cases-view.js?v=1').then(({ mountMingliCasesView }) => {
+    caseView = mountMingliCasesView($('case-list'), { canClassify: can('cases:classify') && can('categories:view') });
+  });
+  return caseViewReady.then(() => caseView.render(caseItems, selectedCases, emptyText));
+}
 const can = action => permissions.includes('*') || permissions.includes('mingli:' + action);
 function error(message = '') { $('error').textContent = message; $('error').hidden = !message; }
 function status(message = '') { $('status').textContent = message; }
@@ -141,22 +148,12 @@ async function loadCases(append = false) {
   const query = append && caseQuery ? caseQuery : { search: $('search').value, categoryId: $('category-filter').value, filters: JSON.stringify(advancedFilters.value()) };
   const result = await api('/cases?' + new URLSearchParams({ ...query, offset, limit: 30 }));
   caseQuery = query;
-  if (!append) { $('case-list').replaceChildren(); selectedCases.clear(); }
-  for (const item of result.cases) {
-    const entry = document.createElement('div'); entry.className = 'ml-case-entry';
-    const button = document.createElement('button'); button.className = 'ml-case-card'; button.type = 'button'; button.dataset.case = item.id;
-    button.innerHTML = `<strong>${escape(item.name)}</strong><span class="ml-category-badge">${escape(item.categoryName || '未分类')}</span><p class="ml-case-pillars">${item.pillars.map(escape).join(' · ')}</p><p>${item.birth.calendar === 'lunar' ? '农历' : '公历'} ${item.birth.year}-${item.birth.leapMonth ? '闰' : ''}${item.birth.month}-${item.birth.day} · ${item.birth.gender === 1 ? '男' : '女'}</p><p class="ml-muted">标签：${escape(item.tags.join(' / ')) || '无'}</p><p class="ml-muted">${escape(item.notePreview)}</p><small>更新于 ${escape(new Date(item.updatedAt).toLocaleString('sv-SE', { timeZone: 'Asia/Shanghai' }))}</small>`;
-    entry.append(button);
-    if (can('cases:classify') && can('categories:view')) {
-      const check = document.createElement('input'); check.type = 'checkbox'; check.dataset.selectCase = item.id;
-      check.setAttribute('aria-label', '选择案例：' + item.name); check.className = 'ml-case-select'; entry.append(check);
-    }
-    $('case-list').append(entry);
-  }
+  if (!append) { caseItems = []; selectedCases.clear(); }
+  caseItems.push(...result.cases);
+  await renderCaseList(query.search || query.categoryId || query.filters !== '{}' ? '当前筛选没有匹配的案例。' : '还没有案例，先排一张命盘并保存。');
   caseOffset = offset + result.cases.length;
   $('case-count').textContent = `${result.total} 个案例`;
   $('more-cases').hidden = caseOffset >= result.total;
-  if (!result.total) $('case-list').textContent = query.search || query.categoryId || query.filters !== '{}' ? '当前筛选没有匹配的案例。' : '还没有案例，先排一张命盘并保存。';
   advancedFilters.describe(query.search, query.categoryId);
   syncSelection();
 }
