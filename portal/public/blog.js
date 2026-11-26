@@ -9,6 +9,9 @@
     var locationEditor = window.createBlogLocation(document.getElementById('blog-location'));
     var visibilityEditor = window.createBlogVisibility(document.getElementById('blog-visibility'));
     var tagFilter = document.getElementById('blog-tag-filter');
+    var tagView, tagViewReady = import('./generated/blog-tag-filter-view.js?v=1').then(function(mod) {
+        tagView = mod.mountBlogTagFilter(tagFilter);
+    });
     var searchInput = document.getElementById('blog-search');
     var searchStatus = document.getElementById('blog-search-status');
     var imageInput = document.getElementById('blog-images');
@@ -582,14 +585,7 @@
         renderEditPreview(button.closest('.blog-post'));
     });
     function renderTagFilter() {
-        tagFilter.replaceChildren();
-        [{ tag: '', count: null }].concat(state.tags).forEach(function(item) {
-            var button = document.createElement('button'); button.type = 'button'; button.className = 'blog-tag';
-            button.dataset.tag = item.tag;
-            button.textContent = item.tag ? '#' + item.tag + ' (' + item.count + ')' : '全部动态';
-            button.setAttribute('aria-pressed', String(state.tag === item.tag));
-            tagFilter.appendChild(button);
-        });
+        tagViewReady.then(function() { tagView.render(state.tags, state.tag); });
     }
     async function selectTag(event) {
         var button = event.target.closest('button[data-tag]');
