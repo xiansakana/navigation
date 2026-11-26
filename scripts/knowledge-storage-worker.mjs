@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createKnowledgeStore } from '../portal/src/knowledge-store.js';
 import { createPostgresKnowledgeStore } from '../portal/src/knowledge-postgres-store.js';
 import { checkKnowledgeDatabase, getKnowledgeDatabase } from '../portal/src/knowledge-runtime.js';
-import { knowledgeDirectory } from '../portal/src/knowledge.js';
+import { knowledgeDirectory } from '../portal/src/knowledge-http.js';
 import { storageConfig, sourcePath, OpenListStorage, archiveSource } from '../portal/src/knowledge-storage.js';
 
 await checkKnowledgeDatabase();
