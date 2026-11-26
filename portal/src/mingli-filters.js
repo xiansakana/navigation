@@ -56,19 +56,28 @@ export function parseCaseFilters(raw) {
   return f;
 }
 
-export function caseFilterSql(raw) {
+export function caseFilterSql(raw, { postgres = false } = {}) {
   const filters = parseCaseFilters(raw), clauses = [], args = [];
   const add = (sql, ...values) => { clauses.push(sql); args.push(...values); };
-  if (filters.gender !== undefined) add("json_extract(birth_json, '$.gender') = ?", filters.gender);
-  if (filters.location) add("json_extract(birth_json, '$.location') LIKE ? ESCAPE '!'", literalLike(filters.location));
-  if (filters.solarFrom) add("substr(json_extract(chart_json, '$.solar'), 1, 10) >= ?", filters.solarFrom);
-  if (filters.solarTo) add("substr(json_extract(chart_json, '$.solar'), 1, 10) <= ?", filters.solarTo);
-  if (filters.notes) add(filters.notes === 'yes' ? "length(trim(notes, char(9)||char(10)||char(13)||' ')) > 0" : "length(trim(notes, char(9)||char(10)||char(13)||' ')) = 0");
+  const jsonText = (column, ...path) => postgres
+    ? `jsonb_extract_path_text(${column}::jsonb, ${path.map(segment => "'" + segment + "'").join(', ')})`
+    : `json_extract(${column}, '$${path.map(segment => Number.isInteger(segment) ? '[' + segment + ']' : '.' + segment).join('')}')`;
+  if (filters.gender !== undefined) add(jsonText('birth_json', 'gender') + ' = ?', postgres ? String(filters.gender) : filters.gender);
+  if (filters.location) {
+    const location = jsonText('birth_json', 'location');
+    add(postgres ? `lower(${location} COLLATE "C") LIKE lower(? COLLATE "C") ESCAPE '!'` : `${location} LIKE ? ESCAPE '!'`, literalLike(filters.location));
+  }
+  const solar = `substr(${jsonText('chart_json', 'solar')}, 1, 10)`;
+  if (filters.solarFrom) add(solar + ' >= ?', filters.solarFrom);
+  if (filters.solarTo) add(solar + ' <= ?', filters.solarTo);
+  const noteLength = postgres ? "length(btrim(notes, chr(9)||chr(10)||chr(13)||' '))" : "length(trim(notes, char(9)||char(10)||char(13)||' '))";
+  if (filters.notes) add(noteLength + (filters.notes === 'yes' ? ' > 0' : ' = 0'));
   filters.pillars?.forEach((p, i) => {
-    for (const [key, value] of Object.entries(p)) add(`json_extract(chart_json, '$.pillars[${i}].${key}') = ?`, value);
+    for (const [key, value] of Object.entries(p)) add(jsonText('chart_json', 'pillars', i, key) + ' = ?', value);
   });
   // Counts make 辰辰 require two actual natal branches; a single 辰 cannot match itself.
-  const occurrence = (field, count) => `(SELECT count(*) FROM json_each(chart_json, '$.pillars') p WHERE json_extract(p.value, '$.${field}') = ?) >= ${count}`;
+  const pillars = postgres ? "jsonb_array_elements(chart_json::jsonb->'pillars') p(value)" : "json_each(chart_json, '$.pillars') p";
+  const occurrence = (field, count) => `(SELECT count(*) FROM ${pillars} WHERE ${jsonText('p.value', field)} = ?) >= ${count}`;
   for (const char of filters.characters || []) add(occurrence(STEMS.includes(char) ? 'gan' : 'zhi', 1), char);
   if (filters.relations) {
     const groups = filters.relations.map(id => {

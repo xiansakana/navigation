@@ -3,9 +3,18 @@ import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
 import { calculateChart } from './mingli-chart.js';
 import { createMingliStore } from './mingli-store.js';
+import { createMingliPostgresStore } from './mingli-postgres.js';
+import { createPostgresDatabase } from './postgres.js';
 import { parseCaseFilters } from './mingli-filters.js';
 import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
 import { canKnowledge } from './knowledge.js';
+
+let postgresStore;
+function activeCaseStore() {
+  const postgres = process.env.NAVIGATION_MINGLI_POSTGRES_URL;
+  if (!postgres) return createMingliStore(getDatabase());
+  return postgresStore ||= createMingliPostgresStore(createPostgresDatabase(postgres));
+}
 
 export function canMingli(session, action = 'view') {
   return !!session?.userId && (!session.isGuest || ['view', 'chart:calculate'].includes(action))
@@ -23,7 +32,7 @@ async function body(req, maxSize = 128 * 1024) {
   catch { throw new Error('请求体不是合法 JSON'); }
 }
 
-export async function handleMingliApi(req, res, url, session, json) {
+export async function handleMingliApi(req, res, url, session, json, getCaseStore = activeCaseStore) {
   res.setHeader('Cache-Control', 'no-store');
   if (!canMingli(session)) return json(res, 403, { ok: false, error: '请登录并获取命理模块权限' });
   const route = url.pathname.slice('/api/mingli'.length), method = req.method;
@@ -56,38 +65,38 @@ export async function handleMingliApi(req, res, url, session, json) {
         offset: Math.min(100000, Math.max(0, Math.floor(Number(url.searchParams.get('offset')) || 0))), limit: Math.max(1, Math.min(100, Math.floor(Number(url.searchParams.get('limit')) || 30))) }) });
     }
     if (route === '/chart') return json(res, 200, { ok: true, chart: calculateChart(await body(req, session.isGuest ? 4096 : 128 * 1024)) });
-    const store = createMingliStore(getDatabase()), uid = session.userId;
-    if (route === '/categories' && method === 'GET') return json(res, 200, { ok: true, ...store.categories.list(uid) });
+    const store = getCaseStore(), uid = session.userId;
+    if (route === '/categories' && method === 'GET') return json(res, 200, { ok: true, ...await store.categories.list(uid) });
     if (action === 'categories:edit') {
-      const item = method === 'DELETE' ? store.categories.remove(uid, category[1]) : store.categories.save(uid, await body(req), category?.[1]);
+      const item = method === 'DELETE' ? await store.categories.remove(uid, category[1]) : await store.categories.save(uid, await body(req), category?.[1]);
       return json(res, !item ? 404 : method === 'POST' ? 201 : 200, item ? { ok: true, ...(method === 'DELETE' ? item : { category: item }) } : { ok: false, error: '分类不存在' });
     }
     if (route === '/cases/category') {
-      const input = await body(req), result = store.categories.assign(uid, input?.ids, input?.categoryId);
+      const input = await body(req), result = await store.categories.assign(uid, input?.ids, input?.categoryId);
       return json(res, result ? 200 : 404, result ? { ok: true, ...result } : { ok: false, error: '案例不存在' });
     }
     if (action === 'cases:import') {
       if (route === '/import/confirm' && !canMingli(session, 'cases:edit')) return json(res, 403, { ok: false, error: '保存导入案例需要案例编辑权限' });
-      return json(res, 200, { ok: true, ...store.importWenZhen(uid, await body(req, 2 * 1024 * 1024), route === '/import/confirm') });
+      return json(res, 200, { ok: true, ...await store.importWenZhen(uid, await body(req, 2 * 1024 * 1024), route === '/import/confirm') });
     }
     if (route === '/cases' && method === 'GET') {
       const filters = parseCaseFilters(url.searchParams.get('filters'));
       if (Object.keys(filters).length && !canMingli(session, 'cases:filter')) return json(res, 403, { ok: false, error: '无权使用案例高级筛选' });
       const page = key => Math.max(0, Math.floor(Number(url.searchParams.get(key)) || 0));
-      return json(res, 200, { ok: true, ...store.list(uid, { search: url.searchParams.get('search') || '', categoryId: url.searchParams.get('categoryId') || '', filters, offset: Math.min(100000, page('offset')), limit: Math.max(1, Math.min(100, page('limit') || 30)) }) });
+      return json(res, 200, { ok: true, ...await store.list(uid, { search: url.searchParams.get('search') || '', categoryId: url.searchParams.get('categoryId') || '', filters, offset: Math.min(100000, page('offset')), limit: Math.max(1, Math.min(100, page('limit') || 30)) }) });
     }
     let item;
     if (route === '/cases' && method === 'POST' || match && method === 'PUT') {
       const input = await body(req);
       if (input && Object.hasOwn(input, 'categoryId') && !canMingli(session, 'cases:classify')) return json(res, 403, { ok: false, error: '无权设置案例分类' });
-      item = store.save(uid, input, match?.[1]);
+      item = await store.save(uid, input, match?.[1]);
     }
-    else if (method === 'GET') item = store.get(uid, match[1]);
-    else item = store.remove(uid, match[1]);
+    else if (method === 'GET') item = await store.get(uid, match[1]);
+    else item = await store.remove(uid, match[1]);
     if (!item) return json(res, 404, { ok: false, error: '案例不存在' });
     return json(res, method === 'POST' ? 201 : 200, { ok: true, ...(method === 'DELETE' ? {} : { case: item }) });
   } catch (e) {
-    if (e.code?.startsWith('SQLITE_')) {
+    if (/^(SQLITE_|[0-9A-Z]{5}$|ECONN|ETIMEDOUT)/.test(e.code || '') || e.name === 'PostgresConnectionError') {
       console.error('[mingli]', e.code);
       return json(res, 500, { ok: false, error: '案例保存失败，请稍后重试' });
     }

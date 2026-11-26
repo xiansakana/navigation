@@ -29,6 +29,12 @@ PGSERVICE=navigation-target python scripts/rehearse-postgres.py \
 
 从生产在线快照初始化的目标库可用于兼容性和 Navicat 只读验证；快照时间之后的生产写入仍进入 SQLite。正式切换使用停写后得到的快照，并按 [应用切换条件](#应用切换条件) 验收。
 
+## 应用读写适配
+
+Portal 的命理个人案例已接入异步 PostgreSQL 查询和事务。独立验证环境通过 `NAVIGATION_MINGLI_POSTGRES_URL` 选择 PostgreSQL。此配置仅接管命理的个人案例、分类和问真导入，排盘仍在应用内计算，知识库案例仍依赖现有知识库。正式全站切换前生产不启用这一独立配置。
+
+GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访客拒绝、不同账号的数据隔离、分类约束、条件筛选、批量归类及并发导入。待其余业务适配后再执行全站切换。
+
 ## 应用切换条件
 
 运行时需要 PostgreSQL 连接池，以及将 Portal、后台队列、股票、抄底和 QQ 业务改为异步数据库读写。

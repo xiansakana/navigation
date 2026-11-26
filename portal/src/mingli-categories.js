@@ -1,9 +1,15 @@
 import crypto from 'node:crypto';
 
 const ID = /^[a-f0-9]{32}$/;
-function categoryName(value) {
+export function categoryName(value) {
   if (typeof value !== 'string' || !value.trim() || value.trim().length > 30) throw new Error('分类名称需为 1—30 字');
   return value.trim();
+}
+
+export function parseMingliAssignmentIds(ids, categoryId) {
+  if (categoryId === undefined) throw new Error('请选择目标分类');
+  if (!Array.isArray(ids) || !ids.length || ids.length > 200 || ids.some(id => typeof id !== 'string' || !ID.test(id))) throw new Error('每次请选择 1—200 个有效案例');
+  return [...new Set(ids)];
 }
 
 export function createMingliCategories(db) {
@@ -65,9 +71,7 @@ export function createMingliCategories(db) {
       })();
     },
     assign(uid, ids, categoryId) {
-      if (categoryId === undefined) throw new Error('请选择目标分类');
-      if (!Array.isArray(ids) || !ids.length || ids.length > 200 || ids.some(id => typeof id !== 'string' || !ID.test(id))) throw new Error('每次请选择 1—200 个有效案例');
-      ids = [...new Set(ids)];
+      ids = parseMingliAssignmentIds(ids, categoryId);
       return db.transaction(() => {
         const selected = validate(uid, categoryId);
         const own = db.prepare('SELECT id FROM mingli_cases WHERE user_id=? AND id=?');

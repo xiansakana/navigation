@@ -7,6 +7,36 @@ import { connectionStore } from './connection-store.js';
 
 export const createMingliStore = connectionStore(initializeMingliStore);
 
+export function readMingliCase(row) {
+  return row && { id: row.id, name: row.name, birth: JSON.parse(row.birth_json),
+    chart: JSON.parse(row.chart_json), tags: JSON.parse(row.tags_json), notes: row.notes,
+    createdAt: row.created_at, updatedAt: row.updated_at, categoryId: row.category_id || null, categoryName: row.category_name || null, source: row.source_json ? JSON.parse(row.source_json) : null };
+}
+
+export function summarizeMingliCase({ chart, notes, source, ...item }) {
+  return { ...item, source: source ? { provider: source.provider, matched: source.matched } : null, pillars: chart.pillars.map(p => p.ganZhi), notePreview: notes.slice(0, 120) };
+}
+
+export function validateMingliCase(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('案例格式无效');
+  const name = String(raw.name ?? '').trim();
+  if (!name || name.length > 80) throw new Error('案例名称需为 1—80 字');
+  const notes = String(raw.notes ?? '');
+  if (notes.length > 20000) throw new Error('笔记最多 20000 字');
+  if (!Array.isArray(raw.tags) || raw.tags.length > 12 || raw.tags.some(t => typeof t !== 'string' || t.length > 30)) throw new Error('最多 12 个标签，每个不超过 30 字');
+  return { name, notes, tags: [...new Set(raw.tags.map(t => t.trim()).filter(Boolean))] };
+}
+
+export function summarizeMingliImport(prepared, rows, commit) {
+  const summary = { total: prepared.total, valid: rows.length, duplicates: rows.filter(r => r.duplicate).length,
+    matched: rows.filter(r => r.source.matched).length, mismatches: rows.filter(r => !r.source.matched).length, errors: prepared.errors };
+  if (!commit) return { ...summary, preview: rows.map(r => ({ name: r.name, solar: r.chart.solar, clock: r.chart.clock, gender: r.birth.gender, group: r.source.group,
+    originalPillars: r.source.originalPillars, pillars: r.chart.pillars.map(p => p.ganZhi).join(''), duplicate: r.duplicate, matched: r.source.matched })) };
+  if (prepared.errors.length) throw new Error('存在无效案例，请先修正文件后重新预览');
+  if (summary.mismatches) throw new Error('存在四柱不一致的案例，需人工核对后再导入');
+  return summary;
+}
+
 function initializeMingliStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS mingli_cases (
     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL,
@@ -19,11 +49,8 @@ function initializeMingliStore(db) {
   db.exec('CREATE INDEX IF NOT EXISTS mingli_cases_category ON mingli_cases(user_id,category_id)');
   const categories = createMingliCategories(db);
   const selectCases = 'SELECT *, (SELECT name FROM mingli_categories g WHERE g.id=mingli_cases.category_id AND g.user_id=mingli_cases.user_id) AS category_name FROM mingli_cases';
-  const read = row => row && ({ id: row.id, name: row.name, birth: JSON.parse(row.birth_json),
-    chart: JSON.parse(row.chart_json), tags: JSON.parse(row.tags_json), notes: row.notes,
-    createdAt: row.created_at, updatedAt: row.updated_at, categoryId: row.category_id || null, categoryName: row.category_name || null, source: row.source_json ? JSON.parse(row.source_json) : null });
   const selectCase = db.prepare(selectCases + ' WHERE user_id = ? AND id = ?');
-  const get = (uid, id) => read(selectCase.get(uid, id));
+  const get = (uid, id) => readMingliCase(selectCase.get(uid, id));
   return {
     get, categories,
     list(uid, { search = '', categoryId = '', filters = {}, offset = 0, limit = 30 } = {}) {
@@ -44,20 +71,15 @@ function initializeMingliStore(db) {
       args.push(...advanced.args);
       const total = db.prepare('SELECT count(*) AS count FROM mingli_cases WHERE ' + where).get(...args).count;
       const cases = db.prepare(selectCases + ' WHERE ' + where + ' ORDER BY updated_at DESC, id LIMIT ? OFFSET ?').all(...args, limit, offset)
-        .map(read).map(({ chart, notes, source, ...item }) => ({ ...item, source: source ? { provider: source.provider, matched: source.matched } : null, pillars: chart.pillars.map(p => p.ganZhi), notePreview: notes.slice(0, 120) }));
+        .map(readMingliCase).map(summarizeMingliCase);
       return { cases, total, offset, limit };
     },
     save(uid, raw, id = null) {
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('案例格式无效');
-      const name = String(raw.name ?? '').trim();
-      if (!name || name.length > 80) throw new Error('案例名称需为 1—80 字');
-      const notes = String(raw.notes ?? '');
-      if (notes.length > 20000) throw new Error('笔记最多 20000 字');
-      if (!Array.isArray(raw.tags) || raw.tags.length > 12 || raw.tags.some(t => typeof t !== 'string' || t.length > 30)) throw new Error('最多 12 个标签，每个不超过 30 字');
+      const { name, notes, tags } = validateMingliCase(raw);
       const previous = id ? get(uid, id) : null;
       if (id && !previous) return null;
       const categoryId = raw.categoryId === undefined ? previous?.categoryId || null : categories.validate(uid, raw.categoryId);
-      const chart = calculateChart(raw.birth), tags = [...new Set(raw.tags.map(t => t.trim()).filter(Boolean))];
+      const chart = calculateChart(raw.birth);
       const now = new Date().toISOString();
       if (id) {
         db.prepare('UPDATE mingli_cases SET name=?, birth_json=?, chart_json=?, tags_json=?, notes=?, updated_at=?,category_id=? WHERE user_id=? AND id=?')
@@ -73,12 +95,8 @@ function initializeMingliStore(db) {
       const prepared = prepareWenZhenImport(bundle);
       const exists = db.prepare('SELECT id FROM mingli_cases WHERE user_id=? AND source_type=? AND source_key=?');
       const rows = prepared.rows.map(r => ({ ...r, duplicate: !!exists.get(uid, 'wenzhen', r.source.key) }));
-      const summary = { total: prepared.total, valid: rows.length, duplicates: rows.filter(r => r.duplicate).length,
-        matched: rows.filter(r => r.source.matched).length, mismatches: rows.filter(r => !r.source.matched).length, errors: prepared.errors };
-      if (!commit) return { ...summary, preview: rows.map(r => ({ name: r.name, solar: r.chart.solar, clock: r.chart.clock, gender: r.birth.gender, group: r.source.group,
-        originalPillars: r.source.originalPillars, pillars: r.chart.pillars.map(p => p.ganZhi).join(''), duplicate: r.duplicate, matched: r.source.matched })) };
-      if (prepared.errors.length) throw new Error('存在无效案例，请先修正文件后重新预览');
-      if (summary.mismatches) throw new Error('存在四柱不一致的案例，需人工核对后再导入');
+      const summary = summarizeMingliImport(prepared, rows, commit);
+      if (!commit) return summary;
       let imported = 0;
       const ids = [];
       db.transaction(() => {
