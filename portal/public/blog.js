@@ -22,8 +22,8 @@
     var shortcut = document.getElementById('blog-shortcut');
     var state = { userId: '', canPost: false, canManage: false, lastId: null, loading: false,
         pending: [], posts: new Map(), editing: null, tag: '', tags: [], search: '', refreshPending: false, preparing: 0 };
-    var feedPosts = [], feedView;
-    var feedViewReady = import('./generated/blog-feed-view.js?v=1').then(function(mod) {
+    var feedPosts = [], feedView, feedGeneration = 0;
+    var feedViewReady = import('./generated/blog-feed-view.js?v=2').then(function(mod) {
         feedView = mod.mountBlogFeed(feed, {
             editItems: editItems,
             renderGallery: function(host, items) { window.renderBlogGallery(host, items); },
@@ -33,14 +33,14 @@
     });
     function renderFeed(empty) {
         var model = { posts: feedPosts, userId: state.userId, canPost: state.canPost, canManage: state.canManage,
-            canViewComments: state.canViewComments, empty: empty };
+            canViewComments: state.canViewComments, empty: empty, generation: feedGeneration };
         if (feedView) feedView.render(model); else feedViewReady.then(function() { feedView?.render(model); });
     }
 
     function feedEmptyText() {
         return state.search ? '没有找到匹配的博客，试试其他关键词或清空搜索。' : state.tag ? '这个标签下还没有动态。' : '还没有动态，写下第一篇吧。';
     }
-    function restoreFeed() { renderFeed(feedEmptyText()); }
+    function restoreFeed() { feedGeneration++; renderFeed(feedEmptyText()); }
 
     function loadEditor() {
         return window.portalPage.loadScript('/blog-rich-editor.js?v=blog-unified-1');

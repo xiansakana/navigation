@@ -22,6 +22,7 @@ export interface FeedModel {
   canManage: boolean;
   canViewComments: boolean;
   empty: string;
+  generation?: number;
 }
 
 interface Helpers {
@@ -118,7 +119,7 @@ export function mountBlogFeed(host: HTMLElement, helpers: Helpers) {
       if (state.canViewComments) {
         main.push(h('div', { class: 'blog-comments' }, [h('div', { class: 'blog-comments-content', hidden: true })]));
       }
-      return h('article', { key: post.id, class: 'blog-post', 'data-id': post.id }, [
+      return h('article', { key: post.id + ':' + (state.generation || 0), class: 'blog-post', 'data-id': post.id }, [
         h('span', { class: 'blog-avatar' }, (post.authorName || '?').slice(0, 1).toUpperCase()),
         h('div', { class: 'blog-post-main' }, main)
       ]);
