@@ -33,47 +33,49 @@ async function readParts(client, id) {
   return rows.map(row => ({ part: Number(row.part), bytes: Number(row.bytes) }));
 }
 
+export async function reservePostgresKnowledgeUpload(client, uid, input, config, availableBytes, linkImport, queueId = '') {
+  if (!Number.isFinite(availableBytes) || availableBytes < 0) throw new Error('服务器可用空间无法确定');
+  await lockKnowledgeUploadAdmission(client);
+  const { rows: [settings] } = await client.query('SELECT backend,model_settings_json FROM navigation.knowledge_settings WHERE user_id=$1', [uid]);
+  const document = uploadInput(input, { backend: settings?.backend || 'codex', ...JSON.parse(settings?.model_settings_json || '{}') });
+  for (const url of new Set([document.sourceUrl, linkImport?.url].filter(Boolean))) {
+    const duplicate = await findPostgresKnowledgeDuplicate(client, uid, url, { exceptQueue: queueId });
+    if (duplicate) throw duplicateSourceError(duplicate);
+  }
+  const { rows: [quotas] } = await client.query(`SELECT
+      count(*) FILTER (WHERE user_id=$1) AS notes,
+      coalesce(sum(byte_size) FILTER (WHERE user_id=$1),0) AS owner_bytes,
+      coalesce(sum(byte_size) FILTER (WHERE status IN ('uploading','importing')),0) AS reserved,
+      count(*) FILTER (WHERE user_id=$1 AND status IN ('uploading','importing','queued','processing'))
+        + (SELECT count(*) FROM navigation.knowledge_upload_queue
+          WHERE user_id=$1 AND state='resolving' AND expires>=$2 AND id<>$3) AS pending
+    FROM navigation.knowledge_documents`, [uid, Date.now(), queueId]);
+  assertUploadDiskSpace(document.bytes, Number(quotas.reserved), availableBytes);
+  if (Number(quotas.pending) >= 5) throw capacityError();
+  if (Number(quotas.notes) >= 2000) throw new Error('最多2000篇笔记，请先清理已有内容');
+  if (!config && Number(quotas.owner_bytes) + document.bytes > 20 * MAX_VIDEO_BYTES) throw new Error('服务器存储最多20GB视频，请先清理已有内容');
+  const id = randomBytes(16).toString('hex'), time = new Date().toISOString();
+  const { rows: [saved] } = await client.query(`INSERT INTO navigation.knowledge_documents
+    (id,user_id,title,topic,tags_json,source_url,original_name,byte_size,mime_type,fingerprint,backend,model_settings_json,status,stage,created_at,updated_at)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15) RETURNING *`, [
+    id, uid, document.title, document.topic, JSON.stringify(document.tags), document.sourceUrl, document.originalName,
+    document.bytes, document.mimeType, document.fingerprint, document.backend, JSON.stringify(linkImport?.selection?.modelSettings || document.modelSettings),
+    linkImport ? 'importing' : 'uploading', linkImport ? '等待下载B站视频' : '等待上传', time,
+  ]);
+  if (config) await client.query('INSERT INTO navigation.knowledge_sources(document_id,user_id,object_path) VALUES($1,$2,$3)',
+    [id, uid, sourcePath(config, uid, { id, mimeType: document.mimeType })]);
+  if (linkImport) await client.query(`INSERT INTO navigation.knowledge_imports(document_id,user_id,url,created_at,settings_json)
+    VALUES($1,$2,$3,$4,$5)`, [id, uid, linkImport.url, Date.now(), JSON.stringify(linkImport.selection)]);
+  return projectKnowledgeDocument(saved, {
+    sourceImport: linkImport ? { state: 'pending' } : null,
+    storage: config ? { provider: '115', state: 'waiting', error: '', verifiedAt: null, timings: { uploadMs: 0, verificationMs: 0 } }
+      : { provider: 'local', state: 'local' },
+  });
+}
+
 export function createPostgresKnowledgeUploads(db) {
   function create(uid, input, config, availableBytes, linkImport) {
-    if (!Number.isFinite(availableBytes) || availableBytes < 0) throw new Error('服务器可用空间无法确定');
-    return db.transaction(async client => {
-      await lockKnowledgeUploadAdmission(client);
-      const { rows: [settings] } = await client.query('SELECT backend,model_settings_json FROM navigation.knowledge_settings WHERE user_id=$1', [uid]);
-      const document = uploadInput(input, { backend: settings?.backend || 'codex', ...JSON.parse(settings?.model_settings_json || '{}') });
-      for (const url of new Set([document.sourceUrl, linkImport?.url].filter(Boolean))) {
-        const duplicate = await findPostgresKnowledgeDuplicate(client, uid, url);
-        if (duplicate) throw duplicateSourceError(duplicate);
-      }
-      const { rows: [quotas] } = await client.query(`SELECT
-          count(*) FILTER (WHERE user_id=$1) AS notes,
-          coalesce(sum(byte_size) FILTER (WHERE user_id=$1),0) AS owner_bytes,
-          coalesce(sum(byte_size) FILTER (WHERE status IN ('uploading','importing')),0) AS reserved,
-          count(*) FILTER (WHERE user_id=$1 AND status IN ('uploading','importing','queued','processing'))
-            + (SELECT count(*) FROM navigation.knowledge_upload_queue
-              WHERE user_id=$1 AND state='resolving' AND expires>=$2) AS pending
-        FROM navigation.knowledge_documents`, [uid, Date.now()]);
-      assertUploadDiskSpace(document.bytes, Number(quotas.reserved), availableBytes);
-      if (Number(quotas.pending) >= 5) throw capacityError();
-      if (Number(quotas.notes) >= 2000) throw new Error('最多2000篇笔记，请先清理已有内容');
-      if (!config && Number(quotas.owner_bytes) + document.bytes > 20 * MAX_VIDEO_BYTES) throw new Error('服务器存储最多20GB视频，请先清理已有内容');
-      const id = randomBytes(16).toString('hex'), time = new Date().toISOString();
-      const { rows: [saved] } = await client.query(`INSERT INTO navigation.knowledge_documents
-        (id,user_id,title,topic,tags_json,source_url,original_name,byte_size,mime_type,fingerprint,backend,model_settings_json,status,stage,created_at,updated_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15) RETURNING *`, [
-        id, uid, document.title, document.topic, JSON.stringify(document.tags), document.sourceUrl, document.originalName,
-        document.bytes, document.mimeType, document.fingerprint, document.backend, JSON.stringify(document.modelSettings),
-        linkImport ? 'importing' : 'uploading', linkImport ? '等待下载B站视频' : '等待上传', time,
-      ]);
-      if (config) await client.query('INSERT INTO navigation.knowledge_sources(document_id,user_id,object_path) VALUES($1,$2,$3)',
-        [id, uid, sourcePath(config, uid, { id, mimeType: document.mimeType })]);
-      if (linkImport) await client.query(`INSERT INTO navigation.knowledge_imports(document_id,user_id,url,created_at,settings_json)
-        VALUES($1,$2,$3,$4,$5)`, [id, uid, linkImport.url, Date.now(), JSON.stringify(linkImport.selection)]);
-      return projectKnowledgeDocument(saved, {
-        sourceImport: linkImport ? { state: 'pending' } : null,
-        storage: config ? { provider: '115', state: 'waiting', error: '', verifiedAt: null, timings: { uploadMs: 0, verificationMs: 0 } }
-          : { provider: 'local', state: 'local' },
-      });
-    });
+    return db.transaction(client => reservePostgresKnowledgeUpload(client, uid, input, config, availableBytes, linkImport));
   }
 
   return {

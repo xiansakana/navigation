@@ -10,6 +10,24 @@ import { connectionStore } from './connection-store.js';
 
 export const createUploadQueue = connectionStore(initializeUploadQueue);
 
+export function uploadQueueSettings(raw, defaults) {
+  if (!Array.isArray(raw.urls) || !raw.urls.length || raw.urls.length > 100 || raw.urls.some(url => typeof url !== 'string' || url.length > 1500)) throw new Error('每批支持1至100条B站链接，每条不超过1500字');
+  const common = metadata({ title: '批量导入', topic: raw.topic || '', tags: raw.tags || [] });
+  const settings = { ...qualitySettings(raw, defaults.quality), backend: backendName(raw.backend || defaults.backend), modelSettings: defaults.modelSettings, topic: common.topic, tags: common.tags };
+  if (raw.urls.length === 1 && (raw.title !== undefined || raw.sourceUrl !== undefined)) {
+    const override = metadata({ title: raw.title || '自动填写标题', topic: common.topic, tags: common.tags, sourceUrl: raw.sourceUrl || '' });
+    settings.overrides = { topic: common.topic, tags: common.tags, ...(raw.title ? { title: override.title } : {}), ...(raw.sourceUrl !== undefined ? { sourceUrl: override.sourceUrl } : {}) };
+  }
+  return settings;
+}
+
+export function batchImportInput(info, selection) {
+  return { title: selection.overrides?.title || info.title, topic: selection.overrides?.topic ?? (selection.topic || info.topic),
+    tags: selection.overrides?.tags ?? [...new Set([...selection.tags, ...info.tags])].slice(0, 20),
+    sourceUrl: selection.overrides?.sourceUrl ?? info.sourceUrl, bytes: MAX_VIDEO_BYTES, mimeType: 'video/mp4',
+    originalName: info.title.replace(/[\\/:*?"<>|]/g, '-') + '.mp4', backend: selection.backend };
+}
+
 function initializeUploadQueue(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS knowledge_upload_queue (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL UNIQUE,user_id TEXT NOT NULL,url TEXT NOT NULL,
@@ -22,13 +40,7 @@ function initializeUploadQueue(db) {
   return {
     get, duplicate,
     add(uid, raw, defaults) {
-      if (!Array.isArray(raw.urls) || !raw.urls.length || raw.urls.length > 100 || raw.urls.some(u => typeof u !== 'string' || u.length > 1500)) throw new Error('每批支持1至100条B站链接，每条不超过1500字');
-      const common = metadata({ title: '批量导入', topic: raw.topic || '', tags: raw.tags || [] });
-      const settings = { ...qualitySettings(raw, defaults.quality), backend: backendName(raw.backend || defaults.backend), modelSettings: defaults.modelSettings, topic: common.topic, tags: common.tags };
-      if (raw.urls.length === 1 && (raw.title !== undefined || raw.sourceUrl !== undefined)) {
-        const override = metadata({ title: raw.title || '自动填写标题', topic: common.topic, tags: common.tags, sourceUrl: raw.sourceUrl || '' });
-        settings.overrides = { topic: common.topic, tags: common.tags, ...(raw.title ? { title: override.title } : {}), ...(raw.sourceUrl !== undefined ? { sourceUrl: override.sourceUrl } : {}) };
-      }
+      const settings = uploadQueueSettings(raw, defaults);
       return db.transaction(() => {
         const count = db.prepare("SELECT count(*) n FROM knowledge_upload_queue WHERE user_id=? AND state IN ('pending','resolving','failed')").get(uid).n;
         const results = [], time = Date.now(); let accepted = 0;
@@ -113,8 +125,7 @@ export async function runUploadQueue(db, directoryFor, authorize, { inspect = in
       if (existing) { queue.settle(job, 'duplicate', '', existing.document_id || '', existing.title || info.title); return; }
       const active = db.prepare("SELECT count(*) n FROM knowledge_documents WHERE user_id=? AND status IN ('uploading','importing','queued','processing')").get(uid).n;
       if (active >= 5) { queue.settle(job, 'pending'); return; }
-      const doc = store.create(uid, { title: selection.overrides?.title || info.title, topic: selection.overrides?.topic ?? (selection.topic || info.topic), tags: selection.overrides?.tags ?? [...new Set([...selection.tags, ...info.tags])].slice(0, 20),
-        sourceUrl: selection.overrides?.sourceUrl ?? info.sourceUrl, bytes: MAX_VIDEO_BYTES, mimeType: 'video/mp4', originalName: info.title.replace(/[\\/:*?"<>|]/g, '-') + '.mp4', backend: selection.backend }, { queueId: job.id });
+      const doc = store.create(uid, batchImportInput(info, selection), { queueId: job.id });
       db.prepare('UPDATE knowledge_documents SET model_settings_json=? WHERE user_id=? AND id=?').run(JSON.stringify(selection.modelSettings), uid, doc.id);
       store.imports.add(uid, doc.id, info.sourceUrl, selection);
       if (config) store.sources.add(uid, doc.id, sourcePath(config, uid, doc));

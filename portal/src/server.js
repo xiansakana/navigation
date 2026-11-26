@@ -68,6 +68,8 @@ import { canKnowledge } from './knowledge.js';
 import { handleKnowledgeWorkerApi } from './knowledge-worker-api.js';
 import { knowledgeDirectory } from './knowledge-http.js';
 import { startKnowledgeImports } from './knowledge-import.js';
+import { checkKnowledgeDatabase, getKnowledgeDatabase, knowledgePostgresDatabase } from './knowledge-runtime.js';
+import { createPostgresKnowledgeStore } from './knowledge-postgres-store.js';
 import { canCodexCli } from './codex-cli.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -615,7 +617,7 @@ async function handleRequest(req, res) {
         if (req.url.startsWith('/readyz')) {
             getDatabase().prepare('SELECT 1').get();
             try {
-                await identity.ready(); await checkMingliPostgres(); await checkBlogPostgres();
+                await identity.ready(); await checkMingliPostgres(); await checkBlogPostgres(); await checkKnowledgeDatabase();
                 if (resourcesDb) await verifyConfiguredPostgres(resourcesDb);
                 const tornUrl = postgresUrlFor('tornUsers');
                 if (tornUrl) await verifyConfiguredPostgres(portalPostgresDatabase(tornUrl));
@@ -633,11 +635,12 @@ async function handleRequest(req, res) {
     }
     if (url.pathname.startsWith('/api/knowledge/worker/')) {
         const rbac = await readIdentity();
+        const db = knowledgePostgresDatabase();
         return handleKnowledgeWorkerApi(req, res, url, json, uid => {
             const ctx = resolveSessionUser({ userId: uid }, config, rbac);
             const s = ctx && { userId: uid, permissions: ctx.permissions, isGuest: ctx.user.username === (config.auth?.guestUsername || 'guest') };
             return ctx?.rbac?.accessPolicy?.modules?.knowledge?.enabled !== false && canKnowledge(s) && canKnowledge(s, 'process:edit') && canKnowledge(s, 'worker:edit');
-        });
+        }, db && createPostgresKnowledgeStore(db) || undefined);
     }
     if (url.pathname === '/api/internal/bookkeeping/qq') {
         if (req.method !== 'POST' || !internalQqAuthorized(req)) return json(res, 403, {ok:false,error:'Forbidden'});
@@ -884,6 +887,7 @@ server.on('upgrade', async function(req, socket, head) {
 var host = config.server?.host || '127.0.0.1';
 var port = config.server?.port || 8080;
 
+await checkKnowledgeDatabase();
 server.listen(port, host, async function() {
     if (!config.runtime?.externalWorkers) {
         try {
@@ -894,7 +898,7 @@ server.listen(port, host, async function() {
             startThumbnailWorker(blogDb);
         } catch (error) { console.error('[portal background start]', error.code || error.name); }
     }
-    startKnowledgeImports(getDatabase(), knowledgeDirectory, async (uid, batch = false) => {
+    startKnowledgeImports(getKnowledgeDatabase(), knowledgeDirectory, async (uid, batch = false) => {
         const ctx = resolveSessionUser({ userId: uid }, config, await readIdentity());
         const s = ctx && { userId: uid, permissions: ctx.permissions, isGuest: ctx.user.username === (config.auth?.guestUsername || 'guest') };
         return ctx?.rbac?.accessPolicy?.modules?.knowledge?.enabled !== false && ['view', 'import:edit', 'upload:edit', 'process:edit', ...(batch ? ['queue:edit'] : [])].every(action => canKnowledge(s, action));

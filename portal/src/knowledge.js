@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { getDatabase } from '../../shared/db/index.js';
+import { getKnowledgeDatabase } from './knowledge-runtime.js';
+import { createPostgresKnowledgeStore } from './knowledge-postgres-store.js';
 import { storageConfig } from './knowledge-storage.js';
 import { hasPermission } from './rbac.js';
 import { createKnowledgeStore, CHUNK_BYTES, MAX_VIDEO_BYTES, MODEL_FIELDS } from './knowledge-store.js';
@@ -33,7 +34,7 @@ async function inspectImport(uid, url) {
   const rate = importRequests.get(uid) || { since: time, count: 0, busy: false };
   if (rate.busy || rate.count >= 20 || importRequests.size > 10000) throw Object.assign(new Error('视频信息读取过于频繁，请稍后重试'), { status: 429 });
   rate.count++; rate.busy = true; importRequests.set(uid, rate);
-  try { const cookie = await bilibiliAccount(getDatabase()).credentials(uid); return await inspectBilibili(url, { cookie }); } finally { rate.busy = false; }
+  try { const cookie = await bilibiliAccount(getKnowledgeDatabase()).credentials(uid); return await inspectBilibili(url, { cookie }); } finally { rate.busy = false; }
 }
 
 export async function handleKnowledgeApi(req, res, url, session, json) {
@@ -47,7 +48,7 @@ async function knowledgeApi(req, res, url, session, json) {
     return json(res, 409, { ok: false, code: 'KNOWLEDGE_ACCOUNT_CHANGED', error: '登录账号已变化，请回到原账号继续或刷新页面' });
   if (url.pathname.startsWith('/api/knowledge/public/')) {
     if (!canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '无权查看公开笔记' });
-    try { return handlePublicKnowledge(req, res, url, json, getDatabase()); }
+    try { return await handlePublicKnowledge(req, res, url, json, getKnowledgeDatabase()); }
     catch { return json(res, 503, { ok: false, error: '公开笔记暂不可用，请稍后重试' }); }
   }
   // Never route a guest through personal settings, worker, import, media or document APIs.
@@ -55,12 +56,12 @@ async function knowledgeApi(req, res, url, session, json) {
   if (url.pathname === '/api/knowledge/documents/visibility') {
     if (!canKnowledge(session, 'publish:batch:edit') || !canKnowledge(session, 'publish:edit') || !canKnowledge(session, 'notes:view'))
       return json(res, 403, { ok: false, error: '无权批量修改笔记可见范围' });
-    return handleKnowledgeBatchVisibility(req, res, session, json, getDatabase());
+    return handleKnowledgeBatchVisibility(req, res, session, json, getKnowledgeDatabase());
   }
   const visibility = /^\/api\/knowledge\/documents\/([a-f0-9]{32})\/visibility$/.exec(url.pathname);
   if (visibility) {
     if (!canKnowledge(session, 'publish:edit') || !canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '无权修改笔记可见范围' });
-    try { return await handleKnowledgeVisibility(req, res, url, session, json, getDatabase(), visibility[1]); }
+    try { return await handleKnowledgeVisibility(req, res, url, session, json, getKnowledgeDatabase(), visibility[1]); }
     catch { return json(res, 503, { ok: false, error: '可见范围暂不可用，请稍后重试' }); }
   }
   const route = url.pathname.slice('/api/knowledge'.length), method = req.method;
@@ -90,49 +91,51 @@ async function knowledgeApi(req, res, url, session, json) {
   if (method === 'GET' && (route === '/documents' || document && !['parts', 'source', 'frames'].includes(document[2])) && !canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '无权查看学习笔记' });
   if (document && ['source', 'frames'].includes(document[2]) && !canKnowledge(session, document[2] + ':view')) return json(res, 403, { ok: false, error: '无权查看此原始材料' });
   if (!['GET', 'HEAD'].includes(method) && (!sameOriginWrite(req))) return json(res, 403, { ok: false, error: '不允许跨站写入' });
-  const store = createKnowledgeStore(getDatabase()), uid = session.userId;
+  const db = getKnowledgeDatabase(), store = db.query ? createPostgresKnowledgeStore(db) : createKnowledgeStore(db), uid = session.userId;
+  const retry = (id, input = {}) => db.query ? store.retry(uid, id, action => canKnowledge(session, action), input)
+    : retryKnowledgeDocument(db, store, uid, id, action => canKnowledge(session, action), input);
   const visible = d => d && ({ ...d, transcript: canKnowledge(session, 'transcript:view') ? d.transcript.map(({ rawText, ...s }) => ({ ...s, ...(canKnowledge(session, 'transcript:script:view') ? { rawText } : {}) })) : [], frames: canKnowledge(session, 'frames:view') ? d.frames : [] });
   try {
     if (route.startsWith('/upload-queue')) {
-      const queue = createUploadQueue(getDatabase());
-      if (route === '/upload-queue' && method === 'GET') return json(res, 200, { ok: true, ...queue.list(uid, Math.min(100000, Math.max(0, Math.floor(Number(url.searchParams.get('offset')) || 0)))) });
+      const queue = store.queue || createUploadQueue(db);
+      if (route === '/upload-queue' && method === 'GET') return json(res, 200, { ok: true, ...await queue.list(uid, Math.min(100000, Math.max(0, Math.floor(Number(url.searchParams.get('offset')) || 0)))) });
       if (!route.endsWith('/cancel') && !['import:edit', 'upload:edit', 'process:edit'].every(a => canKnowledge(session, a))) return json(res, 403, { ok: false, error: '需要链接导入、上传和生成笔记权限' });
       if (route === '/upload-queue' && method === 'POST') {
-        const input = await body(req, 180000), defaults = store.settings(uid);
-        const result = queue.add(uid, input, { ...defaults, quality: bilibiliAccount(getDatabase()).public(uid), modelSettings: Object.fromEntries([...MODEL_FIELDS, ...ASR_FIELDS].map(key => [key, defaults[key]])) });
+        const input = await body(req, 180000), defaults = await store.settings(uid);
+        const result = await queue.add(uid, input, { ...defaults, quality: await bilibiliAccount(db).public(uid), modelSettings: Object.fromEntries([...MODEL_FIELDS, ...ASR_FIELDS].map(key => [key, defaults[key]])) });
         if (!canKnowledge(session, 'notes:view')) result.results = result.results.map(({ documentId, title, ...rest }) => rest);
         return json(res, 202, { ok: true, ...result });
       }
       const match = /^\/upload-queue\/([a-f0-9]{32})\/(retry|cancel)$/.exec(route);
-      if (!queue.get(uid, match[1])) return json(res, 404, { ok: false, error: '队列任务不存在' });
-      if (!queue.change(uid, match[1], match[2])) return json(res, 409, { ok: false, error: '任务已进入下载处理，请在对应笔记中管理' });
+      if (!await queue.get(uid, match[1])) return json(res, 404, { ok: false, error: '队列任务不存在' });
+      if (!await queue.change(uid, match[1], match[2])) return json(res, 409, { ok: false, error: '任务已进入下载处理，请在对应笔记中管理' });
       return json(res, 200, { ok: true });
     }
     if (route.startsWith('/bilibili')) {
-      const account = bilibiliAccount(getDatabase());
-      if (route === '/bilibili' && method === 'GET') return json(res, 200, { ok: true, account: account.public(uid) });
+      const account = bilibiliAccount(db);
+      if (route === '/bilibili' && method === 'GET') return json(res, 200, { ok: true, account: await account.public(uid) });
       if (route === '/bilibili/check') return json(res, 200, { ok: true, account: await account.check(uid) });
-      if (route === '/bilibili/settings') return json(res, 200, { ok: true, settings: qualitySettings({}, account.saveSettings(uid, await body(req, 1024))) });
+      if (route === '/bilibili/settings') return json(res, 200, { ok: true, settings: qualitySettings({}, await account.saveSettings(uid, await body(req, 1024))) });
       if (route === '/bilibili/login/start') return json(res, 200, { ok: true, ...await account.start(uid) });
       if (route === '/bilibili/login/poll') return json(res, 200, { ok: true, ...await account.poll(uid) });
-      if (route === '/bilibili' && method === 'DELETE') return json(res, 200, { ok: true, account: account.unlink(uid) });
+      if (route === '/bilibili' && method === 'DELETE') return json(res, 200, { ok: true, account: await account.unlink(uid) });
     }
     if (['/imports/preview', '/imports'].includes(route)) {
       if (!canKnowledge(session, 'upload:edit') || !canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要上传视频和生成笔记权限' });
       const input = await body(req, 8192);
-      const known = store.duplicateSource(uid, input.url);
+      const known = await store.duplicateSource(uid, input.url);
       if (known) throw duplicateSourceError(known);
       const info = await inspectImport(uid, input.url);
-      const resolved = store.duplicateSource(uid, info.sourceUrl);
+      const resolved = await store.duplicateSource(uid, info.sourceUrl);
       if (resolved) throw duplicateSourceError(resolved);
-      const account = bilibiliAccount(getDatabase()), selection = qualitySettings(input, account.public(uid));
+      const account = bilibiliAccount(db), selection = qualitySettings(input, await account.public(uid));
       const cookie = await account.credentials(uid);
       const playback = await inspectBilibiliQuality(info, selection, { cookie });
       if (route === '/imports/preview') return json(res, 200, { ok: true, metadata: { ...info, playback } });
       if (!playback.canImport) throw new Error(playback.reason);
       await fsp.mkdir(knowledgeRoot(), { recursive: true, mode: 0o700 });
       const disk = await fsp.statfs(knowledgeRoot());
-      const item = store.createLinkImport(uid, {
+      const item = await store.createLinkImport(uid, {
         title: input.title === undefined ? info.title : input.title,
         topic: input.topic === undefined ? info.topic : input.topic,
         tags: input.tags === undefined ? info.tags : input.tags,
@@ -140,7 +143,7 @@ async function knowledgeApi(req, res, url, session, json) {
         bytes: MAX_VIDEO_BYTES,
         mimeType: 'video/mp4',
         originalName: info.title.replace(/[\\/:*?"<>|]/g, '-') + '.mp4',
-        backend: input.backend || store.settings(uid).backend
+        backend: input.backend || (await store.settings(uid)).backend
       }, info.sourceUrl, selection, storageConfig(uid), disk.bavail * disk.bsize);
       return json(res, 202, { ok: true, document: item });
     }
@@ -149,47 +152,48 @@ async function knowledgeApi(req, res, url, session, json) {
       const input = await body(req, 1024), format = input.format || 'exe';
       if (!['exe', 'zip'].includes(format)) throw new Error('安装包格式无效');
       if (format === 'zip' && !canKnowledge(session, 'devices:install-zip')) return json(res, 403, { ok: false, error: '需要ZIP脚本安装包下载权限' });
-      const pairing = store.devices.start('Windows 视频工作器'); store.devices.approve(uid, pairing.userCode);
+      const pairing = await store.devices.start('Windows 视频工作器');
+      if (!await store.devices.approve(uid, pairing.userCode)) throw new Error('设备配对码已失效');
       const binding = { portalUrl: process.env.KNOWLEDGE_PUBLIC_URL || 'https://saoyu.fun', deviceCode: pairing.deviceCode, expiresAt: Date.now() + 600000 };
       return format === 'zip' ? sendWorkerPackage(res, binding) : sendWorkerExe(res, binding);
     }
     if (route === '/worker-package') return sendWorkerPackage(res);
-    if (route === '/devices' && method === 'GET') return json(res, 200, { ok: true, devices: store.devices.list(uid) });
-    if (/^\/devices\/[a-f0-9]{32}$/.test(route) && method === 'DELETE') { const revoked = store.devices.revoke(uid, route.split('/').pop()); return json(res, revoked ? 200 : 404, { ok: revoked }); }
+    if (route === '/devices' && method === 'GET') return json(res, 200, { ok: true, devices: await store.devices.list(uid) });
+    if (/^\/devices\/[a-f0-9]{32}$/.test(route) && method === 'DELETE') { const revoked = await store.devices.revoke(uid, route.split('/').pop()); return json(res, revoked ? 200 : 404, { ok: revoked }); }
     if (route === '/device-pair') {
       const code = method === 'GET' ? url.searchParams.get('code') : (await body(req, 1024)).code;
       if (!/^[A-Fa-f0-9]{8}$/.test(code || '')) throw new Error('请输入安装程序显示的8位配对码');
-      if (method === 'GET') { const pair = store.devices.inspect(code); return json(res, pair ? 200 : 404, pair ? { ok: true, ...pair } : { ok: false, error: '配对码已失效或已使用' }); }
+      if (method === 'GET') { const pair = await store.devices.inspect(code); return json(res, pair ? 200 : 404, pair ? { ok: true, ...pair } : { ok: false, error: '配对码已失效或已使用' }); }
       if (!canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要知识库处理权限' });
-      const approved = store.devices.approve(uid, code); return json(res, approved ? 200 : 409, { ok: approved, ...(approved ? {} : { error: '配对码已失效或已使用' }) });
+      const approved = await store.devices.approve(uid, code); return json(res, approved ? 200 : 409, { ok: approved, ...(approved ? {} : { error: '配对码已失效或已使用' }) });
     }
-    if (route === '/settings' && method === 'GET') return json(res, 200, { ok: true, ...store.settings(uid), linkDefaults: qualitySettings({}, bilibiliAccount(getDatabase()).public(uid)), storage: { provider: storageConfig(uid) ? '115' : 'local' }, worker: store.worker(uid), chunkBytes: CHUNK_BYTES, maxBytes: MAX_VIDEO_BYTES });
+    if (route === '/settings' && method === 'GET') return json(res, 200, { ok: true, ...await store.settings(uid), linkDefaults: qualitySettings({}, await bilibiliAccount(db).public(uid)), storage: { provider: storageConfig(uid) ? '115' : 'local' }, worker: await store.worker(uid), chunkBytes: CHUNK_BYTES, maxBytes: MAX_VIDEO_BYTES });
     if (route === '/settings' && method === 'PUT') {
       const input = await body(req, 4096);
       if (MODEL_FIELDS.some(key => Object.hasOwn(input, key)) && !canKnowledge(session, 'model:edit')) return json(res, 403, { ok: false, error: '没有模型和强度设置权限' });
       if (ASR_FIELDS.some(key => Object.hasOwn(input, key)) && !canKnowledge(session, 'asr:edit')) return json(res, 403, { ok: false, error: '没有语音转写设置权限' });
       if (['mediaConcurrency', 'summaryConcurrency'].some(key => Object.hasOwn(input, key)) && !canKnowledge(session, 'concurrency:edit')) return json(res, 403, { ok: false, error: '没有并发设置权限' });
-      return json(res, 200, { ok: true, ...store.saveSettings(uid, input) });
+      return json(res, 200, { ok: true, ...await store.saveSettings(uid, input) });
     }
-    if (route === '/worker-token' && method === 'POST') return json(res, 200, { ok: true, token: store.rotateToken(uid) });
+    if (route === '/worker-token' && method === 'POST') return json(res, 200, { ok: true, token: await store.rotateToken(uid) });
     if (route === '/reanalysis' && method === 'POST') {
       if (!canKnowledge(session, 'reanalysis:edit') || !canKnowledge(session, 'process:edit') || !canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '需要重新分析、生成笔记和查看笔记权限' });
-      const input = await body(req, 256000), items = reanalysisTargets(store, uid, input, canKnowledge(session, 'transcript:view'));
-      return json(res, 202, { ok: true, ...scheduleReanalysis(store, uid, items, input.mode || 'reuse', knowledgeDirectory, input.preview === true) });
+      const input = await body(req, 256000), items = await reanalysisTargets(store, uid, input, canKnowledge(session, 'transcript:view'));
+      return json(res, 202, { ok: true, ...await scheduleReanalysis(store, uid, items, input.mode || 'reuse', knowledgeDirectory, input.preview === true) });
     }
     if (route === '/documents/retry-failed' && method === 'POST') {
       if (!canKnowledge(session, 'process:edit') || !canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '需要查看笔记和生成笔记权限' });
       await body(req, 4096);
-      const db = getDatabase(), failed = store.failedDocuments(uid);
+      const failed = await store.failedDocuments(uid);
       const results = [];
       for (const { id } of failed) {
-        try { results.push({ id, accepted: retryKnowledgeDocument(db, store, uid, id, action => canKnowledge(session, action)) }); }
+        try { results.push({ id, accepted: await retry(id) }); }
         catch (e) { results.push({ id, accepted: false, error: /^SQLITE_/.test(e.code || '') ? '知识库忙，请稍后重试' : e.message }); }
       }
       const accepted = results.filter(r => r.accepted).length;
       return json(res, 202, { ok: true, accepted, skipped: results.length - accepted, results });
     }
-    if (route === '/documents' && method === 'GET') return json(res, 200, { ok: true, ...store.list(uid, {
+    if (route === '/documents' && method === 'GET') return json(res, 200, { ok: true, ...await store.list(uid, {
       search: url.searchParams.get('search') || '', topic: url.searchParams.get('topic') || '', status: url.searchParams.get('status') || '',
       offset: Math.floor(Math.min(100000, Math.max(0, Number(url.searchParams.get('offset')) || 0))), limit: 30,
       includeTranscript: canKnowledge(session, 'transcript:view')
@@ -197,13 +201,13 @@ async function knowledgeApi(req, res, url, session, json) {
     if (route === '/documents' && method === 'POST') {
       const input = await body(req, 8192);
       if (!canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '上传视频还需生成笔记权限' });
-      const duplicate = store.duplicateSource(uid, input.sourceUrl);
+      const duplicate = await store.duplicateSource(uid, input.sourceUrl);
       if (duplicate) throw duplicateSourceError(duplicate);
       await fsp.mkdir(knowledgeRoot(), { recursive: true, mode: 0o700 });
       const disk = await fsp.statfs(knowledgeRoot());
-      const item = store.createUpload(uid, input, storageConfig(uid), disk.bavail * disk.bsize);
+      const item = await store.createUpload(uid, input, storageConfig(uid), disk.bavail * disk.bsize);
       try { await fsp.mkdir(knowledgeDirectory(item.id), { recursive: true, mode: 0o700 }); }
-      catch (e) { store.remove(uid, item.id); throw e; }
+      catch (e) { await store.remove(uid, item.id); throw e; }
       return json(res, 201, { ok: true, document: item, chunkBytes: CHUNK_BYTES });
     }
     if (!document) return json(res, 405, { ok: false, error: '不支持此请求方法' });
@@ -212,40 +216,40 @@ async function knowledgeApi(req, res, url, session, json) {
     // completion and deletion remain serialized so no upload can recreate deleted data.
     const partData = operation === 'parts' && method === 'PUT' ? await bytes(req, CHUNK_BYTES) : null;
     return await lock(id, async () => {
-      store.expire(uid);
-      const item = store.get(uid, id);
+      await store.expire(uid);
+      const item = await store.get(uid, id);
       if (!item) return json(res, 404, { ok: false, error: '笔记不存在' });
-      if (operation === 'versions' && method === 'GET') return json(res, 200, { ok: true, versions: store.reanalysis.list(uid, id) });
+      if (operation === 'versions' && method === 'GET') return json(res, 200, { ok: true, versions: await store.reanalysis.list(uid, id) });
       if (['reanalyze', 'restore'].includes(operation) && method === 'POST') {
         if (!canKnowledge(session, 'process:edit') || !canKnowledge(session, 'notes:view')) return json(res, 403, { ok: false, error: '需要生成笔记和查看笔记权限' });
         const input = await body(req, 4096);
-        if (operation === 'reanalyze') return json(res, 202, { ok: true, ...scheduleReanalysis(store, uid, [{ id, revision: input.revision }], input.mode || 'reuse', knowledgeDirectory, input.preview === true) });
+        if (operation === 'reanalyze') return json(res, 202, { ok: true, ...await scheduleReanalysis(store, uid, [{ id, revision: input.revision }], input.mode || 'reuse', knowledgeDirectory, input.preview === true) });
         if (!/^[a-f0-9]{32}$/.test(input.versionId || '')) throw new Error('历史版本无效');
-        store.reanalysis.restore(uid, id, input.versionId, input.revision);
-        createKnowledgeCaseStore(getDatabase()).syncDocument(store.getRow(uid, id));
-        return json(res, 200, { ok: true, document: visible(store.get(uid, id)) });
+        await store.reanalysis.restore(uid, id, input.versionId, input.revision);
+        if (!db.query) createKnowledgeCaseStore(db).syncDocument(store.getRow(uid, id));
+        return json(res, 200, { ok: true, document: visible(await store.get(uid, id)) });
       }
       const directory = knowledgeDirectory(id);
       if (operation === 'local-input' && method === 'POST') {
         if (!canKnowledge(session, 'upload:edit') || !canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要上传和生成笔记权限' });
         const input = await body(req, 1024);
-        if (input.cancel) { store.localInputs.remove(uid, id); return json(res, 200, { ok: true }); }
-        return json(res, 200, { ok: true, ...store.localInputs.offer(uid, id, input.workerId) });
+        if (input.cancel) { await store.localInputs.remove(uid, id); return json(res, 200, { ok: true }); }
+        return json(res, 200, { ok: true, ...await store.localInputs.offer(uid, id, input.workerId) });
       }
       if (!operation && method === 'GET') return json(res, 200, { ok: true, document: visible(item) });
       if (!operation && method === 'PUT') {
         if (item.status === 'processing' || item.status === 'queued' && item.reanalysis?.state === 'pending') return json(res, 409, { ok: false, error: '请等待当前任务完成后编辑' });
-        return json(res, 200, { ok: true, document: visible(store.edit(uid, id, await body(req))) });
+        return json(res, 200, { ok: true, document: visible(await store.edit(uid, id, await body(req))) });
       }
       if (!operation && method === 'DELETE') {
-        const downloading = store.imports.get(uid, id);
+        const downloading = await store.imports.get(uid, id);
         if (downloading?.state === 'downloading' && downloading.heartbeat > Date.now() - 120000) return json(res, 409, { ok: false, error: '视频正在下载，请等待下载完成或失败后删除' });
-        if (store.sources.deleting(uid, id)) return json(res, 200, { ok: true });
-        store.remove(uid, id);
+        if (await store.sources.deleting(uid, id)) return json(res, 200, { ok: true });
+        if (!await store.remove(uid, id)) return json(res, 409, { ok: false, error: '笔记状态已变化，请刷新后重试' });
         await fsp.rm(directory, { recursive: true, force: true });
         return json(res, 200, { ok: true });
       }
-      if (operation === 'parts' && method === 'GET') return json(res, 200, { ok: true, parts: store.parts(uid, id), chunkBytes: CHUNK_BYTES });
+      if (operation === 'parts' && method === 'GET') return json(res, 200, { ok: true, parts: await store.parts(uid, id), chunkBytes: CHUNK_BYTES });
       if (operation === 'parts' && method === 'PUT') {
         const number = Number(part), count = Math.ceil(item.bytes / CHUNK_BYTES);
         if (item.status !== 'uploading' || !Number.isInteger(number) || number < 1 || number > count) throw new Error('分片编号或上传状态无效');
@@ -255,30 +259,30 @@ async function knowledgeApi(req, res, url, session, json) {
         const temp = path.join(directory, 'part-' + number + '.' + crypto.randomBytes(6).toString('hex'));
         await fsp.writeFile(temp, data);
         try { await fsp.rename(temp, path.join(directory, 'part-' + number)); } finally { await fsp.rm(temp, { force: true }); }
-        store.part(uid, id, number, data.length); return json(res, 200, { ok: true });
+        await store.part(uid, id, number, data.length); return json(res, 200, { ok: true });
       }
       if (operation === 'complete' && method === 'POST') {
         if (!canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '无权生成笔记' });
         if (item.status !== 'uploading') return json(res, 409, { ok: false, error: '视频已提交处理' });
-        const parts = store.parts(uid, id), count = Math.ceil(item.bytes / CHUNK_BYTES);
+        const parts = await store.parts(uid, id), count = Math.ceil(item.bytes / CHUNK_BYTES);
         if (parts.length !== count || parts.some((p, i) => p.part !== i + 1) || parts.reduce((n, p) => n + p.bytes, 0) !== item.bytes) throw new Error('视频尚未上传完整');
         const target = await fsp.open(path.join(directory, 'source.tmp'), 'w');
         const digest = crypto.createHash('sha256');
         try { for (const p of parts) for await (const chunk of fs.createReadStream(path.join(directory, 'part-' + p.part))) { digest.update(chunk); await target.writeFile(chunk); } }
         finally { await target.close(); }
         await fsp.rename(path.join(directory, 'source.tmp'), path.join(directory, 'source'));
-        store.enqueue(uid, id, digest.digest('hex'));
+        if (!await store.enqueue(uid, id, digest.digest('hex'))) return json(res, 409, { ok: false, error: '视频已提交处理' });
         for (const p of parts) await fsp.rm(path.join(directory, 'part-' + p.part), { force: true });
-        return json(res, 202, { ok: true, document: store.get(uid, id) });
+        return json(res, 202, { ok: true, document: await store.get(uid, id) });
       }
       if (operation === 'retry' && method === 'POST') {
         const input = await body(req, 4096);
-        if (!retryKnowledgeDocument(getDatabase(), store, uid, id, action => canKnowledge(session, action), input)) return json(res, 409, { ok: false, error: '仅失败任务可以重试' });
-        return json(res, 202, { ok: true, document: store.get(uid, id) });
+        if (!await retry(id, input)) return json(res, 409, { ok: false, error: '仅失败任务可以重试' });
+        return json(res, 202, { ok: true, document: await store.get(uid, id) });
       }
       if (operation === 'storage-retry' && method === 'POST') {
-        if (!store.sources.retry(uid, id)) return json(res, 409, { ok: false, error: '仅保存失败的视频可以重试' });
-        return json(res, 202, { ok: true, document: visible(store.get(uid, id)) });
+        if (!await store.sources.retry(uid, id)) return json(res, 409, { ok: false, error: '仅保存失败的视频可以重试' });
+        return json(res, 202, { ok: true, document: visible(await store.get(uid, id)) });
       }
       if (operation === 'source' && method === 'GET') return serveSource(req, res, store, uid, id);
       if (operation === 'frames' && method === 'GET' && item.frames.some(f => f.name === part)) return stream(req, res, path.join(directory, part), 'image/jpeg');

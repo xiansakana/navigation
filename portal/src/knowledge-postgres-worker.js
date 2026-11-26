@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { createPostgresKnowledgeCodexCalls } from './knowledge-codex-calls.js';
 import { createPostgresKnowledgeDeviceStore } from './knowledge-devices.js';
 import { createPostgresKnowledgeLocalInputs } from './knowledge-local-store.js';
@@ -27,6 +28,30 @@ export function createPostgresKnowledgeWorker(db) {
     async workerUser(token) {
       const { rows: [row] } = await db.query('SELECT user_id FROM navigation.knowledge_workers WHERE token_hash=$1', [hashToken(token)]);
       return row?.user_id || null;
+    },
+    async worker(uid) {
+      const { rows: [row] } = await db.query('SELECT last_seen,label,capabilities_json FROM navigation.knowledge_workers WHERE user_id=$1', [uid]);
+      if (!row) return { configured: false, online: false, capabilities: {}, scheduling: 'gpu-only' };
+      const [settings, { rows }] = await Promise.all([documents.settings(uid), db.query(`SELECT worker_id,label,last_seen,capabilities_json
+        FROM navigation.knowledge_worker_instances WHERE user_id=$1 AND last_seen>$2`, [uid, new Date(Date.now() - 90000).toISOString()])]);
+      const workers = rows.map(r => ({ id: r.worker_id, label: r.label, lastSeen: r.last_seen, capabilities: JSON.parse(r.capabilities_json) }));
+      const preferred = workers.find(item => item.capabilities.media?.ready && item.capabilities.media.detail === 'cuda' && item.capabilities[settings.backend]?.ready);
+      return { configured: true, online: !!preferred, lastSeen: preferred?.lastSeen || row.last_seen, label: preferred?.label || row.label,
+        capabilities: preferred?.capabilities || JSON.parse(row.capabilities_json), workers, scheduling: 'gpu-only' };
+    },
+    rotateToken(uid) {
+      const token = 'nkw_' + randomBytes(32).toString('hex');
+      return db.transaction(async client => {
+        await lockKnowledgeWorkerOwner(client, uid);
+        await client.query(`INSERT INTO navigation.knowledge_workers(user_id,token_hash) VALUES($1,$2)
+          ON CONFLICT(user_id) DO UPDATE SET token_hash=excluded.token_hash,last_seen=NULL,capabilities_json='{}'`, [uid, hashToken(token)]);
+        await client.query(`DELETE FROM navigation.knowledge_worker_instances i WHERE i.user_id=$1
+          AND NOT EXISTS (SELECT 1 FROM navigation.knowledge_worker_devices d WHERE d.user_id=i.user_id AND d.id=i.worker_id)`, [uid]);
+        await client.query(`UPDATE navigation.knowledge_documents n SET status='failed',stage='工作器凭据已更换',
+          error='请使用新凭据连接工作器后重试',lease=NULL,updated_at=$2 WHERE n.user_id=$1 AND n.status='processing'
+          AND NOT EXISTS (SELECT 1 FROM navigation.knowledge_worker_devices d WHERE d.user_id=n.user_id AND d.id=n.worker_id)`, [uid, new Date().toISOString()]);
+        return token;
+      });
     },
     heartbeatWorker(uid, input, token, device) {
       const { workerId, capabilities, label, time } = knowledgeWorkerHeartbeat(input);

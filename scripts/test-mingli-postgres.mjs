@@ -50,6 +50,8 @@ import { createPostgresKnowledgeDocuments } from '../portal/src/knowledge-postgr
 import { createPostgresKnowledgeVersions } from '../portal/src/knowledge-postgres-versions.js';
 import { createPostgresKnowledgeLocalInputs } from '../portal/src/knowledge-local-store.js';
 import { createPostgresKnowledgeWorker } from '../portal/src/knowledge-postgres-worker.js';
+import { createPostgresKnowledgeStore } from '../portal/src/knowledge-postgres-store.js';
+import { bilibiliAccount } from '../portal/src/knowledge-bilibili-account.js';
 import { handleKnowledgeWorkerApi } from '../portal/src/knowledge-worker-api.js';
 import { handlePublicKnowledge, postgresPublicKnowledgeStore } from '../portal/src/knowledge-public.js';
 import { CHUNK_BYTES } from '../portal/src/knowledge-store.js';
@@ -605,6 +607,75 @@ async function verifyKnowledgeWorkerHttp(db) {
   }
 }
 
+async function verifyKnowledgeProductionStore(db) {
+  const uid = 'postgres-knowledge-store', outside = 'postgres-knowledge-store-outsider';
+  const store = createPostgresKnowledgeStore(db);
+  assert.equal(store, createPostgresKnowledgeStore(db));
+  const account = bilibiliAccount(db);
+  assert.deepEqual(await account.public(outside),
+    { bound: false, state: 'unbound', nickname: '', lastChecked: 0, quality: 80, strict: true });
+  assert.deepEqual(await account.saveSettings(uid, { quality: 64, strict: false }),
+    { bound: false, state: 'unbound', nickname: '', lastChecked: 0, quality: 64, strict: false });
+  assert.equal((await account.unlink(uid)).quality, 64);
+  assert.equal((await store.worker(uid)).configured, false);
+  assert.deepEqual(await store.reanalysis.list(outside, 'a'.repeat(32)), []);
+
+  const defaults = { ...await store.settings(uid), quality: await account.public(uid), modelSettings: {} };
+  const firstUrl = 'https://www.bilibili.com/video/BV1yy411c7dd';
+  const added = await store.queue.add(uid, { urls: [firstUrl, 'not-a-video'] }, defaults);
+  assert.equal(added.accepted, 1);
+  assert.equal(added.results[1].status, 'invalid');
+  assert.equal((await store.queue.add(uid, { urls: [firstUrl] }, defaults)).results[0].status, 'duplicate');
+  const listed = await store.queue.list(uid);
+  assert.equal(listed.total, 1);
+  assert.equal(listed.counts.pending, 1);
+  assert.equal((await store.queue.list(outside)).total, 0);
+
+  const first = await store.queue.claim();
+  assert.equal(first.url, firstUrl);
+  const selection = JSON.parse(first.settings_json);
+  const item = await store.queue.submit(first,
+    { title: 'Batch fixture', topic: 'Batch', tags: ['fixture'], sourceUrl: firstUrl }, selection, null, 15 * 1024 ** 3);
+  assert.equal(item.status, 'importing');
+  assert.equal((await store.queue.get(uid, first.id)).state, 'submitted');
+  assert.equal(await store.get(outside, item.id), null);
+
+  const second = await store.queue.add(uid, { urls: ['https://www.bilibili.com/video/BV1zz411c7dd'] }, defaults);
+  const deferred = await store.queue.claim();
+  assert.equal(deferred.id, second.results[0].id);
+  for (let index = 0; index < 4; index += 1) {
+    await db.query(`INSERT INTO navigation.knowledge_documents(id,user_id,title,original_name,byte_size,mime_type,backend,status,created_at,updated_at)
+      VALUES($1,$2,'Capacity fixture','capacity.mp4',1024,'video/mp4','codex','queued',$3,$3)`,
+    [('c' + index).padEnd(32, '0'), uid, new Date().toISOString()]);
+  }
+  // A rejected reservation must not poison the transaction: the queue job is
+  // released back to pending for a later attempt.
+  assert.equal(await store.queue.submit(deferred,
+    { title: 'Capacity fixture', topic: 'Batch', tags: [], sourceUrl: 'https://www.bilibili.com/video/BV1zz411c7dd' },
+    JSON.parse(deferred.settings_json), null, 15 * 1024 ** 3), null);
+  assert.equal((await store.queue.get(uid, deferred.id)).state, 'pending');
+  await db.query("DELETE FROM navigation.knowledge_documents WHERE user_id=$1 AND title='Capacity fixture'", [uid]);
+
+  const queueJob = await store.queue.claim();
+  assert.equal(await store.queue.fail(queueJob, new Error('fixture failure')), true);
+  assert.equal((await store.queue.get(uid, queueJob.id)).state, 'failed');
+  assert.equal(await store.queue.change(uid, queueJob.id, 'retry'), true);
+  assert.equal((await store.queue.get(uid, queueJob.id)).state, 'pending');
+  assert.equal(await store.queue.change(uid, queueJob.id, 'cancel'), true);
+  assert.equal((await store.queue.get(uid, queueJob.id)).state, 'cancelled');
+
+  const failedId = 'f'.repeat(32);
+  await db.query(`INSERT INTO navigation.knowledge_documents(id,user_id,title,original_name,byte_size,mime_type,backend,status,created_at,updated_at)
+    VALUES($1,$2,'Failed fixture','failed.mp4',1024,'video/mp4','codex','failed',$3,$3)`, [failedId, uid, new Date().toISOString()]);
+  assert.ok((await store.failedDocuments(uid)).some(row => row.id === failedId));
+  assert.equal(await store.retry(uid, failedId, () => true, {}), true);
+  assert.equal((await store.get(uid, failedId)).status, 'queued');
+  assert.equal(await store.retry(uid, 'a'.repeat(32), () => true, {}), false);
+  assert.equal(await store.remove(uid, failedId), true);
+  assert.equal(await store.get(uid, failedId), null);
+  assert.equal(await store.remove(outside, failedId), false);
+}
+
 async function verifyCodexQueue(db) {
   const first = createPostgresCodexQueue(db), second = createPostgresCodexQueue(db);
   const uid = 'postgres-codex-fixture', qq = '12345678';
@@ -764,6 +835,7 @@ async function verifyRbac(db) {
   const running = await startAccessPortal({ extraEnv: {
     NAVIGATION_RBAC_POSTGRES_URL: dsn.toString(), NAVIGATION_MINGLI_POSTGRES_URL: dsn.toString(),
     NAVIGATION_BLOG_POSTGRES_URL: dsn.toString(), NAVIGATION_RESOURCES_POSTGRES_URL: dsn.toString(),
+    NAVIGATION_KNOWLEDGE_POSTGRES_URL: dsn.toString(),
   } });
   try {
     assert.equal((await fetch(running.baseUrl + '/readyz')).status, 200);
@@ -827,6 +899,7 @@ test('Mingli HTTP entry point uses PostgreSQL for owner-scoped cases, categories
     await verifyKnowledgeLeases(db);
     await verifyKnowledgeUploads(db);
     await verifyKnowledgeWorkerHttp(db);
+    await verifyKnowledgeProductionStore(db);
     await verifyQqMonitoring(db);
     await verifyRbac(db);
     const store = createMingliPostgresStore(db);

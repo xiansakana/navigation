@@ -100,22 +100,22 @@ export async function archiveSource(storage, sources, s, file) {
   if (!s.sha256) {
     hashes = await hashFile(file);
     if (hashes.bytes !== s.byte_size) throw new Error('临时原视频大小不符');
-    if (!sources.update(s, { sha1: hashes.sha1, sha256: hashes.sha256 })) throw new Error('归档任务已过期');
+    if (!await sources.update(s, { sha1: hashes.sha1, sha256: hashes.sha256 })) throw new Error('归档任务已过期');
   }
   await storage.mkdir(s.object_path);
   const existing = await storage.exists(s.object_path);
   if (!existing) {
     const started = Date.now();
-    sources.update(s, { state: 'uploading', error: '', upload_started_at: started, upload_ms: 0 });
+    if (!await sources.update(s, { state: 'uploading', error: '', upload_started_at: started, upload_ms: 0 })) throw new Error('归档任务已过期');
     await storage.upload(s.object_path, file, s.byte_size, hashes.sha1);
-    sources.update(s, { upload_ms: Date.now() - started });
+    await sources.update(s, { upload_ms: Date.now() - started });
   }
   const verificationStarted = Date.now();
-  sources.update(s, { state: 'verifying', verification_started_at: verificationStarted, verification_ms: 0 });
+  if (!await sources.update(s, { state: 'verifying', verification_started_at: verificationStarted, verification_ms: 0 })) throw new Error('归档任务已过期');
   await storage.verify(s.object_path, s.byte_size, hashes.sha256);
-  if (!sources.update(s, { state: 'verified', verified_at: new Date().toISOString(), error: '', verification_ms: Date.now() - verificationStarted })) throw new Error('归档任务已过期');
+  if (!await sources.update(s, { state: 'verified', verified_at: new Date().toISOString(), error: '', verification_ms: Date.now() - verificationStarted })) throw new Error('归档任务已过期');
   await fsp.rm(file, { force: true });
-  sources.update(s, { state: 'ready' });
+  await sources.update(s, { state: 'ready' });
 }
 export async function proxySource(req, res, uid, source, mimeType) {
   const controller = new AbortController();

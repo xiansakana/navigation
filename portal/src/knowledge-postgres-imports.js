@@ -4,6 +4,16 @@ import { lockKnowledgeUploadAdmission } from './knowledge-postgres-uploads.js';
 
 export function createPostgresKnowledgeImports(db) {
   return {
+    async get(uid, id) {
+      const { rows: [row] } = await db.query('SELECT * FROM navigation.knowledge_imports WHERE user_id=$1 AND document_id=$2', [uid, id]);
+      return row && { ...row, heartbeat: Number(row.heartbeat), created_at: Number(row.created_at) };
+    },
+    async progress(job, bytes) {
+      await db.query(`UPDATE navigation.knowledge_documents d SET stage=$4,updated_at=$5
+        WHERE d.user_id=$1 AND d.id=$2 AND d.status='importing' AND EXISTS (
+          SELECT 1 FROM navigation.knowledge_imports i WHERE i.user_id=d.user_id AND i.document_id=d.id AND i.lease=$3)`,
+      [job.user_id, job.document_id, job.lease, '下载B站视频 · ' + (bytes / 1024 ** 2).toFixed(1) + ' MB', new Date().toISOString()]);
+    },
     async claim() {
       const time = Date.now(), lease = randomBytes(24).toString('hex');
       const { rows: [row] } = await db.query(`WITH next AS (
@@ -22,7 +32,7 @@ export function createPostgresKnowledgeImports(db) {
       [job.user_id, job.document_id, job.lease, Date.now(), Date.now() - 120000]);
       return result.rowCount === 1;
     },
-    complete(job, hashes, media = {}) {
+    complete(job, hashes, media = {}, publish) {
       if (!Number.isSafeInteger(hashes.bytes) || hashes.bytes < 12 || hashes.bytes > MAX_VIDEO_BYTES ||
           !/^[a-f0-9]{64}$/.test(hashes.sha256 || '')) throw new Error('导入视频大小或校验值无效');
       return db.transaction(async client => {
@@ -35,6 +45,7 @@ export function createPostgresKnowledgeImports(db) {
           WHERE user_id=$1 AND document_id=$2 AND lease=$3 AND state='downloading' AND heartbeat>=$5`,
         [job.user_id, job.document_id, job.lease, JSON.stringify(media), Date.now() - 120000]);
         if (!claim.rowCount) return false;
+        if (publish) await publish();
         await client.query(`UPDATE navigation.knowledge_documents SET byte_size=$3,status='queued',stage='等待GPU工作器',
           source_sha256=$4,progress=0,error='',updated_at=$5 WHERE user_id=$1 AND id=$2`,
         [job.user_id, job.document_id, hashes.bytes, hashes.sha256, new Date().toISOString()]);

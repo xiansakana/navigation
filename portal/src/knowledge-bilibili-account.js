@@ -45,13 +45,29 @@ export function loginCookies(response) {
   return [...entries].map(([k, v]) => k + '=' + v).join('; ');
 }
 export function createBilibiliAccount(db, { fetcher = fetch, key = masterKey, clock = Date.now, qr = value => QRCode.toDataURL(value, { width: 240, margin: 2 }) } = {}) {
-  db.exec(`CREATE TABLE IF NOT EXISTS knowledge_bilibili_accounts (
+  const postgres = !!db.query;
+  if (!postgres) db.exec(`CREATE TABLE IF NOT EXISTS knowledge_bilibili_accounts (
     user_id TEXT PRIMARY KEY,credential_cipher TEXT NOT NULL DEFAULT '',nickname TEXT NOT NULL DEFAULT '',
     state TEXT NOT NULL DEFAULT 'unbound',last_checked INTEGER NOT NULL DEFAULT 0,
     quality INTEGER NOT NULL DEFAULT 80,strict INTEGER NOT NULL DEFAULT 1);`);
   const sessions = new Map();
-  const row = uid => db.prepare('SELECT * FROM knowledge_bilibili_accounts WHERE user_id=?').get(uid);
+  const credentialsWrites = new Map();
+  const row = (uid, client = db) => postgres
+    ? client.query('SELECT * FROM navigation.knowledge_bilibili_accounts WHERE user_id=$1', [uid]).then(result => result.rows[0])
+    : db.prepare('SELECT * FROM knowledge_bilibili_accounts WHERE user_id=?').get(uid);
   const ensure = uid => db.prepare('INSERT OR IGNORE INTO knowledge_bilibili_accounts(user_id) VALUES (?)').run(uid);
+  const publicFields = r => ({ bound: !!r?.credential_cipher, state: r?.state || 'unbound', nickname: r?.nickname || '', lastChecked: Number(r?.last_checked || 0),
+    ...qualitySettings({}, r ? { quality: Number(r.quality), strict: !!Number(r.strict) } : {}) });
+  const readCookie = (uid, r) => {
+    if (!r?.credential_cipher) return '';
+    if (r.state === 'expired') throw new Error('B站登录已失效，请在处理设置中重新扫码绑定');
+    return unseal(uid, r.credential_cipher, key());
+  };
+  function writeCredential(uid, write) {
+    const pending = (credentialsWrites.get(uid) || Promise.resolve()).catch(() => {}).then(write);
+    credentialsWrites.set(uid, pending);
+    return pending.finally(() => { if (credentialsWrites.get(uid) === pending) credentialsWrites.delete(uid); });
+  }
   async function request(origin, route, cookie = '') {
     let response;
     try { response = await fetcher(origin + route, { headers: { ...headers, ...(cookie ? { Cookie: cookie } : {}) }, redirect: 'error', signal: AbortSignal.timeout(15000) }); }
@@ -66,29 +82,34 @@ export function createBilibiliAccount(db, { fetcher = fetch, key = masterKey, cl
   }
   const service = {
     public(uid) {
-      const r = row(uid);
-      return { bound: !!r?.credential_cipher, state: r?.state || 'unbound', nickname: r?.nickname || '', lastChecked: r?.last_checked || 0,
-        ...qualitySettings({}, r ? { quality: r.quality, strict: !!r.strict } : {}) };
+      return postgres ? row(uid).then(publicFields) : publicFields(row(uid));
     },
     saveSettings(uid, raw) {
+      if (postgres) return db.transaction(async client => {
+        await client.query('INSERT INTO navigation.knowledge_bilibili_accounts(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING', [uid]);
+        const { rows: [previous] } = await client.query('SELECT * FROM navigation.knowledge_bilibili_accounts WHERE user_id=$1 FOR UPDATE', [uid]);
+        const s = qualitySettings(raw, publicFields(previous));
+        const { rows: [saved] } = await client.query('UPDATE navigation.knowledge_bilibili_accounts SET quality=$2,strict=$3 WHERE user_id=$1 RETURNING *',
+          [uid, s.quality, s.strict ? 1 : 0]);
+        return publicFields(saved);
+      });
       const s = qualitySettings(raw, this.public(uid)); ensure(uid);
       db.prepare('UPDATE knowledge_bilibili_accounts SET quality=?,strict=? WHERE user_id=?').run(s.quality, s.strict ? 1 : 0, uid);
       return this.public(uid);
     },
     cookie(uid) {
-      const r = row(uid);
-      if (!r?.credential_cipher) return '';
-      if (r.state === 'expired') throw new Error('B站登录已失效，请在处理设置中重新扫码绑定');
-      return unseal(uid, r.credential_cipher, key());
+      return postgres ? row(uid).then(r => readCookie(uid, r)) : readCookie(uid, row(uid));
     },
     async check(uid, force = true) {
-      const r = row(uid); if (!r?.credential_cipher) return this.public(uid);
-      if (!force && r.last_checked > clock() - 60000) { this.cookie(uid); return this.public(uid); }
+      const r = await row(uid); if (!r?.credential_cipher) return publicFields(r);
+      if (!force && Number(r.last_checked) > clock() - 60000) { readCookie(uid, r); return publicFields(r); }
       const cookie = unseal(uid, r.credential_cipher, key());
       const { data } = await request('https://api.bilibili.com', '/x/web-interface/nav', cookie);
       // Never revive credentials if a concurrent unlink/rebind has replaced them.
-      db.prepare('UPDATE knowledge_bilibili_accounts SET state=?,nickname=?,last_checked=? WHERE user_id=? AND credential_cipher=?')
-        .run(data?.isLogin === true ? 'connected' : 'expired', data?.isLogin === true ? String(data.uname || '').slice(0, 100) : r.nickname, clock(), uid, r.credential_cipher);
+      const update = [data?.isLogin === true ? 'connected' : 'expired',
+        data?.isLogin === true ? String(data.uname || '').slice(0, 100) : r.nickname, clock(), uid, r.credential_cipher];
+      if (postgres) await db.query('UPDATE navigation.knowledge_bilibili_accounts SET state=$1,nickname=$2,last_checked=$3 WHERE user_id=$4 AND credential_cipher=$5', update);
+      else db.prepare('UPDATE knowledge_bilibili_accounts SET state=?,nickname=?,last_checked=? WHERE user_id=? AND credential_cipher=?').run(...update);
       return this.public(uid);
     },
     async credentials(uid) { await this.check(uid, false); return this.cookie(uid); },
@@ -124,14 +145,31 @@ export function createBilibiliAccount(db, { fetcher = fetch, key = masterKey, cl
         const { data: account } = await request('https://api.bilibili.com', '/x/web-interface/nav', cookie);
         if (sessions.get(uid) !== pending) return { status: 'cancelled' };
         if (account?.isLogin !== true) throw new Error('B站登录未生效，请重新扫码');
-        ensure(uid);
-        db.prepare("UPDATE knowledge_bilibili_accounts SET credential_cipher=?,nickname=?,state='connected',last_checked=? WHERE user_id=?")
-          .run(seal(uid, cookie, key()), String(account.uname || '').slice(0, 100), clock(), uid);
-        sessions.delete(uid); return { status: 'connected', account: this.public(uid) };
+        const cipher = seal(uid, cookie, key()), nickname = String(account.uname || '').slice(0, 100);
+        if (postgres) {
+          const saved = await writeCredential(uid, async () => {
+            if (sessions.get(uid) !== pending) return false;
+            await db.query(`INSERT INTO navigation.knowledge_bilibili_accounts(user_id,credential_cipher,nickname,state,last_checked)
+              VALUES($1,$2,$3,'connected',$4) ON CONFLICT(user_id) DO UPDATE SET
+              credential_cipher=excluded.credential_cipher,nickname=excluded.nickname,state=excluded.state,last_checked=excluded.last_checked`,
+            [uid, cipher, nickname, clock()]);
+            return true;
+          });
+          if (!saved || sessions.get(uid) !== pending) return { status: 'cancelled' };
+        } else {
+          ensure(uid);
+          db.prepare("UPDATE knowledge_bilibili_accounts SET credential_cipher=?,nickname=?,state='connected',last_checked=? WHERE user_id=?")
+            .run(cipher, nickname, clock(), uid);
+        }
+        sessions.delete(uid); return { status: 'connected', account: await this.public(uid) };
       } finally { pending.busy = false; }
     },
     unlink(uid) {
       sessions.delete(uid);
+      if (postgres) return writeCredential(uid, async () => {
+        await db.query("UPDATE navigation.knowledge_bilibili_accounts SET credential_cipher='',nickname='',state='unbound',last_checked=0 WHERE user_id=$1", [uid]);
+        return this.public(uid);
+      });
       db.prepare("UPDATE knowledge_bilibili_accounts SET credential_cipher='',nickname='',state='unbound',last_checked=0 WHERE user_id=?").run(uid);
       return this.public(uid);
     }
