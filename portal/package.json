@@ -13,7 +13,7 @@
     "test": "node ../scripts/test.mjs portal",
     "typecheck": "tsc --noEmit --strict --skipLibCheck --target ES2020 --module ESNext --moduleResolution bundler src/client/resources-view.ts src/client/knowledge-notes-view.ts",
     "prestart": "npm run build:views",
-    "build:views": "node ../scripts/build-vue.mjs public/generated src/client/resources-view.ts src/client/knowledge-notes-view.ts"
+    "build:views": "node ../scripts/build-vue.mjs public/generated src/client/resources-view.ts src/client/knowledge-notes-view.ts src/client/dashboard-view.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1145.0",
