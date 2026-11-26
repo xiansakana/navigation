@@ -1,3 +1,4 @@
+import { injectPageScripts } from './page-shell.js';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
@@ -302,7 +303,7 @@ function injectNapcatTokenShim(html, token, mountPath) {
 function injectPortalShell(html, service) {
     if (!html.includes('<body')) return html;
     html = ensureViewportMeta(html);
-    if (!html.includes('/data-scope.js')) html = html.replace(/<\/head>/i, '<script defer src="/data-scope.js?v=1"></script><script defer src="/navbar-dropdown.js?v=5"></script></head>');
+    html = injectPageScripts(html);
     if (!html.includes('/ui/back-to-top.js')) {
         html = html.replace(/<\/head>/i, '<script defer src="/ui/back-to-top.js?v=1"></script></head>');
     }

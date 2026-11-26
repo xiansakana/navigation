@@ -7,9 +7,8 @@
     var navbar = document.querySelector('.navbar');
     if (!navbar) return;
     try {
-      var results = await Promise.all([fetch('/api/services'), fetch('/api/me')]);
-      if (results.some(function (r) { return !r.ok; })) return;
-      var services = (await results[0].json()).services || [], me = await results[1].json();
+      var [catalog, me] = await Promise.all([window.portalPage.services(), window.portalPage.user()]);
+      var services = catalog.services || [];
       var permissions = me.permissions || [];
       var can = function (p) { return permissions.includes('*') || permissions.includes(p) || permissions.includes(p.replace(/:view$/, ':edit')) || permissions.some(function (g) { return g.endsWith(':*') && p.startsWith(g.slice(0, -1)); }); };
       var path = location.pathname, active = null;

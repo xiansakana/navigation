@@ -56,7 +56,7 @@ document.getElementById('logout').addEventListener('click', function() {
     });
 });
 
-api('me').then(function(data) {
+Promise.all([window.portalPage.user(), window.portalPage.services()]).then(function([data, catalog]) {
     var logoutBtn = document.getElementById('logout');
     if (data.isGuest) {
         document.getElementById('welcome').textContent = '访客（guest 权限）';
@@ -71,11 +71,10 @@ api('me').then(function(data) {
             if (adminLink) adminLink.classList.remove('hidden');
         }
     }
-    return api('services');
-}).then(function(data) {
-    visibleServices = data.services || [];
+    visibleServices = catalog.services || [];
     document.getElementById('service-search').dispatchEvent(new Event('input'));
 }).catch(function(err) {
+    if (err.status === 401) { location.href = '/login/'; return; }
     document.getElementById('welcome').textContent = '加载失败';
     document.getElementById('service-search-status').textContent = '服务加载失败，请刷新重试';
     window.portalToast?.error(err.message);

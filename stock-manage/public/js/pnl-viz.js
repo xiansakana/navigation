@@ -61,8 +61,24 @@ function chartColors() {
   };
 }
 
-function getEcharts() {
-  return globalThis.echarts;
+let chartLoad;
+let chartRevision = 0;
+
+function loadEcharts() {
+  if (!chartLoad) {
+    const script = document.createElement('script');
+    script.src = new URL('../vendor/echarts.min.js', import.meta.url).href;
+    chartLoad = new Promise((resolve, reject) => {
+      script.onload = () => globalThis.echarts ? resolve() : reject(new Error('图表组件未初始化'));
+      script.onerror = () => reject(new Error('图表组件加载失败'));
+      document.head.append(script);
+    }).catch((error) => {
+      script.remove();
+      chartLoad = undefined;
+      throw error;
+    });
+  }
+  return chartLoad;
 }
 
 function effectiveYM() {
@@ -312,6 +328,7 @@ function disposeLineChart() {
 }
 
 export function disposePnlChart() {
+  chartRevision++;
   disposeLineChart();
 }
 
@@ -439,10 +456,17 @@ function seriesFingerprint(rangeSlice) {
   return JSON.stringify(rangeSlice.map(p => [p.date, p.cumulativeNet, p.dayNet]));
 }
 
-function mountLineChart(host, rangeSlice) {
-  const echarts = getEcharts();
+function mountLineChart(host, rangeSlice, revision) {
+  const echarts = globalThis.echarts;
   if (!echarts) {
-    host.innerHTML = '<div class="sm-pnl-empty">图表组件未加载，请刷新页面。</div>';
+    host.innerHTML = '<div class="sm-pnl-empty" role="status">正在加载图表…</div>';
+    loadEcharts().then(() => {
+      if (revision === chartRevision && host.isConnected) mountLineChart(host, rangeSlice, revision);
+    }).catch(() => {
+      if (revision !== chartRevision || !host.isConnected) return;
+      host.innerHTML = '<button type="button" class="btn ghost">重试加载图表</button>';
+      host.firstElementChild.addEventListener('click', () => mountLineChart(host, rangeSlice, revision));
+    });
     return;
   }
   if (lineChart && (!document.contains(lineChart.getDom()) || lineChart.getDom() !== host)) {
@@ -584,6 +608,7 @@ function ensureShell(container) {
 }
 
 export function renderPnlVisualization(container, getData, callbacks = {}) {
+  const revision = ++chartRevision;
   lastContainer = container;
   lastGetData = getData;
   lastCallbacks = callbacks;
@@ -636,7 +661,7 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
     emptyEl?.classList.add('hidden');
     lineBlock?.classList.remove('hidden');
     const host = container.querySelector('#sm-pnl-echarts');
-    if (host) mountLineChart(host, rangeSlice);
+    if (host) mountLineChart(host, rangeSlice, revision);
     return;
   }
 

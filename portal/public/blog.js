@@ -3,7 +3,8 @@
     var feed = document.getElementById('blog-feed');
     var composer = document.getElementById('blog-composer');
     var input = document.getElementById('blog-content');
-    var richEditor = window.createBlogEditor(input);
+    var richEditor;
+    var write = document.getElementById('blog-write');
     var tagEditor = window.createBlogTags(document.getElementById('blog-tags'));
     var locationEditor = window.createBlogLocation(document.getElementById('blog-location'));
     var visibilityEditor = window.createBlogVisibility(document.getElementById('blog-visibility'));
@@ -18,6 +19,30 @@
     var shortcut = document.getElementById('blog-shortcut');
     var state = { userId: '', canPost: false, canManage: false, lastId: null, loading: false,
         pending: [], posts: new Map(), editing: null, tag: '', tags: [], search: '', refreshPending: false, preparing: 0 };
+
+    function loadEditor() {
+        return window.portalPage.loadScript('/blog-rich-editor.js?v=blog-unified-1');
+    }
+
+    async function openComposer() {
+        if (!(state.canPost || state.canManage) || write.disabled) return;
+        write.disabled = true;
+        try {
+            await loadEditor();
+            if (!(state.canPost || state.canManage)) return;
+            richEditor ||= window.createBlogEditor(input);
+            composer.classList.remove('hidden');
+            write.classList.add('hidden');
+            locationEditor.start();
+            richEditor.focus();
+        } catch (error) {
+            window.portalToast?.error(error.message);
+        } finally {
+            write.disabled = false;
+        }
+    }
+
+    write.addEventListener('click', openComposer);
 
     function acceptPastedImages(editorRoot, lockRoot, getTarget, render, allowed) {
         window.bindBlogImagePaste(editorRoot, async function(files) {
@@ -217,8 +242,9 @@
             state.canPost = data.canPost;
             state.canManage = data.canManage;
             state.canViewComments = data.canViewComments; state.canComment = data.canComment;
-            composer.classList.toggle('hidden', !(state.canPost || state.canManage));
-            if (state.canPost || state.canManage) locationEditor.start();
+            var canCompose = state.canPost || state.canManage;
+            composer.classList.toggle('hidden', !canCompose || !richEditor);
+            write.classList.toggle('hidden', !canCompose || Boolean(richEditor));
             shortcut.textContent = state.canPost ? '写博客' : '查看动态';
             shortcut.classList.remove('hidden');
             data.posts.forEach(function(post) { state.posts.set(post.id, post); feed.appendChild(renderPost(post)); });
@@ -343,7 +369,7 @@
     });
     composer.addEventListener('submit', async function(event) {
         event.preventDefault();
-        if (state.preparing) return;
+        if (!richEditor || !(state.canPost || state.canManage) || state.preparing) return;
         if (state.saving || state.editing) { window.portalToast?.warn('请先完成当前编辑或上传'); return; }
         if (richEditor.isEmpty() && !state.pending.length) { window.portalToast?.error('请输入博客内容或添加媒体'); return; }
         state.saving = true;
@@ -461,7 +487,11 @@
             return;
         }
         if (state.editing) { window.portalToast?.warn('请先完成当前编辑'); return; }
+        try { await loadEditor(); }
+        catch (error) { window.portalToast?.error(error.message); return; }
+        if (state.editing || state.saving || !article.isConnected) return;
         var post = state.posts.get(button.dataset.id);
+        if (!post) return;
         state.editing = { id: post.id, keepMediaIds: editItems(post).map(function(item) { return item.id; }), pending: [] };
         var body = article.querySelector('.blog-post-content');
         var editor = document.createElement('div');
@@ -570,12 +600,10 @@
     tagFilter.addEventListener('click', selectTag);
     feed.addEventListener('click', selectTag);
     more.addEventListener('click', function() { load(false); });
-    shortcut.addEventListener('click', function() { if (state.canPost) setTimeout(function() { richEditor.focus(); }, 0); });
+    shortcut.addEventListener('click', function() { if (state.canPost) openComposer(); });
     async function initialize() {
         try {
-            var response = await fetch('/api/me');
-            var user = await response.json();
-            if (!response.ok || !user.ok) throw new Error(user.error || '无法获取博客权限');
+            var user = await window.portalPage.user();
             var permissions = user.permissions || [];
             var canView = user.isGuest || permissions.includes('blog:feed:view') || (!user.isGuest
                 && (permissions.includes('blog:post:edit') || permissions.includes('blog:manage:edit')));

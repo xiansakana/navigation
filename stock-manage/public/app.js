@@ -5,7 +5,7 @@ import { renderTradeReview } from './js/trade-review.js?v=hk-fund-1';
 import { formatPrice, formatQuantity, priceInputValue } from './js/price-format.js?v=quantity-1';
 import { bindTradeInstrument } from './js/trade-instrument.js?v=keep-trade-account-1';
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js?v=holding-note';
-import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=period-3';
+import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=lazy-chart-1';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey, isHoldingsSortable, individualHoldingWeight } from './js/holdings-table.js?v=group-weight-sort';
 import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js?v=access-1';
 
