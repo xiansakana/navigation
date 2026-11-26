@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
+import { splitPlainText } from './codex-text.js';
 import path from 'node:path';
 import https from 'node:https';
 import dns from 'node:dns';
@@ -214,13 +216,12 @@ async function fetchTweets(options) {
 function formatMessage(tweet, decision) {
     var time = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(tweet.at));
     var confidence = { high: '高', medium: '中', low: '低' }[decision.confidence] || decision.confidence;
-    var excerpt = String(tweet.text).length > 500 ? String(tweet.text).slice(0, 500) + '…' : String(tweet.text);
     return [
         '🔔 Codex 额度重置信号',
         '判断：' + decision.label + '（置信度：' + confidence + '）',
         '时间：' + time,
         '',
-        excerpt,
+        String(tweet.text),
         ...(decision.contextText ? ['', '回复上下文：' + decision.contextText] : []),
         '',
         tweet.url || ('https://x.com/thsottiaux/status/' + tweet.id),
@@ -234,6 +235,21 @@ export async function deliverToChannels(config, message, alreadySent, send, onDe
     var failures = [];
     await Promise.all((config.monitors?.tiboReset?.channels || ['qq']).map(async function(channel) {
         if (sent.has(channel)) return;
+        const limit = channel === 'qq' ? 1500 : channel === 'slack' ? 3500 : Infinity;
+        const parts = message.length <= limit ? [message] : splitPlainText(message, limit - 80);
+        const digest = parts.length > 1 ? createHash('sha256').update(message).digest('hex') : '';
+        async function deliver(key, target) {
+            for (const [index, part] of parts.entries()) {
+                const checkpoint = key + ':part:' + digest + ':' + index;
+                if (parts.length > 1 && sent.has(checkpoint)) continue;
+                const text = parts.length === 1 ? part : `【Codex 额度重置信号 ${index + 1}/${parts.length}】\n${part}`;
+                await send(config, channel, text, target);
+                if (parts.length > 1) {
+                    sent.add(checkpoint);
+                    onDelivered?.(Array.from(sent));
+                }
+            }
+        }
         try {
             var qq = config.monitors?.tiboReset?.qq;
             if (channel === 'qq' && qq?.useDefaultTarget === false) {
@@ -242,14 +258,14 @@ export async function deliverToChannels(config, message, alreadySent, send, onDe
                     var deliveryKey = 'qq:' + target.id;
                     if (sent.has(deliveryKey)) continue;
                     try {
-                        await send(config, channel, message, target);
+                        await deliver(deliveryKey, target);
                         sent.add(deliveryKey);
                         onDelivered?.(Array.from(sent));
                     } catch { failures.push(deliveryKey); }
                 }
                 if (!qq.targets.every(target => sent.has('qq:' + target.id))) return;
             } else {
-                await send(config, channel, message);
+                await deliver(channel);
             }
             sent.add(channel);
             onDelivered?.(Array.from(sent));

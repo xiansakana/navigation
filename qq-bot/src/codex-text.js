@@ -59,11 +59,15 @@ export function codexQqText(message) {
 export function codexQqChunks(message) {
   let text = codexQqText(message).replace(/\[CQ:/gi, '［CQ:').slice(0, 10000);
   if (/[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1);
+  return splitPlainText(text, 1500);
+}
+
+export function splitPlainText(text, limit) {
   const chunks = [];
   for (let start = 0; start < text.length;) {
-    let end = Math.min(start + 1500, text.length);
+    let end = Math.min(start + limit, text.length);
     const newline = text.lastIndexOf('\n', end - 1);
-    if (end < text.length && newline >= start + 750) end = newline + 1;
+    if (end < text.length && newline >= start + limit / 2) end = newline + 1;
     if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]) && /[\uDC00-\uDFFF]/.test(text[end])) end--;
     chunks.push(text.slice(start, end));start = end;
   }

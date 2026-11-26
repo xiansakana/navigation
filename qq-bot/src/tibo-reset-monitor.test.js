@@ -29,6 +29,37 @@ function monitorFixture(initial, tweets, send) {
     return { create, state: () => stored };
 }
 
+test('reset notification includes the fetched text past the former 500-character limit', async () => {
+    const tail = 'The usage reset will happen tonight.';
+    const text = 'Codex usage update. ' + 'Details '.repeat(80) + tail;
+    const messages = [];
+    const fixture = monitorFixture({ initialized: true, seenIds: [] }, [{ ...contextParent, text }], async (_, channel, message) => {
+        messages.push(message);
+        assert.ok(message.includes(text));
+        assert.ok(message.includes('https://x.com/thsottiaux/status/100'));
+    });
+    await fixture.create().checkNow();
+    assert.equal(messages.length, 2);
+});
+
+test('multipart QQ retries start at the failed part and email receives the entire notice', async () => {
+    const message = '🔔'.repeat(1800) + '\nhttps://x.com/thsottiaux/status/100';
+    const config = { monitors: { tiboReset: { channels: ['qq', 'email'] } } };
+    let checkpoint = [], fail = true;
+    const qq = [], email = [];
+    const send = async (_, channel, part) => {
+        if (channel === 'email') { email.push(part); return; }
+        if (fail && part.includes(' 2/')) throw new Error('send failed');
+        assert.ok(part.length <= 1500 && part.isWellFormed());
+        qq.push(part.slice(part.indexOf('\n') + 1));
+    };
+    await assert.rejects(deliverToChannels(config, message, [], send, keys => { checkpoint = keys; }), /qq/);
+    fail = false;
+    await deliverToChannels(config, message, checkpoint, send);
+    assert.equal(qq.join(''), message);
+    assert.deepEqual(email, [message]);
+});
+
 test('legacy negative is reclassified and delivered once; unknown historical seen IDs are not replayed', async () => {
     const sent = [];
     const fixture = monitorFixture({ initialized: true, seenIds: ['100', '101'], lastTweet: { ...contextReply, decision: { relevant: false } } }, [contextParent, contextReply], async (_, channel, message) => { sent.push(channel); assert.match(message, /回复上下文：Day 20/); });
