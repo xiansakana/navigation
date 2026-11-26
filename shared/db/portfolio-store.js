@@ -54,15 +54,15 @@ function normalizePortfolio(raw) {
 
 export function createLegacyPortfolioStore(db) {
   const getMeta = db.prepare('SELECT value FROM meta WHERE key = ?');
-  const setMeta = db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)');
+  const setMeta = db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value');
   const allTrades = db.prepare("SELECT data FROM trades ORDER BY json_extract(data, '$.trade_date') ASC, id ASC");
-  const upsertTrade = db.prepare('INSERT OR REPLACE INTO trades (id, data) VALUES (?, ?)');
+  const upsertTrade = db.prepare('INSERT INTO trades (id, data) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET data = excluded.data');
   const clearTrades = db.prepare('DELETE FROM trades');
   const allQuotes = db.prepare('SELECT symbol, data FROM quotes');
-  const upsertQuote = db.prepare('INSERT OR REPLACE INTO quotes (symbol, data) VALUES (?, ?)');
+  const upsertQuote = db.prepare('INSERT INTO quotes (symbol, data) VALUES (?, ?) ON CONFLICT (symbol) DO UPDATE SET data = excluded.data');
   const clearQuotes = db.prepare('DELETE FROM quotes');
   const allMeta = db.prepare('SELECT symbol, data FROM holdings_meta');
-  const upsertMeta = db.prepare('INSERT OR REPLACE INTO holdings_meta (symbol, data) VALUES (?, ?)');
+  const upsertMeta = db.prepare('INSERT INTO holdings_meta (symbol, data) VALUES (?, ?) ON CONFLICT (symbol) DO UPDATE SET data = excluded.data');
   const clearMeta = db.prepare('DELETE FROM holdings_meta');
 
   function metaNumber(key, fallback) {
@@ -206,7 +206,8 @@ export function migrateLegacyPortfolio(db, userId) {
       if (value != null) db.prepare('INSERT INTO portfolio_user_meta(user_id,key,value) VALUES(?,?,?)').run(userId, key, value);
     }
     // The migrated portfolio snapshot is authoritative, including zero balances.
-    db.prepare("INSERT OR REPLACE INTO portfolio_user_meta(user_id,key,value) VALUES(?,'dip_cash_migrated','1')").run(userId);
+    db.prepare(`INSERT INTO portfolio_user_meta(user_id,key,value) VALUES(?,'dip_cash_migrated','1')
+      ON CONFLICT (user_id,key) DO UPDATE SET value = excluded.value`).run(userId);
     db.prepare("INSERT INTO meta(key,value) VALUES('portfolio_legacy_owner',?)").run(userId);
     const after = store.read();
     if (JSON.stringify(after) !== JSON.stringify(before)) throw new Error('迁移核对失败');

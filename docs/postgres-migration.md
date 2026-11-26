@@ -1,0 +1,24 @@
+# Navigation PostgreSQL 迁移
+
+## 数据导入演练
+
+`scripts/rehearse-postgres.py` 从 SQLite 只读事务读取同一时点的数据，流式写入 PostgreSQL 17 的新 `navigation_rehearsal_*` schema。它保留整数、浮点数、文本、BLOB、NULL、SQLite 行号和自增高水位，并按行号复读 PostgreSQL 数据，核对逐表行数和内容摘要。任何一步失败会回滚整个 schema。重复使用已有 schema 会报错。
+
+使用独立数据库和可创建 schema 的演练账号，连接信息通过 libpq 服务配置提供：
+
+```bash
+python -m pip install 'psycopg[binary]==3.3.9'
+PGSERVICE=navigation-rehearsal python scripts/rehearse-postgres.py \
+  --sqlite /path/to/navigation.db --schema navigation_rehearsal_trial1
+```
+
+演练表的 `_sqlite_rowid` 保留旧数据的排序依据，`sqlite_sequence` 保留自增高水位，`_sqlite_schema` 保存原始表、索引和触发器定义。演练报告只输出汇总数量，目标数据库包含完整业务数据，应按生产数据控制访问。
+
+## 应用切换条件
+
+演练表用于校验数据转换。运行时需要独立的 PostgreSQL 版本化迁移和连接池，以及将 Portal、后台队列、股票、抄底和 QQ 业务改为异步数据库读写。
+
+- 明确每处 `rowid` 排序和游标的业务顺序，给迁入和新增记录分配连续可比较的键。将 SQLite 序列值用于初始化 PostgreSQL 自增序列。
+- 将 RBAC 版本更新、账务事务、上传配额和任务领取迁移到 PostgreSQL 的事务与锁机制。对并发读取、写入、回滚和跨用户数据隔离做 PostgreSQL 集成测试。
+- 建立 PostgreSQL 备份并验证实际恢复，更新 ECS 服务的启动与健康检查。单独保留 SQLite 一致性备份以支持正式切换前回退。
+- 上述检查通过后，在停写窗口导入最终快照并验证记录数、归属和关键业务行为，再切换应用连接。恢复生产写入后，回退前需处理 PostgreSQL 中新增的写入。

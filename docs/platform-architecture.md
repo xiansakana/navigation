@@ -98,4 +98,4 @@ python3 -m unittest discover -s portal/workers -p 'test_*.py'
 
 GitHub Actions 安装各服务锁定依赖并执行这些检查。工作流提供测试结果，分支保护和“CI成功才能部署”的远程规则仍需单独配置，不能仅凭有工作流宣称已启用强制门禁。
 
-本轮不迁移 PostgreSQL、不引入消息中间件、不更换 HTTP 框架、不一次迁移 workspaces。后续先量化写锁等待、任务积压和慢请求，再决定是否需要这些变动。
+生产应用当前仍使用 SQLite。PostgreSQL 数据导入演练与切换验收条件见 [PostgreSQL 迁移](postgres-migration.md)。

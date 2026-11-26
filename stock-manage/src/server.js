@@ -396,7 +396,8 @@ app.put('/api/accounts/order', (req, res) => {
   const saved = portfolioDb.transaction(() => {
     const owned = new Set(investmentRows(portfolioDb, userId).map(account => account.id));
     if (owned.size !== ids.length || ids.some(id => !owned.has(id))) return false;
-    portfolioDb.prepare('INSERT OR REPLACE INTO portfolio_user_meta(user_id,key,value) VALUES(?,?,?)')
+    portfolioDb.prepare(`INSERT INTO portfolio_user_meta(user_id,key,value) VALUES(?,?,?)
+      ON CONFLICT (user_id,key) DO UPDATE SET value = excluded.value`)
       .run(userId, 'investment_account_order', JSON.stringify(ids));
     return true;
   }).immediate();

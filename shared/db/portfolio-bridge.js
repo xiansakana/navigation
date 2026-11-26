@@ -16,7 +16,8 @@ function metaApi(db, userId) {
   requirePortfolioUserId(userId);
   return {
     get: { get: (key) => db.prepare('SELECT value FROM portfolio_user_meta WHERE user_id=? AND key=?').get(userId, key) },
-    set: { run: (key, value) => db.prepare('INSERT OR REPLACE INTO portfolio_user_meta(user_id,key,value) VALUES(?,?,?)').run(userId, key, value) }
+    set: { run: (key, value) => db.prepare(`INSERT INTO portfolio_user_meta(user_id,key,value) VALUES(?,?,?)
+      ON CONFLICT (user_id,key) DO UPDATE SET value = excluded.value`).run(userId, key, value) }
   };
 }
 
