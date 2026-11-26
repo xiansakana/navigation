@@ -5,7 +5,8 @@ import { moduleApiHandler } from './module-api.js';
 import { tornToolboxAccess } from './torn-toolbox-access.js';
 import { moduleInventory, moduleInventoryPostgres, findModuleApi, TORN_MONITOR_ASSETS } from './modules.js';
 import { portalPostgresDatabase } from './postgres.js';
-import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
+import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
+import { postgresUrlFor } from '../../shared/db/postgres/config.js';
 import { requestDataAccess, scopedSession, availableDataAccess, scopeCookie, auditDataAccess, stripPortalIdentity } from './data-access.js';
 import { accessModules, modulePolicy, moduleForPath } from './access-policy.js';
 import { readJson, sameOriginWrite } from '../../shared/http.js';
@@ -76,12 +77,13 @@ const readIdentity = () => identity.load(config);
 sessionSecret(config);
 if (config.runtime?.externalWorkers) process.env.NAVIGATION_EXTERNAL_WORKERS = '1';
 const loginLimiter = createLoginLimiter();
-const resourcesDb = process.env.NAVIGATION_RESOURCES_POSTGRES_URL
-    ? portalPostgresDatabase(process.env.NAVIGATION_RESOURCES_POSTGRES_URL) : null;
+const resourcesUrl = postgresUrlFor('resources');
+const resourcesDb = resourcesUrl
+    ? portalPostgresDatabase(resourcesUrl) : null;
 const resourceMonitor = createResourceMonitor({
     async moduleReader() {
         if (!resourcesDb) return moduleInventory(getDatabase(), config.services || []);
-        await verifyPostgresSchema(resourcesDb);
+        await verifyConfiguredPostgres(resourcesDb);
         return moduleInventoryPostgres(resourcesDb, config.services);
     },
 });
@@ -614,9 +616,9 @@ async function handleRequest(req, res) {
             getDatabase().prepare('SELECT 1').get();
             try {
                 await identity.ready(); await checkMingliPostgres(); await checkBlogPostgres();
-                if (resourcesDb) await verifyPostgresSchema(resourcesDb);
-                const tornUrl = process.env.NAVIGATION_TORN_POSTGRES_URL || process.env.NAVIGATION_TORN_USERS_POSTGRES_URL;
-                if (tornUrl) await verifyPostgresSchema(portalPostgresDatabase(tornUrl));
+                if (resourcesDb) await verifyConfiguredPostgres(resourcesDb);
+                const tornUrl = postgresUrlFor('tornUsers');
+                if (tornUrl) await verifyConfiguredPostgres(portalPostgresDatabase(tornUrl));
             }
             catch { return json(res, 503, { ok: false, service: 'portal' }); }
         }

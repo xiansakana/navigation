@@ -7,7 +7,8 @@ import { createChainNotifier } from './torn-chain-notifications.js';
 import { ShoppingMonitor, createShoppingStore, shoppingConfig } from './torn-shopping-monitor.js';
 import { portalTornRequest } from './torn-chain-monitor.js';
 import { createPostgresShoppingStore } from './torn-shopping-postgres.js';
-import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
+import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
+import { postgresUrlFor } from '../../shared/db/postgres/config.js';
 import { portalPostgresDatabase } from './postgres.js';
 import { portalIdentity } from './postgres-rbac.js';
 
@@ -95,9 +96,9 @@ export async function handleTornShoppingApi(req, res, url, session, json, config
     return !!ctx && canTornShopping(ctx, action) && (action !== 'notify:edit' || canTornShopping(ctx, 'notify:view'));
   };
   initialization ||= (async () => {
-    const url = process.env.NAVIGATION_TORN_POSTGRES_URL;
+    const url = postgresUrlFor('torn');
     const db = url && portalPostgresDatabase(url);
-    if (db) await verifyPostgresSchema(db);
+    if (db) await verifyConfiguredPostgres(db);
     service = createTornShoppingService({ store: db ? createPostgresShoppingStore(db) : createShoppingStore(getDatabase()),
       authorize: uid => authorized(uid, 'control:edit'), authorizeNotify: uid => authorized(uid, 'notify:edit'), sendNotification: async (settings, row) => {
         const endpoint = config.services?.find(item => item.id === 'notifications')?.internalUrl || 'http://127.0.0.1:8787';

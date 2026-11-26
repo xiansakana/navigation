@@ -1,6 +1,7 @@
 import { copyRbac, revisionKey } from '../../shared/db/rbac-store.js';
 import { createPostgresRbacStore } from '../../shared/db/postgres/rbac-store.js';
-import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
+import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
+import { postgresUrlFor } from '../../shared/db/postgres/config.js';
 import { configServicesKey, loadRbac, saveRbac, syncRbacPermissions } from './rbac.js';
 import { portalPostgresDatabase } from './postgres.js';
 
@@ -44,7 +45,7 @@ export function createPortalIdentityRepository(connectionString) {
   const db = portalPostgresDatabase(connectionString);
   const repository = createPortalPostgresRbac(db);
   async function ready() {
-    await verifyPostgresSchema(db);
+    await verifyConfiguredPostgres(db);
     let rows;
     try { ({ rows } = await db.query('SELECT id FROM navigation.rbac_snapshot WHERE id = 1')); }
     catch { throw Object.assign(new Error('权限数据库暂不可用'), { status: 503, code: 'RBAC_DB_UNAVAILABLE' }); }
@@ -76,4 +77,4 @@ export function createPortalIdentityRepository(connectionString) {
   };
 }
 
-export const portalIdentity = createPortalIdentityRepository(process.env.NAVIGATION_RBAC_POSTGRES_URL);
+export const portalIdentity = createPortalIdentityRepository(postgresUrlFor('identity'));

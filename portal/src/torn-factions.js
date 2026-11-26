@@ -9,7 +9,8 @@ import { createFactionStore, FactionScanner } from './torn-faction-scan.js';
 import { createPostgresFactionStore } from './torn-faction-postgres.js';
 import { portalPostgresDatabase } from './postgres.js';
 import { portalIdentity } from './postgres-rbac.js';
-import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
+import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
+import { postgresUrlFor } from '../../shared/db/postgres/config.js';
 
 export function canFactionScan(session, action = 'view') {
   const permissions = session?.dataAccess?.permissions || session?.permissions || [];
@@ -70,9 +71,9 @@ export async function handleFactionApi(req, res, url, session, json, config) {
     return canFactionScan({ userId: uid, permissions: current.permissions, isGuest: current.user.username === (config.auth?.guestUsername || 'guest') }, 'control:edit');
   };
   initialization ||= (async () => {
-    const databaseUrl = process.env.NAVIGATION_TORN_POSTGRES_URL;
+    const databaseUrl = postgresUrlFor('torn');
     const db = databaseUrl && portalPostgresDatabase(databaseUrl);
-    if (db) await verifyPostgresSchema(db);
+    if (db) await verifyConfiguredPostgres(db);
     service = createFactionService({ store: db ? createPostgresFactionStore(db) : createFactionStore(getDatabase()), authorize });
     return service;
   })().catch(error => { initialization = undefined; throw error; });

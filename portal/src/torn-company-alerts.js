@@ -11,7 +11,8 @@ import { COMPANY_ALERT_KINDS, companyRules, createCompanyAlertsStore, CompanyAle
 import { createPostgresCompanyAlertsStore } from './torn-company-alerts-postgres.js';
 import { portalPostgresDatabase } from './postgres.js';
 import { portalIdentity } from './postgres-rbac.js';
-import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
+import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
+import { postgresUrlFor } from '../../shared/db/postgres/config.js';
 const names = { salary: '扣工资', training: '员工训练', stock: '库存' };
 export function canCompanyAlerts(s, action = 'view') { return !!s?.userId && (!s.isGuest || action.endsWith('view')) && hasPermission(s.dataAccess?.permissions || s.permissions || [], 'torn-company-alerts:' + action); }
 export function createCompanyAlertsService({ store, request = portalTornRequest, roster, authorize, notify }) {
@@ -93,9 +94,9 @@ export async function handleCompanyAlertsApi(req, res, url, session, json, confi
     return canCompanyAlerts(subject) && canCompanyAlerts(subject, action);
   };
   initialization ||= (async () => {
-    const databaseUrl = process.env.NAVIGATION_TORN_POSTGRES_URL;
+    const databaseUrl = postgresUrlFor('torn');
     const db = databaseUrl && portalPostgresDatabase(databaseUrl);
-    if (db) await verifyPostgresSchema(db);
+    if (db) await verifyConfiguredPostgres(db);
     service = createCompanyAlertsService({
       store: db ? createPostgresCompanyAlertsStore(db) : createCompanyAlertsStore(getDatabase()),
       authorize, roster: () => normalizeCompanyWatchers(loadServiceConfig('company')),

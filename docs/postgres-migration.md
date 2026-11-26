@@ -59,6 +59,8 @@ GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访�
 
 运行时需要 PostgreSQL 连接池，以及将 Portal、后台队列、股票、抄底和 QQ 业务改为异步数据库读写。
 
+生产模式使用 `NAVIGATION_DATABASE_ENGINE=postgres`、`NAVIGATION_POSTGRES_URL` 和 `NAVIGATION_POSTGRES_DATABASE`。服务共用同一个目标库，连接检查核对数据库名称和 schema 版本，并验证应用角色具有读写业务表及使用序列的权限。历史模块连接变量继续用于隔离演练。生产开启前需清除与统一连接不一致的模块配置，并完成所有服务的 SQLite 禁用运行验证。
+
 - 明确每处 `rowid` 排序和游标的业务顺序，给迁入和新增记录分配连续可比较的键。将 SQLite 序列值用于初始化 PostgreSQL 自增序列。
 - 将 RBAC 版本更新、账务事务、上传配额和任务领取迁移到 PostgreSQL 的事务与锁机制。对并发读取、写入、回滚和跨用户数据隔离做 PostgreSQL 集成测试。
 - 建立 PostgreSQL 备份并验证实际恢复，更新 ECS 服务的启动与健康检查。单独保留 SQLite 一致性备份以支持正式切换前回退。

@@ -20,7 +20,7 @@ import { sendEmail } from './email.js';
 import { sendSlack } from './slack.js';
 import { createWatchdogStore, startLoginWatchdog } from './watchdog.js';
 import { getPostgresCodexIdentity, getPostgresMonitoring } from './postgres.js';
-import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
+import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
 import { startTiboResetMonitor } from './tibo-reset-monitor.js';
 import { createBusinessService } from './business.js';
 
@@ -148,7 +148,8 @@ export function createNotificationServer(initialConfig, options) {
         try {
             if (req.method === 'GET' && url.pathname === '/readyz') {
                 try {
-                    if (options?.monitoringDb) await verifyPostgresSchema(options.monitoringDb);
+                    if (options?.monitoringDb) await verifyConfiguredPostgres(options.monitoringDb);
+                    if (options?.readCodexRbac) await options.readCodexRbac();
                     return json(res, 200, { ok: true });
                 } catch { return json(res, 503, { ok: false }); }
             }

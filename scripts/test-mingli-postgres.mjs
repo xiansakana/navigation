@@ -21,7 +21,7 @@ import { createCodexService } from '../shared/codex/codex-service.js';
 import { createPostgresCodexQueue } from '../shared/codex/codex-postgres-queue.js';
 import { createPostgresCodexConversations } from '../shared/codex/codex-postgres-conversations.js';
 import { handleCodexConversationsApi } from '../portal/src/codex-conversations.js';
-import { verifyPostgresSchema } from '../shared/db/postgres/readiness.js';
+import { verifyPostgresSchema, verifyPostgresApplicationTarget } from '../shared/db/postgres/readiness.js';
 import { startAccessPortal } from '../portal/src/test-fixtures/access-portal.js';
 import { moduleInventoryPostgres } from '../portal/src/modules.js';
 import { createPostgresBlogRepository } from '../portal/src/blog-postgres.js';
@@ -325,7 +325,7 @@ async function verifyTornWorkerProcess(db, dsn, uid) {
       };`);
     const env = {
       ...process.env, NAVIGATION_DATABASE_ENGINE: 'postgres', NAVIGATION_DB_PATH: paths.sqlite,
-      NAVIGATION_TORN_POSTGRES_URL: dsn, NAVIGATION_RBAC_POSTGRES_URL: dsn,
+      NAVIGATION_POSTGRES_URL: dsn, NAVIGATION_POSTGRES_DATABASE: new URL(dsn).pathname.slice(1),
       PORTAL_CONFIG_PATH: paths.portal, TORN_COMPANY_CONFIG_PATH: paths.company,
       TORN_UNDERCUT_CONFIG_PATH: paths.undercut, TORN_COMPANY_STATE_FILE: paths.state,
     };
@@ -638,6 +638,9 @@ test('Mingli HTTP entry point uses PostgreSQL for owner-scoped cases, categories
     });
     schemaCreated = true;
     assert.deepEqual(await verifyPostgresSchema(db), { database: database.name, version: '001-initial' });
+    assert.deepEqual(await verifyPostgresApplicationTarget(db, database.name), { database: database.name, version: '001-initial' });
+    await assert.rejects(() => verifyPostgresApplicationTarget(db, 'incorrect_fixture_database'), { code: 'POSTGRES_NOT_READY' });
+    await db.transaction(client => assert.rejects(() => verifyPostgresApplicationTarget(client, database.name), { code: 'POSTGRES_NOT_WRITABLE' }), { readOnly: true });
     await verifyTornUsers(db);
     await verifyTornShopping(db);
     await verifyTornDestruction(db);

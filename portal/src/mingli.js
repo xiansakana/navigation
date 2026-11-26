@@ -1,6 +1,7 @@
 import { sameOriginWrite } from '../../shared/http.js';
 import { getDatabase } from '../../shared/db/index.js';
-import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
+import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
+import { postgresUrlFor } from '../../shared/db/postgres/config.js';
 import { hasPermission } from './rbac.js';
 import { calculateChart } from './mingli-chart.js';
 import { createMingliStore } from './mingli-store.js';
@@ -13,19 +14,19 @@ import { canKnowledge } from './knowledge.js';
 let postgresDatabase;
 let postgresStore;
 function activeCaseStore() {
-  const postgres = process.env.NAVIGATION_MINGLI_POSTGRES_URL;
+  const postgres = postgresUrlFor('mingli');
   if (!postgres) return createMingliStore(getDatabase());
   postgresDatabase ||= portalPostgresDatabase(postgres);
-  return postgresStore ||= verifyPostgresSchema(postgresDatabase).then(() => createMingliPostgresStore(postgresDatabase)).catch(error => {
+  return postgresStore ||= verifyConfiguredPostgres(postgresDatabase).then(() => createMingliPostgresStore(postgresDatabase)).catch(error => {
     postgresStore = undefined;
     throw error;
   });
 }
 
 export async function checkMingliPostgres() {
-  if (!process.env.NAVIGATION_MINGLI_POSTGRES_URL) return;
+  if (!postgresUrlFor('mingli')) return;
   await activeCaseStore();
-  await verifyPostgresSchema(postgresDatabase);
+  await verifyConfiguredPostgres(postgresDatabase);
 }
 
 export function canMingli(session, action = 'view') {

@@ -16,14 +16,15 @@ import { portalTornRequest } from '../portal/src/torn-chain-monitor.js';
 import { bazaarListings } from '../portal/src/torn-shopping-monitor.js';
 import { installWorkerApi } from '../torn-toolbox-desktop/src/torn-api.js';
 import { portalPostgresDatabase } from '../portal/src/postgres.js';
-import { verifyPostgresSchema } from '../shared/db/postgres/readiness.js';
+import { verifyConfiguredPostgres } from '../shared/db/postgres/readiness.js';
+import { postgresUrlFor } from '../shared/db/postgres/config.js';
 import { portalIdentity } from '../portal/src/postgres-rbac.js';
 
 process.env.NAVIGATION_PROCESS_ROLE = 'torn-monitor-worker';
 const config = loadConfig(), controller = new AbortController();
-const postgresUrl = process.env.NAVIGATION_TORN_POSTGRES_URL || process.env.NAVIGATION_TORN_USERS_POSTGRES_URL;
+const postgresUrl = postgresUrlFor('tornUsers');
 const runDb = postgresUrl ? portalPostgresDatabase(postgresUrl) : getDatabase();
-if (postgresUrl) await verifyPostgresSchema(runDb);
+if (postgresUrl) await verifyConfiguredPostgres(runDb);
 const startedAt = Date.now(), seen = new Map();
 let stopping = false, ready = false;
 installWorkerApi(portalTornRequest, bazaarListings, controller.signal);
@@ -40,7 +41,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/readyz') {
     if (!ready || stopping) return json(res, 503, { ok: false });
     try {
-      if (postgresUrl) await verifyPostgresSchema(runDb);
+      if (postgresUrl) await verifyConfiguredPostgres(runDb);
       else runDb.prepare('SELECT 1').get();
       await portalIdentity.ready();
       return json(res, 200, { ok: true });

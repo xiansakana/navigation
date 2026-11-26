@@ -14,7 +14,8 @@ import { portfolioIdentityMiddleware } from '../../shared/portfolio-user.js';
 import { currentPortfolioUserId } from '../../shared/portfolio-user.js';
 import { getDatabase } from '../../shared/db/index.js';
 import { createPostgresPool } from '../../shared/db/postgres/pool.js';
-import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
+import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
+import { postgresUrlFor } from '../../shared/db/postgres/config.js';
 import { investmentRows, projectInvestments, saveInvestmentAccount, unlinkInvestmentAccount } from '../../shared/investment-accounts.js';
 import { dipCashFunds, setDipCashReserve } from '../../shared/dip-cash-funds.js';
 import { createBookkeepingStore } from '../../portal/src/bookkeeping-store.js';
@@ -63,9 +64,9 @@ const portfolioDb = getDatabase({ dbPath: config.dbPath });
 ensureUserPortfolioSchema(portfolioDb);
 ensureFundHoldings(portfolioDb);
 const quotes = createQuoteService(config);
-const quantDatabaseUrl = process.env.NAVIGATION_QUANT_POSTGRES_URL;
+const quantDatabaseUrl = postgresUrlFor('quant');
 const quantDatabase = quantDatabaseUrl && createPostgresPool(pg.Pool, quantDatabaseUrl, 'navigation-stock-manage');
-if (quantDatabase) await verifyPostgresSchema(quantDatabase);
+if (quantDatabase) await verifyConfiguredPostgres(quantDatabase);
 const app = express();
 app.use((req, res, next) => { if (!serveUiAsset(req, res)) next(); });
 
@@ -77,7 +78,7 @@ app.use(portfolioIdentityMiddleware);
 app.get('/readyz', async (_req, res) => {
   try {
     portfolioDb.prepare('SELECT 1').get();
-    if (quantDatabase) await verifyPostgresSchema(quantDatabase);
+    if (quantDatabase) await verifyConfiguredPostgres(quantDatabase);
     res.json({ ok: true, service: 'stock-manage' });
   } catch { res.status(503).json({ ok: false, service: 'stock-manage' }); }
 });

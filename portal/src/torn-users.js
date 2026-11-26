@@ -7,7 +7,8 @@ import { createChainNotifier } from './torn-chain-notifications.js';
 import { UsersMonitor, createUsersStore, usersConfig } from './torn-users-monitor.js';
 import { portalTornRequest } from './torn-chain-monitor.js';
 import { createPostgresUsersStore } from './torn-users-postgres.js';
-import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
+import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
+import { postgresUrlFor } from '../../shared/db/postgres/config.js';
 import { portalPostgresDatabase } from './postgres.js';
 import { portalIdentity } from './postgres-rbac.js';
 
@@ -85,9 +86,9 @@ export async function handleTornUsersApi(req, res, url, session, json, config) {
     return !!ctx && canTornUsers(ctx, action) && (action !== 'notify:edit' || canTornUsers(ctx, 'notify:view'));
   };
   initialization ||= (async () => {
-    const url = process.env.NAVIGATION_TORN_POSTGRES_URL || process.env.NAVIGATION_TORN_USERS_POSTGRES_URL;
+    const url = postgresUrlFor('tornUsers');
     const db = url && portalPostgresDatabase(url);
-    if (db) await verifyPostgresSchema(db);
+    if (db) await verifyConfiguredPostgres(db);
     service = createTornUsersService({ store: db ? createPostgresUsersStore(db) : createUsersStore(getDatabase()),
       authorize: uid => authorized(uid, 'control:edit'), authorizeNotify: uid => authorized(uid, 'notify:edit'), sendNotification: async (settings, row) => {
         const endpoint = config.services?.find(item => item.id === 'notifications')?.internalUrl || 'http://127.0.0.1:8787';

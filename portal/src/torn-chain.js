@@ -7,7 +7,8 @@ import { createChainNotifier } from './torn-chain-notifications.js';
 import { DestructionMonitor, createDestructionStore, destructionConfig } from './torn-destruction-monitor.js';
 import { portalTornRequest } from './torn-chain-monitor.js';
 import { createPostgresDestructionStore } from './torn-destruction-postgres.js';
-import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
+import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
+import { postgresUrlFor } from '../../shared/db/postgres/config.js';
 import { portalPostgresDatabase } from './postgres.js';
 import { portalIdentity } from './postgres-rbac.js';
 
@@ -85,9 +86,9 @@ export async function handleTornChainApi(req, res, url, session, json, config) {
     return !!ctx && canTornChain(ctx, action) && (action !== 'notify:edit' || canTornChain(ctx, 'notify:view'));
   };
   initialization ||= (async () => {
-    const databaseUrl = process.env.NAVIGATION_TORN_POSTGRES_URL;
+    const databaseUrl = postgresUrlFor('torn');
     const db = databaseUrl && portalPostgresDatabase(databaseUrl);
-    if (db) await verifyPostgresSchema(db);
+    if (db) await verifyConfiguredPostgres(db);
     service = createTornChainService({
       store: db ? createPostgresDestructionStore(db) : createDestructionStore(getDatabase()),
       authorize: uid => authorized(uid, 'control:edit'), authorizeNotify: uid => authorized(uid, 'notify:edit'),
