@@ -1,3 +1,5 @@
+import { createSampling } from './sampling.js?v=1';
+
 (function () {
   const $ = (id) => document.getElementById(id);
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -18,7 +20,7 @@
   const meter = (value) => `<div class="resource-meter ${value >= 95 ? 'danger' : value >= 85 ? 'warn' : ''}"><i style="width:${Math.min(100, Math.max(0, Number(value) || 0))}%"></i></div>`;
   const badge = (status, good) => `<span class="resource-badge ${good ? 'good' : 'bad'}">${esc(status)}</span>`;
   const empty = (cols, message) => `<tr><td colspan="${cols}" class="resource-empty">${esc(message)}</td></tr>`;
-  let snapshot = null, paused = false, busy = false, timer = null;
+  let snapshot = null, paused = false;
 
   function chart(id, points, fields, fixedMax) {
     const usable = points.filter((p) => fields.some((f) => p[f] != null));
@@ -84,33 +86,37 @@
     $('updated-at').textContent = `采样时间 ${new Date(data.collectedAt).toLocaleString('sv-SE')}`;
   }
 
-  async function refresh() {
-    clearTimeout(timer);
-    if (busy) return;
-    busy = true; $('refresh').disabled = true;
-    try {
-      const response = await fetch('/api/resources/metrics', { cache: 'no-store', signal: AbortSignal.timeout(12000) });
+  const sampling = createSampling({
+    document,
+    async sample(signal) {
+      const response = await fetch('/api/resources/metrics', { cache: 'no-store', signal });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || '资源监控加载失败');
-      render(data.snapshot); $('error').classList.add('hidden');
+      return data.snapshot;
+    },
+    onSample(data) {
+      render(data); $('error').classList.add('hidden');
       $('live-state').classList.toggle('paused', paused);
       $('live-state').textContent = paused ? '已暂停' : '实时采样';
-    } catch (error) {
+    },
+    onError(error) {
       $('error').textContent = `${error.message}${snapshot ? '，当前保留上次采样，数据尚未更新。' : '，请稍后刷新重试。'}`;
       $('error').classList.remove('hidden'); $('live-state').textContent = '数据未更新';
       $('live-state').classList.add('paused');
-    } finally {
-      busy = false; $('refresh').disabled = false; window.navigationSkeleton?.finish();
-      if (!paused && !document.hidden) timer = setTimeout(refresh, 10000);
+    },
+    onBusy(busy) {
+      $('refresh').disabled = busy;
+      if (!busy) window.navigationSkeleton?.finish();
     }
-  }
-  $('refresh').addEventListener('click', refresh);
+  });
+  $('refresh').addEventListener('click', sampling.refresh);
   $('service-search').addEventListener('input', renderServices);
   $('pause').addEventListener('click', () => {
     paused = !paused; $('pause').textContent = paused ? '恢复刷新' : '暂停刷新';
     $('pause').setAttribute('aria-pressed', String(paused)); $('live-state').classList.toggle('paused', paused);
-    $('live-state').textContent = paused ? '已暂停' : '实时采样'; clearTimeout(timer); if (!paused) refresh();
+    $('live-state').textContent = paused ? '已暂停' : '实时采样';
+    sampling.setPaused(paused);
   });
-  document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(timer); else if (!paused) refresh(); });
-  refresh();
+  window.addEventListener('pagehide', (event) => { if (!event.persisted) sampling.dispose(); });
+  sampling.refresh();
 })();

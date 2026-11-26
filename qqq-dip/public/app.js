@@ -1,3 +1,4 @@
+import { createActionHistory } from './js/action-history.js?v=1';
 import { loadPortalContext, can, canStock, isPortalMode } from './js/portal-auth.js?v=scope-1';
 
 const EVENT_LABELS = {
@@ -21,14 +22,9 @@ let state = {
   notify: { qq: {}, targets: [], events: {} },
   evaluation: null,
   monitor: {},
-  actions: { items: [] },
   lots: [],
   tab: 'monitor'
 };
-
-let actionPage = 1;
-let actionPageSize = 20;
-let actionRequestId = 0;
 
 function $(sel) { return document.querySelector(sel); }
 function toast(type, msg) {
@@ -270,13 +266,7 @@ function applyState(data) {
   if (data.notify) state.notify = data.notify;
   if (data.evaluation) state.evaluation = data.evaluation;
   if (data.monitor) state.monitor = data.monitor;
-  if (data.actions) {
-    const filter = $('#action-filter')?.value || 'all';
-    const incomingLimit = Number(data.actions.limit) || 20;
-    if (actionPage === 1 && filter === 'all' && incomingLimit === actionPageSize) {
-      state.actions = data.actions;
-    }
-  }
+  if (data.actions) actionHistory.acceptSnapshot(data.actions);
   if (data.lots) state.lots = data.lots;
   if (data.market && state.monitor) state.monitor.market = data.market;
   render();
@@ -695,7 +685,7 @@ function openPlanFillModal(tierId) {
         message: `登记 ${tierId} 分腿实际成交` } });
       $('#modal-root').innerHTML = '';
       applyState(data);
-      await loadActions(1);
+      await actionHistory.load();
     } catch (error) { toast('error', error.message); button.disabled = false; }
   });
   $('#plan-cancel').addEventListener('click', async () => {
@@ -877,40 +867,10 @@ function renderLots() {
   }).join('') : '<tr><td colspan="9" class="hint">还没有登记抄底仓位</td></tr>';
 }
 
-function renderActions() {
-  const items = state.actions?.items || [];
-  const total = Number(state.actions?.total) || 0;
-  const pageCount = Math.max(1, Math.ceil(total / actionPageSize));
-  if (actionPage > pageCount) actionPage = pageCount;
-  $('#action-list').innerHTML = items.length ? items.map((a) => `
-    <div class="sm-action">
-      <div class="meta">${escapeHtml(formatDateTime(a.ts))} · ${escapeHtml(a.source)} · ${escapeHtml(a.type)}${a.tier ? ' · ' + escapeHtml(a.tier) : ''}</div>
-      <div>${escapeHtml(a.message)}</div>
-      ${a.payload?.sentiment ? `<div class="hint">触发时情绪 ${escapeHtml(sentimentReading(a.payload.sentiment))} · ${escapeHtml(a.payload.sentiment.asOf)} · CNN 公开归档${a.payload.sentiment.stale ? ' · 当时为旧值' : ''}</div>` : ''}
-    </div>
-  `).join('') : '<p class="hint">暂无操作记录</p>';
-  $('#action-page-info').textContent = `第 ${actionPage} / ${pageCount} 页 · 共 ${total} 条`;
-  $('#action-prev').disabled = actionPage <= 1;
-  $('#action-next').disabled = actionPage >= pageCount;
-}
-
-async function loadActions(page = 1) {
-  const filter = $('#action-filter')?.value || 'all';
-  const targetPage = Math.max(1, Number(page) || 1);
-  const requestId = ++actionRequestId;
-  const params = new URLSearchParams({
-    limit: String(actionPageSize),
-    offset: String((targetPage - 1) * actionPageSize),
-    source: filter
-  });
-  const data = await api(`/actions?${params}`);
-  if (requestId !== actionRequestId) return;
-  const pageCount = Math.max(1, Math.ceil((Number(data.total) || 0) / actionPageSize));
-  if (targetPage > pageCount) return loadActions(pageCount);
-  actionPage = targetPage;
-  state.actions = data;
-  renderActions();
-}
+const actionHistory = createActionHistory(document, {
+  api, escapeHtml, formatDateTime, sentimentReading,
+  onError: (error) => toast('error', error.message)
+});
 
 function defaultTarget() {
   return {
@@ -1001,7 +961,7 @@ function render() {
   renderSymbols();
   renderTiers();
   renderLots();
-  renderActions();
+  actionHistory.render();
   if (state.tab === 'qq') renderQq();
   applyPermissions();
 }
@@ -1224,19 +1184,7 @@ function bind() {
       render();
     } catch (e) { toast('error', e.message); }
   });
-  $('#action-filter').addEventListener('change', () => {
-    loadActions(1).catch((e) => toast('error', e.message));
-  });
-  $('#action-prev').addEventListener('click', () => {
-    loadActions(actionPage - 1).catch((e) => toast('error', e.message));
-  });
-  $('#action-next').addEventListener('click', () => {
-    loadActions(actionPage + 1).catch((e) => toast('error', e.message));
-  });
-  $('#action-page-size').addEventListener('change', (e) => {
-    actionPageSize = Number(e.target.value) || 20;
-    loadActions(1).catch((err) => toast('error', err.message));
-  });
+  actionHistory.bind();
   $('#tier-table').addEventListener('click', async (e) => {
     const id = e.target.dataset.exec;
     if (!id) return;
@@ -1288,7 +1236,7 @@ function bind() {
         const data = await api('/actions', { method: 'POST', body });
         $('#modal-root').innerHTML = '';
         applyState(data);
-        await loadActions(1);
+        await actionHistory.load();
         toast('success', type === 'sell' ? '已同步卖出到持仓' : '已保存');
       } catch (err) { toast('error', err.message); }
     });
