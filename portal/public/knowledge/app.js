@@ -79,6 +79,7 @@ async function settings() {
   text('worker-status', worker.online ? `${worker.label || 'GPU工作器'} · 在线 · 仅GPU处理，已禁用CPU接单 · ${c.pipeline?.version === 1 ? '分阶段并发已启用' : '当前设备为旧版，空闲更新后启用并发'}` : worker.configured ? '等待本机GPU工作器就绪，任务已暂停等待；不会切换到CPU。' : '尚未连接GPU工作器，请安装并配对本机工作器。任务会保留在队列中等待。');
   const info = c[state.settings.backend];
   text('backend-description', info ? `${worker.online && info.ready ? '工作器已就绪' : '工作器未就绪'} · ${state.settings[prefix + 'Model'] || info.model || info.detail || ''} · 强度：${state.settings[prefix + 'Effort'] || '工作器默认'}` : '选择总结方式后，由已连接工作器执行。');
+  $('upload-toggle').disabled = $('settings-toggle').disabled = $('worker-token').disabled = false;
 }
 function renderBatch() {
   show('batch-publication', can('publish:batch:edit') && can('publish:edit') && can('notes:view'));
@@ -297,18 +298,23 @@ async function uploadFile(file, metadata, entry = null, report = () => {}) {
   finally { if (entry) state.resume = null; state.uploading = false; $('upload-submit').disabled = false; $('upload-mode').disabled = false; $('video-file').disabled = false; linkImport.mode(); }
 }
 async function boot() {
-  const meResponse = await fetch('/api/me'); if (meResponse.redirected) return location.assign('/login/');
-  const me = await meResponse.json(); state.permissions = me.permissions || []; state.owner = me.userId;
+  let me;
+  try { me = await window.portalPage.user(); }
+  catch (e) { if (e.status === 401) return location.assign('/login/'); throw e; }
+  state.permissions = me.permissions || []; state.owner = me.userId;
   if (me.isGuest || !can('view')) throw new Error('请登录具备知识库权限的账号');
   show('upload-toggle', can('upload:edit') && can('process:edit')); show('worker-token', can('worker:edit'));
   $('upload-batch-option').hidden = !can('queue:edit') || !can('import:edit');
   $('video-file').multiple = can('queue:edit') && can('queue:view');
-  await uploadQueue.refresh();
   show('upload-mode-label', can('import:edit') && can('upload:edit') && can('process:edit')); linkImport.mode();
   createDevicePanel({ can, api, send, onError: error });
   const bilibili = createBilibiliPanel({ element: $, can, api, send, onError: error, onDefaults: s => linkImport.defaults(s) });
-  await bilibili.refresh();
-  await settings();
+  $('upload-toggle').disabled = $('settings-toggle').disabled = $('worker-token').disabled = true;
+  const configuration = (async () => {
+    try { await bilibili.refresh(); }
+    finally { await settings(); }
+  })();
+  const preparation = Promise.allSettled([configuration, uploadQueue.refresh()]);
   if (can('notes:view')) {
     await load();
     const documentId = new URL(location.href).searchParams.get('document');
@@ -317,14 +323,18 @@ async function boot() {
       if (/^#kb-heading-\d+$/.test(location.hash)) document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: 'start' });
     }
   }
+  for (const result of await preparation) { if (result.status === 'rejected') error(result.reason); }
+  let polling = false;
   setInterval(async () => {
-    if (document.hidden || state.uploading) return;
+    if (document.hidden || state.uploading || polling) return;
+    polling = true;
     try {
       await settings();
       const queueState = await uploadQueue.refresh();
       if (can('notes:view') && (queueState?.active > 0 || ['queued', 'processing', 'uploading', 'importing'].some(status => state.statusCounts[status] > 0) || state.current?.storage?.provider === '115' && state.current.storage.state !== 'ready' || state.documents.some(d => d.storage?.provider === '115' && d.storage.state !== 'ready'))) await load(undefined, true);
       if (!state.editing && state.current && (['queued', 'processing', 'importing'].includes(state.current.status) || state.current.storage?.provider === '115' && state.current.storage.state !== 'ready')) await open(state.current.id, true);
     } catch { /* Keep existing content during temporary connection loss. */ }
+    finally { polling = false; }
   }, 5000);
 }
 $('settings-toggle').onclick = () => show('settings', $('settings').hidden);

@@ -1,5 +1,5 @@
 (() => {
-  const $=id=>document.getElementById(id);let state,scopeRequest=0,loading=false;
+  const $=id=>document.getElementById(id);let state,scopeRequest=0,loading=false,settingsRequest;
   const message=(text,type='')=>{$('message').textContent=text;$('message').className='notice '+type;};
   async function api(path,options={}){
     const response=await fetch('/api/codex-cli/'+path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...options.headers}});
@@ -27,6 +27,20 @@
     }catch(error){if(token===scopeRequest)message(error.message,'error');return false;}
     finally{if(token===scopeRequest)$('runtime-fields').disabled=!state.permissions.editRuntime;}
   }
+  function loadSettings() {
+    if (!state || $('settings-view').hidden) return;
+    if (!settingsRequest) {
+      settingsRequest = Promise.all([
+        state.permissions.viewRuntime ? runtime() : true,
+        state.permissions.viewUsage ? api('usage').then(result => {
+          $('usage').textContent = result.text;
+        }).catch(error => { $('usage').textContent = error.message; }) : undefined
+      ]).then(([runtimeOk]) => {
+        if (runtimeOk) message('已连接服务器。模型与强度选项来自当前账号。');
+      });
+    }
+    return settingsRequest;
+  }
   async function refresh(){
     if(loading)return;loading=true;$('refresh').disabled=true;message('正在读取服务器状态…');
     try{
@@ -43,17 +57,18 @@
       $('qq-unavailable').hidden=state.permissions.viewRuntime;$('runtime-form').hidden=!state.permissions.viewRuntime;$('save-runtime').hidden=!state.permissions.editRuntime;
       options($('scope'),[{value:'',label:'我的 QQ 私聊'},...state.groups.map(g=>({value:g,label:'群聊 · '+g}))],$('scope').value);
       options($('runtime-model'),[{value:'',label:'默认（继承服务器）'},...state.models.map(m=>({value:m.id,label:m.name+' · '+m.id}))],'');
-      const runtimeOk=!state.permissions.viewRuntime || await runtime();
       $('usage-panel').hidden=!state.permissions.viewUsage;
-      if(state.permissions.viewUsage){try{$('usage').textContent=(await api('usage')).text;}catch(error){$('usage').textContent=error.message;}}
       $('updated').textContent='最近更新 · '+new Date().toLocaleString('sv-SE', { timeZone:'Asia/Shanghai' })+'（北京时间）';
-      if(runtimeOk)message('已连接服务器。模型与强度选项来自当前账号。');
+      settingsRequest = undefined;
+      if ($('settings-view').hidden) message('已连接服务器。模型与强度选项来自当前账号。');
+      else await loadSettings();
     }catch(error){message(error.message,'error');}
     finally{loading=false;$('refresh').disabled=false;}
   }
   $('server-model').addEventListener('change',()=>efforts('server'));
   $('runtime-model').addEventListener('change',()=>{efforts('runtime');effective();});$('runtime-effort').addEventListener('change',effective);
   $('scope').addEventListener('change',runtime);$('refresh').addEventListener('click',refresh);
+  document.addEventListener('codex-view', event => { if (event.detail === 'settings') void loadSettings(); });
   $('server-form').addEventListener('submit',async event=>{
     event.preventDefault();$('save-server').disabled=true;
     try{await api('settings',{method:'PUT',body:JSON.stringify({model:$('server-model').value,effort:$('server-effort').value,version:state.version})});await refresh();message('服务器默认设置已保存，后续任务生效。','success');}catch(error){message(error.message,'error');}finally{$('save-server').disabled=false;}

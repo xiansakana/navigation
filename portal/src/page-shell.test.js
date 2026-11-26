@@ -35,3 +35,18 @@ test('page startup coalesces concurrent reads and retries after a transient erro
         window.close();
     }
 });
+
+test('session redirects surface as authentication errors without parsing HTML', async () => {
+    const { window } = new JSDOM('', { runScripts: 'outside-only' });
+    try {
+        window.fetch = async () => ({
+            redirected: true,
+            url: 'https://example.test/login/?return=%2Fknowledge%2F',
+            json() { assert.fail('a login page is not JSON'); }
+        });
+        window.eval(source);
+        await assert.rejects(window.portalPage.user(), { status: 401 });
+    } finally {
+        window.close();
+    }
+});

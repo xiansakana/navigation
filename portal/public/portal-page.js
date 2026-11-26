@@ -5,6 +5,11 @@
     function read(path) {
         if (!reads.has(path)) {
             const request = fetch(path).then(async (response) => {
+                if (response.redirected && /^\/login(?:\/|\.html|$)/.test(new URL(response.url).pathname)) {
+                    const error = new Error('请先登录');
+                    error.status = 401;
+                    throw error;
+                }
                 const data = await response.json();
                 if (!response.ok || data.ok === false) {
                     const error = new Error(data.error || response.statusText);
