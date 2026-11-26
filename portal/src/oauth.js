@@ -214,7 +214,7 @@ export function handleOAuthStart(providerId, req, res, config, secret) {
     res.end();
 }
 
-export async function handleOAuthCallback(providerId, req, res, config, secret) {
+export async function handleOAuthCallback(providerId, req, res, config, secret, repository = { load: loadRbac, save: saveRbac }) {
     var setup = getProviderConfig(config, providerId);
     if (!setup) {
         res.writeHead(302, { Location: '/login/?error=' + encodeURIComponent('OAuth 未启用') });
@@ -237,10 +237,10 @@ export async function handleOAuthCallback(providerId, req, res, config, secret) 
     }
     try {
         var profile = await resolveOAuthProfile(providerId, setup.cfg, setup.provider, code);
-        var rbac = loadRbac(config);
+        var rbac = await repository.load(config);
         var defaultRoleId = config.oauth?.defaultRoleId || 'role_guest';
         var user = upsertOAuthUser(rbac, Object.assign({}, profile, { defaultRoleId: defaultRoleId }));
-        saveRbac(rbac);
+        await repository.save(rbac);
         res.writeHead(302, {
             Location: '/',
             'Set-Cookie': [

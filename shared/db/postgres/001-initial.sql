@@ -1,6 +1,12 @@
 -- PostgreSQL baseline for the shared Navigation database.
 -- Apply with search_path set to the empty target schema.
 
+CREATE TABLE navigation_schema_migrations (
+  version text PRIMARY KEY
+);
+
+INSERT INTO navigation_schema_migrations (version) VALUES ('001-initial');
+
 CREATE TABLE blog_comments (
   id TEXT PRIMARY KEY,
   post_id TEXT NOT NULL,

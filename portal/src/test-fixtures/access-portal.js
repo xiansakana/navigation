@@ -11,7 +11,7 @@ import { modulePolicy } from '../access-policy.js';
 import { createSessionCookie } from '../auth.js';
 import { createBookkeepingStore } from '../bookkeeping-store.js';
 
-export async function startAccessPortal() {
+export async function startAccessPortal({ extraEnv = {} } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'navigation-access-'));
   const previousDb = process.env.NAVIGATION_DB_PATH;
   process.env.NAVIGATION_DB_PATH = path.join(root, 'fixture.db');
@@ -40,7 +40,7 @@ export async function startAccessPortal() {
   store.saveEntry(b.id, { date: '2026-10-24T12:00:00', type: '支出', amount: 3, accountId: account });
   let output = '';
   const child = spawn(process.execPath, [fileURLToPath(new URL('../server.js', import.meta.url))], { windowsHide: true,
-    env: { ...process.env, PORTAL_CONFIG_PATH: configFile, NAVIGATION_EXTERNAL_WORKERS: '1', KNOWLEDGE_DATA_DIR: path.join(root, 'knowledge'), NODE_TEST_CONTEXT: 'fixture' } });
+    env: { ...process.env, ...extraEnv, PORTAL_CONFIG_PATH: configFile, NAVIGATION_EXTERNAL_WORKERS: '1', KNOWLEDGE_DATA_DIR: path.join(root, 'knowledge'), NODE_TEST_CONTEXT: 'fixture' } });
   child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { output += data; });
   const baseUrl = 'http://127.0.0.1:' + port;
   const cleanup = async () => {

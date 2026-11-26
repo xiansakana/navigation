@@ -15,7 +15,7 @@ import { loadRbacBlob, saveRbacBlob, rbacRevision, copyRbac } from '../../shared
 var rbacCache = null;
 var rbacCacheConfigKey = null;
 
-function configServicesKey(config) {
+export function configServicesKey(config) {
     return JSON.stringify((config.services || []).map(function(s) { return s.id; }));
 }
 
@@ -335,7 +335,7 @@ function migrateRolePermissions(permissions) {
     return Array.from(out);
 }
 
-export function syncRbacPermissions(data, config) {
+export function syncRbacPermissions(data, config, { persist = true } = {}) {
     var before = JSON.stringify(data);
     ensureAccessPolicy(data);
     var servicePerms = buildServicePermissions(config.services);
@@ -373,7 +373,7 @@ export function syncRbacPermissions(data, config) {
     }
     if (!data.userPrefs) data.userPrefs = {};
     ensureGuestAccess(data, config);
-    if (JSON.stringify(data) !== before) {
+    if (persist && JSON.stringify(data) !== before) {
         saveRbac(data);
     }
     return data;
@@ -495,7 +495,7 @@ export function getStockManagePrefs(data, userId) {
     };
 }
 
-export function updateUserPrefs(data, userId, patch) {
+export function updateUserPrefs(data, userId, patch, { persist = true } = {}) {
     if (!userId) throw new Error('无效用户');
     if (!data.userPrefs) data.userPrefs = {};
     var current = data.userPrefs[userId] || {};
@@ -508,7 +508,7 @@ export function updateUserPrefs(data, userId, patch) {
         }
     });
     data.userPrefs[userId] = next;
-    saveRbac(data);
+    if (persist) saveRbac(data);
     return next;
 }
 

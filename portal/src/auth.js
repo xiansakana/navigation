@@ -67,9 +67,9 @@ export function resolveLoggedInPermissions(rbac, user, config = {}) {
     )));
 }
 
-export function resolveSessionUser(session, config) {
+export function resolveSessionUser(session, config, rbac) {
     if (!session?.userId) return null;
-    var rbac = loadRbac(config);
+    rbac ??= loadRbac(config);
     var user = findUserById(rbac, session.userId);
     if (user && user.enabled !== false) {
         return {
@@ -93,8 +93,7 @@ export function isAnonymousGuestEnabled(config) {
     return config?.auth?.anonymousGuest !== false;
 }
 
-export function resolveGuestContext(config) {
-    var rbac = loadRbac(config);
+export function resolveGuestContext(config, rbac = loadRbac(config)) {
     var guestUsername = config?.auth?.guestUsername || 'guest';
     var user = findUserByUsername(rbac, guestUsername);
     if (!user || user.enabled === false) return null;
@@ -105,11 +104,12 @@ export function resolveGuestContext(config) {
     };
 }
 
-export function resolveRequestUser(req, config) {
+export function resolveRequestUser(req, config, rbac) {
     var secret = config?.auth?.sessionSecret;
     var session = getSession(req, secret);
     if (session) {
-        var ctx = resolveSessionUser(session, config);
+        rbac ??= loadRbac(config);
+        var ctx = resolveSessionUser(session, config, rbac);
         if (ctx) {
             return {
                 userId: ctx.user.id,
@@ -122,7 +122,7 @@ export function resolveRequestUser(req, config) {
         }
     }
     if (!isAnonymousGuestEnabled(config)) return null;
-    var guest = resolveGuestContext(config);
+    var guest = resolveGuestContext(config, rbac);
     if (!guest) return null;
     return {
         userId: guest.user.id,
@@ -134,8 +134,7 @@ export function resolveRequestUser(req, config) {
     };
 }
 
-export function verifyLogin(username, password, config) {
-    var rbac = loadRbac(config);
+export function verifyLogin(username, password, config, rbac = loadRbac(config)) {
     var user = authenticateUser(rbac, username, password);
     if (user && user.enabled !== false) return user;
     return null;

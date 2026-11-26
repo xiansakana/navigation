@@ -11,14 +11,18 @@ export async function runKnowledgeImport(db, directoryFor, authorize, { download
   if (!job) return false;
   const uid = job.user_id, id = job.document_id, directory = directoryFor(id);
   const controller = new AbortController(), signal = AbortSignal.any([controller.signal, AbortSignal.timeout(45 * 60000)]);
-  const allowed = () => authorize(uid) && store.imports.get(uid, id)?.lease === job.lease;
-  const heartbeat = setInterval(() => {
-    try { if (!allowed() || !store.imports.touch(job)) controller.abort(); }
+  const allowed = async () => await authorize(uid) && store.imports.get(uid, id)?.lease === job.lease;
+  let checking = false;
+  const heartbeat = setInterval(async () => {
+    if (checking) return;
+    checking = true;
+    try { if (!await allowed() || !store.imports.touch(job)) controller.abort(); }
     catch (e) { if (!/^SQLITE_(BUSY|LOCKED)/.test(e.code || '')) controller.abort(); }
+    finally { checking = false; }
   }, 10000);
   let result;
   try {
-    if (!allowed()) throw new Error('账号或链接导入权限已撤销');
+    if (!await allowed()) throw new Error('账号或链接导入权限已撤销');
     await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
     const disk = await fsp.statfs(directory);
     if (disk.bavail * disk.bsize < 3 * MAX_VIDEO_BYTES + 5 * 1024 ** 3) throw new Error('服务器可用空间不足');
@@ -33,7 +37,7 @@ export async function runKnowledgeImport(db, directoryFor, authorize, { download
       } catch (e) { if (!/^SQLITE_(BUSY|LOCKED)/.test(e.code || '')) throw e; }
     } });
     const hashes = await hashFile(result.file);
-    if (!allowed()) throw new Error('账号、权限或导入任务已变化');
+    if (!await allowed()) throw new Error('账号、权限或导入任务已变化');
     await fsp.rename(result.file, path.join(directory, 'source'));
     db.transaction(() => {
       if (!store.imports.done(job, result.media)) throw new Error('导入任务已过期');

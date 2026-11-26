@@ -135,7 +135,8 @@ def copy_baseline(source, target, namespace, tables):
         JOIN pg_namespace n ON n.oid = c.relnamespace
         JOIN pg_attribute a ON a.attrelid = c.oid
         JOIN pg_type t ON t.oid = a.atttypid
-        WHERE n.nspname = %s AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
+        WHERE n.nspname = %s AND c.relkind = 'r' AND c.relname <> 'navigation_schema_migrations'
+          AND a.attnum > 0 AND NOT a.attisdropped
         ORDER BY c.relname, a.attnum
     """, (namespace,)):
         schema.setdefault(table_name, []).append((column, pg_type, bool(identity)))

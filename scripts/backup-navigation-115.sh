@@ -31,5 +31,13 @@ if ((${#pending[@]})); then
   # Completing a retry is this run's backup; avoid immediately exporting another large archive.
   exit 0
 fi
-archive="$("$PYTHON" "$ROOT/scripts/backup-navigation.py" --destination "$DESTINATION" --keep 3 --logical)"
+case "${NAVIGATION_DATABASE_ENGINE:-sqlite}" in
+  sqlite) snapshot_args=(--logical) ;;
+  postgres)
+    : "${NAVIGATION_POSTGRES_BACKUP_SERVICE:?Configure the libpq PostgreSQL backup service}"
+    snapshot_args=(--postgres-service "$NAVIGATION_POSTGRES_BACKUP_SERVICE")
+    ;;
+  *) echo 'Invalid NAVIGATION_DATABASE_ENGINE' >&2; exit 1 ;;
+esac
+archive="$("$PYTHON" "$ROOT/scripts/backup-navigation.py" --destination "$DESTINATION" --keep 3 "${snapshot_args[@]}")"
 upload "$archive"

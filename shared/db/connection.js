@@ -29,6 +29,10 @@ function loadBetterSqlite3() {
 }
 
 export function getDatabase(options = {}) {
+  const engine = process.env.NAVIGATION_DATABASE_ENGINE || 'sqlite';
+  if (engine !== 'sqlite') {
+    throw Object.assign(new Error('当前运行时尚未接入所选数据库引擎'), { status: 503, code: 'DATABASE_ENGINE_UNAVAILABLE' });
+  }
   const dbPath = resolveDbPath(options.dbPath);
   if (dbInstance && dbPathUsed === dbPath) {
     return dbInstance;

@@ -1,5 +1,6 @@
 import { sameOriginWrite } from '../../shared/http.js';
 import { getDatabase } from '../../shared/db/index.js';
+import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
 import { hasPermission } from './rbac.js';
 import { calculateChart } from './mingli-chart.js';
 import { createMingliStore } from './mingli-store.js';
@@ -9,11 +10,22 @@ import { parseCaseFilters } from './mingli-filters.js';
 import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
 import { canKnowledge } from './knowledge.js';
 
+let postgresDatabase;
 let postgresStore;
 function activeCaseStore() {
   const postgres = process.env.NAVIGATION_MINGLI_POSTGRES_URL;
   if (!postgres) return createMingliStore(getDatabase());
-  return postgresStore ||= createMingliPostgresStore(createPostgresDatabase(postgres));
+  postgresDatabase ||= createPostgresDatabase(postgres);
+  return postgresStore ||= verifyPostgresSchema(postgresDatabase).then(() => createMingliPostgresStore(postgresDatabase)).catch(error => {
+    postgresStore = undefined;
+    throw error;
+  });
+}
+
+export async function checkMingliPostgres() {
+  if (!process.env.NAVIGATION_MINGLI_POSTGRES_URL) return;
+  await activeCaseStore();
+  await verifyPostgresSchema(postgresDatabase);
 }
 
 export function canMingli(session, action = 'view') {
@@ -65,7 +77,7 @@ export async function handleMingliApi(req, res, url, session, json, getCaseStore
         offset: Math.min(100000, Math.max(0, Math.floor(Number(url.searchParams.get('offset')) || 0))), limit: Math.max(1, Math.min(100, Math.floor(Number(url.searchParams.get('limit')) || 30))) }) });
     }
     if (route === '/chart') return json(res, 200, { ok: true, chart: calculateChart(await body(req, session.isGuest ? 4096 : 128 * 1024)) });
-    const store = getCaseStore(), uid = session.userId;
+    const store = await getCaseStore(), uid = session.userId;
     if (route === '/categories' && method === 'GET') return json(res, 200, { ok: true, ...await store.categories.list(uid) });
     if (action === 'categories:edit') {
       const item = method === 'DELETE' ? await store.categories.remove(uid, category[1]) : await store.categories.save(uid, await body(req), category?.[1]);
@@ -96,6 +108,7 @@ export async function handleMingliApi(req, res, url, session, json, getCaseStore
     if (!item) return json(res, 404, { ok: false, error: '案例不存在' });
     return json(res, method === 'POST' ? 201 : 200, { ok: true, ...(method === 'DELETE' ? {} : { case: item }) });
   } catch (e) {
+    if (e.code === 'POSTGRES_NOT_READY') return json(res, 503, { ok: false, error: e.message });
     if (/^(SQLITE_|[0-9A-Z]{5}$|ECONN|ETIMEDOUT)/.test(e.code || '') || e.name === 'PostgresConnectionError') {
       console.error('[mingli]', e.code);
       return json(res, 500, { ok: false, error: '案例保存失败，请稍后重试' });

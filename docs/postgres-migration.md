@@ -35,6 +35,14 @@ Portal 的命理个人案例已接入异步 PostgreSQL 查询和事务。独立�
 
 GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访客拒绝、不同账号的数据隔离、分类约束、条件筛选、批量归类及并发导入。待其余业务适配后再执行全站切换。
 
+隔离环境可用 `NAVIGATION_RBAC_POSTGRES_URL` 为 Portal 选择 PostgreSQL 身份源。密码与 OAuth 登录、角色和数据策略管理、数据空间、以及 Portal 访问审计使用这一来源。真实 Portal 集成测试覆盖密码登录、撤权、已有会话和跨用户范围访问。Codex、QQ 和 Torn 的独立进程也接入统一身份源后，才能切换生产配置。迁移文件包含数据库版本标记，Portal 在任一已配置数据库不可用或版本不匹配时报告未就绪。SQLite 数据库入口拒绝全站 PostgreSQL 配置，防止切换时静默写入 SQLite。
+
+## PostgreSQL 备份与恢复
+
+在备份机器安装与 PostgreSQL 服务端同版本的 `pg_dump`、`pg_restore` 和 `psql`。全站切换后，为现有 115 备份任务配置 `NAVIGATION_DATABASE_ENGINE=postgres` 和 `NAVIGATION_POSTGRES_BACKUP_SERVICE`，由 libpq 服务配置提供连接。备份账号需可读 `navigation` 下的表及序列。数据库使用事务一致的 `pg_dump` 自定义格式，备份任务继续用既有加密和上传验证流程。
+
+解密归档后，在独立实例预先建好一个空的 `navigation_restore_*` 数据库，通过 `python scripts/backup-navigation.py --verify ARCHIVE --restore-postgres-service SERVICE` 核对归档和恢复。恢复使用单一事务。应用数据库账号和授权由部署配置重新建立。
+
 ## 应用切换条件
 
 运行时需要 PostgreSQL 连接池，以及将 Portal、后台队列、股票、抄底和 QQ 业务改为异步数据库读写。

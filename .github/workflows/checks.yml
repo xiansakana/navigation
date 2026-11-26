@@ -65,3 +65,25 @@ jobs:
       - run: node --test scripts/test-mingli-postgres.mjs
         env:
           PGPORT: ${{ job.services.postgres.ports[5432] }}
+      - name: Verify PostgreSQL archive and restore
+        env:
+          PGPORT: ${{ job.services.postgres.ports[5432] }}
+          NAVIGATION_PG_TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          clients="$RUNNER_TEMP/navigation-pg-clients"
+          mkdir -p "$clients"
+          for tool in pg_dump pg_restore psql; do
+            printf '#!/usr/bin/env bash\nexec docker exec -i -e PGSERVICEFILE=/tmp/navigation-test-pg-service.conf "$NAVIGATION_PG_TEST_CONTAINER" %s "$@"\n' "$tool" > "$clients/$tool"
+            chmod +x "$clients/$tool"
+          done
+          docker exec -i "$NAVIGATION_PG_TEST_CONTAINER" sh -c 'umask 077; cat > /tmp/navigation-test-pg-service.conf' <<'EOF'
+          [backup-source]
+          host=/var/run/postgresql
+          dbname=navigation_rehearsal_ci
+          user=rehearsal
+          [backup-restore]
+          host=/var/run/postgresql
+          dbname=navigation_restore_backup_ci
+          user=rehearsal
+          EOF
+          PATH="$clients:$PATH" python -m unittest discover -s scripts -p test_backup_postgres.py -v

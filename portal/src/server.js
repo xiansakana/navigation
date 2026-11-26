@@ -1,4 +1,5 @@
 import { injectPageScripts } from './page-shell.js';
+import { portalIdentity as identity } from './postgres-rbac.js';
 import { instrumentRequest } from '../../shared/request-log.js';
 import { moduleApiHandler } from './module-api.js';
 import { tornToolboxAccess } from './torn-toolbox-access.js';
@@ -36,7 +37,6 @@ import {
     hasStockManageFeature,
     canViewAdmin,
     hasPermission,
-    loadRbac,
     getStockManagePrefs,
     updateUserPrefs
 } from './rbac.js';
@@ -58,7 +58,7 @@ import { resumeVideoJobs } from './blog.js';
 import { startThumbnailWorker } from './blog-media-process.js';
 import { createResourceMonitor, canViewResources } from './resources.js';
 import { canBookkeep } from './bookkeeping.js';
-import { canMingli } from './mingli.js';
+import { canMingli, checkMingliPostgres } from './mingli.js';
 import { canTornChain } from './torn-chain.js';
 import { canKnowledge } from './knowledge.js';
 import { handleKnowledgeWorkerApi } from './knowledge-worker-api.js';
@@ -69,6 +69,7 @@ import { canCodexCli } from './codex-cli.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
 var config = loadConfig();
+const readIdentity = () => identity.load(config);
 sessionSecret(config);
 if (config.runtime?.externalWorkers) process.env.NAVIGATION_EXTERNAL_WORKERS = '1';
 const loginLimiter = createLoginLimiter();
@@ -126,9 +127,13 @@ function getSessionSecret() {
     return sessionSecret(config);
 }
 
-function requireAuth(req, res, options) {
+async function requestIdentity(req) {
+    return resolveRequestUser(req, config, await readIdentity());
+}
+
+async function requireAuth(req, res, options) {
     var opts = options || {};
-    var ctx = resolveRequestUser(req, config);
+    var ctx = await requestIdentity(req);
     if (!ctx) {
         redirect(res, '/login/');
         return null;
@@ -137,12 +142,12 @@ function requireAuth(req, res, options) {
         redirect(res, '/login/');
         return null;
     }
-    return {
+    return Object.defineProperty({
         username: ctx.username,
         userId: ctx.userId,
         permissions: ctx.permissions,
         isGuest: ctx.isGuest
-    };
+    }, 'rbac', { value: ctx.rbac });
 }
 
 function menuToService(menu, userAgent) {
@@ -171,8 +176,7 @@ function menuToService(menu, userAgent) {
 
 function publicServices(userCtx, userAgent) {
     if (!userCtx) return [];
-    var rbac = loadRbac(config);
-    return getVisibleMenus(rbac, userCtx.permissions)
+    return getVisibleMenus(userCtx.rbac, userCtx.permissions)
         .filter(function(menu) { return menu.id !== 'menu_admin'; })
         .map(function(menu) { return menuToService(menu, userAgent); });
 }
@@ -180,7 +184,8 @@ function publicServices(userCtx, userAgent) {
 async function handleApi(req, res, url, session) {
     if (url.pathname === '/api/me/torn-toolbox-access' && req.method === 'GET') {
         res.setHeader('Cache-Control', 'no-store');
-        return json(res, 200, { ok: true, ...tornToolboxAccess(req, session, config) });
+        return json(res, 200, { ok: true, ...tornToolboxAccess(req, session, config, (request, actor, module, cfg, action) =>
+            requestDataAccess(request, actor, module, cfg, action, actor.rbac)) });
     }
     const moduleHandler = moduleApiHandler(url.pathname);
     if (moduleHandler) {
@@ -188,7 +193,7 @@ async function handleApi(req, res, url, session) {
             const module = findModuleApi(url.pathname);
             // Author-published text remains a separate deliberately public projection.
             const publicRead = module.id === 'knowledge' && url.pathname.startsWith('/api/knowledge/public');
-            const access = requestDataAccess(req, session, module.id, config, publicRead ? 'read' : undefined);
+            const access = requestDataAccess(req, session, module.id, config, publicRead ? 'read' : undefined, session.rbac);
             auditDataAccess(req, res, access);
             if (access.binding) { stripPortalIdentity(req); req.url = url.pathname + url.search; return proxyHttpRequest(access.binding, req, res); }
             return await moduleHandler(req, res, url, scopedSession(session, access), { json, config, resourceMonitor });
@@ -198,14 +203,14 @@ async function handleApi(req, res, url, session) {
         const moduleId = url.searchParams.get('module') || moduleForPath(url.searchParams.get('path') || '', config.services);
         if (!accessModules(config.services).some(m => m.id === moduleId)) return json(res, 400, { ok: false, error: '模块不存在' });
         if (req.method === 'GET') {
-            let selected = null; try { selected = requestDataAccess(req, session, moduleId, config, 'read').scope; } catch { /* Revoked selection must be replaced explicitly. */ }
-            return json(res, 200, { ok: true, module: moduleId, selected, scopes: availableDataAccess(session, moduleId, config) });
+            let selected = null; try { selected = requestDataAccess(req, session, moduleId, config, 'read', session.rbac).scope; } catch { /* Revoked selection must be replaced explicitly. */ }
+            return json(res, 200, { ok: true, module: moduleId, selected, scopes: availableDataAccess(session, moduleId, config, session.rbac) });
         }
         if (req.method !== 'PUT') return json(res, 405, { ok: false, error: '不支持此方法' });
         try {
             const input = await readJson(req, 2048);
             req.headers['x-navigation-data-scope'] = input.scope;
-            const access = requestDataAccess(req, session, moduleId, config, 'read');
+            const access = requestDataAccess(req, session, moduleId, config, 'read', session.rbac);
             res.setHeader('Set-Cookie', scopeCookie(moduleId) + '=' + encodeURIComponent(access.scope) + '; Path=/; HttpOnly; SameSite=Lax' + (cookieOptions(config).secure ? '; Secure' : ''));
             return json(res, 200, { ok: true, scope: access.scope });
         } catch (error) { return json(res, error.status || 400, { ok: false, error: error.message }); }
@@ -215,14 +220,14 @@ async function handleApi(req, res, url, session) {
             path: m.id === 'blog' ? '/' : m.id === 'torn-chain' ? '/torn-toolbox/chain/' : m.id === 'torn-users' ? '/torn-toolbox/chain/#users' : m.id === 'torn-factions' ? '/torn-toolbox/chain/#factions' : (config.services || []).find(s => s.id === m.id)?.path || '/' + m.id + '/' })) });
     }
     if (req.method === 'GET' && url.pathname === '/api/me') {
-        var rbac = loadRbac(config);
+        var rbac = session.rbac;
         var stockManagePrefs = getStockManagePrefs(rbac, session.userId);
         let dataContext = null, visiblePermissions = session.permissions;
         try {
             const source = new URL(req.headers.referer || '', 'http://' + req.headers.host);
             const moduleId = moduleForPath(source.pathname, config.services);
             if (moduleId) {
-                const access = requestDataAccess(req, session, moduleId, config, 'read');
+                const access = requestDataAccess(req, session, moduleId, config, 'read', session.rbac);
                 visiblePermissions = access.permissions;
                 dataContext = { module: moduleId, scope: access.scope, label: access.label, writable: access.writable };
             }
@@ -245,7 +250,7 @@ async function handleApi(req, res, url, session) {
         }
         try {
             var body = await readJson(req);
-            var rbacData = loadRbac(config);
+            var rbacData = await readIdentity();
             var patch = {};
             if (body.stockManage && typeof body.stockManage === 'object') {
                 var sm = body.stockManage;
@@ -255,13 +260,14 @@ async function handleApi(req, res, url, session) {
                 if (sm.colVis && typeof sm.colVis === 'object') stockPatch.colVis = sm.colVis;
                 patch.stockManage = stockPatch;
             }
-            updateUserPrefs(rbacData, session.userId, patch);
+            updateUserPrefs(rbacData, session.userId, patch, { persist: false });
+            await identity.save(rbacData);
             return json(res, 200, {
                 ok: true,
                 prefs: { stockManage: getStockManagePrefs(rbacData, session.userId) }
             });
         } catch (err) {
-            return json(res, 400, { ok: false, error: err.message });
+            return json(res, err.status || 400, { ok: false, error: err.message });
         }
     }
 
@@ -270,7 +276,7 @@ async function handleApi(req, res, url, session) {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/menus') {
-        var rbacMenus = loadRbac(config);
+        var rbacMenus = session.rbac;
         var menus = getVisibleMenus(rbacMenus, session.permissions).map(function(menu) {
             return menuToService(menu, req.headers['user-agent']);
         });
@@ -284,7 +290,7 @@ async function handleApi(req, res, url, session) {
 
     if (url.pathname.startsWith('/api/piclist/')) {
         try {
-            const access = requestDataAccess(req, session, 'piclist', config);
+            const access = requestDataAccess(req, session, 'piclist', config, undefined, session.rbac);
             auditDataAccess(req, res, access);
             if (access.binding) { stripPortalIdentity(req); return proxyHttpRequest(access.binding, req, res); }
         }
@@ -338,7 +344,7 @@ async function handleApi(req, res, url, session) {
         if (session.isGuest) {
             return json(res, 401, { ok: false, error: '请先登录' });
         }
-        return handleAdminApi(req, res, url, session, config, json, readJson);
+        return handleAdminApi(req, res, url, session, config, json, readJson, identity);
     }
 
     return json(res, 404, { ok: false, error: 'Not Found' });
@@ -354,7 +360,7 @@ async function handleLoginApi(req, res) {
         if (typeof body.username !== 'string' || typeof body.password !== 'string' || body.username.length > 128 || body.password.length > 1024) return json(res, 400, { ok: false, error: '登录信息无效' });
         const retry = loginLimiter.check(req, body.username, config);
         if (retry) { res.setHeader('Retry-After', String(retry)); return json(res, 429, { ok: false, error: '登录尝试过于频繁，请稍后重试' }); }
-        var user = verifyLogin(body.username, body.password, config);
+        var user = verifyLogin(body.username, body.password, config, await readIdentity());
         if (!user) {
             loginLimiter.failure(req, body.username, config);
             return json(res, 401, { ok: false, error: '用户名或密码错误' });
@@ -363,7 +369,7 @@ async function handleLoginApi(req, res) {
         res.setHeader('Set-Cookie', createSessionCookie(user.id, getSessionSecret(), cookieOptions(config)));
         return json(res, 200, { ok: true });
     } catch (err) {
-        return json(res, 400, { ok: false, error: err.message });
+        return json(res, err.status || 400, { ok: false, error: err.message });
     }
 }
 
@@ -428,12 +434,13 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
         // 思源 API 即使用 POST 拉取文档，不可在 Portal 层拦截 POST。
         // AList /s/ /sd/ /sp/ 短链分享对访客开放。
         try {
-            const publicSession = resolveRequestUser(req, config);
-            dataAccess = requestDataAccess(req, publicSession || {}, ctx.service.id, config, 'read');
+            const rbac = await readIdentity();
+            const publicSession = resolveRequestUser(req, config, rbac);
+            dataAccess = requestDataAccess(req, publicSession || {}, ctx.service.id, config, 'read', rbac);
             if (dataAccess.binding) ctx = { ...ctx, service: { ...dataAccess.binding, id: ctx.service.id, path: ctx.service.path } };
         } catch (error) { sendError(req, res, browserUrl, error.status || 403, error.message); return true; }
     } else {
-        proxySession = requireAuth(req, res);
+        proxySession = await requireAuth(req, res);
         if (!proxySession) return true;
 
         if (!canAccessProxiedService(proxySession.permissions, ctx.service)) {
@@ -480,7 +487,7 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
         }
         try {
             dataAccess = requestDataAccess(req, proxySession, ctx.service.id, config,
-                ['notes', 'napcat', 'piclist'].includes(ctx.service.id) ? 'write' : undefined);
+                ['notes', 'napcat', 'piclist'].includes(ctx.service.id) ? 'write' : undefined, proxySession.rbac);
             auditDataAccess(req, res, dataAccess);
             if (dataAccess.binding) ctx = { ...ctx, service: { ...dataAccess.binding, id: ctx.service.id, path: ctx.service.path } };
         } catch (error) { sendError(req, res, browserUrl, error.status || 403, error.message); return true; }
@@ -592,7 +599,11 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
 
 async function handleRequest(req, res) {
     if (req.method === 'GET' && ['/healthz', '/readyz'].includes(new URL(req.url, 'http://localhost').pathname)) {
-        if (req.url.startsWith('/readyz')) getDatabase().prepare('SELECT 1').get();
+        if (req.url.startsWith('/readyz')) {
+            getDatabase().prepare('SELECT 1').get();
+            try { await identity.ready(); await checkMingliPostgres(); }
+            catch { return json(res, 503, { ok: false, service: 'portal' }); }
+        }
         return json(res, 200, { ok: true, service: 'portal' });
     }
     if (serveUiAsset(req, res)) return;
@@ -603,8 +614,9 @@ async function handleRequest(req, res) {
         return res.end();
     }
     if (url.pathname.startsWith('/api/knowledge/worker/')) {
+        const rbac = await readIdentity();
         return handleKnowledgeWorkerApi(req, res, url, json, uid => {
-            const ctx = resolveSessionUser({ userId: uid }, config);
+            const ctx = resolveSessionUser({ userId: uid }, config, rbac);
             const s = ctx && { userId: uid, permissions: ctx.permissions, isGuest: ctx.user.username === (config.auth?.guestUsername || 'guest') };
             return ctx?.rbac?.accessPolicy?.modules?.knowledge?.enabled !== false && canKnowledge(s) && canKnowledge(s, 'process:edit') && canKnowledge(s, 'worker:edit');
         });
@@ -612,8 +624,9 @@ async function handleRequest(req, res) {
     if (url.pathname === '/api/internal/bookkeeping/qq') {
         if (req.method !== 'POST' || !internalQqAuthorized(req)) return json(res, 403, {ok:false,error:'Forbidden'});
         try {
+            const rbac = await readIdentity();
             const input = await readJson(req, 65536), service = createQqBookkeeping(getDatabase(), {resolveUser: uid => {
-                const ctx = resolveSessionUser({userId:uid}, config);
+                const ctx = resolveSessionUser({userId:uid}, config, rbac);
                 return ctx && ctx.rbac?.accessPolicy?.modules?.bookkeeping?.enabled !== false ? {permissions:ctx.permissions,isGuest:ctx.user.username === (config.auth?.guestUsername || 'guest')} : null;
             }});
             if (input.ack) { service.ack(String(input.ack)); return json(res,200,{ok:true}); }
@@ -629,7 +642,7 @@ async function handleRequest(req, res) {
         if (route.oauthAction === 'start') {
             return handleOAuthStart(route.oauthProvider, req, res, config, getSessionSecret());
         }
-        return handleOAuthCallback(route.oauthProvider, req, res, config, getSessionSecret());
+        return handleOAuthCallback(route.oauthProvider, req, res, config, getSessionSecret(), identity);
     }
 
     if (route.kind === 'portal-api') {
@@ -638,7 +651,7 @@ async function handleRequest(req, res) {
             await handleLoginApi(req, res);
             return;
         }
-        var session = requireAuth(req, res);
+        var session = await requireAuth(req, res);
         if (!session) return;
         return handleApi(req, res, url, session);
     }
@@ -655,13 +668,13 @@ async function handleRequest(req, res) {
         const pageModule = url.pathname === '/' || url.pathname === '/index.html' ? null
             : url.pathname.startsWith('/torn-toolbox/chain/') ? 'torn-chain'
             : accessModules(config.services).find(m => url.pathname.startsWith('/' + m.id + '/'))?.id;
-        if (pageModule && !modulePolicy(loadRbac(config), pageModule, config.services).enabled) return sendError(req, res, url, 403, '模块已由管理员停用');
+        if (pageModule && !modulePolicy(await readIdentity(), pageModule, config.services).enabled) return sendError(req, res, url, 403, '模块已由管理员停用');
     }
 
     if (req.method === 'GET' && (url.pathname === '/piclist/manage'
         || url.pathname === '/piclist/manage/'
         || url.pathname === '/piclist/manage/index.html')) {
-        var piclistSession = requireAuth(req, res, { requireLogin: true });
+        var piclistSession = await requireAuth(req, res, { requireLogin: true });
         if (!piclistSession) return;
         if (!canViewService(piclistSession.permissions, 'piclist')) {
             return sendError(req, res, url, 403, '无权访问该服务', {
@@ -674,7 +687,7 @@ async function handleRequest(req, res) {
     }
 
     if (['/resources', '/resources/', '/resources/index.html', '/resources.html'].includes(path.posix.normalize(url.pathname))) {
-        var resourceSession = requireAuth(req, res);
+        var resourceSession = await requireAuth(req, res);
         if (!resourceSession) return;
         res.setHeader('Cache-Control', 'no-store');
         if (!canViewResources(resourceSession)) {
@@ -686,7 +699,7 @@ async function handleRequest(req, res) {
     }
 
     if (['/knowledge', '/knowledge/', '/knowledge/index.html', '/knowledge/public', '/knowledge/public/', '/knowledge/public.html', '/knowledge/public/index.html'].includes(path.posix.normalize(url.pathname))) {
-        const knowledgeSession = requireAuth(req, res);
+        const knowledgeSession = await requireAuth(req, res);
         if (!knowledgeSession) return;
         res.setHeader('Cache-Control', 'no-store');
         if (!canKnowledge(knowledgeSession)) return sendError(req, res, url, 403, '请登录具备知识库权限的账号', { title: '无权访问知识库' });
@@ -695,7 +708,7 @@ async function handleRequest(req, res) {
     }
 
     if (['/mingli', '/mingli/', '/mingli/index.html'].includes(path.posix.normalize(url.pathname))) {
-        var mingliSession = requireAuth(req, res);
+        var mingliSession = await requireAuth(req, res);
         if (!mingliSession) return;
         res.setHeader('Cache-Control', 'no-store');
         if (!canMingli(mingliSession)) return sendError(req, res, url, 403, '无权访问命理模块', {
@@ -705,7 +718,7 @@ async function handleRequest(req, res) {
     }
 
     if (['/bookkeeping', '/bookkeeping/', '/bookkeeping/index.html'].includes(path.posix.normalize(url.pathname))) {
-        var bookkeepingSession = requireAuth(req, res);
+        var bookkeepingSession = await requireAuth(req, res);
         if (!bookkeepingSession) return;
         res.setHeader('Cache-Control', 'no-store');
         if (!canBookkeep(bookkeepingSession)) return sendError(req, res, url, 403, '无权访问记账模块', {
@@ -715,7 +728,7 @@ async function handleRequest(req, res) {
     }
 
     if (url.pathname === '/codex-cli' || url.pathname.startsWith('/codex-cli/')) {
-        var codexSession = requireAuth(req,res);
+        var codexSession = await requireAuth(req,res);
         if (!codexSession) return;
         if (!canCodexCli(codexSession)) return sendError(req,res,url,403,'无权访问Codex CLI模块');
         var codexFile = url.pathname.replace(/^\/codex-cli\/?/,'') || 'index.html';
@@ -726,14 +739,14 @@ async function handleRequest(req, res) {
     }
 
     if (url.pathname === '/torn-toolbox/shopping' || url.pathname.startsWith('/torn-toolbox/shopping/')) {
-      const session = requireAuth(req,res); if (!session) return;
+      const session = await requireAuth(req,res); if (!session) return;
       if (!hasPermission(session.permissions, 'torn-shopping:view')) return json(res,403,{ok:false,error:'无权访问扫货助手'});
       const file = url.pathname.replace(/^\/torn-toolbox\/shopping\/?/, '') || 'index.html';
       if (!['index.html','app.js'].includes(file)) return json(res,404,{ok:false});
       res.setHeader('Cache-Control','no-store'); return serveStatic(path.join(PUBLIC_DIR,'torn-toolbox','shopping',file),res);
     }
     if (url.pathname === '/torn-toolbox/chain' || url.pathname.startsWith('/torn-toolbox/chain/')) {
-        const chainSession = requireAuth(req, res);
+        const chainSession = await requireAuth(req, res);
         if (!chainSession) return;
         if (!canTornChain(chainSession)) return sendError(req, res, url, 403, '无权访问监控');
         const file = url.pathname.replace(/^\/torn-toolbox\/chain\/?/, '') || 'index.html';
@@ -744,7 +757,7 @@ async function handleRequest(req, res) {
 
     var hubPath = '/torn-toolbox';
     if (url.pathname === hubPath || url.pathname === hubPath + '/' || url.pathname === hubPath + '/index.html') {
-        var hubSession = requireAuth(req, res);
+        var hubSession = await requireAuth(req, res);
         if (!hubSession) return;
         if (!canViewService(hubSession.permissions, 'torn-toolbox')) {
             return sendError(req, res, url, 403, '无权访问该服务', {
@@ -757,13 +770,13 @@ async function handleRequest(req, res) {
     }
 
     if (url.pathname === '/' || url.pathname === '/index.html') {
-        var homeSession = requireAuth(req, res);
+        var homeSession = await requireAuth(req, res);
         if (!homeSession) return;
         return serveStatic(path.join(PUBLIC_DIR, 'dashboard.html'), res);
     }
 
     if (url.pathname === '/admin/') {
-        var adminSession = requireAuth(req, res, { requireLogin: true });
+        var adminSession = await requireAuth(req, res, { requireLogin: true });
         if (!adminSession) return;
         if (!canViewAdmin(adminSession.permissions)) {
             return redirect(res, '/');
@@ -773,7 +786,7 @@ async function handleRequest(req, res) {
 
     if (url.pathname === '/login/') {
         var loginSession = getSession(req, getSessionSecret());
-        if (loginSession && resolveSessionUser(loginSession, config)) {
+        if (loginSession && resolveSessionUser(loginSession, config, await readIdentity())) {
             return redirect(res, '/');
         }
         if (serveStatic(path.join(PUBLIC_DIR, 'login.html'), res)) return;
@@ -814,7 +827,8 @@ server.on('upgrade', async function(req, socket, head) {
     }
     if (isPublicProxyService(proxyCtx.service)) {
         try {
-            const access = requestDataAccess(req, resolveRequestUser(req, config) || {}, proxyCtx.service.id, config, 'read');
+            const rbac = await readIdentity();
+            const access = requestDataAccess(req, resolveRequestUser(req, config, rbac) || {}, proxyCtx.service.id, config, 'read', rbac);
             if (access.binding) proxyCtx = { ...proxyCtx, service: { ...access.binding, id: proxyCtx.service.id, path: proxyCtx.service.path } };
         } catch { socket.destroy(); return; }
         stripPortalIdentity(req);
@@ -822,7 +836,9 @@ server.on('upgrade', async function(req, socket, head) {
         proxyWebSocket(proxyCtx.service, req, socket, head);
         return;
     }
-    var ctx = resolveRequestUser(req, config);
+    let ctx;
+    try { ctx = await requestIdentity(req); }
+    catch { socket.destroy(); return; }
     if (!ctx) {
         socket.destroy();
         return;
@@ -832,7 +848,7 @@ server.on('upgrade', async function(req, socket, head) {
         return;
     }
     try {
-        const access = requestDataAccess(req, ctx, proxyCtx.service.id, config, 'write');
+        const access = requestDataAccess(req, ctx, proxyCtx.service.id, config, 'write', ctx.rbac);
         if (access.binding) proxyCtx = { ...proxyCtx, service: { ...access.binding, id: proxyCtx.service.id, path: proxyCtx.service.path } };
     } catch { socket.destroy(); return; }
     if (proxyCtx.service.id === 'notes'
@@ -857,8 +873,8 @@ server.listen(port, host, function() {
     resumeVideoJobs(getDatabase(), config);
     startThumbnailWorker(getDatabase());
     }
-    startKnowledgeImports(getDatabase(), knowledgeDirectory, (uid, batch = false) => {
-        const ctx = resolveSessionUser({ userId: uid }, config);
+    startKnowledgeImports(getDatabase(), knowledgeDirectory, async (uid, batch = false) => {
+        const ctx = resolveSessionUser({ userId: uid }, config, await readIdentity());
         const s = ctx && { userId: uid, permissions: ctx.permissions, isGuest: ctx.user.username === (config.auth?.guestUsername || 'guest') };
         return ctx?.rbac?.accessPolicy?.modules?.knowledge?.enabled !== false && ['view', 'import:edit', 'upload:edit', 'process:edit', ...(batch ? ['queue:edit'] : [])].every(action => canKnowledge(s, action));
     });

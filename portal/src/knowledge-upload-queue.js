@@ -92,7 +92,7 @@ export async function runUploadQueue(db, directoryFor, authorize, { inspect = in
   if (!job) return false;
   const uid = job.user_id;
   try {
-    if (!authorize(uid)) throw new Error('账号或批量导入权限已撤销');
+    if (!await authorize(uid)) throw new Error('账号或批量导入权限已撤销');
     const cookie = await bilibiliAccount(db).credentials(uid);
     const info = await inspect(job.url, { cookie }), selection = JSON.parse(job.settings_json);
     if (queue.get(uid, job.id)?.lease !== job.lease) return true;
@@ -106,8 +106,8 @@ export async function runUploadQueue(db, directoryFor, authorize, { inspect = in
     const disk = await fsp.statfs(base);
     if (disk.bavail * disk.bsize < 3 * MAX_VIDEO_BYTES + 5 * 1024 ** 3) throw new Error('服务器可用空间不足，请清理后重试');
     const config = storageConfig(uid);
+    if (!await authorize(uid)) throw new Error('账号或批量导入权限已撤销');
     db.transaction(() => {
-      if (!authorize(uid)) throw new Error('账号或批量导入权限已撤销');
       if (queue.get(uid, job.id)?.lease !== job.lease) return;
       const existing = queue.duplicate(uid, info.sourceUrl, job.id);
       if (existing) { queue.settle(job, 'duplicate', '', existing.document_id || '', existing.title || info.title); return; }

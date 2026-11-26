@@ -6,7 +6,8 @@ import { pipeline } from 'node:stream/promises';
 import { imageCacheHeaders, respondImageNotModified } from './blog-image-cache.js';
 import { normalizeVisibility, canViewPost } from './blog-visibility.js';
 import { getDatabase } from '../../shared/db/index.js';
-import { hasPermission, loadRbac, findUserById, resolveUserPermissions } from './rbac.js';
+import { hasPermission, findUserById, resolveUserPermissions } from './rbac.js';
+import { portalIdentity } from './postgres-rbac.js';
 import { uploadImage, uploadVideo, normalizeMediaPosition, withBlogMediaResponse } from './blog-media-storage.js';
 import { normalizeContent, normalizeTags, normalizeLocation, contentSearchText, normalizeSearch } from './blog-content.js';
 import { parseCoordinates, resolveAddress } from './blog-address.js';
@@ -165,7 +166,7 @@ export function processVideoJob(db, upload, session, config) {
             }
             const item = await finishVideoUpload(db, upload);
             if (config) {
-                const rbac = loadRbac(config), user = findUserById(rbac, upload.user_id);
+                const rbac = await portalIdentity.load(config), user = findUserById(rbac, upload.user_id);
                 session = { userId: upload.user_id, permissions: user?.enabled ? resolveUserPermissions(rbac, user) : [], isGuest: false };
             }
             const current = db.prepare('SELECT 1 FROM blog_video_uploads WHERE id = ?').get(upload.id);

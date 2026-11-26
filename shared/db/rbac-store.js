@@ -1,7 +1,11 @@
 import { ensureRbacRevision } from './schema.js';
 const initialized = new WeakSet();
 function ready(db) { if (!initialized.has(db)) { ensureRbacRevision(db); initialized.add(db); } }
-const revisionKey = Symbol.for('navigation.rbacRevision');
+export const revisionKey = Symbol.for('navigation.rbacRevision');
+
+export function staleRbacError() {
+  return Object.assign(new Error('权限配置已被其他操作更新，请刷新后重试'), { status: 409, code: 'RBAC_CONFLICT' });
+}
 
 export function rbacRevision(db) {
   ready(db);
@@ -31,7 +35,7 @@ export function saveRbacBlob(db, data) {
     const result = expected === 0
       ? db.prepare('INSERT INTO rbac_snapshot (id, payload, revision) VALUES (1, ?, 1) ON CONFLICT (id) DO NOTHING').run(payload)
       : db.prepare('UPDATE rbac_snapshot SET payload = ?, revision = revision + 1 WHERE id = 1 AND revision = ?').run(payload, expected);
-    if (!result.changes) throw Object.assign(new Error('权限配置已被其他操作更新，请刷新后重试'), { status: 409, code: 'RBAC_CONFLICT' });
+    if (!result.changes) throw staleRbacError();
     Object.defineProperty(data, revisionKey, { value: expected + 1, writable: true, configurable: true });
   }).immediate();
 }

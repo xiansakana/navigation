@@ -3,20 +3,26 @@ import { loadRbac } from './rbac.js';
 import { resolveDataAccess, listDataAccess, dataRequestAction } from './access-policy.js';
 import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from '../../shared/auth/permissions.js';
+import { portalIdentity } from './postgres-rbac.js';
 
 const auditReady = new WeakSet();
 export function auditDataAccess(req, res, access) {
   if (access.action !== 'write') return;
   const pathname = new URL(req.url, 'http://localhost').pathname;
-  res.once('finish', () => {
+  res.once('finish', async () => {
     try {
+      const values = [access.actorId, access.ownerId, access.moduleId, access.scope, req.method, pathname.slice(0, 512), res.statusCode, new Date().toISOString()];
+      if (portalIdentity.writeAudit) {
+        await portalIdentity.writeAudit(values);
+        return;
+      }
       const db = getDatabase();
       if (!auditReady.has(db)) {
         db.exec('CREATE TABLE IF NOT EXISTS data_access_audit(id INTEGER PRIMARY KEY,actor_id TEXT NOT NULL,owner_id TEXT NOT NULL,module_id TEXT NOT NULL,scope TEXT NOT NULL,method TEXT NOT NULL,path TEXT NOT NULL,status INTEGER NOT NULL,created_at TEXT NOT NULL)');
         auditReady.add(db);
       }
       db.prepare('INSERT INTO data_access_audit(actor_id,owner_id,module_id,scope,method,path,status,created_at) VALUES(?,?,?,?,?,?,?,?)')
-        .run(access.actorId, access.ownerId, access.moduleId, access.scope, req.method, pathname.slice(0, 512), res.statusCode, new Date().toISOString());
+        .run(...values);
     } catch (error) { console.error('[data-access-audit]', error.code || 'write failed'); }
   });
 }
@@ -25,11 +31,11 @@ export const scopeCookie = moduleId => 'portal_scope_' + moduleId;
 export function stripPortalIdentity(req) {
   for (const name of ['x-portal-user-id', 'x-portal-username', 'x-portal-permissions', 'x-navigation-data-scope']) delete req.headers[name];
 }
-export function requestDataAccess(req, session, moduleId, config, action) {
+export function requestDataAccess(req, session, moduleId, config, action, rbac) {
   const url = new URL(req.url, 'http://localhost');
   let scope = req.headers['x-navigation-data-scope'] || parseCookies(req)[scopeCookie(moduleId)];
   if (scope && (typeof scope !== 'string' || scope.length > 256)) throw Object.assign(new Error('数据范围无效'), { status: 400 });
-  const rbac = loadRbac(config);
+  rbac ??= loadRbac(config);
   if ((!scope || scope === 'self') && session.isGuest && ['torn-chain', 'torn-factions', 'torn-users'].includes(moduleId)) {
     scope = listDataAccess(rbac, session, moduleId, config.services).find(item => /^(user|team):/.test(item.scope))?.scope;
   }
@@ -54,6 +60,6 @@ export function permissionsForDataAccess(rbac, permissions, access) {
 export function scopedSession(session, access) {
   return { ...session, actorUserId: session.userId, userId: access.ownerId, dataAccess: access };
 }
-export function availableDataAccess(session, moduleId, config) {
-  return listDataAccess(loadRbac(config), session, moduleId, config.services);
+export function availableDataAccess(session, moduleId, config, rbac = loadRbac(config)) {
+  return listDataAccess(rbac, session, moduleId, config.services);
 }
