@@ -7,7 +7,7 @@ import { bindTradeInstrument } from './js/trade-instrument.js?v=keep-trade-accou
 import { HOLDINGS_COLUMNS, colFeatureId, LS_COL_VIS, LS_DASHBOARD, LS_PNL_VISIBLE, LS_FULL_WIDTH, LS_TABLE_SORT, loadJson, saveJson, defaultColVis, defaultTableSort } from './js/constants.js?v=holding-note';
 import { renderPnlVisualization, disposePnlChart } from './js/pnl-viz.js?v=lazy-chart-1';
 import { buildHoldingsGroups, toggleTableSort, sortMark, effectiveGroupKey, isHoldingsSortable, individualHoldingWeight } from './js/holdings-table.js?v=group-weight-sort';
-import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js?v=access-1';
+import { loadPortalContext, can, canDip, saveStockManagePrefs, isPortalMode, getStockManagePrefs } from './js/portal-auth.js?v=shared-startup-1';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));

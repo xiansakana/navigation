@@ -41,9 +41,9 @@ export function canStock(feature, action = 'view') {
 
 export async function loadPortalContext() {
   try {
-    const res = await fetch('/api/me');
-    if (!res.ok) return null;
-    const data = await res.json();
+    const data = await (window.portalPage?.user() ?? fetch('/api/me').then((response) =>
+      response.ok ? response.json() : null));
+    if (!data) return null;
     ctx = {
       portal: true,
       permissions: data.permissions || []

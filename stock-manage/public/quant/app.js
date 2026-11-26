@@ -1,5 +1,5 @@
 import { formatPrice } from '../js/price-format.js';
-import { loadPortalContext, can, canDip } from '../js/portal-auth.js';
+import { loadPortalContext, can, canDip } from '../js/portal-auth.js?v=shared-startup-1';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];

@@ -1,5 +1,5 @@
 import { createActionHistory } from './js/action-history.js?v=1';
-import { loadPortalContext, can, canStock, isPortalMode } from './js/portal-auth.js?v=scope-1';
+import { loadPortalContext, can, canStock, isPortalMode } from './js/portal-auth.js?v=shared-startup-1';
 
 const EVENT_LABELS = {
   T1: 'T1', T2: 'T2', T3: 'T3', T4: 'T4', T5: 'T5', T6: 'T6', T7: 'T7',
