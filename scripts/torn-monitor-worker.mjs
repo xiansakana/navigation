@@ -20,9 +20,9 @@ import { verifyPostgresSchema } from '../shared/db/postgres/readiness.js';
 import { portalIdentity } from '../portal/src/postgres-rbac.js';
 
 process.env.NAVIGATION_PROCESS_ROLE = 'torn-monitor-worker';
-const config = loadConfig(), db = getDatabase(), controller = new AbortController();
+const config = loadConfig(), controller = new AbortController();
 const postgresUrl = process.env.NAVIGATION_TORN_POSTGRES_URL || process.env.NAVIGATION_TORN_USERS_POSTGRES_URL;
-const runDb = postgresUrl ? portalPostgresDatabase(postgresUrl) : db;
+const runDb = postgresUrl ? portalPostgresDatabase(postgresUrl) : getDatabase();
 if (postgresUrl) await verifyPostgresSchema(runDb);
 const startedAt = Date.now(), seen = new Map();
 let stopping = false, ready = false;
@@ -41,7 +41,7 @@ const server = http.createServer(async (req, res) => {
     if (!ready || stopping) return json(res, 503, { ok: false });
     try {
       if (postgresUrl) await verifyPostgresSchema(runDb);
-      else db.prepare('SELECT 1').get();
+      else runDb.prepare('SELECT 1').get();
       await portalIdentity.ready();
       return json(res, 200, { ok: true });
     } catch { return json(res, 503, { ok: false }); }

@@ -4,8 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadServiceConfig, saveServiceConfig } from './config.js';
 import { UndercutMonitor } from './undercut-monitor.js';
-import { createUndercutStore } from './undercut-store.js';
+import { createPostgresUndercutStore, createUndercutStore } from './undercut-store.js';
 import { getDatabase } from '../../shared/db/index.js';
+import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
 import { fetchItems } from './torn-api.js';
 import { maskUndercutWatcherForClient, mergeUndercutWatcherConfig } from './watchers.js';
 import { normalizeItems } from './utils.js';
@@ -24,7 +25,12 @@ var itemsCacheByWatcher = new Map();
 function getConfig() { return config; }
 
 var sse = createSseBroadcaster();
-var undercutMonitor = new UndercutMonitor(getConfig, process.env.NAVIGATION_PROCESS_ROLE === 'torn-monitor-worker' ? { store: createUndercutStore(getDatabase()) } : {});
+const isWorker = process.env.NAVIGATION_PROCESS_ROLE === 'torn-monitor-worker';
+const databaseUrl = isWorker && process.env.NAVIGATION_TORN_POSTGRES_URL;
+const db = databaseUrl && (await import('../../portal/src/postgres.js')).portalPostgresDatabase(databaseUrl);
+if (db) await verifyPostgresSchema(db);
+const store = db ? createPostgresUndercutStore(db) : isWorker ? createUndercutStore(getDatabase()) : undefined;
+var undercutMonitor = new UndercutMonitor(getConfig, { store });
 var authorize = createAuthGuard(getConfig);
 var serveStatic = createStaticHandler(PUBLIC_DIR, SHARED_DIR);
 

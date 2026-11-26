@@ -34,11 +34,12 @@ export class UndercutMonitor extends EventEmitter {
         this.watcherStates = new Map();
     }
 
-    ensureWatcherState(id) {
+    ensureWatcherState(id, restored) {
         if (!this.watcherStates.has(id)) {
             const watcher = this.getWatchers().find(w => w.id === id);
-            const saved = watcher && this.store?.load(watcher);
+            const saved = restored ?? (watcher && this.store?.load?.(watcher));
             this.watcherStates.set(id, {
+                apiKey: watcher?.apiKey,
                 playerCache: {},
                 pendingMarket: new Map(saved?.pendingMarket || []),
                 recentBazaarAlerts: new Map(saved?.recentBazaarAlerts ?? (saved?.alerts || [])
@@ -178,7 +179,22 @@ export class UndercutMonitor extends EventEmitter {
                 requestSignal.removeEventListener('abort', abort);
             }
         };
-        var state = this.ensureWatcherState(watcher.id);
+        const cached = this.watcherStates.get(watcher.id);
+        if (cached && cached.apiKey !== watcher.apiKey) this.watcherStates.delete(watcher.id);
+        const restored = !this.watcherStates.has(watcher.id) && this.store?.restore
+            ? await this.store.restore(watcher)
+            : undefined;
+        signal?.throwIfAborted();
+        const current = this.ensureWatcherState(watcher.id, restored);
+        const state = { ...current,
+            pendingMarket: new Map(current.pendingMarket), activeKeys: new Set(current.activeKeys),
+            alertMap: new Map(current.alertMap)
+        };
+        const persist = async () => {
+            signal?.throwIfAborted();
+            await this.store?.save(watcher, state);
+            this.watcherStates.set(watcher.id, state);
+        };
         var apiKey = watcher.apiKey;
         var watchBazaar = watcher.watchBazaar !== false;
         var watchItemMarket = watcher.watchItemMarket !== false;
@@ -237,7 +253,7 @@ export class UndercutMonitor extends EventEmitter {
             state.pendingMarket.clear();
             state.activeKeys.clear();
             state.alertMap.clear();
-            this.store?.save(watcher, state);
+            await persist();
             var scope = [];
             if (watchBazaar) scope.push('Bazaar');
             if (watchItemMarket) scope.push('Item Market');
@@ -336,7 +352,7 @@ export class UndercutMonitor extends EventEmitter {
         });
         state.activeKeys = currentUndercuts;
         state.recentBazaarAlerts = recentBazaarAlerts;
-        this.store?.save(watcher, state);
+        await persist();
 
         if (newAlerts.length) {
             state.alerts += newAlerts.length;
@@ -397,7 +413,8 @@ export class UndercutMonitor extends EventEmitter {
                 totalNew += result.newAlerts.length; totalPending += result.pendingCount || 0;
                 this.ensureWatcherState(watcher.id).lastError = '';
             } catch (err) {
-                this.ensureWatcherState(watcher.id).lastError = err.message;
+                const previous = this.watcherStates.get(watcher.id);
+                if (previous) previous.lastError = err.message;
                 if (signal?.aborted) throw err;
                 errors.push(watcher.label + '：' + err.message);
                 this.emit('error', watcher.label + ': ' + err.message);

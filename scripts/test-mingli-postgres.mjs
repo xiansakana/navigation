@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { handleMingliApi } from '../portal/src/mingli.js';
 import { createMingliPostgresStore } from '../portal/src/mingli-postgres.js';
@@ -19,6 +26,7 @@ import { createPostgresUsersStore } from '../portal/src/torn-users-postgres.js';
 import { UsersMonitor } from '../portal/src/torn-users-monitor.js';
 import { createTornRunStore } from '../portal/src/torn-worker-runs.js';
 import { createTornWorkerRuntime, tickTornWorker } from '../portal/src/torn-worker-runtime.js';
+import { workerSignature } from '../portal/src/torn-worker-transport.js';
 import { createCodexAuthMonitor } from '../qq-bot/src/codex-auth-monitor.js';
 import { createWatchdogStore, startLoginWatchdog } from '../qq-bot/src/watchdog.js';
 import { createPostgresShoppingStore } from '../portal/src/torn-shopping-postgres.js';
@@ -27,6 +35,9 @@ import { createPostgresDestructionStore } from '../portal/src/torn-destruction-p
 import { createPostgresCompanyAlertsStore } from '../portal/src/torn-company-alerts-postgres.js';
 import { createPostgresFactionStore } from '../portal/src/torn-faction-postgres.js';
 import { FactionScanner } from '../portal/src/torn-faction-scan.js';
+import { createPostgresUndercutStore } from '../torn-toolbox-desktop/src/undercut-store.js';
+import { createPostgresQuantStore } from '../stock-manage/src/quant-store.js';
+import { createPostgresQuantBacktestStore } from '../stock-manage/src/quant-backtest-store.js';
 
 async function verifyQqMonitoring(db) {
   let restarts = 0, now = 1000000, usageReads = 0, sent = 0;
@@ -262,6 +273,124 @@ async function verifyTornFactionScan(db) {
   assert.equal((await first.get(uid)).run.rows.length, 0);
 }
 
+async function verifyTornUndercut(db) {
+  const watcher = { id: 'undercut-fixture', apiKey: 'fixturekey123456' };
+  const first = createPostgresUndercutStore(db);
+  await first.save(watcher, {
+    activeKeys: new Set(['market:1']), alertMap: new Map(), pendingMarket: new Map([['im-2', { firstSeenAt: 1000 }]]),
+  });
+  const restarted = createPostgresUndercutStore(db);
+  assert.deepEqual((await restarted.restore(watcher)).activeKeys, ['market:1']);
+  assert.deepEqual((await restarted.restore(watcher)).pendingMarket, [['im-2', { firstSeenAt: 1000 }]]);
+  assert.equal(await restarted.restore({ ...watcher, apiKey: 'fixturekey000000' }), null);
+}
+
+async function verifyTornWorkerProcess(db, dsn, uid) {
+  const reservations = await Promise.all(Array.from({ length: 3 }, async () => {
+    const server = net.createServer().listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    return server;
+  }));
+  const [workerPort, companyPort, undercutPort] = reservations.map(server => server.address().port);
+  await Promise.all(reservations.map(server => new Promise(resolve => server.close(resolve))));
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'navigation-torn-postgres-'));
+  const paths = Object.fromEntries(['portal', 'company', 'undercut', 'state', 'sqlite'].map(name => [name, path.join(dir, name + '.json')]));
+  const config = { auth: { sessionSecret: randomUUID() }, services: [], runtime: { tornMonitorWorkerPort: workerPort } };
+  let child, exited, output = '';
+  const stop = async () => {
+    if (!child) return;
+    child.kill('SIGTERM');
+    const force = setTimeout(() => child.kill('SIGKILL'), 5000);
+    try { await exited; }
+    finally { clearTimeout(force); child = undefined; }
+  };
+  try {
+    await writeFile(paths.portal, JSON.stringify(config));
+    for (const [service, port] of [['company', companyPort], ['undercut', undercutPort]]) {
+      await writeFile(paths[service], JSON.stringify({ server: { host: '127.0.0.1', port }, [service]: { autoStart: false } }));
+    }
+    const mock = path.join(dir, 'mock.mjs');
+    await writeFile(mock, `const real = globalThis.fetch;
+      globalThis.fetch = async (input, options) => {
+        const url = new URL(input);
+        if (url.hostname === '127.0.0.1') return real(input, options);
+        if (url.hostname === 'api.torn.com') return Response.json({ search: [], info: { user: { id: 123 } } });
+        throw new Error('External request blocked in test');
+      };`);
+    const env = {
+      ...process.env, NAVIGATION_DATABASE_ENGINE: 'postgres', NAVIGATION_DB_PATH: paths.sqlite,
+      NAVIGATION_TORN_POSTGRES_URL: dsn, NAVIGATION_RBAC_POSTGRES_URL: dsn,
+      PORTAL_CONFIG_PATH: paths.portal, TORN_COMPANY_CONFIG_PATH: paths.company,
+      TORN_UNDERCUT_CONFIG_PATH: paths.undercut, TORN_COMPANY_STATE_FILE: paths.state,
+    };
+    const run = async () => {
+      child = spawn(process.execPath, ['--import', pathToFileURL(mock).href, 'scripts/torn-monitor-worker.mjs'], {
+        cwd: fileURLToPath(new URL('../', import.meta.url)), env, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      exited = once(child, 'exit');
+      for (const stream of [child.stdout, child.stderr]) stream.on('data', data => { output += data; });
+      const deadline = Date.now() + 10000;
+      while (child.exitCode === null && Date.now() < deadline) {
+        const status = await fetch('http://127.0.0.1:' + workerPort + '/readyz', { signal: AbortSignal.timeout(500) }).catch(() => null);
+        if (status?.ok) return;
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      throw new Error('PostgreSQL Torn worker readiness failed: ' + output);
+    };
+    await createPostgresDestructionStore(db).save(uid, { apiKey: 'fixturekey123456' });
+    const runs = createTornRunStore(db);
+    await runs.set('torn-chain', uid, true);
+    const checkRunning = async () => {
+      const body = JSON.stringify({ at: Date.now(), nonce: randomUUID().replaceAll('-', ''), method: 'GET',
+        path: '/api/torn-chain/state', session: { userId: uid, permissions: ['*'] }, headers: { host: '127.0.0.1' }, body: null });
+      const response = await fetch('http://127.0.0.1:' + workerPort + '/dispatch', {
+        method: 'POST', headers: { 'X-Torn-Signature': workerSignature(body, config) }, body,
+      });
+      const data = await response.json();
+      assert.equal(response.status, 200, JSON.stringify(data));
+      assert.equal(data.state.running, true, JSON.stringify({ state: data.state, output }));
+    };
+    await run();
+    await checkRunning();
+    await stop();
+    await run();
+    await checkRunning();
+    assert.equal((await fetch('http://127.0.0.1:' + undercutPort + '/api/state')).status, 200);
+    await assert.rejects(() => readFile(paths.sqlite), { code: 'ENOENT' });
+    await runs.set('torn-chain', uid, false);
+  } finally {
+    await stop();
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+async function verifyQuant(db) {
+  const uid = 'quant-fixture', outsider = 'quant-fixture-other';
+  const first = createPostgresQuantStore({}, db), second = createPostgresQuantStore({}, db);
+  await Promise.all([
+    first.update(uid, state => { state.settings.symbols = ['GOOG']; }),
+    second.update(uid, state => { state.paper.cash -= 500; }),
+    second.update(uid, state => { state.paper.cash -= 500; }),
+  ]);
+  const saved = await first.read(uid);
+  assert.deepEqual(saved.settings.symbols, ['GOOG']);
+  assert.equal(saved.paper.cash, 99000);
+  assert.equal((await second.read(outsider)).paper.cash, 100000);
+  await assert.rejects(() => first.update(uid, state => {
+    state.paper.cash = 1;
+    throw new Error('rollback fixture');
+  }), /rollback fixture/);
+  assert.equal((await second.read(uid)).paper.cash, 99000);
+
+  const backtests = createPostgresQuantBacktestStore(db);
+  const result = await backtests.save(uid, { period: '1y', results: [{ symbol: 'GOOG' }] });
+  assert.equal((await backtests.list(uid))[0].id, result.id);
+  assert.equal(await backtests.get(outsider, result.id), null);
+  assert.equal(await backtests.remove(outsider, result.id), false);
+  assert.deepEqual(await backtests.get(uid, result.id), result);
+  assert.equal(await backtests.remove(uid, result.id), true);
+}
+
 async function verifyRbac(db) {
   const lowLevel = createPostgresRbacStore(db);
   const writer = createPortalPostgresRbac(db);
@@ -328,6 +457,7 @@ async function verifyRbac(db) {
   dsn.hostname = process.env.PGHOST || '127.0.0.1';
   dsn.port = process.env.PGPORT || '5432';
   dsn.pathname = '/' + process.env.PGDATABASE;
+  await verifyTornWorkerProcess(db, dsn.toString(), admin.id);
   const running = await startAccessPortal({ extraEnv: {
     NAVIGATION_RBAC_POSTGRES_URL: dsn.toString(), NAVIGATION_MINGLI_POSTGRES_URL: dsn.toString(),
     NAVIGATION_BLOG_POSTGRES_URL: dsn.toString(), NAVIGATION_RESOURCES_POSTGRES_URL: dsn.toString(),
@@ -385,6 +515,8 @@ test('Mingli HTTP entry point uses PostgreSQL for owner-scoped cases, categories
     await verifyTornDestruction(db);
     await verifyTornCompanyAlerts(db);
     await verifyTornFactionScan(db);
+    await verifyTornUndercut(db);
+    await verifyQuant(db);
     await verifyQqMonitoring(db);
     await verifyRbac(db);
     const store = createMingliPostgresStore(db);

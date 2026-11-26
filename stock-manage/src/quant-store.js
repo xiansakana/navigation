@@ -41,6 +41,53 @@ export function normalizeQuantState(raw = {}) {
   };
 }
 
+export function safeQuantUserId(userId) {
+  const value = String(userId || 'local').trim();
+  return /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : 'local';
+}
+
+function readLegacyState(file, userId) {
+  if (userId !== 'usr_admin' && userId !== 'local') return null;
+  try { return normalizeQuantState(JSON.parse(fs.readFileSync(file, 'utf8'))); }
+  catch (error) {
+    if (error?.code !== 'ENOENT') console.warn('读取旧量化配置失败:', error.code || error.name);
+    return null;
+  }
+}
+
+export function createPostgresQuantStore(config, db) {
+  const legacyFile = path.join(path.dirname(resolveDataPath(config)), 'quant.json');
+  const select = 'SELECT data FROM navigation.quant_user_state WHERE user_id=$1';
+  const insert = 'INSERT INTO navigation.quant_user_state(user_id,data,updated_at) VALUES($1,$2,$3)';
+  async function ensure(client, owner, lock = false) {
+    const sql = select + (lock ? ' FOR UPDATE' : '');
+    let { rows: [row] } = await client.query(sql, [owner]);
+    if (!row) {
+      const legacy = readLegacyState(legacyFile, owner);
+      if (lock || legacy) {
+        await client.query(insert + ' ON CONFLICT(user_id) DO NOTHING',
+          [owner, JSON.stringify(legacy ?? normalizeQuantState()), new Date().toISOString()]);
+        ({ rows: [row] } = await client.query(sql, [owner]));
+      }
+    }
+    return row ? normalizeQuantState(JSON.parse(row.data)) : normalizeQuantState();
+  }
+  return {
+    read: userId => ensure(db, safeQuantUserId(userId)),
+    update(userId, change) {
+      const owner = safeQuantUserId(userId);
+      return db.transaction(async client => {
+        const current = await ensure(client, owner, true);
+        change(current);
+        const payload = normalizeQuantState(current);
+        await client.query('UPDATE navigation.quant_user_state SET data=$2,updated_at=$3 WHERE user_id=$1',
+          [owner, JSON.stringify(payload), new Date().toISOString()]);
+        return payload;
+      });
+    },
+  };
+}
+
 export function createQuantStore(config, databaseOverride = null) {
   const database = databaseOverride || getDatabase({ dbPath: config.dbPath });
   const legacyFile = path.join(path.dirname(resolveDataPath(config)), 'quant.json');
@@ -50,42 +97,32 @@ export function createQuantStore(config, databaseOverride = null) {
     ON CONFLICT(user_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at
   `);
 
-  function safeUserId(userId) {
-    const value = String(userId || 'local').trim();
-    return /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : 'local';
-  }
-
-  function legacyState(userId) {
-    if (userId !== 'usr_admin' && userId !== 'local') return null;
-    try {
-      return normalizeQuantState(JSON.parse(fs.readFileSync(legacyFile, 'utf8')));
-    } catch (error) {
-      if (error?.code !== 'ENOENT') console.warn(`读取旧量化配置失败: ${error.message}`);
-      return null;
-    }
-  }
-
   function read(userId = 'local') {
-    const owner = safeUserId(userId);
+    const owner = safeQuantUserId(userId);
     try {
       const row = select.get(owner);
       if (row?.data) return normalizeQuantState(JSON.parse(row.data));
     } catch (error) {
       console.warn(`读取用户量化配置失败: ${error.message}`);
     }
-    const migrated = legacyState(owner);
+    const migrated = readLegacyState(legacyFile, owner);
     if (migrated) return write(owner, migrated);
     return normalizeQuantState();
   }
 
   function write(userId = 'local', value) {
-    const owner = safeUserId(userId);
+    const owner = safeQuantUserId(userId);
     const payload = normalizeQuantState(value);
     upsert.run(owner, JSON.stringify(payload), new Date().toISOString());
     return payload;
   }
 
-  return { read, write };
+  const update = database.transaction((userId, change) => {
+    const current = read(userId);
+    change(current);
+    return write(userId, current);
+  }).immediate;
+  return { read, write, update };
 }
 
 export function resetPaper(settings) {

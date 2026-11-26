@@ -13,12 +13,15 @@ import { serveUiAsset } from '../../shared/ui-assets.js';
 import { portfolioIdentityMiddleware } from '../../shared/portfolio-user.js';
 import { currentPortfolioUserId } from '../../shared/portfolio-user.js';
 import { getDatabase } from '../../shared/db/index.js';
+import { createPostgresPool } from '../../shared/db/postgres/pool.js';
+import { verifyPostgresSchema } from '../../shared/db/postgres/readiness.js';
 import { investmentRows, projectInvestments, saveInvestmentAccount, unlinkInvestmentAccount } from '../../shared/investment-accounts.js';
 import { dipCashFunds, setDipCashReserve } from '../../shared/dip-cash-funds.js';
 import { createBookkeepingStore } from '../../portal/src/bookkeeping-store.js';
 import { queueSavedTradeHistory } from '../../portal/src/bookkeeping-security-history.js';
 import { configureQuoteNetwork } from '../../shared/quote-network.js';
 import express from 'express';
+import pg from 'pg';
 import path from 'node:path';
 import XLSX from 'xlsx';
 import { fileURLToPath } from 'node:url';
@@ -60,6 +63,9 @@ const portfolioDb = getDatabase({ dbPath: config.dbPath });
 ensureUserPortfolioSchema(portfolioDb);
 ensureFundHoldings(portfolioDb);
 const quotes = createQuoteService(config);
+const quantDatabaseUrl = process.env.NAVIGATION_QUANT_POSTGRES_URL;
+const quantDatabase = quantDatabaseUrl && createPostgresPool(pg.Pool, quantDatabaseUrl, 'navigation-stock-manage');
+if (quantDatabase) await verifyPostgresSchema(quantDatabase);
 const app = express();
 app.use((req, res, next) => { if (!serveUiAsset(req, res)) next(); });
 
@@ -67,6 +73,14 @@ if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 
 app.use(express.json({ limit: '2mb' }));
 app.use(portfolioIdentityMiddleware);
+
+app.get('/readyz', async (_req, res) => {
+  try {
+    portfolioDb.prepare('SELECT 1').get();
+    if (quantDatabase) await verifyPostgresSchema(quantDatabase);
+    res.json({ ok: true, service: 'stock-manage' });
+  } catch { res.status(503).json({ ok: false, service: 'stock-manage' }); }
+});
 
 function quantUserId(req) {
   const value = String(req.headers['x-portal-user-id'] || 'local').trim();
@@ -755,7 +769,7 @@ app.get('/api/stock/:symbol', async (req, res) => {
   }
 });
 
-registerQuantRoutes(app, { config, store, quotes, quantUserId, requireQuantPermission });
+registerQuantRoutes(app, { config, store, quotes, quantUserId, requireQuantPermission, database: quantDatabase });
 
 app.get('/api/option/:symbol', async (req, res) => {
   try {

@@ -1,7 +1,7 @@
 import { mapWithConcurrency } from '../../shared/map-with-concurrency.js';
 import { analyzeCandles, backtestCandles, DEFAULT_QUANT_CONFIG, normalizeQuantConfig } from './quant-analysis.js';
-import { createQuantStore, resetPaper } from './quant-store.js';
-import { createQuantBacktestStore } from './quant-backtest-store.js';
+import { createPostgresQuantStore, createQuantStore, resetPaper } from './quant-store.js';
+import { createPostgresQuantBacktestStore, createQuantBacktestStore } from './quant-backtest-store.js';
 import { inferMarket, normalizeSymbol } from './markets.js';
 import { deriveHoldings } from './trades.js';
 
@@ -42,15 +42,24 @@ function unavailableQuantSignal({ symbol, name, price, changePercent, status, me
   };
 }
 
-export function registerQuantRoutes(app, { config, store, quotes, quantUserId, requireQuantPermission }) {
-  const quantStore = createQuantStore(config);
-  const quantBacktestStore = createQuantBacktestStore(config);
+function quantRoute(handler) {
+  return async (req, res) => {
+    try { await handler(req, res); }
+    catch (error) {
+      res.status(error.status || 500).json({ error: error.status ? error.message : '量化数据暂不可用' });
+    }
+  };
+}
+
+export function registerQuantRoutes(app, { config, store, quotes, quantUserId, requireQuantPermission, database }) {
+  const quantStore = database ? createPostgresQuantStore(config, database) : createQuantStore(config);
+  const quantBacktestStore = database ? createPostgresQuantBacktestStore(database) : createQuantBacktestStore(config);
 
   async function analyzeQuantSymbols(rawSymbols, rawPeriod, rawConfig, userId = 'local') {
       const data = store.read();
       const holdings = deriveHoldings(data.trades);
       const holdingMap = new Map(holdings.map((holding) => [normalizeSymbol(holding.symbol), holding]));
-      const saved = quantStore.read(userId).settings;
+      const saved = (await quantStore.read(userId)).settings;
       const symbols = quantSymbols(rawSymbols, saved.symbols);
       const strategyConfig = typeof rawConfig === 'string' ? quantConfig(rawConfig) : normalizeQuantConfig(rawConfig || saved.config);
       const period = quantPeriod(rawPeriod || saved.period);
@@ -126,10 +135,10 @@ export function registerQuantRoutes(app, { config, store, quotes, quantUserId, r
     }
   });
 
-  app.get('/api/quant/settings', (req, res) => {
+  app.get('/api/quant/settings', quantRoute(async (req, res) => {
     if (!requireQuantPermission(req, res, 'quant-settings')) return;
-    res.json(quantStore.read(quantUserId(req)).settings);
-  });
+    res.json((await quantStore.read(quantUserId(req))).settings);
+  }));
 
   app.get('/api/quant/history/:symbol', async (req, res) => {
     if (!requireQuantPermission(req, res, 'quant-history')) return;
@@ -164,7 +173,7 @@ export function registerQuantRoutes(app, { config, store, quotes, quantUserId, r
     }
   });
 
-  app.put('/api/quant/settings', (req, res) => {
+  app.put('/api/quant/settings', quantRoute(async (req, res) => {
     const scope = ['watchlist', 'config', 'paper'].includes(req.body?.scope) ? req.body.scope : 'watchlist';
     const scopeFeature = {
       watchlist: 'quant-watchlist',
@@ -173,57 +182,61 @@ export function registerQuantRoutes(app, { config, store, quotes, quantUserId, r
     }[scope];
     if (!requireQuantPermission(req, res, scopeFeature, 'edit')) return;
     const userId = quantUserId(req);
-    const current = quantStore.read(userId);
     const body = req.body || {};
+    let symbols;
     if (scope === 'watchlist') {
       const rawSymbols = Array.isArray(body.symbols) ? body.symbols.join(',') : String(body.symbols || '');
-      const symbols = quantSymbols(rawSymbols);
+      symbols = quantSymbols(rawSymbols);
       if (!symbols.length) return res.status(400).json({ error: '请至少保存一个有效的美股代码' });
-      current.settings.symbols = symbols;
-      current.settings.period = quantPeriod(body.period).key;
-    } else if (scope === 'config') {
-      current.settings.config = normalizeQuantConfig(body.config || current.settings.config);
-    } else {
-      current.settings.paperInitialCapital = Math.max(1000, Math.min(100000000, Number(body.paperInitialCapital) || current.settings.paperInitialCapital));
-      current.settings.paperPositionPct = Math.max(0.01, Math.min(1, Number(body.paperPositionPct) || current.settings.paperPositionPct));
     }
-    res.json(quantStore.write(userId, current).settings);
-  });
+    const updated = await quantStore.update(userId, ({ settings }) => {
+      if (scope === 'watchlist') {
+        settings.symbols = symbols;
+        settings.period = quantPeriod(body.period).key;
+      } else if (scope === 'config') {
+        settings.config = normalizeQuantConfig(body.config || settings.config);
+      } else {
+        settings.paperInitialCapital = Math.max(1000, Math.min(100000000, Number(body.paperInitialCapital) || settings.paperInitialCapital));
+        settings.paperPositionPct = Math.max(0.01, Math.min(1, Number(body.paperPositionPct) || settings.paperPositionPct));
+      }
+    });
+    res.json(updated.settings);
+  }));
 
-  app.get('/api/quant/backtests', (req, res) => {
+  app.get('/api/quant/backtests', quantRoute(async (req, res) => {
     if (!requireQuantPermission(req, res, 'quant-backtest')) return;
-    res.json({ items: quantBacktestStore.list(quantUserId(req), req.query.limit) });
-  });
+    res.json({ items: await quantBacktestStore.list(quantUserId(req), req.query.limit) });
+  }));
 
-  app.get('/api/quant/backtests/:id', (req, res) => {
+  app.get('/api/quant/backtests/:id', quantRoute(async (req, res) => {
     if (!requireQuantPermission(req, res, 'quant-backtest')) return;
-    const result = quantBacktestStore.get(quantUserId(req), req.params.id);
+    const result = await quantBacktestStore.get(quantUserId(req), req.params.id);
     if (!result) return res.status(404).json({ error: '回测记录不存在' });
     res.json(result);
-  });
+  }));
 
-  app.delete('/api/quant/backtests/:id', (req, res) => {
+  app.delete('/api/quant/backtests/:id', quantRoute(async (req, res) => {
     if (!requireQuantPermission(req, res, 'quant-backtest-delete', 'edit')) return;
-    const removed = quantBacktestStore.remove(quantUserId(req), req.params.id);
+    const removed = await quantBacktestStore.remove(quantUserId(req), req.params.id);
     if (!removed) return res.status(404).json({ error: '回测记录不存在' });
     res.json({ ok: true });
-  });
+  }));
 
   app.post('/api/quant/backtest', async (req, res) => {
     if (!requireQuantPermission(req, res, 'quant-backtest-run', 'edit')) return;
     try {
       const userId = quantUserId(req);
-      const savedState = quantStore.read(userId);
-      const saved = savedState.settings;
+      const saved = (await quantStore.read(userId)).settings;
       const rawSymbols = Array.isArray(req.body?.symbols) ? req.body.symbols.join(',') : String(req.body?.symbols || '');
       const symbols = quantSymbols(rawSymbols, saved.symbols);
       if (!symbols.length) return res.status(400).json({ error: '请选择回测标的' });
       const period = quantPeriod(req.body?.period || saved.period);
       const strategyConfig = normalizeQuantConfig(req.body?.config || saved.config);
       const initialCapital = Math.max(1000, Math.min(100000000, Number(req.body?.initialCapital) || 100000));
-      saved.backtestPeriod = period.key === '3m' ? '6m' : period.key;
-      saved.backtestInitialCapital = initialCapital;
-      quantStore.write(userId, savedState);
+      await quantStore.update(userId, ({ settings }) => {
+        settings.backtestPeriod = period.key === '3m' ? '6m' : period.key;
+        settings.backtestInitialCapital = initialCapital;
+      });
       const allocation = initialCapital / symbols.length;
       const backtestStart = Date.now() - period.days * 86400000;
       const results = await mapWithConcurrency(symbols, 2, async (symbol) => {
@@ -275,7 +288,7 @@ export function registerQuantRoutes(app, { config, store, quotes, quantUserId, r
         to: equityCurve.at(-1)?.timestamp || null,
         timestamp: Date.now()
       };
-      res.json(quantBacktestStore.save(userId, response));
+      res.json(await quantBacktestStore.save(userId, response));
     } catch (error) {
       res.status(500).json({ error: error.message || '回测失败' });
     }
@@ -306,66 +319,73 @@ export function registerQuantRoutes(app, { config, store, quotes, quantUserId, r
     };
   }
 
-  app.get('/api/quant/paper', (req, res) => {
+  app.get('/api/quant/paper', quantRoute(async (req, res) => {
     if (!requireQuantPermission(req, res, 'quant-paper')) return;
-    res.json(paperView(quantStore.read(quantUserId(req))));
-  });
+    res.json(paperView(await quantStore.read(quantUserId(req))));
+  }));
 
-  app.post('/api/quant/paper/reset', (req, res) => {
+  app.post('/api/quant/paper/reset', quantRoute(async (req, res) => {
     if (!requireQuantPermission(req, res, 'quant-paper-reset', 'edit')) return;
     const userId = quantUserId(req);
-    const saved = quantStore.read(userId);
-    if (Number(req.body?.initialCapital) >= 1000) saved.settings.paperInitialCapital = Number(req.body.initialCapital);
-    saved.paper = resetPaper(saved.settings);
-    res.json(paperView(quantStore.write(userId, saved)));
-  });
+    const updated = await quantStore.update(userId, saved => {
+      if (Number(req.body?.initialCapital) >= 1000) saved.settings.paperInitialCapital = Number(req.body.initialCapital);
+      saved.paper = resetPaper(saved.settings);
+    });
+    res.json(paperView(updated));
+  }));
 
   app.post('/api/quant/paper/sync', async (req, res) => {
     if (!requireQuantPermission(req, res, 'quant-paper-sync', 'edit')) return;
     try {
       const userId = quantUserId(req);
-      const saved = quantStore.read(userId);
-      const analysis = await analyzeQuantSymbols(saved.settings.symbols.join(','), saved.settings.period, saved.settings.config, userId);
+      const { settings } = await quantStore.read(userId);
+      const analysis = await analyzeQuantSymbols(settings.symbols.join(','), settings.period, settings.config, userId);
       const now = Date.now();
       const trades = [];
-      for (const signal of analysis.signals) {
-        if (signal.status !== 'ok' || !(Number(signal.price) > 0)) continue;
-        const holding = saved.paper.holdings[signal.symbol];
-        if (holding) holding.lastPrice = Number(signal.price);
-        const signalKey = `${signal.asOf || now}:${signal.signal}`;
-        if (saved.paper.processedSignals[signal.symbol] === signalKey) continue;
-        if (signal.signal === 'BUY' && !holding) {
-          const current = paperView(saved, analysis.signals);
-          const budget = Math.min(saved.paper.cash, current.totalEquity * saved.settings.paperPositionPct);
-          const shares = Math.floor((budget / Number(signal.price)) * 10000) / 10000;
-          if (shares > 0) {
-            const cost = shares * Number(signal.price);
-            saved.paper.cash -= cost;
-            saved.paper.holdings[signal.symbol] = { shares, avgCost: Number(signal.price), lastPrice: Number(signal.price) };
-            trades.push({ timestamp: now, symbol: signal.symbol, side: 'BUY', shares, price: Number(signal.price), amount: cost });
-          }
-        } else if (signal.signal === 'SELL' && holding) {
-          const amount = Number(holding.shares) * Number(signal.price);
-          saved.paper.cash += amount;
-          trades.push({
-            timestamp: now,
-            symbol: signal.symbol,
-            side: 'SELL',
-            shares: Number(holding.shares),
-            price: Number(signal.price),
-            amount,
-            pnl: Number(holding.shares) * (Number(signal.price) - Number(holding.avgCost))
-          });
-          delete saved.paper.holdings[signal.symbol];
+      const updated = await quantStore.update(userId, saved => {
+        const current = saved.settings;
+        if (current.period !== settings.period || JSON.stringify(current.symbols) !== JSON.stringify(settings.symbols)
+            || JSON.stringify(current.config) !== JSON.stringify(settings.config)) {
+          throw Object.assign(new Error('分析设置已变更，请重新同步'), { status: 409 });
         }
-        saved.paper.processedSignals[signal.symbol] = signalKey;
-      }
-      saved.paper.trades = saved.paper.trades.concat(trades).slice(-500);
-      saved.paper.updatedAt = now;
-      quantStore.write(userId, saved);
-      res.json({ ...paperView(saved, analysis.signals), executed: trades, signals: analysis.signals });
+        for (const signal of analysis.signals) {
+          if (signal.status !== 'ok' || !(Number(signal.price) > 0)) continue;
+          const holding = saved.paper.holdings[signal.symbol];
+          if (holding) holding.lastPrice = Number(signal.price);
+          const signalKey = `${signal.asOf || now}:${signal.signal}`;
+          if (saved.paper.processedSignals[signal.symbol] === signalKey) continue;
+          if (signal.signal === 'BUY' && !holding) {
+            const current = paperView(saved, analysis.signals);
+            const budget = Math.min(saved.paper.cash, current.totalEquity * saved.settings.paperPositionPct);
+            const shares = Math.floor((budget / Number(signal.price)) * 10000) / 10000;
+            if (shares > 0) {
+              const cost = shares * Number(signal.price);
+              saved.paper.cash -= cost;
+              saved.paper.holdings[signal.symbol] = { shares, avgCost: Number(signal.price), lastPrice: Number(signal.price) };
+              trades.push({ timestamp: now, symbol: signal.symbol, side: 'BUY', shares, price: Number(signal.price), amount: cost });
+            }
+          } else if (signal.signal === 'SELL' && holding) {
+            const amount = Number(holding.shares) * Number(signal.price);
+            saved.paper.cash += amount;
+            trades.push({
+              timestamp: now,
+              symbol: signal.symbol,
+              side: 'SELL',
+              shares: Number(holding.shares),
+              price: Number(signal.price),
+              amount,
+              pnl: Number(holding.shares) * (Number(signal.price) - Number(holding.avgCost))
+            });
+            delete saved.paper.holdings[signal.symbol];
+          }
+          saved.paper.processedSignals[signal.symbol] = signalKey;
+        }
+        saved.paper.trades = saved.paper.trades.concat(trades).slice(-500);
+        saved.paper.updatedAt = now;
+      });
+      res.json({ ...paperView(updated, analysis.signals), executed: trades, signals: analysis.signals });
     } catch (error) {
-      res.status(500).json({ error: error.message || '模拟盘同步失败' });
+      res.status(error.status || 500).json({ error: error.message || '模拟盘同步失败' });
     }
   });
 }

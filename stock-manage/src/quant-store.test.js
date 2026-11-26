@@ -5,6 +5,7 @@ import { createQuantStore, resetPaper } from './quant-store.js';
 function memoryDatabase() {
   const rows = new Map();
   return {
+    transaction: fn => ({ immediate: fn }),
     prepare(sql) {
       if (sql.startsWith('SELECT')) return { get: (userId) => rows.has(userId) ? { data: rows.get(userId) } : undefined };
       return { run: (userId, data) => rows.set(userId, data) };
