@@ -63,10 +63,8 @@ export function createPostgresPortfolioStore(db, userId, options = {}) {
   async function ledgerContext(run, uid) {
     const ledgers = new Map();
     if (bookkeeping) {
-      const [{ rows: accounts }, { rows: entries }] = await Promise.all([
-        run.query('SELECT id,name,archived,opening,currency,account_type FROM navigation.bookkeeping_accounts WHERE user_id=$1', [uid]),
-        run.query('SELECT * FROM navigation.bookkeeping_entries WHERE user_id=$1 AND affects_balance=1', [uid])
-      ]);
+      const { rows: accounts } = await run.query('SELECT id,name,archived,opening,currency,account_type FROM navigation.bookkeeping_accounts WHERE user_id=$1', [uid]);
+      const { rows: entries } = await run.query('SELECT * FROM navigation.bookkeeping_entries WHERE user_id=$1 AND affects_balance=1', [uid]);
       for (const row of accounts) ledgers.set(row.id, mapLedger(row));
       return { ledgers, entries };
     }
@@ -100,7 +98,9 @@ export function createPostgresPortfolioStore(db, userId, options = {}) {
   }
 
   async function project(run, uid, raw) {
-    const [accounts, funds, ledger] = await Promise.all([investmentRows(run, uid), fundRows(run, uid), ledgerContext(run, uid)]);
+    const accounts = await investmentRows(run, uid);
+    const funds = await fundRows(run, uid);
+    const ledger = await ledgerContext(run, uid);
     return projectInvestmentsFrom({ rows: accounts, funds, entries: ledger.entries, ledgers: ledger.ledgers, raw: raw || {} });
   }
 
@@ -128,9 +128,10 @@ export function createPostgresPortfolioStore(db, userId, options = {}) {
     return db.transaction(async client => {
       const before = await portfolioRow(client, owner, true) || normalizePortfolio({});
       const payload = correctDividendTaxPortfolio(normalizePortfolio(input));
-      const [loadedAccounts, funds, ledger, reserves] = await Promise.all([
-        investmentRows(client, owner), fundRows(client, owner), ledgerContext(client, owner), reserveRows(client, owner)
-      ]);
+      const loadedAccounts = await investmentRows(client, owner);
+      const funds = await fundRows(client, owner);
+      const ledger = await ledgerContext(client, owner);
+      const reserves = await reserveRows(client, owner);
       const accounts = loadedAccounts.map(account => ({ ...account }));
       payload.trades = prepareInvestmentTradesFrom({ next: payload.trades, before, accounts, funds });
       if (accounts.length) {
@@ -311,7 +312,8 @@ export function createPostgresPortfolioStore(db, userId, options = {}) {
     const target = cents(amount);
     return db.transaction(async client => {
       const raw = await portfolioRow(client, user, true) || normalizePortfolio({});
-      const [investments, reserves] = await Promise.all([project(client, user, raw), reserveRows(client, user)]);
+      const investments = await project(client, user, raw);
+      const reserves = await reserveRows(client, user);
       const account = dipCashFundsFrom(investments, reserves).find(a => a.accountId === accountId);
       if (!account) throw new Error('请选择本人名下的证券账户');
       if (target > cents(account.reserved) && target > Math.round(account.cash * 100)) throw new Error('账户现金不足，不能增加预留');

@@ -45,7 +45,7 @@ await withTestDatabase(async ({ url, client, pg }) => {
     const { rows: [audit] } = await client.query("SELECT count(*)::int AS n FROM navigation.investment_account_audit WHERE user_id='u'");
     assert(audit.n >= 1, '投资账户审计写入');
     const { rows: [reserve] } = await client.query("SELECT reserved FROM navigation.dip_cash_funds WHERE user_id='u'");
-    assertEqual(Number(reserve.reserved), 100, '抄底预留持久化');
+    assertEqual(Number(reserve.reserved), 10000, '抄底预留持久化（分）');
     console.log('portfolio postgres ok');
   } finally {
     await pool.close();
