@@ -4,7 +4,7 @@
   "description": "美股/A股持仓管理（navigation 子服务，纯 JS）",
   "type": "module",
   "scripts": {
-    "build": "node ../scripts/build-vue.mjs public/generated src/client/trade-table.ts",
+    "build": "node ../scripts/build-vue.mjs public/generated src/client/trade-table.ts src/client/holdings-page.ts src/client/quant-page.ts && node ../scripts/build-vue.mjs ../qqq-dip/public/generated src/client/dip-page.ts",
     "typecheck": "tsc --noEmit --strict --skipLibCheck --target ES2020 --module ESNext --moduleResolution bundler src/client/trade-table.ts",
     "prestart": "npm run build",
     "start": "node src/server.js",

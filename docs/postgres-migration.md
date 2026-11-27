@@ -41,7 +41,7 @@ GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访�
 
 隔离环境通过 `NAVIGATION_TORN_POSTGRES_URL` 验证 Torn 用户监控、扫货助手、帮派摧毁监控、帮派筛选、公司提醒、压价监控的断点、通知设置和提醒去重，以及工作器心跳和启停意图。独立公司管理的既有文件型状态由公司工作器保存。
 
-`NAVIGATION_QQ_MONITOR_POSTGRES_URL` 用于隔离验证 QQ 登录监控、重启冷却记录、Codex 登录告警去重和工作器心跳。Codex PostgreSQL 仓库已通过隔离测试，覆盖会话 API、任务进度、Web 与 QQ 入队、并发领取、队列上限、执行中断以及结果和回执原子写入。上线前仍需让待办、QQ 消息入口、会话 API 的生产配置与工作器统一使用这套存储。
+`NAVIGATION_QQ_MONITOR_POSTGRES_URL` 用于隔离验证 QQ 登录监控、重启冷却记录、Codex 登录告警去重和工作器心跳。Codex PostgreSQL 仓库已覆盖会话 API、任务进度、Web 与 QQ 入队、并发领取、队列上限、执行中断以及结果和回执原子写入；Portal、qq-bot 与 Codex 工作器现已统一使用这套存储，待办、设置、运行时偏好、附件与出站队列同样落在 `codex_*` / `qq_codex_*` 表。
 
 股票服务通过 `NAVIGATION_QUANT_POSTGRES_URL` 验证量化设置、模拟盘和回测记录的读写。量化状态使用同一账号行锁串行更新，行情请求在事务外完成。实盘组合、记账关联和抄底资金仍须完成迁移。
 
@@ -67,7 +67,19 @@ GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访�
 | `NAVIGATION_QQ_MONITOR_POSTGRES_URL` | qq-bot |
 | `NAVIGATION_QUANT_POSTGRES_URL` | stock-manage |
 
-`knowledge-storage-worker` 通过 `/etc/navigation/postgres.env` 读取知识库连接变量。记账、实盘组合、抄底资金和 `qqq-dip` 已于 2026-11-27 完成迁移并切换到 PostgreSQL；仍未设置 `NAVIGATION_DATABASE_ENGINE=postgres`，各模块继续通过独立变量选择 PostgreSQL，未设置时回退 SQLite。
+`knowledge-storage-worker` 通过 `/etc/navigation/postgres.env` 读取知识库连接变量。记账、实盘组合、抄底资金和 `qqq-dip` 已于 2026-11-27 完成迁移并切换到 PostgreSQL。
+
+同日完成剩余运行时状态迁移：Codex 会话/待办/队列/附件通过 `NAVIGATION_QQ_MONITOR_POSTGRES_URL` 接入；`torn_company_monitor_state` 与 `qq_bot_state` 由 `003-runtime-state.sql` 创建；命理知识库案例改为读取 `knowledge` 库的 `mingli_knowledge_cases`；Portal 后台心跳与 `/readyz` 不再依赖 SQLite。
+
+2026-11-27 已在全部 PM2 进程启用全局引擎：
+
+```bash
+NAVIGATION_DATABASE_ENGINE=postgres
+NAVIGATION_POSTGRES_URL=postgresql://…/navigation
+NAVIGATION_POSTGRES_DATABASE=navigation
+```
+
+同时保留全部模块级 `NAVIGATION_*_POSTGRES_URL`（值与统一连接一致）。SQLite 文件和 `config.json` 原样保留用于回滚；未迁移的独立外部服务（SiYuan、AList、PicList、NapCat 等）不受此变量影响。
 
 四个模块使用以下模块级变量：
 
@@ -79,11 +91,13 @@ GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访�
 
 抄底资金在组合写入事务内维护，必须随 `NAVIGATION_PORTFOLIO_POSTGRES_URL` 一起切换，不单独配置变量。
 
-`qqq_dip_state` 属于 PostgreSQL 专有表，由 `shared/db/postgres/002-qqq-dip-state.sql` 幂等创建，不写入 `001-initial.sql`，也不提升 `navigation_schema_migrations` 的版本；SQLite 基线导入只比对 SQLite 快照中真实存在的表。执行方式：
+`qqq_dip_state`、`torn_company_monitor_state`、`qq_bot_state` 属于 PostgreSQL 专有表，分别由 `002-qqq-dip-state.sql`、`003-runtime-state.sql` 幂等创建，不写入 `001-initial.sql`，也不提升 `navigation_schema_migrations` 的版本；SQLite 基线导入只比对 SQLite 快照中真实存在的表。执行方式：
 
 ```bash
 docker exec -i navigation-postgres-postgres-1 psql -U navigation_db_admin -d navigation \
   < shared/db/postgres/002-qqq-dip-state.sql
+docker exec -i navigation-postgres-postgres-1 psql -U navigation_db_admin -d navigation \
+  < shared/db/postgres/003-runtime-state.sql
 ```
 
 实际切换顺序：先部署代码（不设置变量）并确认 SQLite 正常；备份 `data/navigation.db` 与 `data/qqq-dip.json`（快照时间 `20261127095008`）；执行 002；portal、portal-background、stock-manage、qqq-dip 同批设置组合变量并重启；上述进程再加上记账变量并重启；最后为 qqq-dip 设置状态变量并重启。每批切换后检查 `/readyz`、`/api/health` 和页面数据，最后 `pm2 save`。
@@ -94,7 +108,7 @@ docker exec -i navigation-postgres-postgres-1 psql -U navigation_db_admin -d nav
 - 浏览器实测记账新增/删除 0.01 账单后余额恢复；股票新增/删除 1 股 QQQ 交易后现金与交易数恢复；抄底监控现金、档位、仓位、操作记录正常。
 - 切换后 SQLite 中 `bookkeeping_entries` 仍为 3,731 条、`portfolio_users.updated_at` 停留在切换前、`qqq-dip.json` 不再更新，证明已迁数据不再写 SQLite。
 
-回滚时删除对应进程的上述变量并执行 `pm2 restart <进程> --update-env`，随后 `pm2 save`；systemd worker 移除 `/etc/systemd/system/knowledge-storage-worker.service.d/postgres.conf` 后重启。SQLite 数据文件和 `config.json` 在切换过程中保持原样，删除变量即可回到 SQLite 读写。切换后写入 PostgreSQL 的新数据不会自动回流 SQLite，回滚前需人工核对。切换前的 SQLite 一致性快照位于 `data/navigation.db.bak-20261127095008`（qqq-dip JSON 同目录同名 `.bak-20261127095008` 若存在）。
+回滚时删除对应进程的上述变量并执行 `pm2 restart <进程> --update-env`，随后 `pm2 save`；systemd worker 移除 `/etc/systemd/system/knowledge-storage-worker.service.d/postgres.conf` 后重启。SQLite 数据文件和 `config.json` 在切换过程中保持原样，删除变量即可回到 SQLite 读写。全局引擎回滚需要同时删除 `NAVIGATION_DATABASE_ENGINE`、`NAVIGATION_POSTGRES_URL`、`NAVIGATION_POSTGRES_DATABASE` 与模块级变量，再重启全部进程。切换后写入 PostgreSQL 的新数据不会自动回流 SQLite，回滚前需人工核对。切换前的 SQLite 一致性快照位于 `data/navigation.db.bak-20261127095008`（qqq-dip JSON 同目录同名 `.bak-20261127095008` 若存在）。
 
 ## 应用切换条件
 

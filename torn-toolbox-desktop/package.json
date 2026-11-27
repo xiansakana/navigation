@@ -12,6 +12,7 @@
     "start:undercut": "node src/server-undercut.js",
     "start:company": "node src/server-company.js",
     "migrate-config": "node scripts/migrate-config.mjs",
+    "build": "node public/vue/build.mjs",
     "test": "node ../scripts/test.mjs torn-toolbox-desktop"
   }
 }

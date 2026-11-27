@@ -14,6 +14,8 @@ for old in torn-company torn-undercut; do
 done
 cd "$ROOT/portal"
 npm install --omit=dev
+cd "$ROOT/torn-toolbox-desktop"
+npm run build
 cd "$ROOT"
 if pm2 describe torn-monitor-worker >/dev/null 2>&1; then
   pm2 restart torn-monitor-worker

@@ -10,6 +10,7 @@
   "scripts": {
     "test:send": "node src/send-test.js",
     "test": "node ../scripts/test.mjs qq-bot",
+    "build": "node public/vue/build.mjs",
     "start": "node src/server.js"
   },
   "dependencies": {

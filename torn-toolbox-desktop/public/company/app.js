@@ -3,6 +3,11 @@ var companyWatchers = [];
 
 function $(id) { return document.getElementById(id); }
 
+function setStatus(text) {
+    if (window.TornShell && window.TornShell.setGlobalStatus) return window.TornShell.setGlobalStatus(text);
+    $('global-status').textContent = text;
+}
+
 function formatTime(ts) {
     return new Date(ts * 1000).toLocaleString('sv-SE');
 }
@@ -63,7 +68,7 @@ function updateCompanyState(state) {
     $('co-apps').textContent = state.apps || 0;
     $('co-next').textContent = formatNext(state.nextScanAt);
     $('co-message').textContent = state.statusMessage || '';
-    $('global-status').textContent = running ? '公司监听中' : '就绪';
+    setStatus(running ? '公司监听中' : '就绪');
     WUI.renderWatcherMeta(state.watchers || [], 'apps');
 }
 
@@ -215,7 +220,7 @@ async function saveConfig() {
             }
         })
     });
-    $('global-status').textContent = '设置已保存';
+    setStatus('设置已保存');
     await loadState();
 }
 
@@ -226,7 +231,7 @@ function connectEvents() {
     es.addEventListener('error', function(e) {
         if (!e.data) return;
         var msg = JSON.parse(e.data).message;
-        $('global-status').textContent = msg;
+        setStatus(msg);
         WUI.toastErr(msg);
     });
 }
@@ -281,6 +286,6 @@ WUI.bindTargetTypeChange($('co-watchers'));
 WUI.handleTargetActions($('co-watchers'), function() { return companyWatchers; }, renderCompanyWatchers, syncCompanyWatchersFromDom);
 
 loadState().then(connectEvents).catch(function(err) {
-    $('global-status').textContent = err.message;
+    setStatus(err.message);
     WUI.toastErr(err.message);
 }).finally(function() { window.navigationSkeleton?.finish(); });

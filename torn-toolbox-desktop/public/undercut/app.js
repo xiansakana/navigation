@@ -4,6 +4,11 @@ var itemsCacheByWatcher = new Map();
 
 function $(id) { return document.getElementById(id); }
 
+function setStatus(text) {
+    if (window.TornShell && window.TornShell.setGlobalStatus) return window.TornShell.setGlobalStatus(text);
+    $('global-status').textContent = text;
+}
+
 function formatMoney(n) {
     var v = Math.round(Number(n) || 0);
     return '$' + Math.abs(v).toLocaleString('en-US');
@@ -71,7 +76,7 @@ function updateUndercutState(state) {
     $('uc-alerts').textContent = state.alerts || 0;
     $('uc-next').textContent = state.checking && running ? '本轮结束后安排' : formatNext(state.nextScanAt);
     $('uc-message').textContent = state.statusMessage || '';
-    $('global-status').textContent = running ? '压价监听中' : '就绪';
+    setStatus(running ? '压价监听中' : '就绪');
     WUI.renderWatcherMeta(state.watchers || [], 'alerts');
 }
 
@@ -370,7 +375,7 @@ async function saveConfig() {
             }
         })
     });
-    $('global-status').textContent = '设置已保存';
+    setStatus('设置已保存');
     await loadState();
 }
 
@@ -381,7 +386,7 @@ function connectEvents() {
     es.addEventListener('error', function(e) {
         if (!e.data) return;
         var msg = JSON.parse(e.data).message;
-        $('global-status').textContent = msg;
+        setStatus(msg);
         WUI.toastErr(msg);
     });
 }
@@ -459,6 +464,6 @@ $('uc-watchers').addEventListener('click', function(e) {
 WUI.bindTargetTypeChange($('uc-watchers'));
 
 loadState().then(connectEvents).catch(function(err) {
-    $('global-status').textContent = err.message;
+    setStatus(err.message);
     WUI.toastErr(err.message);
 }).finally(function() { window.navigationSkeleton?.finish(); });

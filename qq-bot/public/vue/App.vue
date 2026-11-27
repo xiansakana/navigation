@@ -1,0 +1,206 @@
+<script setup>
+import { computed, onMounted, reactive, ref } from 'vue';
+
+const access = reactive({
+  ready: false,
+  canViewConfig: false,
+  canViewNativeBusiness: false,
+  canEdit: false,
+  canTestSlack: false,
+  canBusinessSave: false,
+  canBusinessTest: false
+});
+
+const summary = ref('');
+const monitorStatus = ref('');
+const toastMessage = ref('');
+const toastError = ref(false);
+const toastVisible = ref(false);
+let toastTimer = 0;
+
+const accessVisible = computed(() => ({
+  monitor: access.canViewConfig,
+  channels: access.canViewConfig,
+  business: access.canViewConfig || access.canViewNativeBusiness,
+  sendTest: access.canEdit || access.canTestSlack
+}));
+
+function showToast(message, isError) {
+  toastMessage.value = message;
+  toastError.value = !!isError;
+  toastVisible.value = true;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastVisible.value = false; }, 3200);
+}
+
+onMounted(() => {
+  window.NotificationShell = {
+    setAccess(values) {
+      if (!values) return;
+      for (const key of Object.keys(access)) {
+        if (key !== 'ready' && key in values) access[key] = !!values[key];
+      }
+      access.ready = true;
+    },
+    setSummary(text) { summary.value = text == null ? '' : String(text); },
+    setMonitorStatus(text) { monitorStatus.value = text == null ? '' : String(text); },
+    toast: showToast
+  };
+  window.portalLayout?.set(window.portalLayout.get());
+});
+</script>
+
+<template>
+  <main class="notify-app" data-layout-container data-skeleton="dashboard" data-skeleton-key="page">
+    <section class="hero">
+      <div>
+        <span class="eyebrow">NOTIFICATION HUB</span>
+        <h1>通知管理</h1>
+        <p>集中配置消息渠道、检查可用状态，并在接入业务前完成发送测试。</p>
+      </div>
+      <div class="summary" id="summary" aria-live="polite">{{ summary }}</div>
+      <p id="notification-monitor-status" aria-live="polite">{{ monitorStatus }}</p>
+    </section>
+
+    <div class="notice">
+      <span>i</span>
+      <p>业务监控继续由股票管理和 Torn 工具箱执行；其通知开关、目标及测试可在下方统一管理。</p>
+    </div>
+
+    <section class="monitor-card" :class="{ hidden: !accessVisible.monitor }" data-notification-config>
+      <div class="monitor-main">
+        <span class="channel-icon x-icon">𝕏</span>
+        <div>
+          <div class="monitor-title"><h2>Tibo 重置机会监听</h2><span id="monitor-badge" class="monitor-badge">加载中</span></div>
+          <p>持续检查 @thsottiaux 的每条新推文，判断 Codex 是否可能即将重置额度；命中后通过所选渠道通知。</p>
+          <div id="monitor-detail" class="monitor-detail">正在读取监听状态…</div>
+        </div>
+      </div>
+      <div class="monitor-controls">
+        <fieldset class="monitor-channels"><legend>推送到</legend>
+          <label><input id="monitor-channel-qq" type="checkbox" value="qq"> QQ</label>
+          <label><input id="monitor-channel-email" type="checkbox" value="email"> 邮件</label>
+          <label><input id="monitor-channel-slack" type="checkbox" value="slack"> Slack</label>
+        </fieldset>
+        <label class="switch"><input id="monitor-enabled" type="checkbox"><span></span></label>
+        <label class="interval-label">检查间隔
+          <select id="monitor-interval"><option value="3">3 分钟</option><option value="5">5 分钟</option><option value="10">10 分钟</option><option value="15">15 分钟</option></select>
+        </label>
+        <button id="monitor-check" class="test-btn compact" type="button">立即检查</button>
+        <button id="monitor-save" class="save-btn" type="button">保存监听配置</button>
+        <span id="monitor-save-state" class="save-state" aria-live="polite">监听配置已加载</span>
+      </div>
+      <div class="monitor-qq-config">
+        <h3>QQ 通知目标</h3>
+        <label class="biz-check"><input id="monitor-qq-default" type="checkbox" checked> 使用 QQ 渠道的默认目标</label>
+        <p class="biz-hint">取消勾选后，可单独添加多个群聊或私聊目标；群内 @ 支持多个 QQ 号，用逗号、分号或空格分隔，填写 all 表示 @所有人。</p>
+        <div id="monitor-qq-targets" hidden></div>
+      </div>
+    </section>
+
+    <section class="business-card codex-card" id="codex-settings" aria-labelledby="codex-heading" hidden>
+      <div class="business-card-head"><div><span class="eyebrow">QQ CODEX</span><h2 id="codex-heading">QQ Codex 群聊</h2><p id="codex-status"></p></div></div>
+      <p class="biz-hint">在选中的群里 @机器人并发送 <code>codex navigation 任务内容</code>，只有已授权的发送人可以执行。</p>
+      <div class="codex-groups-head"><h3>允许的群聊</h3><span id="codex-group-count" class="biz-hint" aria-live="polite"></span></div>
+      <p class="biz-hint">直接勾选其他通知已保存的群号，相同群号只显示一次。新增通知群不会自动授权；取消全部选择可关闭群聊入口。</p>
+      <div id="codex-groups" class="codex-group-options" role="group" aria-label="允许的群聊"></div>
+      <div class="codex-group-add"><label for="codex-new-group">其他群号</label><input id="codex-new-group" inputmode="numeric" maxlength="20" placeholder="填写其他群号" disabled><button id="codex-add-group" class="test-btn compact" type="button" disabled>添加群聊</button></div>
+      <div class="form-grid codex-reply"><label>完整结果发送到<select id="codex-group-reply" disabled><option value="private">私聊发起人（群内仅回复任务状态）</option><option value="group">原群，并 @发起人</option></select><small>发送到原群时，群内成员均可看到完整结果。群聊与私聊会话独立。</small></label></div>
+      <div class="config-actions"><span id="codex-save-state" role="status">正在读取配置…</span><button id="codex-save" class="save-btn" type="button" disabled>保存群聊配置</button></div>
+    </section>
+
+    <section class="business-section" :class="{ hidden: !accessVisible.business }" aria-labelledby="business-heading" data-notification-config>
+      <div class="business-heading"><div><span class="eyebrow">BUSINESS NOTIFICATIONS</span><h2 id="business-heading">业务提醒</h2><p>每项业务可分别启用 QQ / Slack；Torn 还能按监听账号控制。Slack 使用上方渠道配置。</p></div><button id="business-refresh" class="test-btn compact" type="button" :hidden="access.ready && !access.canViewConfig">刷新状态</button></div>
+      <div id="business-grid" data-skeleton="cards" data-skeleton-key="business" aria-live="polite">
+        <section class="notification-category" aria-labelledby="notify-stock-heading">
+          <h3 id="notify-stock-heading">股票管理</h3>
+          <section class="notification-subcategory" aria-labelledby="notify-dip-heading">
+            <h4 id="notify-dip-heading">抄底监控</h4>
+            <div class="business-panels"><div id="biz-slot-stock" class="business-grid"><div class="business-loading"><span class="business-spinner"></span>正在读取业务提醒…</div></div></div>
+          </section>
+        </section>
+        <section class="notification-category" aria-labelledby="notify-torn-heading">
+          <h3 id="notify-torn-heading">Torn 工具箱</h3>
+          <section class="notification-subcategory" aria-labelledby="notify-shopping-heading">
+            <h4 id="notify-shopping-heading">扫货助手</h4>
+            <div class="business-panels"><div id="shopping-notifications" class="business-grid" hidden></div></div>
+          </section>
+          <section class="notification-subcategory" aria-labelledby="notify-monitor-heading">
+            <h4 id="notify-monitor-heading">监控</h4>
+            <div class="business-panels"><div id="users-notifications" class="business-grid" hidden></div><div id="chain-notifications" class="business-grid" hidden></div></div>
+          </section>
+          <section class="notification-subcategory" aria-labelledby="notify-undercut-heading">
+            <h4 id="notify-undercut-heading">压价助手</h4>
+            <div class="business-panels"><div id="biz-slot-undercut" class="business-grid"></div></div>
+          </section>
+          <section class="notification-subcategory" aria-labelledby="notify-company-heading">
+            <h4 id="notify-company-heading">公司监听</h4>
+            <div class="business-panels"><div id="biz-slot-company" class="business-grid"></div><div id="company-salary-notifications" class="business-grid" hidden></div><div id="company-training-notifications" class="business-grid" hidden></div><div id="company-stock-notifications" class="business-grid" hidden></div></div>
+          </section>
+        </section>
+      </div>
+    </section>
+
+    <section class="channel-grid" :class="{ hidden: !accessVisible.channels }" data-notification-config>
+      <article class="channel-card" data-channel="qq">
+        <div class="channel-head">
+          <div class="channel-identity"><span class="channel-icon qq">Q</span><div><h2>QQ 通知</h2><p>通过 NapCat 发送私聊或群消息</p></div></div>
+          <label class="switch"><input id="qq-enabled" type="checkbox"><span></span></label>
+        </div>
+        <div class="status-row"><span class="status-dot"></span><span class="status-text">检查中</span></div>
+        <p id="qq-login-status" class="biz-hint" role="status">正在检查 QQ 登录与消息接收连接…</p>
+        <p id="qq-alert-status" class="biz-hint">掉线告警使用已启用且配置完整的 Slack／邮件，不依赖 QQ。</p>
+        <div class="form-grid">
+          <label class="wide">NapCat 地址<input id="qq-base-url" placeholder="http://127.0.0.1:3000"></label>
+          <label class="wide">Access Token<input id="qq-token" type="password" autocomplete="new-password" placeholder="留空则保持原值"></label>
+          <label>消息类型<select id="qq-type"><option value="private">私聊</option><option value="group">群聊</option></select></label>
+          <label id="qq-user-wrap">QQ 号<input id="qq-user-id" inputmode="numeric" placeholder="123456789"></label>
+          <label id="qq-group-wrap" class="hidden">群号<input id="qq-group-id" inputmode="numeric" placeholder="123456789"></label>
+          <label id="qq-at-wrap" class="hidden">@ QQ 号（可选，支持多人）<input id="qq-at-user-id" placeholder="逗号、分号或空格分隔；all 为所有人"></label>
+        </div>
+        <button class="test-btn" data-test="qq" type="button">发送 QQ 测试</button>
+      </article>
+
+      <article class="channel-card" data-channel="email">
+        <div class="channel-head">
+          <div class="channel-identity"><span class="channel-icon email">@</span><div><h2>邮件通知</h2><p>通过标准 SMTP 服务器发送邮件</p></div></div>
+          <label class="switch"><input id="email-enabled" type="checkbox"><span></span></label>
+        </div>
+        <div class="status-row"><span class="status-dot"></span><span class="status-text">检查中</span></div>
+        <div class="form-grid">
+          <label class="wide">SMTP 主机<input id="smtp-host" placeholder="smtp.example.com"></label>
+          <label>端口<input id="smtp-port" type="number" min="1" max="65535" value="465"></label>
+          <label class="check-label"><input id="smtp-secure" type="checkbox" checked> 使用 SSL/TLS</label>
+          <label class="wide">用户名<input id="smtp-user" autocomplete="username" placeholder="name@example.com"></label>
+          <label class="wide">密码或授权码<input id="smtp-pass" type="password" autocomplete="new-password" placeholder="留空则保持原值"></label>
+          <label>发件人<input id="email-from" placeholder="通知中心 <name@example.com>"></label>
+          <label>默认收件人<input id="email-to" placeholder="you@example.com"></label>
+        </div>
+        <button class="test-btn" data-test="email" type="button">发送邮件测试</button>
+      </article>
+
+      <article class="channel-card slack-card" data-channel="slack">
+        <div class="channel-head">
+          <div class="channel-identity"><span class="channel-icon slack">S</span><div><h2>Slack 通知</h2><p>使用 Incoming Webhook 推送到指定频道</p></div></div>
+          <label class="switch"><input id="slack-enabled" type="checkbox"><span></span></label>
+        </div>
+        <div class="status-row"><span class="status-dot"></span><span class="status-text">检查中</span></div>
+        <div class="form-grid">
+          <label class="wide">Webhook URL<input id="slack-webhook-url" type="password" autocomplete="new-password" placeholder="https://hooks.slack.com/services/…"></label>
+        </div>
+        <button class="test-btn" data-test="slack" type="button">发送 Slack 测试</button>
+      </article>
+    </section>
+
+    <section class="send-test" :class="{ hidden: !accessVisible.sendTest }">
+      <div><h2>测试内容</h2><p>测试按钮会使用当前已保存的渠道配置。</p></div>
+      <textarea id="test-message" rows="3" placeholder="留空时发送默认测试消息"></textarea>
+    </section>
+
+    <div class="config-actions">
+      <span id="save-state">修改配置后请保存</span>
+      <button id="save" class="save-btn" type="button">保存渠道配置</button>
+    </div>
+  </main>
+  <div class="toast" id="toast" :class="{ error: toastError }" :hidden="!toastVisible">{{ toastMessage }}</div>
+</template>

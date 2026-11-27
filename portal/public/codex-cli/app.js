@@ -1,6 +1,6 @@
 (() => {
   const $=id=>document.getElementById(id);let state,scopeRequest=0,loading=false,settingsRequest;
-  const message=(text,type='')=>{$('message').textContent=text;$('message').className='notice '+type;};
+  const message=(text,type='')=>{if(window.CodexShell?.notice){window.CodexShell.notice('settings',text,type);return;}$('message').textContent=text;$('message').className='notice '+type;};
   async function api(path,options={}){
     const response=await fetch('/api/codex-cli/'+path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...options.headers}});
     if(response.redirected&&response.url.includes('/login')){location.assign('/login/');throw new Error('请先登录');}
@@ -27,8 +27,9 @@
     }catch(error){if(token===scopeRequest)message(error.message,'error');return false;}
     finally{if(token===scopeRequest)$('runtime-fields').disabled=!state.permissions.editRuntime;}
   }
+  const onSettings=()=>window.CodexShell?.activeView?window.CodexShell.activeView==='settings':!$('settings-view').hidden;
   function loadSettings() {
-    if (!state || $('settings-view').hidden) return;
+    if (!state || !onSettings()) return;
     if (!settingsRequest) {
       settingsRequest = Promise.all([
         state.permissions.viewRuntime ? runtime() : true,
@@ -60,7 +61,7 @@
       $('usage-panel').hidden=!state.permissions.viewUsage;
       $('updated').textContent='最近更新 · '+new Date().toLocaleString('sv-SE', { timeZone:'Asia/Shanghai' })+'（北京时间）';
       settingsRequest = undefined;
-      if ($('settings-view').hidden) message('已连接服务器。模型与强度选项来自当前账号。');
+      if (!onSettings()) message('已连接服务器。模型与强度选项来自当前账号。');
       else await loadSettings();
     }catch(error){message(error.message,'error');}
     finally{loading=false;$('refresh').disabled=false;}

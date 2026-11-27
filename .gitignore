@@ -1,6 +1,10 @@
 **/node_modules/
 stock-manage/public/generated/
 portal/public/generated/
+portal/public/codex-cli/generated/
+qq-bot/public/generated/
+qqq-dip/public/generated/
+torn-toolbox-desktop/public/generated/
 **/__pycache__/
 **/*.log
 **/config.json

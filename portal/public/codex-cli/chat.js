@@ -10,7 +10,13 @@
   };
   const sourceLabel=c=>c.source==='qq'?'QQ'+(c.groupId?' 群聊':' 私聊'):({web:'网页',knowledge:'知识库',cli:'服务器 CLI'}[c.source]||c.source);
   const sourceNames=new Map([...$('session-source').options].map(option=>[option.value,option.textContent]));
-  function notice(text,error=false){$('chat-notice').textContent=text;$('chat-notice').classList.toggle('error',error);}
+  function notice(text,error=false){
+    if(window.CodexShell?.notice){window.CodexShell.notice('chat',text,error?'error':'');return;}
+    $('chat-notice').textContent=text;$('chat-notice').classList.toggle('error',error);
+  }
+  const setNotice=text=>window.CodexShell?.notice?window.CodexShell.notice('sessions',text):void($('sessions-notice').textContent=text);
+  const openDialog=name=>window.CodexShell?.openDialog?window.CodexShell.openDialog(name):void $(name==='newChat'?'new-dialog':'rename-dialog').showModal();
+  const closeDialog=name=>window.CodexShell?.closeDialog?window.CodexShell.closeDialog(name):void $(name==='newChat'?'new-dialog':'rename-dialog').close();
   async function api(path='',method='GET',body) {
     const response=await fetch('/api/codex-cli/conversations'+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
     if(response.redirected&&response.url.includes('/login')){location.assign('/login/');throw new Error('请先登录');}
@@ -18,6 +24,7 @@
   }
   function view(workspace) {
     const name=workspace===true?'workspace':workspace===false?'settings':workspace;
+    if(window.CodexShell?.setView){window.CodexShell.setView(name);return;}
     $('workspace').hidden=name!=='workspace';$('settings-view').hidden=name!=='settings';$('todos-view').hidden=name!=='todos';
     for(const id of ['workspace','settings','todos']){$(id+'-tab').classList.toggle('active',id===name);$(id+'-tab').setAttribute('aria-pressed',String(id===name));}
     history.replaceState(null,'',location.pathname+location.search+(name==='workspace'?'':'#'+name));
@@ -44,12 +51,18 @@
       option.title=partial?'按当前已加载的会话统计，加载更多后数量会更新':'';
     }
     const visible=matching.filter(c=>!source||c.source===source);
-    $('sessions').replaceChildren(...visible.map(c=>{
-      const button=node('button',undefined,'session-entry'+(c.id===selected?' selected':''));button.type='button';button.setAttribute('aria-pressed',String(c.id===selected));
-      button.append(node('strong',c.title),node('span',`${c.project} · ${sourceLabel(c)}${c.state?' · '+(labels[c.state] || c.state):''}`));
-      button.onclick=()=>select(c.id);return button;
-    }));
-    $('sessions-notice').textContent=visible.length?`${visible.length} 个${archived?'已归档':''}会话`:query?'没有匹配的会话':archived?'暂无归档会话':'还没有会话，点击新建开始。';
+    const noticeText=visible.length?`${visible.length} 个${archived?'已归档':''}会话`:query?'没有匹配的会话':archived?'暂无归档会话':'还没有会话，点击新建开始。';
+    const meta=c=>`${c.project} · ${sourceLabel(c)}${c.state?' · '+(labels[c.state] || c.state):''}`;
+    if(window.CodexShell?.setSessions){
+      window.CodexShell.setSessions({selected,notice:noticeText,items:visible.map(c=>({id:c.id,title:c.title,meta:meta(c)}))});
+    }else{
+      $('sessions').replaceChildren(...visible.map(c=>{
+        const button=node('button',undefined,'session-entry'+(c.id===selected?' selected':''));button.type='button';button.setAttribute('aria-pressed',String(c.id===selected));
+        button.append(node('strong',c.title),node('span',meta(c)));
+        button.onclick=()=>select(c.id);return button;
+      }));
+      setNotice(noticeText);
+    }
   }
   function controls() {
     const active=jobs.some(j=>['queued','running'].includes(j.state)),allowed=enabled&&!!current&&!current.readOnly&&!current.archived&&permissions.send&&!active&&!sending&&!!catalog;
@@ -127,15 +140,15 @@
   $('chat-model').onchange=efforts;$('session-search').oninput=renderList;$('session-source').onchange=renderList;$('show-archived').onchange=()=>{listExpanded=false;renderList();void refreshList().catch(e=>notice(e.message,true));};
   $('sessions-more').onclick=async()=>{$('sessions-more').disabled=true;try{await refreshList(true);}catch(e){notice(e.message,true);}finally{$('sessions-more').disabled=false;}};
   $('history-more').onclick=async()=>{$('history-more').disabled=true;try{await detail(selected,true);}catch(e){notice(e.message,true);}finally{$('history-more').disabled=false;}};
-  $('new-chat').onclick=()=>$('new-dialog').showModal();$('cancel-new').onclick=()=>$('new-dialog').close();
+  $('new-chat').onclick=()=>openDialog('newChat');$('cancel-new').onclick=()=>closeDialog('newChat');
   $('new-form').onsubmit=async event=>{
     event.preventDefault();$('create-chat').disabled=true;
-    try{const data=await api('','POST',{project:$('new-project').value});$('new-dialog').close();$('show-archived').checked=false;await refreshList();await select(data.conversation.id);notice('新会话已创建。');}catch(error){notice(error.message,true);$('new-dialog').close();}finally{$('create-chat').disabled=false;}
+    try{const data=await api('','POST',{project:$('new-project').value});closeDialog('newChat');if(window.CodexShell?.setArchived)window.CodexShell.setArchived(false);else $('show-archived').checked=false;await refreshList();await select(data.conversation.id);notice('新会话已创建。');}catch(error){notice(error.message,true);closeDialog('newChat');}finally{$('create-chat').disabled=false;}
   };
-  $('rename-chat').onclick=()=>{$('new-title').value=current.title;$('rename-dialog').showModal();};$('cancel-rename').onclick=()=>$('rename-dialog').close();
+  $('rename-chat').onclick=()=>{$('new-title').value=current.title;openDialog('rename');};$('cancel-rename').onclick=()=>closeDialog('rename');
   $('rename-form').onsubmit=async event=>{
     event.preventDefault();$('save-title').disabled=true;
-    try{await api('/'+selected,'PATCH',{title:$('new-title').value});$('rename-dialog').close();await refreshList();await detail();}catch(error){notice(error.message,true);$('rename-dialog').close();}finally{$('save-title').disabled=false;}
+    try{await api('/'+selected,'PATCH',{title:$('new-title').value});closeDialog('rename');await refreshList();await detail();}catch(error){notice(error.message,true);closeDialog('rename');}finally{$('save-title').disabled=false;}
   };
   $('archive-chat').onclick=async()=>{try{await api('/'+selected,'PATCH',{archived:!current.archived});await refreshList();await detail();}catch(error){notice(error.message,true);}};
   $('stop-chat').onclick=async()=>{$('stop-chat').disabled=true;try{await api('/'+selected+'/stop','POST',{});notice('已请求停止，正在保存任务状态。');await detail();}catch(error){notice(error.message,true);}finally{$('stop-chat').disabled=false;}};
@@ -152,8 +165,9 @@
     const selection=selectionVersion;
     try{
       if(await refreshList()&&selection===selectionVersion&&!$('workspace').hidden)await detail();
-    }catch(error){notice(error.message,true);$('sessions-notice').textContent=error.message;}finally{reading=false;}
+    }catch(error){notice(error.message,true);setNotice(error.message);}finally{reading=false;}
   }
+  window.CodexChat={select,detail,poll,renderList};
   if(location.hash==='#todos')view('todos');else if(location.hash==='#settings')view(false);
   void poll();
   setInterval(()=>void poll(),3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)void poll();});

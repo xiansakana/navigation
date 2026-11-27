@@ -3,7 +3,12 @@
   let state=null,catalog=null,editing='',formRequest='',loading=null,mutating=false,lastRender='';
   const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;};
   const time=value=>value?new Date(value).toLocaleString('sv-SE', { timeZone:'Asia/Shanghai' }):'等待下次检查';
-  const notice=(text,error=false)=>{$('todo-notice').textContent=text;$('todo-notice').classList.toggle('error',error);};
+  const notice=(text,error=false)=>{
+    if(window.CodexShell?.notice){window.CodexShell.notice('todos',text,error?'error':'');return;}
+    $('todo-notice').textContent=text;$('todo-notice').classList.toggle('error',error);
+  };
+  const openTodo=()=>window.CodexShell?.openDialog?window.CodexShell.openDialog('todo'):void $('todo-dialog').showModal();
+  const closeTodo=()=>window.CodexShell?.closeDialog?window.CodexShell.closeDialog('todo'):void $('todo-dialog').close();
   async function api(path='',method='GET',body){
     const response=await fetch('/api/codex-cli/todos'+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});
     if(response.redirected&&response.url.includes('/login')){location.assign('/login/');throw new Error('请先登录');}
@@ -68,16 +73,16 @@
     $('todo-title').value=row?.title || '';$('todo-prompt').value=row?.prompt || '';
     choices($('todo-project'),state.projects.map(value=>({value,label:value})),row?.project || state.projects[0]);conversations(row?.conversationId);
     choices($('todo-model'),[{value:'',label:'执行时继承默认模型'},...(catalog?.models || []).map(m=>({value:m.id,label:m.id}))],row?.runtime.model || '');efforts(row?.runtime.effort);
-    $('todo-auto').disabled=!state.permissions.run;$('todo-auto').checked=state.permissions.run&&(row?row.state!=='paused':true);$('todo-dialog').showModal();
+    $('todo-auto').disabled=!state.permissions.run;$('todo-auto').checked=state.permissions.run&&(row?row.state!=='paused':true);openTodo();
   }
-  $('todo-new').onclick=()=>open();$('todo-cancel').onclick=()=>$('todo-dialog').close();$('todo-project').onchange=()=>conversations();$('todo-model').onchange=()=>efforts();$('todo-filter').onchange=render;
+  $('todo-new').onclick=()=>open();$('todo-cancel').onclick=()=>closeTodo();$('todo-project').onchange=()=>conversations();$('todo-model').onchange=()=>efforts();$('todo-filter').onchange=render;
   $('todo-form').onsubmit=async event=>{
     event.preventDefault();$('todo-save').disabled=true;$('todo-form-error').textContent='';
     try{
       const scheduledAt=$('todo-scheduled').value?Date.parse($('todo-scheduled').value+':00+08:00'):0;
       if(!Number.isSafeInteger(scheduledAt)||scheduledAt<0)throw new Error('请选择有效的执行时间');
       await api(editing?'/'+editing:'',editing?'PATCH':'POST',{title:$('todo-title').value,project:$('todo-project').value,prompt:$('todo-prompt').value,conversationId:$('todo-conversation').value,model:$('todo-model').value,effort:$('todo-effort').value,autoRun:$('todo-auto').checked,requestId:formRequest,scheduledAt});
-      $('todo-dialog').close();notice('待办已保存。');await load(true);
+      closeTodo();notice('待办已保存。');await load(true);
     }catch(error){$('todo-form-error').textContent=error.message;}finally{$('todo-save').disabled=false;}
   };
   document.addEventListener('codex-status',event=>{catalog=event.detail;});

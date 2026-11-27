@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="/codex-cli/chat.css?v=3"><link rel="stylesheet" href="/codex-cli/todos.css?v=1"></head>
 <body class="portal-experience has-navbar portal-layout-enabled">
   <header class="navbar"><div class="navbar-inner"><a class="navbar-brand" href="/"><span class="navbar-logo">⚡</span><span>服务导航</span></a><nav class="navbar-nav"><span class="navbar-title">Codex CLI</span></nav><div class="navbar-actions"><button type="button" class="btn ghost navbar-layout-btn" aria-pressed="false"><span class="label">全宽</span></button><button type="button" class="btn ghost navbar-theme-btn" aria-label="切换主题"><span class="navbar-theme-icon">☀️</span><span class="label navbar-theme-label">日间</span></button></div></div></header>
+  <div id="codex-app">
   <nav class="codex-tabs" aria-label="Codex模块"><button id="workspace-tab" class="active" type="button" aria-pressed="true">会话工作台</button><button id="todos-tab" type="button" aria-pressed="false" hidden>Todo 待办</button><button id="settings-tab" type="button" aria-pressed="false">服务器与 QQ 设置</button></nav>
   <section id="workspace" class="workspace" data-layout-container aria-label="会话工作台">
     <aside class="session-sidebar">
@@ -70,6 +71,7 @@
     <section id="usage-panel" class="panel usage-panel" hidden><div class="section-heading"><span class="section-number">03</span><div><h2>账户额度</h2><p>服务器当前登录账号的实时额度，重置时间使用北京时间。</p></div></div><pre id="usage">正在读取额度…</pre></section>
     <footer id="updated" class="muted"></footer>
   </main>
-  <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script><script defer src="/vendor/marked.js"></script><script defer src="/vendor/purify.js"></script><script defer src="/codex-cli/chat.js?v=workspace-poll-1"></script><script defer src="/codex-cli/todos.js?v=datetime-20261110"></script><script defer src="/codex-cli/app.js?v=page-startup-2"></script>
+  </div>
+  <script src="/theme.js"></script><script src="/layout.js?v=layout-20261018"></script><script type="module" src="/codex-cli/generated/main.js?v=vue-shell-1"></script><script defer src="/vendor/marked.js"></script><script defer src="/vendor/purify.js"></script><script defer src="/codex-cli/chat.js?v=vue-shell-1"></script><script defer src="/codex-cli/todos.js?v=vue-shell-1"></script><script defer src="/codex-cli/app.js?v=vue-shell-1"></script>
 </body>
 </html>

@@ -1,7 +1,8 @@
 (function () {
   'use strict';
   window.createBookkeepingScope=function({$,esc,can,write,load,capturePosition}) {
-    const host=document.createElement('section');host.id='analysis-scope';host.className='bk-analysis-scope hidden';$('filters').before(host);
+    let host=$('analysis-scope');
+    if(!host){host=document.createElement('section');host.id='analysis-scope';host.className='bk-analysis-scope hidden';$('filters').before(host);}
     let tab='entries',scope={options:[],enabled:false,selectedAccountIds:[]},draft=null,revision=0,pending=Promise.resolve(),error='';
     function visibility(){host.classList.toggle('hidden',!can('accounts:view')||!['stats','accounts'].includes(tab)||!scope.options.length);}
     function render(value=scope) {

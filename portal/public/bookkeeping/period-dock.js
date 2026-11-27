@@ -5,7 +5,7 @@
     const dock=document.createElement('nav');
     dock.id='period-dock';dock.className='bk-period-dock hidden';dock.setAttribute('aria-label','图表时间筛选');
     dock.innerHTML='<button type="button" class="btn ghost" data-period-step="prev" aria-label="上一时间段">←</button><button type="button" class="bk-period-dock-caption" aria-haspopup="dialog" aria-controls="period-dock-editor"><span></span><small>选择时间 ▾</small></button><button type="button" class="btn ghost" data-period-step="next" aria-label="下一时间段">→</button>';
-    shell.append(dock);
+    ($('period-dock-slot') || shell).append(dock);
     const dialog=document.createElement('dialog');
     dialog.id='period-dock-editor';dialog.className='bk-dialog bk-period-dock-editor';dialog.setAttribute('aria-labelledby','period-dock-title');
     dialog.innerHTML='<div class="bk-panel-heading"><h2 id="period-dock-title">选择时间</h2><button type="button" class="btn ghost" aria-label="关闭时间选择">✕</button></div><div class="bk-period-dock-fields"></div><div class="bk-form-actions"><button type="button" class="btn primary">完成</button></div>';

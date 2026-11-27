@@ -10,6 +10,7 @@ async function api(path, options) {
 }
 
 function toast(message, isError) {
+    if (window.NotificationShell && window.NotificationShell.toast) return window.NotificationShell.toast(message, isError);
     var el = byId('toast');
     el.textContent = message;
     el.className = 'toast' + (isError ? ' error' : '');
@@ -124,7 +125,9 @@ async function loadQqHealth() {
 function renderStatus(channels) {
     var enabled = channels.filter(function(item) { return item.enabled; }).length;
     var ready = channels.filter(function(item) { return item.enabled && item.ready; }).length;
-    byId('summary').textContent = enabled ? ready + ' / ' + enabled + ' 个已启用渠道就绪' : '尚未启用通知渠道';
+    var summaryText = enabled ? ready + ' / ' + enabled + ' 个已启用渠道就绪' : '尚未启用通知渠道';
+    if (window.NotificationShell && window.NotificationShell.setSummary) window.NotificationShell.setSummary(summaryText);
+    else byId('summary').textContent = summaryText;
     channels.forEach(function(status) {
         var card = document.querySelector('.channel-grid .channel-card[data-channel="' + status.id + '"]');
         if (!card) return;
@@ -275,11 +278,17 @@ document.querySelectorAll('[data-test]').forEach(function(button) {
 
 Promise.all([api('api/status'), loadAccess()]).then(async function([status]) {
     renderStatus(status.channels);
-    byId('notification-monitor-status').textContent = status.tiboEnabled ? 'Tibo 监听已启用' : 'Tibo 监听未启用';
-    for (const section of document.querySelectorAll('[data-notification-config]')) section.classList.toggle('hidden', !access.canViewConfig);
-    if (access.canViewNativeBusiness) document.querySelector('.business-section').classList.remove('hidden');
-    byId('business-refresh').hidden = !access.canViewConfig;
-    document.querySelector('.send-test').classList.toggle('hidden', !access.canEdit && !access.canTestSlack);
+    var monitorStatusText = status.tiboEnabled ? 'Tibo 监听已启用' : 'Tibo 监听未启用';
+    if (window.NotificationShell && window.NotificationShell.setMonitorStatus) window.NotificationShell.setMonitorStatus(monitorStatusText);
+    else byId('notification-monitor-status').textContent = monitorStatusText;
+    if (window.NotificationShell && window.NotificationShell.setAccess) {
+        window.NotificationShell.setAccess(access);
+    } else {
+        for (const section of document.querySelectorAll('[data-notification-config]')) section.classList.toggle('hidden', !access.canViewConfig);
+        if (access.canViewNativeBusiness) document.querySelector('.business-section').classList.remove('hidden');
+        byId('business-refresh').hidden = !access.canViewConfig;
+        document.querySelector('.send-test').classList.toggle('hidden', !access.canEdit && !access.canTestSlack);
+    }
     applyAccess();
     if (!access.canViewConfig) return;
     fill(await api('api/config'));

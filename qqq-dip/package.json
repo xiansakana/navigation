@@ -4,6 +4,7 @@
   "description": "QQQ 抄底监控与 QQ 提醒（navigation 独立子服务）",
   "type": "module",
   "scripts": {
+    "build": "cd ../stock-manage && node ../scripts/build-vue.mjs ../qqq-dip/public/generated src/client/dip-page.ts",
     "start": "node src/server.js",
     "test": "node ../scripts/test.mjs qqq-dip"
   },

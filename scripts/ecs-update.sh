@@ -86,6 +86,7 @@ if should_run qq-bot; then
     echo "==> qq-bot"
     cd "$ROOT/qq-bot"
     npm install --production
+    npm run build
     if pm2 describe qq-bot >/dev/null 2>&1; then
         pm2 restart qq-bot
     else
@@ -176,6 +177,7 @@ if should_run qqq-dip; then
     echo "==> qqq-dip"
     cd "$ROOT/qqq-dip"
     npm install --production
+    npm run build
     if pm2 describe qqq-dip >/dev/null 2>&1; then
         TRUST_PROXY=1 pm2 restart qqq-dip --update-env
     else

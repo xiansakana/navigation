@@ -4,6 +4,11 @@ var companyWatchers = [];
 
 function $(id) { return document.getElementById(id); }
 
+function setStatus(text) {
+    if (window.TornShell && window.TornShell.setGlobalStatus) return window.TornShell.setGlobalStatus(text);
+    $('global-status').textContent = text;
+}
+
 function formatMoney(n) {
     var v = Math.round(Number(n) || 0);
     return '$' + Math.abs(v).toLocaleString('en-US');
@@ -94,7 +99,7 @@ function updateUndercutState(state) {
     $('uc-alerts').textContent = state.alerts || 0;
     $('uc-next').textContent = formatNext(state.nextScanAt);
     $('uc-message').textContent = state.statusMessage || '';
-    $('global-status').textContent = running ? '压价监听中' : '就绪';
+    setStatus(running ? '压价监听中' : '就绪');
 }
 
 function updateCompanyState(state) {
@@ -522,7 +527,7 @@ async function saveConfig() {
             }
         })
     });
-    $('global-status').textContent = '设置已保存';
+    setStatus('设置已保存');
     $('api-key').value = '';
     await loadState();
 }
@@ -536,12 +541,13 @@ function connectEvents() {
     es.addEventListener('error', function(e) {
         if (!e.data) return;
         var payload = JSON.parse(e.data);
-        $('global-status').textContent = payload.message;
+        setStatus(payload.message);
     });
 }
 
 document.querySelectorAll('.tab').forEach(function(tab) {
     tab.addEventListener('click', function() {
+        if (window.TornShell && window.TornShell.setTab) return window.TornShell.setTab(tab.dataset.tab);
         document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
         document.querySelectorAll('.tab-pane').forEach(function(p) { p.classList.remove('active'); });
         tab.classList.add('active');
@@ -550,7 +556,7 @@ document.querySelectorAll('.tab').forEach(function(tab) {
 });
 
 $('save-config').addEventListener('click', function() {
-    saveConfig().catch(function(err) { $('global-status').textContent = err.message; });
+    saveConfig().catch(function(err) { setStatus(err.message); });
 });
 
 $('uc-start').addEventListener('click', function() {
@@ -646,5 +652,5 @@ loadState().then(function() {
     }
     connectEvents();
 }).catch(function(err) {
-    $('global-status').textContent = err.message;
+    setStatus(err.message);
 }).finally(function() { window.navigationSkeleton?.finish(); });

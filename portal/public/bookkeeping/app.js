@@ -1,6 +1,6 @@
-import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
+import { createBookkeepingEntryList } from './entry-list.js?v=vue-shell-1';
 
-(function () {
+(async function () {
   'use strict';
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -26,6 +26,7 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
     }).join('');
   }
   function populate(id, values, empty) { const selected = $(id).value; $(id).innerHTML = options(values, selected, empty); }
+  function showError(message) { const node = $('error'); node.textContent = message; node.classList.remove('hidden'); }
   function query() {
     const p = new URLSearchParams();
     for (const [id, key] of [['month','month'], ['book','book'], ['currency','currency'], ['type','type'], ['category','category'], ['account','accountId'], ['search','q']]) if ($(id).value) p.set(key, $(id).value);
@@ -43,6 +44,25 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
     for (const x of items) if (x.amount > 0) totals[x.currency] = (totals[x.currency] || 0) + x.amount;
     return list.map(x => '<button class="bk-category bk-category-drill"'+analysis.attr({category:x.category,currency:equivalent?$('currency').value:x.currency,flow})+'><div class="bk-category-title"><span>' + esc(x.category) + ' <small class="bk-muted">' + esc(x.currency) + '</small>'+(flow==='income'?'<small> · '+x.count+' 笔 · '+(x.amount>0?(x.amount/(totals[x.currency]||1)*100).toFixed(1)+'%':'冲减')+'</small>':'')+'</span>' + m(x.amount,x.currency) + '</div><div class="bk-bar"><span style="width:' + Math.max(0,Math.min(100,x.amount/(totals[x.currency] || 1)*100)) + '%"></span></div></button>').join('') || '<p class="bk-empty">'+(flow==='income'?'暂无非零分类收入':'暂时没有支出记录')+'</p>';
   }
+
+  const epoch = window.__bookkeepingViewEpoch || 'vue-shell-1';
+  let viewModule;
+  try {
+    viewModule = await import('../generated/bookkeeping-app-view.js?epoch=' + encodeURIComponent(epoch));
+  } catch (error) {
+    showError('记账界面加载失败：' + error.message);
+    return;
+  }
+  const ui = viewModule.mountBookkeepingShell(document.querySelector('.bk-shell'));
+  try { await import('./qq.js?epoch=' + encodeURIComponent(epoch)); } catch (error) { /* QQ 面板保持不可用，不影响记账 */ }
+  const periods = ui.periods;
+  let periodSave = Promise.resolve(), periodReload=0;
+  periods.configure({
+    reload: () => reloadPeriod(),
+    clearFocus: () => analysis.clearFocus(),
+    save: value => { periodSave = periodSave.then(() => write('/preferences', value, 'PUT')).catch(e => { showError('日期筛选保存失败：' + e.message); }); }
+  });
+
   function renderEntries() {
     const converted=state.equivalentSummary||state.analysis?.equivalentSummary, missing=state.conversionMissing||state.analysis?.billing.missingCurrencies||[];
     const dayTotals=new Map((converted?.days||[]).filter(day=>day.currency==='CNY').map(day=>[day.date,day]));
@@ -51,7 +71,8 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
     const statistics=state.analysis?.equivalentSummary||converted||state.summary;
     $('stats-summary').innerHTML=state.analysis?.billing.missingCurrencies.length?'<p class="bk-muted">统计范围历史汇率待补齐。</p>':summaryHtml(statistics,true);
     entryList.render(state, {converted, missing, dayTotals});
-    $('mini-categories').innerHTML = categoriesHtml(state.equivalentSummary?.categories || state.summary.categories,6,!!state.equivalentSummary); $('categories').innerHTML = categoriesHtml(statistics.categories,1000,true);
+    ui.setMiniCategories(state.equivalentSummary?.categories || state.summary.categories, !!state.equivalentSummary);
+    $('categories').innerHTML = categoriesHtml(statistics.categories,1000,true);
     $('income-categories').innerHTML=state.analysis?.billing.missingCurrencies.length?'<p class="bk-empty">缺少历史汇率，分类收入待折算。</p>':categoriesHtml(statistics.incomeCategories || [],1000,true,'income');
     renderStats();
   }
@@ -108,15 +129,13 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
     for (const a of state.accounts) if ((!a.archived || $('show-archived-accounts').checked) && (!selectedGroup || a.group===selectedGroup) && (!$('asset-search').value || (a.name+' '+a.note).toLowerCase().includes($('asset-search').value.toLowerCase()))) (grouped[a.group] ||= []).push(a);
     $('account-groups').innerHTML = Object.entries(grouped).map(([g,list]) => '<details open class="bk-panel bk-account-group"><summary>' + esc(g) + ' · ' + list.length + ' 个账户</summary><p class="bk-muted">' + (list.some(a=>a.balance==null)?'证券行情待补齐，暂不显示部分合计':Object.entries(list.reduce((t,a)=>{t[a.currency]=(t[a.currency]||0)+a.balance;return t;},{})).map(([c,v])=>esc(c)+' '+m(v,c)).join(' · ')) + '（当前列表余额）</p>' + list.map(a => '<div class="bk-account"><span class="bk-badge">' + esc(a.icon || '◈') + '</span><div class="bk-entry-main"><strong>' + esc(a.name) + (a.balanceSource==='portfolio'?' <small class="bk-muted">证券联动</small>':'') + (a.archived?' <small class="bk-muted">已归档</small>':'') + (!a.included?' <small class="bk-muted">不计入</small>':'') + '</strong><p>' + esc(a.currency + ' · ' + a.accountType + (a.note?' · '+a.note:'')) + '</p>' + (a.creditLimit ? '<p>可用额度 ' + m(a.creditLimit+a.balance,a.currency) + (a.billDay?' · 账单日 '+a.billDay+' 日':'') + (a.dueDay?' · 还款日 '+a.dueDay+' 日':'') + '</p>':'') + '<div class="bk-asset-controls"><button data-account-ledger="' + a.id + '">明细</button>' + (a.investment && (me.permissions.includes('*') || me.permissions.includes('service:stock-manage:edit') || me.permissions.includes('service:stock-manage:accounts:view'))?'<a href="/stock-manage/?accountId='+encodeURIComponent(a.investment.id)+'&showAccounts=1">证券明细／现金核对</a>':'') + (can('accounts:edit')?'<button data-account-edit="' + a.id + '">编辑</button>' + (!a.archived && !a.investment?'<button data-account-adjust="' + a.id + '">核对余额</button>':'') + management.accountActions(a):'') + '</div></div><div class="bk-entry-amount ' + (a.balance<0?'bk-expense':'') + '">' + (a.balance==null?'行情待补齐':m(a.balance,a.currency)) + '</div></div>').join('') + '</details>').join('') || '<p class="bk-empty">暂无账户。可新增账户或导入账户快照。</p>';
   }
-  let periodSave = Promise.resolve(), periodReload=0;
-  const periods = window.createBookkeepingPeriods({ $, load:reloadPeriod, clearFocus:()=>analysis.clearFocus(), save:value=>{periodSave=periodSave.then(()=>write('/preferences',value,'PUT')).catch(e=>{$('error').textContent='日期筛选保存失败：'+e.message;$('error').classList.remove('hidden');});} });
-  const periodDock = window.createBookkeepingPeriodDock({ $, can });
-  const accountScope = window.createBookkeepingScope({$,esc,can,write,load,capturePosition:()=>periodDock.capturePosition()});
   async function reloadPeriod() {
     const ticket=++periodReload, restore=periodDock.capturePosition();periodDock.setLoading(true);
     await load();
     if(ticket===periodReload){restore?.();periodDock.setLoading(false);}
   }
+  const periodDock = window.createBookkeepingPeriodDock({ $, can });
+  const accountScope = window.createBookkeepingScope({$,esc,can,write,load,capturePosition:()=>periodDock.capturePosition()});
   const analysis = window.createBookkeepingAnalysis({ $, esc, m, money, can, load, tab, getState:()=>state, periods });
   const management = window.createBookkeepingManagement({ $, esc, can, api, write, load, field, select, options, getState:()=>state, openEditor });
   const details = window.createBookkeepingDetails({ $, esc, m, can, api, getState:()=>state, getAccountId:()=>$('account').value, tab, openEditor, copyEntry, remove:removeEntry });
@@ -127,25 +146,24 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
     await api('/entries/'+item.id,{method:'DELETE'});await load();return true;
   }
   async function load(append = false) {
-    const seq = ++loadSequence; $('error').classList.add('hidden');
+    const seq = ++loadSequence; ui.setLoading(true); $('error').classList.add('hidden');
     try {
       const params = query(); params.set('limit',String(pageSize)); params.set('offset',append?String(state.entries.length):'0');
       const data = await api('/state?' + params);
       if (seq !== loadSequence) return;
       if (append) data.entries = state.entries.concat(data.entries);
       state = data;
-      window.initQqBookkeeping(can,state);
+      window.initQqBookkeeping?.(can,state);
       for(const id of ['add-entry','add-account','add-category'])$(id).disabled=false;
       populate('book',state.books,'所有账本'); populate('category',state.categories,'所有分类'); populate('account',state.accounts.map(a => ({ value:a.id, label:a.name })),'所有账户');
       renderEntries(); renderAccounts(); management.render();accountScope.render(state.analysisScope);
-    } catch (e) { $('error').textContent = e.message; $('error').classList.remove('hidden'); }
+    } catch (e) { showError(e.message); }
+    finally { if (seq === loadSequence) ui.setLoading(false); }
   }
   function tab(name) {
     const previousTab=activeTab;
     activeTab = name;
-    document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active',b.dataset.tab===(name==='entry-detail'?'entries':name)));
-    document.querySelectorAll('.bk-view').forEach(v => v.classList.toggle('hidden',v.id!==name+'-view'));
-    $('filters').classList.toggle('hidden',['accounts','catalog','entry-detail'].includes(name));$('period-selector').classList.toggle('hidden',['catalog','entry-detail'].includes(name));
+    ui.setTab(name);
     periodDock.setTab(name);
     accountScope.setTab(name);
     if(name==='accounts' && analysis.query().investmentHistory)load();
@@ -168,11 +186,11 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
   function openEditor(mode, item = {}, detailGroup = null, isCopy = false) {
     locationCapture?.cancel(); locationCapture=null;
     editing = { mode, item, detailGroup };
-    $('editor').classList.toggle('bk-field-editor',!!detailGroup); $('editor-error').textContent = ''; $('save-item').disabled = false;
-    $('delete-item').classList.toggle('hidden',!!detailGroup || !item.id || !['entry','account'].includes(mode) || !can(mode==='entry'?'entries:edit':'accounts:edit'));
+    $('save-item').disabled = false;
+    let editorTitle = '记一笔', deletable = false, saveHidden = false;
     let html = '';
     if (mode === 'entry') {
-      $('editor-title').textContent = detailGroup ? '修改'+window.bookkeepingDetailGroups[detailGroup].label : item.id ? '编辑账单' : isCopy ? '复制账单' : '记一笔';
+      editorTitle = detailGroup ? '修改'+window.bookkeepingDetailGroups[detailGroup].label : item.id ? '编辑账单' : isCopy ? '复制账单' : '记一笔';
       html = select('type','类型',item.type==='余额调整'?[...types,'余额调整']:types,item.type||'支出') + field('amount','金额',item.amount??'','type="number" step="0.01" required') + select('currency','货币',currencies,item.currency||'CNY') + field('date','日期与时间',item.date||now(),'type="datetime-local" step="1" required') + select('category','一级分类',[],item.category) + select('subcategory','二级分类',[],item.subcategory,'无二级分类') + select('accountId','付款 / 收款账户',accountOptions(),item.accountId,'未关联账户') + select('toAccountId','转入账户',accountOptions(),item.toAccountId,'请选择') + field('toAmount','实际到账金额',item.toAmount??'','type="number" min="0.01" step="0.01"') + field('fee','手续费（付款币种）',item.fee||0,'type="number" min="0" step="0.01"') + field('book','账本',item.book||$('book').value||'个人账本','required') + field('tags','标签',item.tags) + '<label><span class="bk-location-heading">位置 <small id="location-status"></small></span><span class="bk-location-input"><input name="location" aria-label="位置" value="'+esc(item.location)+'"><button type="button" id="location-retry" class="btn ghost" aria-label="重新获取当前位置" title="重新获取当前位置">⌖</button></span></label>' + field('refund','退款金额',item.refund||0,'type="number" min="0" step="0.01"') + field('discount','优惠信息（辅助字段）',item.discount||0,'type="number" min="0" step="0.01"') + '<label class="full">备注<textarea name="note" maxlength="5000">' + esc(item.note) + '</textarea></label><datalist id="category-suggestions">' + state.categories.map(c => '<option value="'+esc(c)+'">').join('') + '</datalist>';
       if (item.id && ['支出','已报销'].includes(item.type)) {
         editing.initialRefundDate=item.refundPostedAt||now();
@@ -180,19 +198,21 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
       }
       if (item.historical) html += '<p class="bk-form-hint">这是历史导入记录，编辑或删除不会改变资产基准。原导出的跨币种转账没有到账金额。</p>';
     } else if (mode === 'account') {
-      $('editor-title').textContent = item.id?'编辑账户':'新增账户';
+      editorTitle = item.id?'编辑账户':'新增账户';
       html = field('name','账户名称',item.name,'required maxlength="100"') + select('group','资产分组',state.accountGroups.length?state.accountGroups.map(g=>g.name):['资金账户'],item.group||state.accountGroups[0]?.name||'资金账户') + select('accountType','账户类型',['现金','银行卡','信用卡','储值卡','投资账户','社保账户','应收款','应付款','其他资产'],item.accountType||'其他资产') + field('icon','账户图标',item.icon||'◈','maxlength="20"') + select('currency','货币',currencies,item.currency||'CNY') + (item.id?'<p class="bk-form-hint">当前余额 '+m(item.balance,item.currency)+'，如需修改请使用“核对余额”。</p>':field('balance','初始余额（负数为欠款）',0,'type="number" step="0.01" required')) + field('creditLimit','信用额度',item.creditLimit||0,'type="number" min="0" step="0.01"') + field('billDay','账单日（0 表示未设置）',item.billDay||0,'type="number" min="0" max="31"') + field('dueDay','还款日（0 表示未设置）',item.dueDay||0,'type="number" min="0" max="31"') + field('note','账户备注',item.note) + '<label>计入总资产<input type="checkbox" name="included" '+(item.included!==false?'checked':'')+'></label>';
     } else if (mode === 'adjust') {
-      $('editor-title').textContent = '核对余额 · ' + item.name;
+      editorTitle = '核对余额 · ' + item.name;
       html = field('balance','实际余额（'+item.currency+'）',item.balance,'type="number" step="0.01" required') + field('date','调整时间',now(),'type="datetime-local" step="1" required') + field('note','调整原因','手动核对余额') + '<p class="bk-form-hint">保存一条余额调整记录，使账户余额等于填写值，不计入收支。</p>';
     } else {
-      $('editor-title').textContent = '预算与汇率';
+      editorTitle = '预算与汇率';
       html = field('budgetMonth','预算月份',$('month').value||now().slice(0,7),'type="month" required') + field('budget','人民币月预算',state.settings.budgets[$('month').value]||0,'type="number" min="0" step="0.01" required') + '<p class="bk-form-hint">默认自动获取参考汇率。下列手动值仅在自动更新失败时备用；留空则使用上次成功缓存或显示缺失。</p>' + currencies.filter(c=>c!=='CNY').map(c=>field('rate_'+c,c+' → CNY（手动备用值）',state.settings.rates[c]||'','type="number" min="0.000001" step="any"')).join('');
     }
     $('editor-fields').innerHTML = html;
     const readonly = mode==='entry' && !can('entries:edit');
-    $('editor-fields').querySelectorAll('input,select,textarea').forEach(el=>el.disabled=readonly); $('save-item').classList.toggle('hidden',readonly);
-    $('editor').showModal();
+    $('editor-fields').querySelectorAll('input,select,textarea').forEach(el=>el.disabled=readonly);
+    saveHidden = readonly;
+    deletable = !!(item.id && !detailGroup && ['entry','account'].includes(mode) && can(mode==='entry'?'entries:edit':'accounts:edit'));
+    ui.editor.open({ title: editorTitle, fieldEditor: !!detailGroup, deletable, saveHidden });
     if (mode==='entry') {
       const form = $('editor-form'), t = form.elements.type; form.elements.amount.inputMode='decimal';
       locationCapture=window.createBookkeepingLocation({input:form.elements.location,status:$('location-status'),retry:$('location-retry'),active:()=>editing?.mode==='entry' && $('editor').open && form.elements.location===$('editor-form').elements.location,enabled:!readonly && can('location:edit')});
@@ -250,12 +270,12 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
       else if (mode==='account') { input.included=event.target.elements.included.checked; await write('/accounts'+(item.id?'/'+item.id:''),input,item.id?'PUT':'POST'); }
       else if (mode==='adjust') await write('/accounts/'+item.id+'/adjust',input);
       else { const rates={ CNY:1 }, budgets={...state.settings.budgets}; for(const c of currencies) if(input['rate_'+c]) rates[c]=Number(input['rate_'+c]); budgets[input.budgetMonth]=Number(input.budget); await write('/settings',{rates,budgets},'PUT'); }
-      await load(); if(mode==='entry' && opened.detailGroup)await details.refresh(item.id); $('editor').close(); window.portalToast?.success('已保存');
-    } catch(e) { $('editor-error').textContent=e.message; } finally { $('save-item').disabled=false; }
+      await load(); if(mode==='entry' && opened.detailGroup)await details.refresh(item.id); ui.editor.close(); window.portalToast?.success('已保存');
+    } catch(e) { ui.editor.setError(e.message); } finally { $('save-item').disabled=false; }
   });
   $('delete-item').addEventListener('click',async()=>{
     if(!window.confirm(editing.mode==='entry'?'删除这条账单？新账单会撤销对账户余额的影响。':'删除这个账户？存在关联账单时不能删除。')) return;
-    try { await api('/'+(editing.mode==='entry'?'entries':'accounts')+'/'+editing.item.id,{method:'DELETE'}); await load(); $('editor').close(); } catch(e) { $('editor-error').textContent=e.message; }
+    try { await api('/'+(editing.mode==='entry'?'entries':'accounts')+'/'+editing.item.id,{method:'DELETE'}); await load(); ui.editor.close(); } catch(e) { ui.editor.setError(e.message); }
   });
   for(const id of ['editor','manager-editor']) {
     const dialog=$(id); let outside=false;
@@ -263,8 +283,8 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
     dialog.addEventListener('pointerdown',e=>{outside=isOutside(e);});
     dialog.addEventListener('click',e=>{if(outside && isOutside(e))dialog.close();outside=false;});
   }
-  $('editor').addEventListener('close',()=>{if(!$('editor').open)locationCapture?.cancel();});
-  $('close-editor').onclick=()=>$('editor').close();
+  $('editor').addEventListener('close',()=>{if(!$('editor').open)locationCapture?.cancel();ui.editor.markClosed();});
+  $('close-editor').onclick=()=>ui.editor.close();
   $('add-entry').onclick=()=>openEditor('entry'); $('add-account').onclick=()=>openEditor('account'); $('settings').onclick=()=>openEditor('settings');
   document.querySelector('.bk-tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)tab(b.dataset.tab);});
   $('account-groups').addEventListener('click',e=>{
@@ -281,7 +301,6 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
     periods.choose('all');
   };
   $('all-dates').onclick=()=>periods.choose('all'); $('more').onclick=()=>load(true);
-  $('privacy').onclick=()=>{const on=document.querySelector('.bk-shell').classList.toggle('bk-private');$('privacy').setAttribute('aria-pressed',String(on));$('privacy').textContent=on?'显示金额':'隐藏金额';};
   $('import-shortcut').onclick=()=>tab('import');
   function invalidateImportReview() {
     if(pendingImport)pendingImport.revision=null;
@@ -420,7 +439,7 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
     try {
       me = await (window.portalPage?.user() ?? fetch('/api/me').then(response => response.json()));
       if (me.isGuest || !me.ok) throw new Error('请登录后访问记账模块');
-      $('owner').textContent = me.dataContext && me.dataContext.scope !== 'self' ? me.dataContext.label : me.username;
+      ui.setOwner(me.dataContext && me.dataContext.scope !== 'self' ? me.dataContext.label : me.username);
       populate('currency',currencies,'全部货币');$('currency').value='';populate('type',[...types,'余额调整'],'所有类型');$('month').value=now().slice(0,7);
       $('extra-filters').open = window.innerWidth > 760;
       for(const [id,p] of [['add-entry','entries:edit'],['add-account','accounts:edit'],['settings','settings:edit'],['import-label','import:edit'],['snapshot-label','accounts:edit'],['export','export:view'],['import-shortcut','import:edit']])$(id).classList.toggle('hidden',!can(p));
@@ -433,7 +452,7 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-entries-1';
       periods.hydrate((await api('/preferences')).period);
       await load();
       if (state) refreshFx();
-    }catch(e){$('error').textContent=e.message;$('error').classList.remove('hidden');}
+    }catch(e){showError(e.message);}
   }
   boot();
   let investmentSyncBusy=false;

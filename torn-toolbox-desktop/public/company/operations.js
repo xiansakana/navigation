@@ -7,8 +7,11 @@
   function text(tag, value, root) { const e=document.createElement(tag);e.textContent=value;root.append(e);return e; }
   function select(value) {
     tab = value in names && state?.permissions.kinds[value] ? value : 'application'; dirty=false;
-    $('company-application').hidden=tab!=='application';$('company-operations').hidden=tab==='application';
-    document.querySelectorAll('[data-company-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.companyTab===tab)));
+    if(window.TornShell?.setCompanyTab) window.TornShell.setCompanyTab(tab);
+    else{
+      $('company-application').hidden=tab!=='application';$('company-operations').hidden=tab==='application';
+      document.querySelectorAll('[data-company-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.companyTab===tab)));
+    }
     if(tab!=='application') render();
   }
   function render() {

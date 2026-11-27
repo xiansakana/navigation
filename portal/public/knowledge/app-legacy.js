@@ -1,0 +1,477 @@
+import { uploadParts } from './upload.js?v=1';
+import { createDevicePanel } from './devices.js?v=datetime-20261110';
+import { createSourcePlayer } from './source.js?v=1';
+import { bindVideoDrop } from './drop.js?v=2';
+import { sendLocalInput } from './local-input.js?v=1';
+import { bindLinkImport } from './link-import.js?v=5';
+import { createUploadQueuePanel, parseBatchLinks } from './queue.js?v=vue-queue-1';
+import { createFileQueue } from './file-queue.js?v=1';
+import { createBilibiliPanel } from './bilibili-account.js?v=datetime-20261110';
+import { createNotePager } from './pagination.js?v=1';
+import { failureMessage } from './failure.js?v=1';
+import { createReanalysisPanel } from './reanalysis.js?v=datetime-20261110';
+const $ = id => document.getElementById(id);
+const state = { permissions: [], documents: [], statusCounts: {}, selected: new Map(), filter: '', batchBusy: false, current: null, settings: null, editing: false, modelDirty: false, asrDirty: false, concurrencyDirty: false, resume: null, uploading: false, offset: 0, total: 0 };
+const can = action => state.permissions.includes('*') || state.permissions.includes('knowledge:' + action);
+const sourcePlayer = createSourcePlayer({ player: $('player'), frame: $('original-frame'), select: $('playback-source'), link: $('original-link'), hint: $('playback-hint'), allowed: () => can('source:view') });
+const text = (id, value) => { $(id).textContent = value || ''; };
+const show = (id, yes) => { $(id).hidden = !yes; };
+const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const tags = value => value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+const time = value => { const s = Math.floor(value || 0); return (s >= 3600 ? String(Math.floor(s / 3600)).padStart(2, '0') + ':' : '') + String(Math.floor(s / 60) % 60).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
+const phaseLabel = d => d.status === 'processing' ? ({ media: '正在转写/提取素材', summary_wait: '等待总结', summary: '正在总结' })[d.processingPhase] || '' : '';
+function error(e) {
+  text('error', e.message || String(e));
+  if (e.duplicate?.documentId && can('notes:view')) {
+    const link = document.createElement('a'); link.href = '/knowledge/?document=' + encodeURIComponent(e.duplicate.documentId);
+    link.textContent = '打开已有笔记'; $('error').append(' ', link);
+  }
+  show('error', true);
+}
+async function api(route, options = {}) {
+  const response = await fetch('/api/knowledge' + route, { ...options, headers: { ...(options.body instanceof Blob ? {} : { 'Content-Type': 'application/json' }), ...(state.owner ? { 'X-Knowledge-Owner': state.owner } : {}), ...options.headers } });
+  if (response.redirected) throw new Error('登录已过期，请刷新页面重新登录');
+  const payload = await response.json();
+  if (!response.ok || !payload.ok) throw Object.assign(new Error(payload.error || '请求失败'), { status: response.status, code: payload.code, duplicate: payload.duplicate });
+  return payload;
+}
+const send = (route, method, data = {}) => api(route, { method, body: JSON.stringify(data) });
+const notePager = createNotePager(params => api('/documents?' + new URLSearchParams(params)));
+const linkImport = bindLinkImport({ element: $, can: () => can('import:edit'), canBatch: () => can('queue:edit') && can('import:edit'), send, busy: () => state.uploading, onError: error, clearError: () => show('error', false) });
+const uploadQueue = createUploadQueuePanel({ element: $, can, api, send, onError: error, openDocument: open });
+const reanalysisPanel = createReanalysisPanel({ element: $, can, state, api, send, onError: error, onDone: async () => { if (state.current) await open(state.current.id); await load(); } });
+const localQueue = createFileQueue({ capacity: () => state.uploading ? Promise.resolve({ active: 5, capacity: 5, blocked: true }) : api('/upload-queue'), upload: (entry, report) => uploadFile(entry.file, entry.metadata, entry, report), changed: renderLocalQueue });
+function renderLocalQueue() {
+  const list = $('file-queue-list'); list.replaceChildren();
+  for (const entry of localQueue.entries) {
+    const row = document.createElement('div'); row.className = 'kb-queue-row';
+    const title = document.createElement('strong'), status = document.createElement('p'); title.textContent = entry.name; status.textContent = entry.message;
+    row.append(title, status);
+    if (can('queue:manage')) for (const [action, label, allowed] of [['retry', '重试上传', entry.state === 'failed'], ['cancel', '取消等待', ['waiting', 'failed'].includes(entry.state)]]) {
+      if (!allowed) continue;
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'btn ghost'; button.textContent = label;
+      button.onclick = () => localQueue[action](entry.id); row.append(button);
+    }
+    list.append(row);
+  }
+}
+async function settings() {
+  state.settings = await api('/settings');
+  linkImport.defaults(state.settings.linkDefaults);
+  text('storage-policy', state.settings.storage?.provider === '115' ? '原视频保存至115，上传和处理期间使用临时缓存。' : '原视频保存在服务器。');
+  $('backend').value = state.settings.backend;
+  $('backend').disabled = !can('settings:edit');
+  const prefix = state.settings.backend === 'codex' ? 'codex' : 'api';
+  if (!state.modelDirty) {
+    $('summary-model').value = state.settings[prefix + 'Model'] || '';
+    $('summary-effort').value = state.settings[prefix + 'Effort'] || '';
+  }
+  $('summary-model').disabled = $('summary-effort').disabled = !can('model:edit') || !can('settings:edit');
+  show('model-save', can('model:edit') && can('settings:edit'));
+  show('asr-settings', can('asr:edit') && can('settings:edit'));
+  if (!state.asrDirty) for (const [id, key] of [['asr-model', 'asrModel'], ['asr-language', 'asrLanguage'], ['asr-profile', 'asrProfile'], ['asr-hotwords', 'asrHotwords']]) $(id).value = state.settings[key] || '';
+  show('concurrency-settings', can('concurrency:edit') && can('settings:edit'));
+  if (!state.concurrencyDirty) {
+    $('media-concurrency').value = String(state.settings.mediaConcurrency);
+    $('summary-concurrency').value = String(state.settings.summaryConcurrency);
+  }
+  const worker = state.settings.worker, c = worker.capabilities;
+  text('worker-status', worker.online ? `${worker.label || 'GPU工作器'} · 在线 · 仅GPU处理，已禁用CPU接单 · ${c.pipeline?.version === 1 ? '分阶段并发已启用' : '当前设备为旧版，空闲更新后启用并发'}` : worker.configured ? '等待本机GPU工作器就绪，任务已暂停等待；不会切换到CPU。' : '尚未连接GPU工作器，请安装并配对本机工作器。任务会保留在队列中等待。');
+  const info = c[state.settings.backend];
+  text('backend-description', info ? `${worker.online && info.ready ? '工作器已就绪' : '工作器未就绪'} · ${state.settings[prefix + 'Model'] || info.model || info.detail || ''} · 强度：${state.settings[prefix + 'Effort'] || '工作器默认'}` : '选择总结方式后，由已连接工作器执行。');
+  $('upload-toggle').disabled = $('settings-toggle').disabled = $('worker-token').disabled = false;
+}
+function renderBatch() {
+  show('batch-publication', can('publish:batch:edit') && can('publish:edit') && can('notes:view'));
+  text('batch-count', '已选 ' + state.selected.size + ' 篇（最多100篇）');
+  $('batch-save').disabled = state.batchBusy || !state.selected.size;
+  $('batch-all').disabled = $('batch-clear').disabled = state.batchBusy;
+}
+let notesView;
+let notesViewLoad;
+
+function prepareNotesView() {
+  if (!notesViewLoad) {
+    notesViewLoad = import('../generated/knowledge-notes-view.js?v=1').then(({ mountNotes }) => {
+      notesView = mountNotes($('documents'), {
+        open: id => open(id).catch(error),
+        select(id, checked) {
+          const document = state.documents.find(item => item.id === id);
+          if (!document || state.batchBusy) return false;
+          if (checked && state.selected.size >= 100) {
+            error(new Error('每批最多选择100篇笔记'));
+            return false;
+          }
+          if (checked) state.selected.set(id, document.revision);
+          else state.selected.delete(id);
+          renderBatch();
+          return true;
+        }
+      });
+    });
+  }
+  return notesViewLoad;
+}
+
+function renderList() {
+  reanalysisPanel.refresh();
+  show('retry-failed', can('process:batch:edit') && can('process:edit') && can('notes:view'));
+  $('retry-failed').disabled = retrying;
+  text('total', state.total + ' 篇');
+  const canSelect = (can('publish:batch:edit') && can('publish:edit')) || (can('reanalysis:batch:edit') && can('reanalysis:edit'));
+  const storageStage = { waiting: '等待上传', pending: '等待保存至115', uploading: '正在保存至115', verifying: '校验原视频', verified: '清理临时原片', failed: '115保存待重试' };
+  notesView?.update(state.documents.map(document => {
+    let stage = document.stage;
+    if (document.status === 'queued' && document.storage?.provider === '115' && document.storage.state !== 'ready') {
+      stage = storageStage[document.storage.state] || stage;
+    }
+    const progress = document.status === 'processing' ? ' ' + document.progress + '%' : '';
+    return {
+      id: document.id,
+      title: document.title,
+      subtitle: (document.topic || '未分类') + ' · ' + stage + progress,
+      preview: document.preview || document.originalName,
+      phase: phaseLabel(document),
+      active: state.current?.id === document.id,
+      selection: canSelect && document.status === 'ready' ? {
+        checked: state.selected.has(document.id),
+        disabled: state.batchBusy,
+        visibility: document.visibility === 'public' ? '公开' : '私有'
+      } : null
+    };
+  }));
+  renderBatch();
+  show('notes-pagination', can('notes:view'));
+  text('notes-page', `第 ${Math.floor(state.offset / 30) + 1} / ${Math.max(1, Math.ceil(state.total / 30))} 页 · 共 ${state.total} 篇`);
+  $('notes-prev').disabled = state.offset === 0;
+  $('notes-next').disabled = state.offset + 30 >= state.total;
+}
+async function load(offset, quiet = false) {
+  const [result] = await Promise.all([
+    quiet ? notePager.refresh() : notePager.load({ search: $('search').value, topic: $('topic-filter').value, status: $('status-filter').value }, offset),
+    prepareNotesView()
+  ]);
+  if (!result) return;
+  if (result.offset !== state.offset || result.filterChanged) $('documents').scrollTop = 0;
+  state.offset = result.offset; state.documents = result.documents; state.total = result.total;
+  state.statusCounts = result.statusCounts || {};
+  const statusLabels = { '': '全部状态', ready: '已生成', queued: '等待处理', processing: '处理中', failed: '失败', uploading: '上传中', importing: '链接下载中' };
+  for (const option of $('status-filter').options) {
+    const count = option.value ? state.statusCounts[option.value] || 0 : Object.values(state.statusCounts).reduce((sum, n) => sum + n, 0);
+    option.textContent = statusLabels[option.value] + '（' + count + '）';
+  }
+  if (result.filterChanged) state.selected.clear();
+  state.filter = result.filterKey;
+  for (const [id, revision] of state.selected) {
+    const item = state.documents.find(d => d.id === id);
+    if (item && (item.status !== 'ready' || item.revision !== revision)) state.selected.delete(id);
+  }
+  const topic = $('topic-filter').value;
+  $('topic-filter').innerHTML = '<option value="">全部分类</option>' + result.topics.map(t => `<option value="${escape(t.topic)}">${escape(t.topic)} (${t.count})</option>`).join('');
+  $('topic-filter').value = topic;
+  $('topics').innerHTML = result.topics.map(t => `<option value="${escape(t.topic)}"></option>`).join('');
+  renderList();
+}
+function tab(name) {
+  sourcePlayer.activate(name === 'source' && !state.editing);
+  for (const button of $('tabs').querySelectorAll('button')) {
+    button.setAttribute('aria-pressed', String(button.dataset.tab === name)); show(button.dataset.tab + '-view', button.dataset.tab === name && !state.editing);
+  }
+}
+function renderStorage(d) {
+  const source = d.storage || { provider: 'local', state: 'local' };
+  const labels = { waiting: '等待视频上传', pending: '等待保存至115', uploading: '正在保存至115', verifying: '正在校验115原视频', verified: '115校验通过，正在清理临时原片', ready: '原视频已保存至115 · ECS原片已清理', failed: source.error ? failureMessage(source.error, '保存至115') : '115保存失败，临时原片已保留' };
+  text('storage-status', source.provider === '115' ? labels[source.state] || '正在保存至115' : '原视频保存在服务器');
+  if (source.timings) {
+    const durations = [];
+    if (source.timings.uploadMs > 0) durations.push(`保存至115${source.state === 'uploading' ? '已用' : '用时'} ${time(source.timings.uploadMs / 1000)}`);
+    if (source.timings.verificationMs > 0) durations.push(`完整性校验${source.state === 'verifying' ? '已用' : '用时'} ${time(source.timings.verificationMs / 1000)}`);
+    if (durations.length) text('storage-status', $('storage-status').textContent + ' · ' + durations.join(' · '));
+  }
+  show('storage-retry', source.state === 'failed' && can('storage:edit'));
+}
+function renderTranscript(d) {
+  text('asr-provenance', `语音模型：${d.provenance.asrModel || '历史记录未保存'} · 语言：${d.language || '未记录'}`);
+  show('transcript-script-label', can('transcript:script:view') && can('transcript:view'));
+  $('transcript').replaceChildren();
+  for (const s of d.transcript) {
+    const row = document.createElement('div'); row.className = 'kb-segment';
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = time(s.start); button.disabled = !can('source:view');
+    button.addEventListener('click', () => { tab('source'); sourcePlayer.seek(s.start); });
+    const p = document.createElement('p'); p.textContent = $('transcript-script').value === 'raw' && can('transcript:script:view') ? s.rawText || s.text : s.text; row.append(button, p); $('transcript').append(row);
+  }
+}
+$('transcript-script').onchange = () => { if (state.current) renderTranscript(state.current); };
+function renderDocument(d) {
+  state.current = d; state.editing = false; show('empty', false); show('detail', true); show('edit-form', false); show('tabs', true);
+  reanalysisPanel.refresh(d);
+  renderStorage(d);
+  text('document-title', d.title);
+  show('publication', can('publish:edit') && d.status === 'ready');
+  $('document-visibility').value = d.visibility || 'private';
+  text('document-meta', `${d.topic || '未分类'} · ${time(d.duration)} · ${d.originalName} · ${d.backend === 'codex' ? 'Codex CLI' : '兼容 API'} · ${new Date(d.updatedAt).toLocaleString('sv-SE')}`);
+  $('document-tags').innerHTML = d.tags.map(t => '<span>' + escape(t) + '</span>').join('');
+  text('job-status', d.error ? failureMessage(d.error, d.stage) : [phaseLabel(d), d.stage].filter(Boolean).join(' · ') + (d.status === 'processing' ? ' · ' + d.progress + '%' : ''));
+  $('job-status').className = d.status;
+  show('retry', d.status === 'failed' && can('process:edit')); show('resume-upload', d.status === 'uploading' && can('upload:edit'));
+  show('edit', can('notes:edit') && ['ready', 'failed'].includes(d.status));
+  show('delete', can('delete:edit')); show('export', can('export:view') && !!d.notes);
+  $('export').href = '/api/knowledge/documents/' + d.id + '/export';
+  const p = d.provenance;
+  const media = d.sourceMedia || {};
+  const profile = d.modelSettings || {}, prefix = d.backend === 'codex' ? 'codex' : 'api';
+  text('provenance', p.generatedAt ? `生成于 ${new Date(p.generatedAt).toLocaleString('sv-SE')} · ${p.model || p.backend} · 推理强度：${p.reasoningEffort || '模型默认'} · ${p.vision ? '含抽样画面核对' : '未进行模型视觉核对'}。${(p.warnings || []).join(' ')}` : `本次任务模型：${profile[prefix + 'Model'] || '工作器默认'} · 强度：${profile[prefix + 'Effort'] || '工作器默认'}。任务完成后在这里阅读完整笔记。`);
+  if (media.width) $('provenance').textContent += ` 原片：${media.width}×${media.height}${media.downgraded ? '（已按设置自动降级）' : ''}。`;
+  $('note-content').innerHTML = DOMPurify.sanitize(marked.parse(d.notes || ''), { USE_PROFILES: { html: true }, FORBID_TAGS: ['img', 'video', 'audio', 'iframe', 'form', 'input', 'button', 'style'], FORBID_ATTR: ['style', 'id', 'name'] });
+  for (const a of $('note-content').querySelectorAll('a')) { a.rel = 'noopener noreferrer'; a.target = '_blank'; }
+  $('outline').replaceChildren();
+  [...$('note-content').querySelectorAll('h2,h3')].forEach((h, i) => {
+    h.id = 'kb-heading-' + i;
+    if (h.tagName !== 'H2') return;
+    const link = document.createElement('a'); link.href = '#' + h.id; link.textContent = h.textContent; $('outline').append(link);
+  });
+  sourcePlayer.reset(d);
+  renderTranscript(d);
+  $('frames').replaceChildren();
+  for (const f of d.frames) {
+    const figure = document.createElement('figure'), image = document.createElement('img'), caption = document.createElement('figcaption');
+    image.src = '/api/knowledge/documents/' + d.id + '/frames/' + f.name; image.alt = '视频画面 ' + time(f.time); image.loading = 'lazy'; caption.textContent = '视频时间 ' + time(f.time); figure.append(image, caption); $('frames').append(figure);
+  }
+  for (const button of $('tabs').querySelectorAll('button')) button.hidden = !can(button.dataset.tab === 'notes' ? 'notes:view' : button.dataset.tab + ':view');
+  tab('notes'); renderList();
+}
+async function open(id, quiet = false) {
+  if (!quiet && state.editing && !window.confirm('当前编辑还未保存，放弃修改并打开其他笔记？')) return;
+  const d = (await api('/documents/' + id)).document;
+  if (quiet && state.current?.id !== id) return;
+  if (quiet && d.revision === state.current?.revision && d.status === state.current?.status) { state.current = d; renderStorage(d); text('job-status', d.error ? failureMessage(d.error, d.stage) : d.stage + (d.status === 'processing' ? ' · ' + d.progress + '%' : '')); return; }
+  renderDocument(d);
+}
+async function upload(event) {
+  event.preventDefault(); show('error', false);
+  if (state.uploading) return;
+  if (['link', 'batch'].includes($('upload-mode').value)) {
+    state.uploading = true; $('upload-submit').disabled = true; $('upload-mode').disabled = true;
+    text('upload-status', '正在提交链接导入任务…');
+    try {
+      const batch = $('upload-mode').value === 'batch', queued = can('queue:edit');
+      const rawLinks = batch ? parseBatchLinks($('batch-links').value) : [$('video-link').value];
+      const result = await send(queued ? '/upload-queue' : '/imports', 'POST', {
+        ...(queued ? { urls: rawLinks } : { url: rawLinks[0] }),
+        ...(!batch ? { title: $('upload-title').value, sourceUrl: $('upload-source').value } : {}),
+        topic: $('upload-topic').value, tags: tags($('upload-tags').value), backend: state.settings.backend, ...linkImport.selection() });
+      if (queued) {
+        const duplicates = result.results.filter(r => r.status === 'duplicate').length;
+        const invalid = result.results.filter(r => r.status === 'invalid');
+        text('queue-submit-result', `已加入 ${result.accepted} 条；重复跳过 ${duplicates} 条；无效 ${invalid.length} 条。` + invalid.map(r => `第${r.index + 1}条：${r.error}`).join(' '));
+        if (can('notes:view')) for (const row of result.results.filter(r => r.status === 'duplicate' && r.documentId)) {
+          const link = document.createElement('a'); link.href = '/knowledge/?document=' + encodeURIComponent(row.documentId);
+          link.textContent = '打开已有笔记：' + (row.title || row.url); $('queue-submit-result').append(document.createElement('br'), link);
+        }
+        if (invalid.length) $('batch-links').value = invalid.map(r => rawLinks[r.index]).join('\n');
+        await uploadQueue.reset();
+      }
+      state.resume = null;
+      if (!result.results?.some(r => r.status === 'invalid')) { show('upload-panel', false); $('upload-form').reset(); linkImport.mode(); }
+      text('message', queued && !result.accepted ? '没有创建新的导入任务，请查看重复或无效链接的校验结果。' : '视频已加入链接下载队列。可关闭页面，下载、生成笔记和115归档会在后台继续。'); text('upload-status', queued && !result.accepted ? '未新增任务' : '链接已提交');
+      await load(); if (result.document) await open(result.document.id);
+    } catch (e) { error(e); text('upload-status', '链接未提交，请检查后重试。'); }
+    finally { state.uploading = false; $('upload-submit').disabled = false; $('upload-mode').disabled = false; }
+    return;
+  }
+  const files = Array.from($('video-file').files); if (!files.length) return;
+  const metadata = { title: $('upload-title').value, topic: $('upload-topic').value, tags: tags($('upload-tags').value), sourceUrl: $('upload-source').value, backend: state.settings.backend };
+  if (can('queue:edit') && can('queue:view')) {
+    try {
+      if (state.resume && files.length !== 1) throw new Error('续传时请只选择对应原视频');
+      const added = localQueue.add(files, metadata, state.resume); state.resume = null;
+      text('message', added ? `已加入 ${added} 个本地视频。请保持页面打开，处理位置空闲后自动上传。` : '所选视频已在本地上传队列中。');
+    } catch (e) { error(e); }
+  } else await uploadFile(files[0], metadata).catch(error);
+}
+async function uploadFile(file, metadata, entry = null, report = () => {}) {
+
+  if (file.size > state.settings.maxBytes) throw new Error('视频超过1GB限制');
+  state.uploading = true; $('upload-submit').disabled = true; $('upload-mode').disabled = true; $('video-file').disabled = true; show('upload-progress', true);
+  $('upload-progress').value = 0; text('upload-status', '正在检查文件和续传进度…');
+  try {
+    const stamp = new Blob([file.slice(0, 1048576), file.slice(Math.max(0, file.size - 1048576)), String(file.size)]);
+    const fingerprint = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await stamp.arrayBuffer()))].map(b => b.toString(16).padStart(2, '0')).join('');
+    let item = entry ? entry.resume : state.resume;
+    if (item && can('notes:view')) {
+      const latest = (await api('/documents/' + item.id)).document;
+      if (latest.status !== 'uploading') { if (entry) entry.resume = null; return latest; }
+    }
+    if (item && (item.bytes !== file.size || item.originalName !== file.name)) throw new Error('请选择同名、同大小的原始视频文件');
+    if (item?.fingerprint && item.fingerprint !== fingerprint) throw new Error('文件内容与原上传文件不同，请选择原始视频');
+    if (!item) {
+      const extension = file.name.split('.').pop().toLowerCase(), mimeType = ({ mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime' })[extension];
+      const result = await send('/documents', 'POST', { title: metadata.title, topic: metadata.topic, tags: metadata.tags, sourceUrl: metadata.sourceUrl,
+        bytes: file.size, mimeType, fingerprint, originalName: file.name, backend: metadata.backend });
+      item = result.document; state.resume = item; if (entry) entry.resume = item;
+    }
+    const { parts, chunkBytes } = await api('/documents/' + item.id + '/parts');
+    const localTransfer = can('local-input:edit') ? sendLocalInput({ file, documentId: item.id, send, status: value => text('local-input-status', value) }) : Promise.resolve(false);
+    const transfer = await uploadParts({ file, parts, chunkBytes, url: `/api/knowledge/documents/${item.id}/parts/`, onProgress(p) {
+      const progress = Math.min(99, Math.floor(p.loaded / p.total * 100));
+      $('upload-progress').value = progress; report('上传中 · ' + progress + '%');
+      text('upload-status', `上传到服务器 ${progress}% · ${(p.speed / 1024 ** 2).toFixed(2)} MB/s · ${p.remaining === null ? '正在测算剩余时间' : p.loaded === p.total ? '等待服务器确认' : '预计剩余 ' + time(Math.ceil(p.remaining))} · 已用 ${time(p.elapsed)}`);
+    } });
+    text('upload-status', '分片已传完，正在合并视频…');
+    const localReady = await localTransfer;
+    const mergeStarted = performance.now();
+    await send('/documents/' + item.id + '/complete', 'POST'); state.resume = null;
+    const elapsed = `本次上传用时 ${time(transfer.elapsedMs / 1000)}，合并用时 ${time((performance.now() - mergeStarted) / 1000)}。`;
+    text('message', elapsed + (localReady ? '已启用本机原视频处理，无需等待115归档或下载；归档在后台独立继续。' : state.settings.storage?.provider === '115' ? '接下来保存至115并校验，之后自动生成笔记。' : '视频已保存，工作器将按队列生成笔记。')); $('upload-progress').value = 100; text('upload-status', '上传完成'); show('upload-panel', false); $('upload-form').reset();
+    await load(); await open(item.id); if (entry) entry.resume = null; return item;
+  } catch (e) { error(e); text('upload-status', '上传未完成，可重新提交继续上传。'); await load().catch(() => {}); throw e; }
+  finally { if (entry) state.resume = null; state.uploading = false; $('upload-submit').disabled = false; $('upload-mode').disabled = false; $('video-file').disabled = false; linkImport.mode(); }
+}
+async function boot() {
+  let me;
+  try { me = await window.portalPage.user(); }
+  catch (e) { if (e.status === 401) return location.assign('/login/'); throw e; }
+  state.permissions = me.permissions || []; state.owner = me.userId;
+  if (me.isGuest || !can('view')) throw new Error('请登录具备知识库权限的账号');
+  show('upload-toggle', can('upload:edit') && can('process:edit')); show('worker-token', can('worker:edit'));
+  $('upload-batch-option').hidden = !can('queue:edit') || !can('import:edit');
+  $('video-file').multiple = can('queue:edit') && can('queue:view');
+  show('upload-mode-label', can('import:edit') && can('upload:edit') && can('process:edit')); linkImport.mode();
+  createDevicePanel({ can, api, send, onError: error });
+  const bilibili = createBilibiliPanel({ element: $, can, api, send, onError: error, onDefaults: s => linkImport.defaults(s) });
+  $('upload-toggle').disabled = $('settings-toggle').disabled = $('worker-token').disabled = true;
+  const configuration = (async () => {
+    try { await bilibili.refresh(); }
+    finally { await settings(); }
+  })();
+  const preparation = Promise.allSettled([configuration, uploadQueue.refresh()]);
+  if (can('notes:view')) {
+    await load();
+    const documentId = new URL(location.href).searchParams.get('document');
+    if (documentId && /^[a-f0-9]{32}$/.test(documentId)) {
+      await open(documentId);
+      if (/^#kb-heading-\d+$/.test(location.hash)) document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: 'start' });
+    }
+  }
+  for (const result of await preparation) { if (result.status === 'rejected') error(result.reason); }
+  let polling = false;
+  setInterval(async () => {
+    if (document.hidden || state.uploading || polling) return;
+    polling = true;
+    try {
+      await settings();
+      const queueState = await uploadQueue.refresh();
+      if (can('notes:view') && (queueState?.active > 0 || ['queued', 'processing', 'uploading', 'importing'].some(status => state.statusCounts[status] > 0) || state.current?.storage?.provider === '115' && state.current.storage.state !== 'ready' || state.documents.some(d => d.storage?.provider === '115' && d.storage.state !== 'ready'))) await load(undefined, true);
+      if (!state.editing && state.current && (['queued', 'processing', 'importing'].includes(state.current.status) || state.current.storage?.provider === '115' && state.current.storage.state !== 'ready')) await open(state.current.id, true);
+    } catch { /* Keep existing content during temporary connection loss. */ }
+    finally { polling = false; }
+  }, 5000);
+}
+$('settings-toggle').onclick = () => show('settings', $('settings').hidden);
+$('upload-toggle').onclick = () => { state.resume = null; text('upload-heading', '从一个视频开始'); show('upload-panel', true); };
+$('upload-close').onclick = () => show('upload-panel', false);
+$('upload-form').onsubmit = upload;
+bindVideoDrop({ zone: $('video-drop'), input: $('video-file'), busy: () => state.uploading,
+  multiple: () => can('queue:edit') && can('queue:view'),
+  maxBytes: () => state.settings?.maxBytes || 1024 ** 3, error,
+  selected: (file, files) => { show('error', false); text('selected-video', (files.length > 1 ? '已选 ' + files.length + ' 个视频 · ' : '') + file.name + ' · ' + (file.size / 1024 ** 2).toFixed(1) + ' MB'); if (!state.resume) $('upload-title').value = file.name.replace(/\.[^.]+$/, '').slice(0, 160); }
+});
+$('upload-form').addEventListener('reset', () => { text('selected-video', '支持拖拽或多选视频，每批最多100个'); queueMicrotask(() => linkImport.reset()); });
+$('search-form').onsubmit = event => { event.preventDefault(); load(0).catch(error); };
+$('topic-filter').onchange = $('status-filter').onchange = () => load(0).catch(error);
+$('notes-prev').onclick = () => { if (can('notes:view')) load(state.offset - 30).catch(error); };
+$('notes-next').onclick = () => { if (can('notes:view')) load(state.offset + 30).catch(error); };
+$('batch-all').onclick = () => { for (const d of state.documents) if (d.status === 'ready' && state.selected.size < 100) state.selected.set(d.id, d.revision); renderList(); };
+$('batch-clear').onclick = () => { state.selected.clear(); renderList(); };
+$('batch-save').onclick = async () => {
+  if (state.batchBusy || !state.selected.size) return;
+  const visibility = $('batch-visibility').value, documents = [...state.selected].map(([id, revision]) => ({ id, revision }));
+  if (!window.confirm(`将选中的 ${documents.length} 篇笔记设为${visibility === 'public' ? '公开' : '私有'}？` + (visibility === 'public' ? '访客将能读取标题、分类、标签和完整正文，请确认不含私人信息。' : '公开知识库将不再展示这些笔记。'))) return;
+  state.batchBusy = true; renderList();
+  try {
+    const result = await send('/documents/visibility', 'PUT', { visibility, documents });
+    state.selected.clear(); await load();
+    if (state.current && documents.some(d => d.id === state.current.id) && !state.editing) await open(state.current.id);
+    text('message', `已将 ${result.count} 篇笔记设为${visibility === 'public' ? '公开' : '私有'}。`);
+  } catch (e) { error(e); }
+  finally { state.batchBusy = false; renderList(); }
+};
+$('backend').onchange = async () => { try { await send('/settings', 'PUT', { backend: $('backend').value }); state.modelDirty = false; await settings(); text('message', '已切换默认总结方式。'); } catch (e) { error(e); } };
+$('summary-model').oninput = $('summary-effort').onchange = () => { state.modelDirty = true; };
+$('media-concurrency').onchange = $('summary-concurrency').onchange = () => { state.concurrencyDirty = true; };
+$('concurrency-save').onclick = async () => {
+  $('concurrency-save').disabled = true;
+  try {
+    await send('/settings', 'PUT', { mediaConcurrency: Number($('media-concurrency').value), summaryConcurrency: Number($('summary-concurrency').value) });
+    state.concurrencyDirty = false; await settings();
+    text('message', '并发设置已保存，每个工作器独立生效；降低并发不会中断已运行的任务。');
+  } catch (e) { error(e); }
+  finally { $('concurrency-save').disabled = false; }
+};
+for (const id of ['asr-model', 'asr-language', 'asr-profile', 'asr-hotwords']) $(id).oninput = () => { state.asrDirty = true; };
+$('asr-save').onclick = async () => {
+  if (!can('asr:edit') || !can('settings:edit')) return;
+  $('asr-save').disabled = true;
+  try {
+    await send('/settings', 'PUT', { asrModel: $('asr-model').value, asrLanguage: $('asr-language').value, asrProfile: $('asr-profile').value, asrHotwords: $('asr-hotwords').value.trim() });
+    state.asrDirty = false; await settings();
+    text('message', '语音设置已保存，用于新任务、失败重试和重新提取原视频；复用已有素材不会重新转写。首次使用新模型需要下载，请耐心等待。');
+  } catch (e) { error(e); }
+  finally { $('asr-save').disabled = false; }
+};
+$('model-save').onclick = async () => {
+  const prefix = state.settings.backend === 'codex' ? 'codex' : 'api';
+  try {
+    await send('/settings', 'PUT', { [prefix + 'Model']: $('summary-model').value.trim(), [prefix + 'Effort']: $('summary-effort').value });
+    state.modelDirty = false; await settings(); text('message', '模型和强度已保存，用于新上传和失败重试；已排队和正在处理的任务保留原配置。');
+  } catch (e) { error(e); }
+};
+$('worker-token').onclick = async () => {
+  if (state.settings.worker.configured && !window.confirm('这会撤销旧版共享凭据，使用该凭据的工作器需重新配置；独立绑定的设备不受影响。继续？')) return;
+  try { const result = await send('/worker-token', 'POST'); $('new-token').value = result.token; show('token-result', true); await settings(); } catch (e) { error(e); }
+};
+$('tabs').onclick = event => { const button = event.target.closest('[data-tab]'); if (button) tab(button.dataset.tab); };
+$('storage-retry').onclick = async () => { try { await send('/documents/' + state.current.id + '/storage-retry', 'POST'); await open(state.current.id, true); await load(); } catch (e) { error(e); } };
+let retrying = false;
+async function retryFailed(all) {
+  if (retrying || !can('process:edit') || all && !can('process:batch:edit')) return;
+  const id = state.current?.id;
+  retrying = true; $('retry').disabled = $('retry-failed').disabled = true; show('error', false);
+  try {
+    const result = await send(all ? '/documents/retry-failed' : '/documents/' + id + '/retry', 'POST', {});
+    text('message', all ? `已重新排队 ${result.accepted} 个失败任务；未重试 ${result.skipped} 个。` + [...new Set(result.results.filter(r => r.error).map(r => r.error))].join('；') : '已重新排队，等待GPU工作器；使用当前模型和强度。');
+    if (state.current && (all || state.current.id === id)) await open(state.current.id);
+    await load();
+  } catch (e) { error(e); }
+  finally { retrying = false; $('retry').disabled = false; renderList(); }
+}
+$('retry').onclick = () => retryFailed(false);
+$('retry-failed').onclick = () => retryFailed(true);
+$('resume-upload').onclick = () => { $('upload-mode').value = 'file'; linkImport.mode(); state.resume = state.current; $('upload-title').value = state.current.title; text('upload-heading', '继续上传：' + state.current.title); show('upload-panel', true); $('video-file').click(); };
+$('delete').onclick = async () => {
+  if (!window.confirm('删除这篇笔记及其原视频、转写和截图？')) return;
+  try { await api('/documents/' + state.current.id, { method: 'DELETE' }); state.selected.delete(state.current.id); state.current = null; state.editing = false; sourcePlayer.reset(null); show('detail', false); show('empty', true); await load(); } catch (e) { error(e); }
+};
+$('edit').onclick = () => {
+  const d = state.current; state.editing = true; $('edit-title').value = d.title; $('edit-topic').value = d.topic; $('edit-tags').value = d.tags.join(', '); $('edit-source').value = d.sourceUrl; $('edit-notes').value = d.notes;
+  tab('notes'); show('notes-view', false); show('tabs', false); show('edit-form', true);
+};
+$('cancel-edit').onclick = () => renderDocument(state.current);
+$('visibility-save').onclick = async () => {
+  const value = $('document-visibility').value;
+  if (value === 'public' && state.current.visibility !== 'public'
+    && !window.confirm('公开后，任何有浏览权限的访客都能读取这篇笔记的标题、分类、标签和完整正文。请确认正文不含私人信息。继续公开？')) return;
+  $('visibility-save').disabled = true;
+  try {
+    await send('/documents/' + state.current.id + '/visibility', 'PUT', { visibility: value, revision: state.current.revision });
+    await open(state.current.id); text('message', value === 'public' ? '笔记正文已公开，可在公开知识库中浏览。' : '已撤回公开，笔记恢复为私有。');
+    await load();
+  } catch (e) { error(e); }
+  finally { $('visibility-save').disabled = false; }
+};
+$('edit-form').onsubmit = async event => {
+  event.preventDefault();
+  try { const result = await send('/documents/' + state.current.id, 'PUT', { title: $('edit-title').value, topic: $('edit-topic').value, tags: tags($('edit-tags').value), sourceUrl: $('edit-source').value, notes: $('edit-notes').value, revision: state.current.revision }); renderDocument(result.document); text('message', '笔记已保存。'); await load(); } catch (e) { error(e); }
+};
+window.addEventListener('beforeunload', event => { if (state.editing || state.uploading || localQueue.pending()) { event.preventDefault(); event.returnValue = ''; } });
+boot().catch(error);
