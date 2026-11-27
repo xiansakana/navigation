@@ -9,10 +9,22 @@ import { createMingliPostgresStore } from './mingli-postgres.js';
 import { portalPostgresDatabase } from './postgres.js';
 import { parseCaseFilters } from './mingli-filters.js';
 import { createKnowledgeCaseStore } from './mingli-knowledge-store.js';
+import { createPostgresKnowledgeCaseStore } from './mingli-knowledge-postgres-store.js';
 import { canKnowledge } from './knowledge.js';
 
 let postgresDatabase;
 let postgresStore;
+let knowledgeDatabase;
+let knowledgeCaseStore;
+async function activeKnowledgeCaseStore() {
+  const url = postgresUrlFor('knowledge');
+  if (!url) return createKnowledgeCaseStore(getDatabase());
+  knowledgeDatabase ||= portalPostgresDatabase(url);
+  await verifyConfiguredPostgres(knowledgeDatabase);
+  knowledgeCaseStore ||= createPostgresKnowledgeCaseStore(knowledgeDatabase);
+  return knowledgeCaseStore;
+}
+
 function activeCaseStore() {
   const postgres = postgresUrlFor('mingli');
   if (!postgres) return createMingliStore(getDatabase());
@@ -70,7 +82,7 @@ export async function handleMingliApi(req, res, url, session, json, getCaseStore
   }
   try {
     if (action === 'knowledge:view') {
-      const store = createKnowledgeCaseStore(getDatabase()), uid = session.userId;
+      const store = await activeKnowledgeCaseStore(), uid = session.userId;
       if (knowledgeCase) { const item = store.get(uid, knowledgeCase[1]); return json(res, item ? 200 : 404, item ? { ok: true, case: item } : { ok: false, error: '知识库案例不存在' }); }
       const filters = parseCaseFilters(url.searchParams.get('filters'));
       if (Object.keys(filters).length && !canMingli(session, 'knowledge:filter')) return json(res, 403, { ok: false, error: '无权使用知识库案例高级筛选' });
