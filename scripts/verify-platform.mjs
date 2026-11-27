@@ -9,7 +9,7 @@ import { sessionSecret } from '../portal/src/login-security.js';
 const config = loadConfig();
 if (config.runtime?.tornMonitorWorker) {
   const { tornWorkerPort } = await import('../portal/src/torn-worker-transport.js');
-  const worker = await fetch('http://127.0.0.1:' + tornWorkerPort(config) + '/healthz', { signal: AbortSignal.timeout(5000) });
+  const worker = await fetch('http://127.0.0.1:' + tornWorkerPort(config) + '/readyz', { signal: AbortSignal.timeout(5000) });
   if (!worker.ok || !(await worker.json()).ok) throw new Error('Torn monitor worker readiness check failed');
 }
 let admin;

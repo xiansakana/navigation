@@ -8,7 +8,7 @@ Torn 的五类后台监控统一运行于 `torn-monitor-worker`，迁移、启�
 
 行情服务连接策略与验收说明见 [quote-network-recovery.md](docs/quote-network-recovery.md)。仅 stock-manage、qqq-dip 启用该策略，部署后核对启动日志、采集请求审计和监控完成时间。
 
-股票管理和抄底监控部署后，从 ECS 本机按各自配置的端口检查 `GET /readyz`。股票管理校验证券组合、记账和量化存储，抄底监控校验抄底状态、证券组合和记账存储。原 `GET /api/health` 用于进程存活探测。
+ECS 部署通过各服务的回环端口检查 `GET /readyz`，覆盖 Portal、QQ 通知、Torn 工作器、股票管理和抄底监控。股票管理校验证券组合、记账和量化存储，抄底监控校验抄底状态、证券组合和记账存储。`GET /healthz` 或 `GET /api/health` 用于进程存活探测。
 
 股票管理的美股盘后报价使用 Nasdaq，不要求额外配置。夜盘需在服务侧设置 `ALPACA_API_KEY_ID` 和 `ALPACA_API_SECRET_KEY`（也可写入未跟踪的 stock-manage/config.json 的 `alpacaApiKeyId`、`alpacaApiSecretKey`）。默认使用 Alpaca 免费计划的 `overnight` 延时成交；有实时 BOATS 行情权限时可设置 `ALPACA_OVERNIGHT_FEED=boats`。配置后重启 stock-manage。缺少凭据或当前夜盘无成交时，页面显示最近可取到的盘后价或普通报价，并提示夜盘暂无报价。
 

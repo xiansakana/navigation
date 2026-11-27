@@ -371,6 +371,15 @@ async function verifyTornWorkerProcess(db, dsn, uid) {
     };
     await run();
     await checkRunning();
+    const workerBase = 'http://127.0.0.1:' + workerPort;
+    const latestMigration = '003-runtime-state';
+    await db.query('DELETE FROM navigation.navigation_schema_migrations WHERE version=$1', [latestMigration]);
+    try {
+      assert.equal((await fetch(workerBase + '/readyz', { signal: AbortSignal.timeout(2000) })).status, 503);
+      assert.equal((await fetch(workerBase + '/healthz', { signal: AbortSignal.timeout(2000) })).status, 200);
+    } finally {
+      await db.query('INSERT INTO navigation.navigation_schema_migrations(version) VALUES ($1)', [latestMigration]);
+    }
     await stop();
     await run();
     await checkRunning();

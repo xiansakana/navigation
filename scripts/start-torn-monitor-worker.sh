@@ -26,7 +26,7 @@ node --input-type=module -e '
   import {setTimeout} from "node:timers/promises";
   import {loadConfig} from "./portal/src/config.js";
   import {tornWorkerPort} from "./portal/src/torn-worker-transport.js";
-  const url="http://127.0.0.1:"+tornWorkerPort(loadConfig())+"/healthz";
+  const url="http://127.0.0.1:"+tornWorkerPort(loadConfig())+"/readyz";
   let ok=false;
   for(let i=0;i<90;i++){try{const r=await fetch(url,{signal:AbortSignal.timeout(2000)});if(r.ok&&(await r.json()).ok){ok=true;break;}}catch{}await setTimeout(500);}
   if(!ok)throw Error("Torn worker readiness failed; inspect PM2 logs, do not run old monitors in parallel");

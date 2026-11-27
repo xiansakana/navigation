@@ -25,6 +25,15 @@ should_run() {
     echo ",$ONLY," | grep -q ",$name,"
 }
 
+verify_service_ready() {
+    local service="$1" port
+    port="$(node -e 'process.stdout.write(String(require("./config.json").server?.port || process.argv[1]))' "$2")"
+    echo "==> $service readiness"
+    curl --fail --silent --show-error --retry 10 --retry-delay 1 --retry-connrefused \
+        --retry-max-time 35 --max-time 5 "http://127.0.0.1:$port/readyz"
+    printf '\n'
+}
+
 git_pull_with_retry() {
     local attempt max=3 delay=5
     for attempt in $(seq 1 "$max"); do
@@ -89,6 +98,7 @@ if should_run qq-bot; then
     npm run build
     if pm2 describe qq-bot >/dev/null 2>&1; then
         pm2 restart qq-bot
+        verify_service_ready qq-bot 8787
     else
         echo "qq-bot 未运行，请先配置 config.json 并执行 ./deploy-ecs.sh"
     fi
@@ -168,6 +178,7 @@ if should_run stock-manage; then
     npm run build
     if pm2 describe stock-manage >/dev/null 2>&1; then
         TRUST_PROXY=1 pm2 restart stock-manage --update-env
+        verify_service_ready stock-manage 5000
     else
         echo "stock-manage 未运行，请先配置 config.json 并执行 ./deploy-ecs.sh"
     fi
@@ -180,6 +191,7 @@ if should_run qqq-dip; then
     npm run build
     if pm2 describe qqq-dip >/dev/null 2>&1; then
         TRUST_PROXY=1 pm2 restart qqq-dip --update-env
+        verify_service_ready qqq-dip 5001
     else
         echo "qqq-dip 未运行，请先配置 config.json 并执行 ./deploy-ecs.sh"
     fi
