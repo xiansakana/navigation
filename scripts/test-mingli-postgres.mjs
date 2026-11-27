@@ -17,6 +17,7 @@ import { createSessionCookie, resolveRequestUser, verifyLogin } from '../portal/
 import { handleOAuthCallback, handleOAuthStart } from '../portal/src/oauth.js';
 import { handleAdminApi } from '../portal/src/admin-api.js';
 import { requestDataAccess } from '../portal/src/data-access.js';
+import { modulePolicy } from '../portal/src/access-policy.js';
 import { createPostgresRbacStore } from '../shared/db/postgres/rbac-store.js';
 import { createCodexService } from '../shared/codex/codex-service.js';
 import { createPostgresCodexQueue } from '../shared/codex/codex-postgres-queue.js';
@@ -888,6 +889,53 @@ async function verifyOAuthLogin(t, provider, config, repository) {
   } finally { mock.mock.restore(); }
 }
 
+async function verifyPostgresSharing(db, running, admin, member, owner) {
+  const adminPolicy = '/api/admin/data-policy';
+  const cases = '/api/mingli/cases';
+  const individual = 'user:' + owner.id;
+  const team = 'team:pg-research';
+  const config = await running.request(adminPolicy, { uid: admin.id });
+  assert.equal(config.status, 200);
+  const policy = config.data.policy;
+  const previous = modulePolicy({ accessPolicy: policy }, 'mingli');
+  policy.teams.push({ id: 'pg-research', name: '研究组 PostgreSQL', ownerId: owner.id });
+  policy.modules.mingli = { ...previous, grants: [
+    { kind: 'user', id: member.id, scope: individual, read: true, write: false },
+    { kind: 'user', id: member.id, scope: team, read: true, write: true }
+  ] };
+  const saved = await running.request(adminPolicy, { uid: admin.id, method: 'PUT', body: policy });
+  assert.equal(saved.status, 200, JSON.stringify(saved.data));
+  const personal = await running.request(cases, { uid: member.id });
+  assert.equal(personal.status, 200);
+  const draft = { name: 'PostgreSQL 共享空间用例',
+    birth: { year: 2005, month: 12, day: 23, hour: 8, minute: 37, gender: 1 }, tags: [], notes: '' };
+  const memberWrite = { uid: member.id, method: 'POST', body: draft };
+  assert.equal((await running.request(cases, { ...memberWrite, scope: individual })).status, 403);
+  const created = await running.request(cases, { ...memberWrite, scope: team });
+  assert.equal(created.status, 201, JSON.stringify(created.data));
+  const id = created.data.case.id;
+  const detail = cases + '/' + id;
+  assert.equal((await running.request(detail, { uid: owner.id })).data.case.id, id);
+  assert.equal((await running.request(detail, { uid: member.id, scope: individual })).data.case.id, id);
+  assert.equal((await running.request(detail, { uid: member.id })).status, 404);
+  const auditDeadline = Date.now() + 3000;
+  let auditRows;
+  while (!(auditRows = (await db.query(`SELECT actor_id,owner_id FROM navigation.data_access_audit
+    WHERE scope=$1 AND module_id='mingli' AND status='201'`, [team])).rows).length) {
+    if (Date.now() >= auditDeadline) throw new Error('Shared write did not produce a PostgreSQL audit record');
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  assert.deepEqual(auditRows, [{ actor_id: member.id, owner_id: owner.id }]);
+
+  saved.data.policy.modules.mingli.grants = [];
+  const revoked = await running.request(adminPolicy, { uid: admin.id, method: 'PUT', body: saved.data.policy });
+  assert.equal(revoked.status, 200, JSON.stringify(revoked.data));
+  for (const scope of [individual, team]) {
+    assert.equal((await running.request(detail, { uid: member.id, scope })).status, 403);
+  }
+  assert.equal((await running.request(detail, { uid: owner.id })).data.case.id, id);
+}
+
 async function verifyRbac(db, t) {
   const lowLevel = createPostgresRbacStore(db);
   const writer = createPortalPostgresRbac(db);
@@ -1012,6 +1060,7 @@ async function verifyRbac(db, t) {
     }
     assert.deepEqual(audit, { actor_id: member.id, owner_id: member.id, status: '201' });
     await verifyBlog(db, running, member, outsider);
+    await verifyPostgresSharing(db, running, admin, member, outsider);
     const adminWrite = await running.request('/api/admin/users', {
       uid: admin.id, method: 'POST', body: { id: member.id, username: member.username, enabled: false, roleIds: [] },
     });
