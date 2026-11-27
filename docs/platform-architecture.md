@@ -71,8 +71,10 @@ RBAC 快照新增 `revision`，更新采用比较版本的事务；缓存读取�
 # 下载过程只把密文写入指定文件，不输出存储管理令牌或签名 URL。
 node scripts/backup-115.mjs download /opt/backups/navigation/<archive>.115.json > backup.enc
 node scripts/backup-115.mjs decrypt backup.enc backup.tar.gz /secure/location/.encryption-key
-python3 scripts/backup-navigation.py --verify backup.tar.gz
+python3.11 scripts/backup-navigation.py --verify backup.tar.gz
 ```
+
+脚本需要 Python 3.8+；ECS 默认的 `python3` 是 3.6，直接执行会报语法错误，使用上面的 `python3.11`。
 
 `--verify` 完整校验归档内文件，恢复 SQLite 并执行 integrity_check/foreign_key_check；需要容纳解压数据库的磁盘。恢复与检查按需使用最多64MiB的 SQLite 页缓存，避免默认小缓存导致大库频繁重复读取；不会把整个数据库装入内存。正式恢复前停止所有写进程，保留现有数据，恢复到新目录核对业务后再切换，不自动覆盖运行中的数据库。
 

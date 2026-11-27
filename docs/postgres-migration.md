@@ -53,7 +53,7 @@ GitHub Actions 使用 PostgreSQL 17 验证 Portal HTTP、OAuth 撤权和并发�
 
 在备份机器安装与 PostgreSQL 服务端同版本的 `pg_dump`、`pg_restore` 和 `psql`。全站切换后，为现有 115 备份任务配置 `NAVIGATION_DATABASE_ENGINE=postgres` 和 `NAVIGATION_POSTGRES_BACKUP_SERVICE`，由 libpq 服务配置提供连接。备份账号需可读 `navigation` 下的表及序列。数据库使用事务一致的 `pg_dump` 自定义格式，备份任务继续用既有加密和上传验证流程。
 
-从 115 下载并解密归档后，在生产数据库之外预先建好一个空的 `navigation_restore_*` 数据库，通过 `python scripts/backup-navigation.py --verify ARCHIVE --restore-postgres-service SERVICE` 核对归档和恢复。恢复使用单一事务。应用数据库账号和授权由部署配置重新建立。2026-11-27 的实测从 115 下载了全部 55 个加密分片，解密后与上传前的归档逐字节一致，独立恢复库共恢复 89 张业务表。
+从 115 下载并解密归档后，在生产数据库之外预先建好一个空的 `navigation_restore_*` 数据库，通过 `python3.11 scripts/backup-navigation.py --verify ARCHIVE --restore-postgres-service SERVICE`（需要 Python 3.8+）核对归档和恢复。恢复使用单一事务。应用数据库账号和授权由部署配置重新建立。2026-11-27 的实测从 115 下载了全部 55 个加密分片，解密后与上传前的归档逐字节一致，独立恢复库共恢复 89 张业务表。
 
 ## 生产启用现状
 
