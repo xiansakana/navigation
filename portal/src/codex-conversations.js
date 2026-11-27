@@ -1,7 +1,7 @@
 import { sameOriginWrite } from '../../shared/http.js';
 import { getDatabase } from '../../shared/db/index.js';
 import {createServerSessions} from './codex-server-sessions.js';
-import { createCodexStore } from '../../shared/codex/codex-store.js';
+import { portalCodexStore } from './codex-store-runtime.js';
 import { readCodexCatalog, resolveRuntime, validateRuntime } from '../../shared/codex/codex-control.js';
 import { hasPermission } from './rbac.js';
 
@@ -35,7 +35,7 @@ export async function handleCodexConversationsApi(req,res,url,session,json,depen
       setup.enabled = setup.enabled && actor.enabled;
     }
     if(method!=='GET'&&!setup.configured)return json(res,403,{ok:false,error:'当前账号尚未配置Codex执行项目'});
-    const store=dependencies.store || createCodexStore(getDatabase()),conversations=store.conversations;
+    const store=dependencies.store || await portalCodexStore().get(),conversations=store.conversations;
     const external=dependencies.external || (!dependencies.store?createServerSessions(getDatabase()):null);
     const cursor=url.searchParams.get('cursor')||'';if(cursor.length>8192)throw new Error('分页标识无效');
     const externalOptions={config:setup.config,all:can('sessions:server:view')&&(!session.dataAccess||session.dataAccess.scope==='self'),canKnowledge:['knowledge:view','knowledge:notes:view'].every(p=>hasPermission(session.permissions||[],p)),canKnowledgePrompts:['knowledge:transcript:view','knowledge:frames:view'].every(p=>hasPermission(session.permissions||[],p)),archived:url.searchParams.get('archived')==='true',cursor};

@@ -116,12 +116,12 @@ export function createTodoStore(db, conversations) {
 export function createTodoScheduler({store,getConfig,authorize,readUsage=readCodexUsage,readCatalog=readCodexCatalog,now=Date.now,includeQQ=()=>true}) {
   let cached=null;
   return {async tick(){
-    if(store.hasActiveJobs(includeQQ()))return;
-    const time=now(),rows=store.todos.due(time);if(!rows.length)return;
+    if(await store.hasActiveJobs(includeQQ()))return;
+    const time=now(),rows=await store.todos.due(time);if(!rows.length)return;
     let row;
     for (const todo of rows) {
       if(await authorize(todo)) {row=todo;break;}
-      store.todos.fail(todo,'账号、项目、会话或自动执行权限已撤销','paused');
+      await store.todos.fail(todo,'账号、项目、会话或自动执行权限已撤销','paused');
     }
     if(!row)return;
     let gate;
@@ -129,19 +129,19 @@ export function createTodoScheduler({store,getConfig,authorize,readUsage=readCod
       if(cached&&cached.nextCheckAt>time)gate=cached;
       else gate=quotaGate(await readUsage(getConfig()),time);
     } catch {gate={available:false,reason:'额度查询暂不可用，将自动复查',nextCheckAt:time+60000,resetAt:0};}
-    if(!gate.available){cached=gate;store.todos.defer(gate.reason,gate.nextCheckAt,gate.resetAt,time);return;}
+    if(!gate.available){cached=gate;await store.todos.defer(gate.reason,gate.nextCheckAt,gate.resetAt,time);return;}
     cached=null;
     let runtime;
     try {
       const catalog=await readCatalog(getConfig());
       runtime=resolveRuntime(getConfig(),JSON.parse(row.runtime_json),catalog);
     } catch {
-      store.todos.fail(row,'无法开始任务，请检查模型设置、会话状态与服务器连接后重试');
+      await store.todos.fail(row,'无法开始任务，请检查模型设置、会话状态与服务器连接后重试');
       return;
     }
-    if(!await authorize(row)){store.todos.fail(row,'自动执行授权已撤销','paused');return;}
+    if(!await authorize(row)){await store.todos.fail(row,'自动执行授权已撤销','paused');return;}
     try {
-      store.todos.promote(row,runtime,now(),includeQQ());
-    } catch {store.todos.fail(row,'无法开始任务，请检查模型设置、会话状态与服务器连接后重试');}
+      await store.todos.promote(row,runtime,now(),includeQQ());
+    } catch {await store.todos.fail(row,'无法开始任务，请检查模型设置、会话状态与服务器连接后重试');}
   }};
 }

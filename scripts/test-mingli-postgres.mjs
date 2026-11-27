@@ -20,6 +20,7 @@ import { createPostgresRbacStore } from '../shared/db/postgres/rbac-store.js';
 import { createCodexService } from '../shared/codex/codex-service.js';
 import { createPostgresCodexQueue } from '../shared/codex/codex-postgres-queue.js';
 import { createPostgresCodexConversations } from '../shared/codex/codex-postgres-conversations.js';
+import { createPostgresCodexStore } from '../shared/codex/codex-postgres-store.js';
 import { handleCodexConversationsApi } from '../portal/src/codex-conversations.js';
 import { verifyPostgresSchema, verifyPostgresApplicationTarget } from '../shared/db/postgres/readiness.js';
 import { startAccessPortal } from '../portal/src/test-fixtures/access-portal.js';
@@ -738,6 +739,88 @@ async function verifyCodexQueue(db) {
   assert.equal(list.body.conversations.length, 7);
 }
 
+async function verifyCodexStore(db) {
+  const uid = 'postgres-codex-store', qq = '12345678';
+  const store = createPostgresCodexStore(db);
+  const conversations = store.conversations;
+  await store.saveSettings(uid, { groups: ['33333333'], groupReply: 'group' });
+  assert.deepEqual(await store.settings(uid), { groups: ['33333333'], groupReply: 'group' });
+  await assert.rejects(() => store.saveSettings(uid, { groups: ['1'], groupReply: 'group' }), /最多20个群号/);
+  await store.saveRuntime(uid, '', { model: 'fixture-model', effort: 'high' });
+  assert.deepEqual(await store.runtime(uid), { model: 'fixture-model', effort: 'high' });
+  await assert.rejects(() => store.saveRuntime(uid, '', { model: 1, effort: '' }), /模型设置格式无效/);
+
+  await store.saveSession(uid, 'navigation', '', 'private-thread');
+  await store.saveSession(uid, 'navigation', '33333333', 'group-thread');
+  assert.equal(await store.session(uid, 'navigation'), 'private-thread');
+  assert.equal(await store.session(uid, 'navigation', '33333333'), 'group-thread');
+  await store.reset(uid, 'navigation', '33333333');
+  assert.equal(await store.session(uid, 'navigation', '33333333'), undefined);
+
+  const image = { kind: 'image', id: 'store-image-1', size: 10 };
+  await store.armAttachments(uid, '');
+  assert.equal(await store.attachmentReception(uid, ''), true);
+  assert.deepEqual(await store.stageAttachments(uid, '', [image, image]), [image]);
+  assert.deepEqual(await store.attachments(uid), [image]);
+
+  assert.equal(await store.event('store-event-1'), true);
+  assert.equal(await store.event('store-event-1'), false);
+  const jobId = await store.enqueue(uid, qq, 'store-event-2', 'navigation', 'fixture task');
+  assert.equal(await store.hasActiveJobs(), true);
+  const job = await store.claim();
+  assert.equal(job.id, jobId);
+  assert.equal(job.prompt, 'fixture task');
+  assert.equal(await store.touch(job.id), true);
+  assert.equal(await store.cancelled(job.id), false);
+  assert.equal(await store.recordRuntime(job, { model: 'fixture-model', effort: 'high' }), true);
+  await store.finish(job, { state: 'succeeded', result: 'done', sessionId: 'private-thread-2', commit: 'abcdef123456', artifacts: [{ path: 'x.png' }] });
+  assert.equal(await store.latestResult(uid), 'done');
+  assert.deepEqual(await store.latestArtifacts(uid), [{ path: 'x.png' }]);
+  assert.equal(await store.latestResult('postgres-codex-store-other'), undefined);
+  assert.equal(await store.session(uid, 'navigation'), 'private-thread-2');
+  while (await store.pendingReply()) {
+    const row = await store.pendingReply();
+    assert.equal(typeof row.id, 'number');
+    await store.delivered(row.id);
+  }
+  await store.clearAttachments(uid);
+
+  const conversation = await conversations.create(uid, 'navigation');
+  const input = { prompt: 'web task', runtime: {}, requestId: 'store-request-1' };
+  const webJob = await conversations.enqueue(uid, qq, conversation.id, input);
+  assert.equal(await conversations.enqueue(uid, qq, conversation.id, input), webJob);
+  const web = await store.claim();
+  assert.equal(web.id, webJob);
+  assert.equal(await conversations.progress(web, { type: 'turn.started' }), true);
+  assert.equal(await store.finish(web, { state: 'succeeded', result: 'web done', sessionId: 'web-thread' }), true);
+  assert.equal(await store.finish(web, { state: 'failed', result: 'late completion' }), false);
+  const detail = await conversations.jobs(uid, conversation.id);
+  assert.equal(detail[0].state, 'succeeded');
+  assert.equal(detail[0].progress[0].kind, 'status');
+  assert.equal((await conversations.get(uid, conversation.id)).session_id, 'web-thread');
+  assert.ok((await conversations.list(uid)).some(row => row.id === conversation.id));
+  assert.equal((await conversations.list('postgres-codex-store-other')).length, 0);
+
+  const todoInput = { title: 'todo', project: 'navigation', prompt: 'todo task', runtime: { model: 'fixture-model', effort: 'high' }, autoRun: true, requestId: 'store-todo-1' };
+  const todo = await store.todos.create(uid, qq, todoInput);
+  assert.equal(todo.state, 'pending');
+  assert.equal((await store.todos.create(uid, qq, todoInput)).id, todo.id);
+  await assert.rejects(() => store.todos.create(uid, qq, { ...todoInput, prompt: 'changed' }), /保存其他内容/);
+  const due = (await store.todos.due(Date.now() + 1)).find(row => row.id === todo.id);
+  assert.ok(due);
+  const promoted = await store.todos.promote(due, { model: 'fixture-model', effort: 'high' }, Date.now() + 1, true);
+  assert.ok(promoted);
+  const todoJob = await store.claim();
+  assert.equal(todoJob.todo_id, todo.id);
+  assert.equal((await store.todos.get(uid, todo.id)).state, 'queued');
+  await store.finish(todoJob, { state: 'succeeded', result: 'todo done' });
+  await store.todos.reconcile();
+  assert.equal((await store.todos.get(uid, todo.id)).state, 'succeeded');
+  await store.todos.remove(uid, todo.id);
+  assert.equal(await store.todos.get(uid, todo.id), undefined);
+  assert.ok((await store.todos.list(uid)).every(row => row.id !== todo.id));
+}
+
 async function verifyQuant(db) {
   const uid = 'quant-fixture', outsider = 'quant-fixture-other';
   const first = createPostgresQuantStore({}, db), second = createPostgresQuantStore({}, db);
@@ -896,6 +979,7 @@ test('Mingli HTTP entry point uses PostgreSQL for owner-scoped cases, categories
     await verifyTornUndercut(db);
     await verifyQuant(db);
     await verifyCodexQueue(db);
+    await verifyCodexStore(db);
     await verifyKnowledgeLeases(db);
     await verifyKnowledgeUploads(db);
     await verifyKnowledgeWorkerHttp(db);

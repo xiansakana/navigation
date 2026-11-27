@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { validateAttachments } from './codex-media.js';
+import { postgresCodexScope } from './codex-postgres-scope.js';
 
 const IN_FLIGHT = "state IN ('queued','running')";
 const STOPPED = '执行进程已中断，未自动重做。修改和提交保留在开发目录，请先查看状态。';
@@ -16,6 +17,8 @@ function jobRow(row) {
 }
 
 export function createPostgresCodexQueue(db, { formatReply = message => [String(message)] } = {}) {
+  const scope = postgresCodexScope(db);
+
   async function settings(client, uid) {
     const { rows: [row] } = await client.query('SELECT groups_json,group_reply FROM navigation.qq_codex_settings WHERE user_id=$1', [uid]);
     return row ? { groups: JSON.parse(row.groups_json), reply: row.group_reply } : { groups: [], reply: 'private' };
@@ -83,7 +86,7 @@ export function createPostgresCodexQueue(db, { formatReply = message => [String(
   return {
     enqueueQQ(uid, qq, eventKey, project, prompt, groupId = '', attachments = []) {
       const payload = JSON.stringify(validateAttachments(attachments));
-      return db.transaction(async client => {
+      return scope.run(async client => {
         await lockPostgresCodexQueue(client);
         const { rows: [existing] } = await client.query('SELECT id,user_id FROM navigation.qq_codex_jobs WHERE event_key=$1', [eventKey]);
         if (existing) {
@@ -102,7 +105,7 @@ export function createPostgresCodexQueue(db, { formatReply = message => [String(
       });
     },
     enqueueWeb(uid, qq, conversationId, { prompt, runtime = {}, requestId }) {
-      return db.transaction(async client => {
+      return scope.run(async client => {
         await lockPostgresCodexQueue(client);
         const event = 'web:' + uid + ':' + requestId;
         const { rows: [previous] } = await client.query('SELECT id,conversation_id FROM navigation.qq_codex_jobs WHERE user_id=$1 AND event_key=$2', [uid, event]);
@@ -125,7 +128,7 @@ export function createPostgresCodexQueue(db, { formatReply = message => [String(
       });
     },
     claim({ includeQQ = true } = {}) {
-      return db.transaction(async client => {
+      return scope.run(async client => {
         await lockPostgresCodexQueue(client);
         const now = Date.now();
         const { rows: stale } = await client.query(`SELECT * FROM navigation.qq_codex_jobs
@@ -140,13 +143,13 @@ export function createPostgresCodexQueue(db, { formatReply = message => [String(
       });
     },
     async touch(job) {
-      const write = await db.query("UPDATE navigation.qq_codex_jobs SET heartbeat=$3 WHERE id=$1 AND user_id=$2 AND state='running'",
+      const write = await scope.client().query("UPDATE navigation.qq_codex_jobs SET heartbeat=$3 WHERE id=$1 AND user_id=$2 AND state='running'",
         [job.id, job.user_id, Date.now()]);
       return write.rowCount === 1;
     },
-    finish(job, result) { return db.transaction(client => persistCompletion(client, job, result, 'running')); },
+    finish(job, result) { return scope.run(client => persistCompletion(client, job, result, 'running')); },
     cancelQQ(uid, groupId = '') {
-      return db.transaction(async client => {
+      return scope.run(async client => {
         await lockPostgresCodexQueue(client);
         const { rows } = await client.query(`SELECT * FROM navigation.qq_codex_jobs
           WHERE user_id=$1 AND group_id=$2 AND origin='qq' AND ${IN_FLIGHT} ORDER BY created_at,_sqlite_rowid FOR UPDATE`, [uid, groupId]);
@@ -158,7 +161,7 @@ export function createPostgresCodexQueue(db, { formatReply = message => [String(
       });
     },
     async stopConversation(uid, conversationId) {
-      const result = await db.query(`UPDATE navigation.qq_codex_jobs
+      const result = await scope.client().query(`UPDATE navigation.qq_codex_jobs
         SET cancel=1,state=CASE WHEN state='queued' THEN 'cancelled' ELSE state END,
           result=CASE WHEN state='queued' THEN '已取消排队任务' ELSE result END,
           finished_at=CASE WHEN state='queued' THEN $3 ELSE finished_at END
@@ -166,11 +169,11 @@ export function createPostgresCodexQueue(db, { formatReply = message => [String(
       return result.rowCount;
     },
     async cancelled(job) {
-      const { rows: [row] } = await db.query('SELECT cancel FROM navigation.qq_codex_jobs WHERE id=$1 AND user_id=$2', [job.id, job.user_id]);
+      const { rows: [row] } = await scope.client().query('SELECT cancel FROM navigation.qq_codex_jobs WHERE id=$1 AND user_id=$2', [job.id, job.user_id]);
       return Number(row?.cancel || 0) !== 0;
     },
     async recordRuntime(job, runtime) {
-      const result = await db.query(`UPDATE navigation.qq_codex_jobs SET runtime_json=$3
+      const result = await scope.client().query(`UPDATE navigation.qq_codex_jobs SET runtime_json=$3
         WHERE id=$1 AND user_id=$2 AND state='running'`, [job.id, job.user_id, JSON.stringify(runtime)]);
       return result.rowCount === 1;
     },

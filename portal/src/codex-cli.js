@@ -1,7 +1,6 @@
 import { sameOriginWrite } from '../../shared/http.js';
 import { codexConfig } from '../../shared/runtime-config.js';
-import { getDatabase } from '../../shared/db/index.js';
-import { createCodexStore } from '../../shared/codex/codex-store.js';
+import { portalCodexStore } from './codex-store-runtime.js';
 import { readCodexCatalog, readCodexStatus, writeCodexDefaults, resolveRuntime, validateRuntime } from '../../shared/codex/codex-control.js';
 import { readCodexUsage, formatCodexUsage } from '../../shared/codex/codex-usage.js';
 import { hasPermission } from './rbac.js';
@@ -40,11 +39,11 @@ export async function handleCodexCliApi(req,res,url,session,json,dependencies={}
   try{
     const setup=(dependencies.setup || codexServerSetup)(session.userId),config=setup.config;
     const runtimeAllowed=setup.configured&&can('qq-codex:execute');
-    const store=dependencies.store || createCodexStore(getDatabase());
+    const store=dependencies.store || await portalCodexStore().get();
     const catalog=dependencies.catalog || readCodexCatalog;
     if(url.pathname.endsWith('/status')){
       const status=await (dependencies.status || readCodexStatus)(config);
-      return json(res,200,{ok:true,...status,qqDefaults:resolveRuntime(config,{model:'',effort:''},status),provisioning:{configured:setup.configured,enabled:setup.enabled,projects:setup.projects},groups:runtimeAllowed?store.settings(session.userId).groups:[],permissions:{editServer:can('codex-cli:settings:edit'),editRuntime:runtimeAllowed&&can('codex-cli:runtime:edit'),viewRuntime:runtimeAllowed,viewUsage:can('codex-cli:usage:view')}});
+      return json(res,200,{ok:true,...status,qqDefaults:resolveRuntime(config,{model:'',effort:''},status),provisioning:{configured:setup.configured,enabled:setup.enabled,projects:setup.projects},groups:runtimeAllowed?(await store.settings(session.userId)).groups:[],permissions:{editServer:can('codex-cli:settings:edit'),editRuntime:runtimeAllowed&&can('codex-cli:runtime:edit'),viewRuntime:runtimeAllowed,viewUsage:can('codex-cli:usage:view')}});
     }
     if(url.pathname.endsWith('/usage')){
       const snapshot=await (dependencies.usage || readCodexUsage)(config);
@@ -53,16 +52,16 @@ export async function handleCodexCliApi(req,res,url,session,json,dependencies={}
     if(url.pathname.endsWith('/runtime')){
       if(!runtimeAllowed)return json(res,403,{ok:false,error:'当前账号未配置QQ Codex执行权限'});
       const body=write?await readBody(req):{},group=write?body.groupId ?? '':url.searchParams.get('groupId') || '';
-      if(typeof group!=='string'||group&&!store.settings(session.userId).groups.includes(group))return json(res,403,{ok:false,error:'群聊不存在或未授权'});
+      if(typeof group!=='string'||group&&!(await store.settings(session.userId)).groups.includes(group))return json(res,403,{ok:false,error:'群聊不存在或未授权'});
       if(write&&Object.keys(body).some(k=>!['groupId','model','effort'].includes(k)))throw new Error('只允许修改当前账号的模型和强度');
       const available=await catalog(config);
       if(write){
         const values=validateRuntime({model:body.model,effort:body.effort},available,{partial:true,defaultModel:config.model || available.defaults.model});
         resolveRuntime(config,values,available);
-        if(group&&!store.settings(session.userId).groups.includes(group))return json(res,403,{ok:false,error:'群聊授权已撤销'});
-        store.saveRuntime(session.userId,group,values);
+        if(group&&!(await store.settings(session.userId)).groups.includes(group))return json(res,403,{ok:false,error:'群聊授权已撤销'});
+        await store.saveRuntime(session.userId,group,values);
       }
-      const preference=store.runtime(session.userId,group);
+      const preference=await store.runtime(session.userId,group);
       return json(res,200,{ok:true,groupId:group,preference,effective:resolveRuntime(config,preference,available)});
     }
     const body=await readBody(req);

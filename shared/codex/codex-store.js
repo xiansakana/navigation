@@ -3,6 +3,8 @@ import { createConversationStore } from './codex-conversations.js';
 import { createTodoStore } from './codex-todos.js';
 import { validateAttachments, mergeAttachments } from './codex-media.js';
 
+const AsyncFunction = (async () => {}).constructor;
+
 export function createCodexStore(db, { formatReply = message => [String(message)] } = {}) {
   db.exec(`CREATE TABLE IF NOT EXISTS qq_codex_jobs (
     id TEXT PRIMARY KEY,user_id TEXT NOT NULL,qq_id TEXT NOT NULL,event_key TEXT UNIQUE NOT NULL,
@@ -54,7 +56,12 @@ export function createCodexStore(db, { formatReply = message => [String(message)
       db.prepare('INSERT INTO qq_codex_settings VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET groups_json=excluded.groups_json,group_reply=excluded.group_reply').run(uid, JSON.stringify([...new Set(input.groups)]), input.groupReply);
       return this.settings(uid);
     },
-    transaction(fn) { return db.transaction(fn)(); },
+    transaction(fn) {
+      // Callers shared with the asynchronous PostgreSQL store await inside the
+      // callback; better-sqlite3 transactions cannot span awaits, so the
+      // fallback path runs those asynchronous callbacks without a wrapper.
+      return fn instanceof AsyncFunction ? fn() : db.transaction(fn)();
+    },
     armAttachments(uid,group) {
       const now=Date.now();db.prepare('DELETE FROM qq_codex_attachment_receptions WHERE expires_at<=?').run(now);
       db.prepare('INSERT INTO qq_codex_attachment_receptions VALUES(?,?,?,?) ON CONFLICT(user_id,group_id) DO UPDATE SET armed_at=excluded.armed_at,expires_at=excluded.expires_at').run(uid,group,now,now+120000);
