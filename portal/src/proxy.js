@@ -304,12 +304,6 @@ function injectPortalShell(html, service) {
     if (!html.includes('<body')) return html;
     html = ensureViewportMeta(html);
     html = injectPageScripts(html);
-    if (!html.includes('/ui/back-to-top.js')) {
-        html = html.replace(/<\/head>/i, '<script defer src="/ui/back-to-top.js?v=1"></script></head>');
-    }
-    if (!html.includes('/ui/input-guard.js')) {
-        html = html.replace(/<\/head>/i, '<script src="/ui/input-guard.js?v=20261011-2"></script></head>');
-    }
     var themeBoot = '<script>(function(){document.documentElement.classList.add("portal-loading");document.documentElement.setAttribute("aria-busy","true");try{var t=localStorage.getItem("portal-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>';
     var themeJs = '<script src="/theme.js"></script>';
     var toastJs = '<script src="/toast.js"></script>';

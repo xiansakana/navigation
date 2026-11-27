@@ -14,6 +14,17 @@ test('direct and proxied pages can share scripts without double-initializing the
     assert.ok(html.indexOf('/portal-page.js') < html.indexOf('/navbar-dropdown.js'));
 });
 
+test('shared input and back-to-top behavior loads once on native and proxied pages', () => {
+    const source = readFileSync(new URL('../public/mingli/index.html', import.meta.url), 'utf8');
+    const native = injectPageScripts(source);
+    const proxied = injectPageScripts("<head><script src='/ui/input-guard.js'></script></head><body></body>");
+    for (const html of [native, proxied]) {
+        assert.equal(html.match(/\/ui\/input-guard\.js/g).length, 1);
+        assert.equal(html.match(/\/ui\/back-to-top\.js/g).length, 1);
+        assert.equal(injectPageScripts(html), html);
+    }
+});
+
 test('page startup coalesces concurrent reads and retries after a transient error', async () => {
     const { window } = new JSDOM('', { runScripts: 'outside-only' });
     try {
