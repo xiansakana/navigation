@@ -8,8 +8,9 @@ import { getPostgresCodexIdentity, getPostgresMonitoring } from '../qq-bot/src/p
 loadConfig();
 const databaseBusy=error=>/^SQLITE_BUSY(?:_|$)/.test(error?.code||'');
 const startupDeadline=Date.now()+30000;
+const [monitoringDb, readRbac] = await Promise.all([getPostgresMonitoring(), getPostgresCodexIdentity()]);
 let db=null;
-if(!process.env.NAVIGATION_QQ_MONITOR_POSTGRES_URL){
+if(!monitoringDb){
   for(;;){
     try{db=getDatabase();break;}
     catch(error){
@@ -19,8 +20,6 @@ if(!process.env.NAVIGATION_QQ_MONITOR_POSTGRES_URL){
   }
 }
 // Execute the durable queue independently of QQ transport; delivery stays in qq-bot.
-const [monitoringDb, readRbac] = await Promise.all([getPostgresMonitoring(), getPostgresCodexIdentity()]);
-if(!monitoringDb && !db) throw new Error('Codex 工作器需要 PostgreSQL 或 SQLite 存储');
 const service = createCodexService({ getConfig: loadConfig, executeJobs: true, deliverReplies: false, readRbac });
 service.start();
 const authController=new AbortController();
