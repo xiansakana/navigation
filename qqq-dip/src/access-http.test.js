@@ -25,7 +25,8 @@ test('the portfolio owner still needs feature permissions for QQQ endpoints and 
   // Fresh FX fixture keeps snapshot requests independent of external quote providers.
   await fs.writeFile(path.join(dir, 'dip.json'), JSON.stringify({ cash: { usdCnyRate: 7.2, fxUpdatedAt: new Date().toISOString() } }));
   const child = spawn(process.execPath, [fileURLToPath(new URL('./server.js', import.meta.url))], {
-    env: { ...process.env, QQQ_DIP_CONFIG_PATH: configPath, NAVIGATION_DB_PATH: dbPath }, stdio: 'ignore', windowsHide: true
+    env: { ...process.env, QQQ_DIP_CONFIG_PATH: configPath, NAVIGATION_DB_PATH: dbPath },
+    stdio: ['ignore', 'ignore', 'inherit'], windowsHide: true
   });
   const base = `http://127.0.0.1:${port}/api`;
   const request = (route, permissions, method = 'GET', body, userId = 'fixture_owner') =>
@@ -41,6 +42,7 @@ test('the portfolio owner still needs feature permissions for QQQ endpoints and 
       await new Promise(resolve => setTimeout(resolve, 25));
     }
     const view = ['service:qqq-dip:tab-monitor:view'];
+    assert.equal((await fetch(base.replace(/\/api$/, '/readyz'), { signal: AbortSignal.timeout(3000) })).status, 200);
     const state = await request('/state', view);
     assert.equal(state.status, 200);
     const privateFields = ['cash', 'lots', 'evaluation', 'notify', 'actions'];

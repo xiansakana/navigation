@@ -47,7 +47,14 @@ const portfolioBackend = await createPortfolioBackend({
 });
 configurePortfolioBackend(portfolioBackend);
 
-const store = await openStore(config);
+const { store, verifyReady: verifyMonitorStore } = await openStore(config);
+const checkPostgres = verifyMonitorStore && (async () => {
+  await Promise.all([
+    verifyMonitorStore(),
+    portfolioDatabase && verifyConfiguredPostgres(portfolioDatabase),
+    bookkeepingDatabase && verifyConfiguredPostgres(bookkeepingDatabase)
+  ]);
+});
 // Repair the legacy use of a strategy instruction as the security name. Only
 // metadata changes; preserve IDs, fills, cash and all user-authored trade names.
 {
@@ -158,6 +165,15 @@ const app = express();
 app.use((req, res, next) => { if (!serveUiAsset(req, res)) next(); });
 if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
+app.get('/readyz', async (_req, res) => {
+  try {
+    if (checkPostgres) await checkPostgres();
+    if (portfolioDb) portfolioDb.prepare('SELECT 1').get();
+    res.json({ ok: true, service: 'qqq-dip' });
+  } catch {
+    res.status(503).json({ ok: false, service: 'qqq-dip' });
+  }
+});
 app.get('/api/internal/notification-settings', createInternalNotificationSettingsHandler({
   getToken: () => config.notify.qq.token,
   getNotify: () => store.getNotify(),
@@ -180,6 +196,15 @@ app.use((req, res, next) => {
   }
   const send = res.json.bind(res);
   res.json = data => send(data && typeof data === 'object' && !Array.isArray(data) ? visibleState(req, data) : data);
+  return next();
+});
+app.use(async (req, res, next) => {
+  if (!checkPostgres || !req.path.startsWith('/api/') || ['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  try {
+    await checkPostgres();
+  } catch {
+    return res.status(503).json({ error: '抄底监控数据库暂不可用' });
+  }
   return next();
 });
 app.use(express.static(PUBLIC));

@@ -1,6 +1,10 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import net from 'node:net';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import { withTestDatabase, assert, assertEqual } from './postgres-test-harness.mjs';
 import { createPostgresPool } from '../shared/db/postgres/pool.js';
 import { createPortfolioBackend } from '../shared/db/portfolio-runtime.js';
@@ -41,9 +45,56 @@ await withTestDatabase(async ({ url, client, pg }) => {
     assertEqual(restored.getSettings().intervalSeconds, 45, '重启后设置');
     assertEqual(restored.listActionRows({ limit: 5 }).items.length, 1, '重启后操作记录');
     assertEqual(restored.getRound().executed.T1.usd, 12, '重启后执行记录');
+    await verifyHttpReadiness({ url, client, dir });
     console.log('qqq-dip postgres ok');
   } finally {
     await pool.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+async function verifyHttpReadiness({ url, client, dir }) {
+  const migration = new URL('../shared/db/postgres/003-runtime-state.sql', import.meta.url);
+  await client.query(fs.readFileSync(migration, 'utf8'));
+  const listener = net.createServer();
+  await new Promise((resolve, reject) => listener.once('error', reject).listen(0, '127.0.0.1', resolve));
+  const port = listener.address().port;
+  await new Promise(resolve => listener.close(resolve));
+  const config = path.join(dir, 'config.json');
+  fs.writeFileSync(config, JSON.stringify({ server: { port }, dbPath: path.join(dir, 'dip.db') }));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.endsWith('_POSTGRES_URL')));
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../qqq-dip/src/server.js', import.meta.url))], {
+    env: { ...env, QQQ_DIP_CONFIG_PATH: config, NAVIGATION_DATABASE_ENGINE: 'postgres',
+      NAVIGATION_POSTGRES_URL: url, NAVIGATION_POSTGRES_DATABASE: new URL(url).pathname.slice(1) },
+    stdio: ['ignore', 'ignore', 'inherit'], windowsHide: true
+  });
+  const base = `http://127.0.0.1:${port}`;
+  const request = (route, options) => fetch(base + route, { signal: AbortSignal.timeout(4000), ...options });
+  const write = () => request('/api/actions', { method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-portal-user-id': 'u',
+      'x-portal-permissions': Buffer.from('["*"]').toString('base64url') },
+    body: JSON.stringify({ message: 'fixture HTTP write' }) });
+  try {
+    const deadline = Date.now() + 8000;
+    while (true) {
+      try { if ((await request('/readyz', { signal: AbortSignal.timeout(500) })).ok) break; } catch { /* Wait for listening. */ }
+      assert(Date.now() < deadline && child.exitCode === null, '抄底监控未能启动');
+      await new Promise(resolve => setTimeout(resolve, 40));
+    }
+    await client.query("DELETE FROM navigation.navigation_schema_migrations WHERE version='003-runtime-state'");
+    assertEqual((await request('/readyz')).status, 503, 'schema 不符时未就绪');
+    assertEqual((await request('/api/health')).status, 200, '数据库异常时进程存活');
+    assertEqual((await write()).status, 503, 'schema 不符时拒绝写入');
+    const blocked = await client.query("SELECT data FROM navigation.qqq_dip_state WHERE id='default'");
+    assert(!JSON.parse(blocked.rows[0].data).actions.some(row => row.message === 'fixture HTTP write'), '被拒绝的操作没有落库');
+    await client.query(fs.readFileSync(migration, 'utf8'));
+    assertEqual((await request('/readyz')).status, 200, 'schema 恢复后重新就绪');
+    assertEqual((await write()).status, 200, 'schema 恢复后允许写入');
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, 'exit');
+      child.kill();
+      await exited;
+    }
+  }
+}

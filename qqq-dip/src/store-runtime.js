@@ -7,8 +7,9 @@ import { createPostgresStore } from './postgres-store.js';
 
 export async function openStore(config) {
   const url = postgresUrlFor('qqqDip');
-  if (!url) return createStore(config);
+  if (!url) return { store: await createStore(config) };
   const db = createPostgresPool(pg.Pool, url, 'navigation-qqq-dip');
-  await verifyConfiguredPostgres(db);
-  return createPostgresStore(config, db);
+  const verifyReady = () => verifyConfiguredPostgres(db);
+  await verifyReady();
+  return { store: await createPostgresStore(config, db), verifyReady };
 }
