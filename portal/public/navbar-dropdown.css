@@ -10,3 +10,18 @@
   .portal-nav-menu { box-sizing: border-box; min-width: min(210px, calc(100vw - 16px)); overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
   .portal-nav-menu a, .portal-nav-menu button { min-height: 44px; box-sizing: border-box; touch-action: manipulation; }
 }
+
+@media (max-width: 640px) {
+  body.has-navbar:has(.navbar-inner > .portal-data-scope) { --navbar-height: 98px; }
+  .navbar-inner:has(> .portal-data-scope) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: 56px 42px;
+    row-gap: 0;
+  }
+  .navbar-inner > .portal-data-scope {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-self: end;
+  }
+}
