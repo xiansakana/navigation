@@ -29,7 +29,7 @@ export async function getPortalPortfolioBackend() {
   const url = postgresUrlFor('portfolio') || '';
   const key = url + '|' + (process.env.NAVIGATION_DB_PATH || '');
   if (portfolioBackend && portfolioKey === key) return portfolioBackend;
-  const sqlite = getDatabase({});
+  const sqlite = url ? null : getDatabase({});
   const database = url ? portalPostgresDatabase(url) : null;
   if (database) await verifyConfiguredPostgres(database);
   portfolioKey = key;
@@ -39,8 +39,8 @@ export async function getPortalPortfolioBackend() {
 
 export async function getBookkeepingBackend() {
   const portfolio = await getPortalPortfolioBackend();
-  const db = getDatabase({});
   const url = postgresUrlFor('bookkeeping');
+  const db = url ? null : getDatabase({});
   const key = (url || '') + '|' + (process.env.NAVIGATION_DB_PATH || '') + '|' + (postgresUrlFor('portfolio') || '');
   if (bookkeepingBackend && bookkeepingKey === key) return bookkeepingBackend;
   bookkeepingKey = key;

@@ -41,7 +41,7 @@ if (portfolioDatabase) await verifyConfiguredPostgres(portfolioDatabase);
 const bookkeepingUrl = postgresUrlFor('bookkeeping');
 const bookkeepingDatabase = bookkeepingUrl && createPostgresPool(pg.Pool, bookkeepingUrl, 'navigation-qqq-dip');
 if (bookkeepingDatabase) await verifyConfiguredPostgres(bookkeepingDatabase);
-const portfolioDb = getDatabase({});
+const portfolioDb = portfolioDatabase && bookkeepingDatabase ? null : getDatabase({});
 const portfolioBackend = await createPortfolioBackend({
   database: portfolioDatabase, sqlite: portfolioDb, bookkeepingDatabase
 });

@@ -11,11 +11,11 @@ import { requestDataAccess, scopedSession, availableDataAccess, scopeCookie, aud
 import { accessModules, modulePolicy, moduleForPath } from './access-policy.js';
 import { readJson, sameOriginWrite } from '../../shared/http.js';
 import { sessionSecret, cookieOptions, createLoginLimiter } from './login-security.js';
-import { createQqBookkeeping, internalQqAuthorized } from './bookkeeping-qq.js';
+import { internalQqAuthorized } from './bookkeeping-qq.js';
+import { getBookkeepingBackend } from './bookkeeping-runtime.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
 import http from 'node:http';
 import { getDatabase } from '../../shared/db/index.js';
-import { startAssetHistory } from './bookkeeping-asset-history.js';
 import { startMediaCleanup } from './blog-media-cleanup.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -615,7 +615,7 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
 async function handleRequest(req, res) {
     if (req.method === 'GET' && ['/healthz', '/readyz'].includes(new URL(req.url, 'http://localhost').pathname)) {
         if (req.url.startsWith('/readyz')) {
-            getDatabase().prepare('SELECT 1').get();
+            if (process.env.NAVIGATION_DATABASE_ENGINE !== 'postgres') getDatabase().prepare('SELECT 1').get();
             try {
                 await identity.ready(); await checkMingliPostgres(); await checkBlogPostgres(); await checkKnowledgeDatabase();
                 if (resourcesDb) await verifyConfiguredPostgres(resourcesDb);
@@ -646,12 +646,13 @@ async function handleRequest(req, res) {
         if (req.method !== 'POST' || !internalQqAuthorized(req)) return json(res, 403, {ok:false,error:'Forbidden'});
         try {
             const rbac = await readIdentity();
-            const input = await readJson(req, 65536), service = createQqBookkeeping(getDatabase(), {resolveUser: uid => {
+            const backend = await getBookkeepingBackend();
+            const input = await readJson(req, 65536), service = backend.createQq(uid => {
                 const ctx = resolveSessionUser({userId:uid}, config, rbac);
                 return ctx && ctx.rbac?.accessPolicy?.modules?.bookkeeping?.enabled !== false ? {permissions:ctx.permissions,isGuest:ctx.user.username === (config.auth?.guestUsername || 'guest')} : null;
-            }});
-            if (input.ack) { service.ack(String(input.ack)); return json(res,200,{ok:true}); }
-            return json(res,200,{ok:true,...service.process(input.event || {})});
+            });
+            if (input.ack) { await service.ack(String(input.ack)); return json(res,200,{ok:true}); }
+            return json(res,200,{ok:true,...(await service.process(input.event || {}))});
         } catch(e) {return json(res,400,{ok:false,error:e.message});}
     }
     var route = resolveRoute(config.services, url.pathname, req.method, url.search, proxyRouteOpts(req));
@@ -891,9 +892,9 @@ await checkKnowledgeDatabase();
 server.listen(port, host, async function() {
     if (!config.runtime?.externalWorkers) {
         try {
-            const db = getDatabase(), blogDb = (await getBlogPostgresRepository())?.db || db;
+            const blogDb = (await getBlogPostgresRepository())?.db || getDatabase();
             startMediaCleanup(blogDb);
-            startAssetHistory(db);
+            (await getBookkeepingBackend()).startAssetHistory({});
             await resumeVideoJobs(blogDb, config);
             startThumbnailWorker(blogDb);
         } catch (error) { console.error('[portal background start]', error.code || error.name); }

@@ -23,6 +23,7 @@ import { getPostgresCodexIdentity, getPostgresMonitoring } from './postgres.js';
 import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
 import { startTiboResetMonitor } from './tibo-reset-monitor.js';
 import { createBusinessService } from './business.js';
+import { loadQqBotState, saveQqBotState } from './state-store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '../public');
@@ -134,7 +135,13 @@ export function createNotificationServer(initialConfig, options) {
     var monitor = options?.startMonitors ? startTiboResetMonitor(function() { return config; }, {
         send: function(currentConfig, channel, message, target) {
             return sendThrough(currentConfig, channel, { ...target, message: message }, options);
-        }
+        },
+        readState: options?.tiboState ? function() { return structuredClone(options.tiboState); } : undefined,
+        writeState: options?.saveTiboState ? function(state) {
+            void options.saveTiboState(state).catch(function(error) {
+                console.error('[tibo-state]', error.code || error.name);
+            });
+        } : undefined
     }) : null;
     var codex = createCodexService({getConfig:()=>config,executeJobs:!config.codex?.externalExecutor,readRbac: options?.readCodexRbac,
         send:(c,target,message)=>(options?.sendQq || sendMessage)(c.napcat,target,message)});
@@ -248,7 +255,23 @@ async function main() {
     var host = config.server.host || '127.0.0.1';
     var port = config.server.port || 8787;
     const [monitoringDb, readCodexRbac] = await Promise.all([getPostgresMonitoring(), getPostgresCodexIdentity()]);
-    var server = createNotificationServer(config, { startMonitors: true, monitoringDb, readCodexRbac });
+    var businessState = null, tiboState = null;
+    if (monitoringDb) {
+        [businessState, tiboState] = await Promise.all([
+            loadQqBotState(monitoringDb, 'business'),
+            loadQqBotState(monitoringDb, 'tibo_reset')
+        ]);
+        if (businessState && typeof businessState === 'object') config.business = businessState;
+    }
+    var server = createNotificationServer(config, { startMonitors: true, monitoringDb, readCodexRbac,
+        saveBusiness: monitoringDb ? function(current) {
+            void saveQqBotState(monitoringDb, 'business', current.business || {}).catch(function(error) {
+                console.error('[business-state]', error.code || error.name);
+            });
+        } : undefined,
+        tiboState,
+        saveTiboState: monitoringDb ? function(state) { return saveQqBotState(monitoringDb, 'tibo_reset', state); } : undefined
+    });
     for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
         server.codexService.stop(); server.bookkeepingReceiver.stop(); server.close();
         const wait = setInterval(() => {if(!server.codexService.status().running){clearInterval(wait);process.exit(0);}},100);

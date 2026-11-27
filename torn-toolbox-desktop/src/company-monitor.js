@@ -5,6 +5,7 @@ import { formatApplicationSummary } from './utils.js';
 import { normalizeCompanyWatchers } from './watchers.js';
 import { DEFAULT_STATE_FILE, fingerprint, loadCompanyMonitorSnapshot, saveCompanyMonitorSnapshot } from './company-monitor-store.js';
 
+
 export class CompanyMonitor extends EventEmitter {
     constructor(getConfig, dependencies = {}) {
         super();
@@ -12,7 +13,12 @@ export class CompanyMonitor extends EventEmitter {
         this.fetchApplications = dependencies.fetchApplications || fetchCompanyApplications;
         this.publishEvent = dependencies.publishEvent || publishBusinessEvent;
         this.stateFile = dependencies.stateFile === undefined ? DEFAULT_STATE_FILE : dependencies.stateFile;
-        this.persistedWatchers = this.stateFile ? loadCompanyMonitorSnapshot(this.stateFile) : {};
+        this.saveSnapshot = dependencies.saveSnapshot || (snapshot => {
+            if (this.stateFile) saveCompanyMonitorSnapshot(snapshot, this.stateFile);
+        });
+        this.persistedWatchers = dependencies.persistedWatchers !== undefined
+            ? dependencies.persistedWatchers
+            : this.stateFile ? loadCompanyMonitorSnapshot(this.stateFile) : {};
         this.timer = null;
         this.running = false;
         this.checking = false;
@@ -43,7 +49,7 @@ export class CompanyMonitor extends EventEmitter {
     }
 
     persistState(watchers) {
-        if (!this.stateFile) return;
+        if (!this.stateFile && !this.saveSnapshot) return;
         var snapshot = {};
         watchers.forEach(function(watcher) {
             var state = this.watcherStates.get(watcher.id);
@@ -54,7 +60,7 @@ export class CompanyMonitor extends EventEmitter {
                 seenApplicationFingerprints: Array.from(state.seen)
             };
         }.bind(this));
-        saveCompanyMonitorSnapshot(snapshot, this.stateFile);
+        try { this.saveSnapshot(snapshot); } catch (error) { console.error('[company-monitor-state]', error.code || error.name); }
         this.persistedWatchers = snapshot;
     }
 

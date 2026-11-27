@@ -4,6 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadServiceConfig, saveServiceConfig } from './config.js';
 import { CompanyMonitor } from './company-monitor.js';
+import { postgresUrlFor } from '../../shared/db/postgres/config.js';
+import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
+import { loadPostgresCompanyMonitorSnapshot, savePostgresCompanyMonitorSnapshot } from './company-monitor-store.js';
 import { maskWatcherForClient, mergeWatcherConfig } from './watchers.js';
 import {
     readJson, json, createStaticHandler, openBrowser, createAuthGuard,
@@ -19,7 +22,16 @@ var config = loadServiceConfig('company');
 function getConfig() { return config; }
 
 var sse = createSseBroadcaster();
-var companyMonitor = new CompanyMonitor(getConfig);
+const companyUrl = process.env.NAVIGATION_PROCESS_ROLE === 'torn-monitor-worker' && postgresUrlFor('torn');
+const companyDb = companyUrl ? (await import('../../portal/src/postgres.js')).portalPostgresDatabase(companyUrl) : null;
+if (companyDb) await verifyConfiguredPostgres(companyDb);
+const companyMonitorOptions = companyDb ? {
+    persistedWatchers: await loadPostgresCompanyMonitorSnapshot(companyDb),
+    saveSnapshot: snapshot => savePostgresCompanyMonitorSnapshot(companyDb, snapshot).catch(error => {
+        console.error('[company-monitor-state]', error.code || error.name);
+    })
+} : {};
+var companyMonitor = new CompanyMonitor(getConfig, companyMonitorOptions);
 var authorize = createAuthGuard(getConfig);
 var serveStatic = createStaticHandler(PUBLIC_DIR, SHARED_DIR);
 

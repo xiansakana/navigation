@@ -57,12 +57,14 @@ try {
   process.exit(1);
 }
 
-const portfolioDb = getDatabase({ dbPath: config.dbPath });
-ensureUserPortfolioSchema(portfolioDb);
-ensureFundHoldings(portfolioDb);
 const portfolioUrl = postgresUrlFor('portfolio');
 const portfolioDatabase = portfolioUrl && createPostgresPool(pg.Pool, portfolioUrl, 'navigation-stock-manage');
 if (portfolioDatabase) await verifyConfiguredPostgres(portfolioDatabase);
+const portfolioDb = portfolioDatabase ? null : getDatabase({ dbPath: config.dbPath });
+if (portfolioDb) {
+  ensureUserPortfolioSchema(portfolioDb);
+  ensureFundHoldings(portfolioDb);
+}
 const bookkeepingUrl = postgresUrlFor('bookkeeping');
 const bookkeepingDatabase = bookkeepingUrl && createPostgresPool(pg.Pool, bookkeepingUrl, 'navigation-stock-manage');
 if (bookkeepingDatabase) await verifyConfiguredPostgres(bookkeepingDatabase);
@@ -95,7 +97,8 @@ app.use(portfolioIdentityMiddleware);
 app.get('/readyz', async (_req, res) => {
   try {
     if (portfolioDatabase) await verifyConfiguredPostgres(portfolioDatabase);
-    else portfolioDb.prepare('SELECT 1').get();
+    else if (portfolioDb) portfolioDb.prepare('SELECT 1').get();
+    else throw new Error('组合存储未配置');
     if (quantDatabase) await verifyConfiguredPostgres(quantDatabase);
     res.json({ ok: true, service: 'stock-manage' });
   } catch { res.status(503).json({ ok: false, service: 'stock-manage' }); }
@@ -164,6 +167,7 @@ function describeReinvestment(trade) {
 function completePortfolioFundQuote(quote, saved) {
   return completeChinaAmcMovement(quote, (symbol, date) => {
     if (verifiedBackfill) return verifiedBackfill.get(currentPortfolioUserId() + '|' + symbol + '|' + date) ?? null;
+    if (!portfolioDb) return null;
     if (!portfolioDb.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bookkeeping_security_prices'").get()) return null;
     return portfolioDb.prepare(`SELECT close FROM bookkeeping_security_prices
       WHERE user_id=? AND symbol=? AND date=? AND source='chinaamc-hk-fund-nav'`)

@@ -31,4 +31,21 @@ export function saveCompanyMonitorSnapshot(watchers, filePath = DEFAULT_STATE_FI
     fs.renameSync(temporaryPath, filePath);
 }
 
+export async function loadPostgresCompanyMonitorSnapshot(db, fallbackFile = DEFAULT_STATE_FILE) {
+    const { rows: [row] } = await db.query("SELECT data FROM navigation.torn_company_monitor_state WHERE id='default'");
+    if (row) {
+        const snapshot = JSON.parse(row.data);
+        return snapshot && snapshot.watchers && typeof snapshot.watchers === 'object' ? snapshot.watchers : {};
+    }
+    const watchers = loadCompanyMonitorSnapshot(fallbackFile);
+    await savePostgresCompanyMonitorSnapshot(db, watchers);
+    return watchers;
+}
+
+export async function savePostgresCompanyMonitorSnapshot(db, watchers) {
+    await db.query(`INSERT INTO navigation.torn_company_monitor_state(id,data,updated_at) VALUES('default',$1,$2)
+        ON CONFLICT(id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at`,
+    [JSON.stringify({ version: 1, watchers: watchers || {} }), new Date().toISOString()]);
+}
+
 export { DEFAULT_STATE_FILE };
