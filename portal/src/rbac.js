@@ -542,6 +542,7 @@ export function upsertOAuthUser(data, payload) {
 
     var existing = findUserByOAuth(data, provider, providerId);
     if (existing) {
+        if (existing.enabled === false) throw new Error('此账户已停用，请联系管理员');
         existing.oauth = existing.oauth || {};
         existing.oauth[provider] = {
             id: providerId,
@@ -550,7 +551,6 @@ export function upsertOAuthUser(data, payload) {
             name: payload.name || null
         };
         if (payload.email) existing.email = payload.email;
-        existing.enabled = true;
         return existing;
     }
 

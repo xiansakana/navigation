@@ -14,6 +14,7 @@ import { createPostgresDatabase } from '../portal/src/postgres.js';
 import { createPortalPostgresRbac } from '../portal/src/postgres-rbac.js';
 import { createPasswordRecord } from '../portal/src/rbac.js';
 import { createSessionCookie, resolveRequestUser, verifyLogin } from '../portal/src/auth.js';
+import { handleOAuthCallback, handleOAuthStart } from '../portal/src/oauth.js';
 import { handleAdminApi } from '../portal/src/admin-api.js';
 import { requestDataAccess } from '../portal/src/data-access.js';
 import { createPostgresRbacStore } from '../shared/db/postgres/rbac-store.js';
@@ -848,13 +849,47 @@ async function verifyQuant(db) {
   assert.equal(await backtests.remove(uid, result.id), true);
 }
 
-async function verifyRbac(db) {
+async function verifyOAuthLogin(t, provider, config, repository) {
+  const path = '/api/oauth/' + provider;
+  const secret = config.auth.sessionSecret;
+  let start, callback;
+  handleOAuthStart(provider, { url: path + '/start', headers: {} }, {
+    writeHead(status, headers) { start = { status, headers }; }, end() {}
+  }, config, secret);
+  assert.equal(start.status, 302);
+  const { searchParams } = new URL(start.headers.Location);
+  const query = new URLSearchParams({ code: 'oauth-fixture-code', state: searchParams.get('state') });
+  const mock = t.mock.method(globalThis, 'fetch', async url => {
+    if (url === 'https://github.com/login/oauth/access_token' || url === 'https://oauth2.googleapis.com/token') {
+      return Response.json({ access_token: 'oauth-fixture-token' });
+    }
+    if (url === 'https://api.github.com/user') return Response.json({ id: 741, login: 'fixture', email: 'fixture@example.test' });
+    if (url === 'https://openidconnect.googleapis.com/v1/userinfo') {
+      return Response.json({ sub: 'fixture-google', email: 'fixture@example.test' });
+    }
+    throw new Error('Unexpected OAuth test request');
+  });
+  try {
+    await handleOAuthCallback(provider, {
+      url: path + '/callback?' + query, headers: { cookie: start.headers['Set-Cookie'].split(';')[0] }
+    }, { writeHead(status, headers) { callback = { status, headers }; }, end() {} },
+    config, secret, repository);
+    assert.equal(callback.status, 302);
+    return callback.headers;
+  } finally { mock.mock.restore(); }
+}
+
+async function verifyRbac(db, t) {
   const lowLevel = createPostgresRbacStore(db);
   const writer = createPortalPostgresRbac(db);
   const reader = createPortalPostgresRbac(db);
-  const config = { auth: { anonymousGuest: false, sessionSecret: 'isolated-postgres-test-only' }, services: [] };
+  const providerConfig = provider => ({ enabled: true, clientId: 'fixture', clientSecret: 'fixture',
+    redirectUri: 'https://example.test/api/oauth/' + provider + '/callback' });
+  const config = { auth: { anonymousGuest: false, sessionSecret: 'isolated-postgres-test-only' }, services: [],
+    oauth: { github: providerConfig('github'), google: providerConfig('google') } };
   await assert.rejects(() => reader.load(config), { status: 503 });
-  const member = { id: 'member', username: 'member', roleIds: ['codex'], enabled: true, ...createPasswordRecord('fixture-passphrase') };
+  const member = { id: 'member', username: 'member', roleIds: ['codex'], enabled: true,
+    oauth: { github: { id: '741' }, google: { id: 'fixture-google' } }, ...createPasswordRecord('fixture-passphrase') };
   const outsider = { id: 'member-b', username: 'member-b', roleIds: [], enabled: true };
   const admin = { id: 'admin', username: 'admin', roleIds: ['role_admin'], enabled: true };
   await lowLevel.save({
@@ -892,6 +927,24 @@ async function verifyRbac(db) {
   assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
   assert.equal(results.find(result => result.status === 'rejected').reason.status, 409);
   await assert.rejects(() => lowLevel.save({ users: [] }), { status: 409 });
+  let concurrentWrite = true;
+  const racingRepository = { ...writer, async save(snapshot) {
+    if (concurrentWrite) {
+      concurrentWrite = false;
+      const other = await reader.load(config);
+      other.userPrefs.member.concurrentOAuthFixture = true;
+      await reader.save(other);
+    }
+    await writer.save(snapshot);
+  } };
+  for (const provider of ['github', 'google']) {
+    const headers = await verifyOAuthLogin(t, provider, config, racingRepository);
+    assert.equal(headers.Location, '/');
+    const current = await reader.load(config);
+    assert.equal(current.userPrefs.member.concurrentOAuthFixture, true);
+    const login = resolveRequestUser({ headers: { cookie: headers['Set-Cookie'][0].split(';')[0] } }, config, current);
+    assert.equal(login?.userId, member.id);
+  }
   const before = await lowLevel.revision();
   const adminResponse = await handleAdminApi({ method: 'POST' }, {}, new URL('http://localhost/api/admin/users'),
     { userId: admin.id }, config, (_, status, body) => ({ status, body }),
@@ -901,6 +954,12 @@ async function verifyRbac(db) {
   const fresh = await reader.load(config);
   assert.equal(resolveRequestUser(req, config, fresh), null);
   assert.equal(verifyLogin('member', 'fixture-passphrase', config, fresh), null);
+  for (const provider of ['github', 'google']) {
+    const headers = await verifyOAuthLogin(t, provider, config, writer);
+    assert.match(decodeURIComponent(headers.Location), /账户已停用/);
+    assert.match(headers['Set-Cookie'], /^portal_oauth_state=;/);
+  }
+  assert.equal(await lowLevel.revision(), before + 1n);
   assert.equal(await receiveCodexHelp(2), true);
   assert.equal(replies.length, 1);
   await db.query("UPDATE navigation.rbac_snapshot SET payload = payload WHERE id = 1");
@@ -953,7 +1012,7 @@ async function verifyRbac(db) {
   } finally { await running.cleanup(); }
 }
 
-test('Mingli HTTP entry point uses PostgreSQL for owner-scoped cases, categories, filters and import', async () => {
+test('Mingli HTTP entry point uses PostgreSQL for owner-scoped cases, categories, filters and import', async t => {
   const db = createPostgresDatabase();
   let schemaCreated = false;
   try {
@@ -993,7 +1052,7 @@ test('Mingli HTTP entry point uses PostgreSQL for owner-scoped cases, categories
     await verifyKnowledgeWorkerHttp(db);
     await verifyKnowledgeProductionStore(db);
     await verifyQqMonitoring(db);
-    await verifyRbac(db);
+    await verifyRbac(db, t);
     const store = createMingliPostgresStore(db);
     const session = (userId, isGuest = false) => ({ userId, isGuest, permissions: ['*'] });
     async function call(route, method = 'GET', data, user = session('a')) {

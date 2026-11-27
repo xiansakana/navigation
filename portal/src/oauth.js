@@ -188,6 +188,20 @@ async function resolveOAuthProfile(providerId, cfg, provider, code) {
     throw new Error('不支持的 OAuth 提供商');
 }
 
+async function saveOAuthLogin(repository, config, profile) {
+    const defaultRoleId = config.oauth?.defaultRoleId || 'role_guest';
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const rbac = await repository.load(config);
+        const user = upsertOAuthUser(rbac, { ...profile, defaultRoleId });
+        try {
+            await repository.save(rbac);
+            return user;
+        } catch (error) {
+            if (error.code !== 'RBAC_CONFLICT' || attempt === 2) throw error;
+        }
+    }
+}
+
 export function handleOAuthStart(providerId, req, res, config, secret) {
     var setup = getProviderConfig(config, providerId);
     if (!setup) {
@@ -237,10 +251,7 @@ export async function handleOAuthCallback(providerId, req, res, config, secret, 
     }
     try {
         var profile = await resolveOAuthProfile(providerId, setup.cfg, setup.provider, code);
-        var rbac = await repository.load(config);
-        var defaultRoleId = config.oauth?.defaultRoleId || 'role_guest';
-        var user = upsertOAuthUser(rbac, Object.assign({}, profile, { defaultRoleId: defaultRoleId }));
-        await repository.save(rbac);
+        var user = await saveOAuthLogin(repository, config, profile);
         res.writeHead(302, {
             Location: '/',
             'Set-Cookie': [
