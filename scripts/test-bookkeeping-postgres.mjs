@@ -82,6 +82,23 @@ await withTestDatabase(async ({ url, client, pg }) => {
     const returns = await asset.returns('u', {}, '2026-01-10', accounts, entries, { CNY: 1 });
     assert(returns === null || typeof returns === 'object', '投资回报');
 
+    const owner = 'linked-valuation';
+    const bank = await store.saveAccount(owner, { name: '银行', currency: 'CNY', balance: 100 });
+    const ledger = await store.saveAccount(owner, { name: '证券', currency: 'CNY', balance: 50 });
+    await store.saveEntry(owner, { type: '转账', amount: 4, currency: 'CNY', accountId: bank, toAccountId: ledger, date: '2026-01-01T12:00:00' });
+    const investmentId = await portfolio.saveInvestmentAccount(owner, { name: '券商', currency: 'CNY', bookkeepingId: ledger, baselineCash: 50 });
+    const [investment] = await portfolio.investmentRows(owner);
+    assertEqual(investment.old_ledger_balance, 5400, '实收转账金额以数值计入绑定前的账面余额');
+    const tradeDate = new Date(Date.parse(investment.baseline_at) + 60_000).toISOString();
+    const portfolioData = {
+      trades: [{ id: 'linked-buy', account_id: investmentId, type: 'buy', symbol: '600000', name: '测试证券', currency: 'CNY', shares: 1, price: 10,
+        total_amount: 10, commission: 0, trade_date: tradeDate, created_at: tradeDate }],
+      quotes: { '600000': { price: 12 } }
+    };
+    await client.query('INSERT INTO navigation.portfolio_users(user_id,data,updated_at) VALUES($1,$2,$3)', [owner, JSON.stringify(portfolioData), tradeDate]);
+    const valued = (await store.accounts(owner)).find(account => account.id === ledger);
+    assertEqual([valued.balance, valued.investment.cash, valued.investment.marketValue], [52, 40, 12], '记账资产使用库中交易和行情计算证券账户总额');
+
     await client.query(`INSERT INTO navigation.bookkeeping_security_prices(user_id,symbol,date,close,source)
       VALUES('u','QQQ','2026-01-05',400,'verified-backfill:test')`);
     const security = postgresSecurityHistory(pool);

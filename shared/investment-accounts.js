@@ -118,7 +118,7 @@ export function ledgerCashDelta(e, accountId) {
   const transfers = ['转账', '还款', '借出', '收回'];
   let result = 0;
   if (e.account_id === accountId) result += (transfers.includes(e.type) || ['支出', '已报销'].includes(e.type) ? -e.amount : e.amount) - e.fee;
-  if (transfers.includes(e.type) && e.to_account_id === accountId) result += e.to_amount ?? e.amount;
+  if (transfers.includes(e.type) && e.to_account_id === accountId) result += Number(e.to_amount ?? e.amount);
   return result;
 }
 

@@ -99,9 +99,11 @@ export function createPostgresPortfolioStore(db, userId, options = {}) {
 
   async function project(run, uid, raw) {
     const accounts = await investmentRows(run, uid);
+    if (!accounts.length) return [];
     const funds = await fundRows(run, uid);
     const ledger = await ledgerContext(run, uid);
-    return projectInvestmentsFrom({ rows: accounts, funds, entries: ledger.entries, ledgers: ledger.ledgers, raw: raw || {} });
+    const portfolio = raw ?? await portfolioRow(run, uid) ?? {};
+    return projectInvestmentsFrom({ rows: accounts, funds, entries: ledger.entries, ledgers: ledger.ledgers, raw: portfolio });
   }
 
   async function readWith(run, uid = owner) {
