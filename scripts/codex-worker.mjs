@@ -8,16 +8,19 @@ import { getPostgresCodexIdentity, getPostgresMonitoring } from '../qq-bot/src/p
 loadConfig();
 const databaseBusy=error=>/^SQLITE_BUSY(?:_|$)/.test(error?.code||'');
 const startupDeadline=Date.now()+30000;
-let db;
-for(;;){
-  try{db=getDatabase();break;}
-  catch(error){
-    if(!databaseBusy(error)||Date.now()>=startupDeadline)throw error;
-    closeDatabase();await delay(500);
+let db=null;
+if(!process.env.NAVIGATION_QQ_MONITOR_POSTGRES_URL){
+  for(;;){
+    try{db=getDatabase();break;}
+    catch(error){
+      if(!databaseBusy(error)||Date.now()>=startupDeadline)throw error;
+      closeDatabase();await delay(500);
+    }
   }
 }
 // Execute the durable queue independently of QQ transport; delivery stays in qq-bot.
 const [monitoringDb, readRbac] = await Promise.all([getPostgresMonitoring(), getPostgresCodexIdentity()]);
+if(!monitoringDb && !db) throw new Error('Codex 工作器需要 PostgreSQL 或 SQLite 存储');
 const service = createCodexService({ getConfig: loadConfig, executeJobs: true, deliverReplies: false, readRbac });
 service.start();
 const authController=new AbortController();
@@ -31,7 +34,7 @@ const timer = setInterval(async () => {
   try {
     const at = String(Date.now());
     if (monitoringDb) await monitoringDb.query("INSERT INTO navigation.meta(key,value) VALUES('codex_worker_heartbeat',$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [at]);
-    else db.prepare("INSERT INTO meta(key,value) VALUES('codex_worker_heartbeat',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(at);
+    else if (db) db.prepare("INSERT INTO meta(key,value) VALUES('codex_worker_heartbeat',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(at);
   } catch (error) {
     console.warn('[codex] 工作进程心跳未保存，下次重试', error.code || error.name);
   } finally { heartbeatBusy = false; }
@@ -39,6 +42,6 @@ const timer = setInterval(async () => {
 for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
   service.stop(); clearInterval(timer);clearInterval(authTimer);authController.abort();
   const drain = setInterval(() => {
-    if (!service.status().running && !heartbeatBusy) { clearInterval(drain); closeDatabase(); process.exit(0); }
+    if (!service.status().running && !heartbeatBusy) { clearInterval(drain); if (db) closeDatabase(); process.exit(0); }
   }, 100);
 });

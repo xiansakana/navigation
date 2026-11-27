@@ -2,16 +2,24 @@ import fs from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { loadConfig } from '../portal/src/config.js';
 import { getDatabase, loadRbacBlob } from '../shared/db/index.js';
+import { postgresUrlFor } from '../shared/db/postgres/config.js';
 import { createSessionCookie } from '../portal/src/auth.js';
 import { sessionSecret } from '../portal/src/login-security.js';
 
-const config = loadConfig(), db = getDatabase();
+const config = loadConfig();
 if (config.runtime?.tornMonitorWorker) {
   const { tornWorkerPort } = await import('../portal/src/torn-worker-transport.js');
   const worker = await fetch('http://127.0.0.1:' + tornWorkerPort(config) + '/healthz', { signal: AbortSignal.timeout(5000) });
   if (!worker.ok || !(await worker.json()).ok) throw new Error('Torn monitor worker readiness check failed');
 }
-const admin = loadRbacBlob(db)?.users?.find(user => user.enabled && user.roleIds?.includes('role_admin'));
+let admin;
+if (postgresUrlFor('identity')) {
+  const { portalIdentity } = await import('../portal/src/postgres-rbac.js');
+  const rbac = await portalIdentity.load(config);
+  admin = rbac?.users?.find(user => user.enabled && user.roleIds?.includes('role_admin'));
+} else {
+  admin = loadRbacBlob(getDatabase())?.users?.find(user => user.enabled && user.roleIds?.includes('role_admin'));
+}
 if (!admin) throw new Error('No active administrator');
 const base = `http://127.0.0.1:${config.server?.port || 8080}`;
 const deadline = Date.now() + 15_000;

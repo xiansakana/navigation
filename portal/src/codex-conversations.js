@@ -1,6 +1,8 @@
 import { sameOriginWrite } from '../../shared/http.js';
 import { getDatabase } from '../../shared/db/index.js';
-import {createServerSessions} from './codex-server-sessions.js';
+import { postgresUrlFor } from '../../shared/db/postgres/config.js';
+import { portalPostgresDatabase } from './postgres.js';
+import {createServerSessions, createPostgresServerSessions} from './codex-server-sessions.js';
 import { portalCodexStore } from './codex-store-runtime.js';
 import { readCodexCatalog, resolveRuntime, validateRuntime } from '../../shared/codex/codex-control.js';
 import { hasPermission } from './rbac.js';
@@ -36,7 +38,11 @@ export async function handleCodexConversationsApi(req,res,url,session,json,depen
     }
     if(method!=='GET'&&!setup.configured)return json(res,403,{ok:false,error:'当前账号尚未配置Codex执行项目'});
     const store=dependencies.store || await portalCodexStore().get(),conversations=store.conversations;
-    const external=dependencies.external || (!dependencies.store?createServerSessions(getDatabase()):null);
+    const external=dependencies.external || (!dependencies.store
+      ? (postgresUrlFor('knowledge')
+        ? createPostgresServerSessions(portalPostgresDatabase(postgresUrlFor('knowledge')))
+        : createServerSessions(getDatabase()))
+      : null);
     const cursor=url.searchParams.get('cursor')||'';if(cursor.length>8192)throw new Error('分页标识无效');
     const externalOptions={config:setup.config,all:can('sessions:server:view')&&(!session.dataAccess||session.dataAccess.scope==='self'),canKnowledge:['knowledge:view','knowledge:notes:view'].every(p=>hasPermission(session.permissions||[],p)),canKnowledgePrompts:['knowledge:transcript:view','knowledge:frames:view'].every(p=>hasPermission(session.permissions||[],p)),archived:url.searchParams.get('archived')==='true',cursor};
     const allowed=(c,groups)=>c&&hasPermission(session.permissions||[],'qq-codex:execute')&&setup.projects.includes(c.project)&&(!c.group_id||groups.includes(c.group_id));
