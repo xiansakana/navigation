@@ -67,9 +67,9 @@ GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访�
 | `NAVIGATION_QQ_MONITOR_POSTGRES_URL` | qq-bot |
 | `NAVIGATION_QUANT_POSTGRES_URL` | stock-manage |
 
-`knowledge-storage-worker` 通过 `/etc/navigation/postgres.env` 读取知识库连接变量。记账、实盘组合、抄底资金和 `qqq-dip` 尚未迁移，因此没有设置 `NAVIGATION_DATABASE_ENGINE=postgres`，这些模块继续使用原 SQLite 文件。
+`knowledge-storage-worker` 通过 `/etc/navigation/postgres.env` 读取知识库连接变量。记账、实盘组合、抄底资金和 `qqq-dip` 已于 2026-11-27 完成迁移并切换到 PostgreSQL；仍未设置 `NAVIGATION_DATABASE_ENGINE=postgres`，各模块继续通过独立变量选择 PostgreSQL，未设置时回退 SQLite。
 
-剩余四个模块使用以下模块级变量，未设置时回退 SQLite：
+四个模块使用以下模块级变量：
 
 | 变量 | 覆盖范围 | 使用进程 |
 | --- | --- | --- |
@@ -86,9 +86,15 @@ docker exec -i navigation-postgres-postgres-1 psql -U navigation_db_admin -d nav
   < shared/db/postgres/002-qqq-dip-state.sql
 ```
 
-切换顺序：先部署代码（不设置变量）并确认 SQLite 正常；备份 `data/navigation.db` 与 `data/qqq-dip.json`；执行 002；portal、stock-manage、qqq-dip 同批设置组合变量并重启；portal、stock-manage 同批设置记账变量并重启；最后为 qqq-dip 设置状态变量并重启。每批切换后逐页验证，最后 `pm2 save`。
+实际切换顺序：先部署代码（不设置变量）并确认 SQLite 正常；备份 `data/navigation.db` 与 `data/qqq-dip.json`（快照时间 `20261127095008`）；执行 002；portal、portal-background、stock-manage、qqq-dip 同批设置组合变量并重启；上述进程再加上记账变量并重启；最后为 qqq-dip 设置状态变量并重启。每批切换后检查 `/readyz`、`/api/health` 和页面数据，最后 `pm2 save`。
 
-回滚时删除对应进程的上述变量并执行 `pm2 restart <进程> --update-env`，随后 `pm2 save`；systemd worker 移除 `/etc/systemd/system/knowledge-storage-worker.service.d/postgres.conf` 后重启。SQLite 数据文件和 `config.json` 在切换过程中保持原样，删除变量即可回到 SQLite 读写。切换后写入 PostgreSQL 的新数据不会自动回流 SQLite，回滚前需人工核对。
+切换完成后验证：
+
+- `scripts/test-portfolio-postgres.mjs`、`scripts/test-bookkeeping-postgres.mjs`、`scripts/test-qqq-dip-postgres.mjs` 在 ECS 上使用临时数据库（`navigation_test_*`）全部通过，覆盖组合写入、账户绑定、抄底预留、记账退款、导入去重、资产历史、汇率/证券价格、QQ 状态与 qqq-dip 重启恢复。
+- 浏览器实测记账新增/删除 0.01 账单后余额恢复；股票新增/删除 1 股 QQQ 交易后现金与交易数恢复；抄底监控现金、档位、仓位、操作记录正常。
+- 切换后 SQLite 中 `bookkeeping_entries` 仍为 3,731 条、`portfolio_users.updated_at` 停留在切换前、`qqq-dip.json` 不再更新，证明已迁数据不再写 SQLite。
+
+回滚时删除对应进程的上述变量并执行 `pm2 restart <进程> --update-env`，随后 `pm2 save`；systemd worker 移除 `/etc/systemd/system/knowledge-storage-worker.service.d/postgres.conf` 后重启。SQLite 数据文件和 `config.json` 在切换过程中保持原样，删除变量即可回到 SQLite 读写。切换后写入 PostgreSQL 的新数据不会自动回流 SQLite，回滚前需人工核对。切换前的 SQLite 一致性快照位于 `data/navigation.db.bak-20261127095008`（qqq-dip JSON 同目录同名 `.bak-20261127095008` 若存在）。
 
 ## 应用切换条件
 

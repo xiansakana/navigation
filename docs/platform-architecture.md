@@ -98,4 +98,4 @@ python3 -m unittest discover -s portal/workers -p 'test_*.py'
 
 GitHub Actions 安装各服务锁定依赖并执行这些检查。工作流提供测试结果，分支保护和“CI成功才能部署”的远程规则仍需单独配置，不能仅凭有工作流宣称已启用强制门禁。
 
-生产环境已按模块启用 PostgreSQL：身份与 RBAC、命理、博客、资源、知识库、Torn 监控、QQ 登录监控和量化存储通过 `NAVIGATION_*_POSTGRES_URL` 接入同一 `navigation` schema；记账、实盘组合、抄底资金和 `qqq-dip` 仍使用 SQLite，因此未设置全局 `NAVIGATION_DATABASE_ENGINE=postgres`。启停与回滚步骤见 [PostgreSQL 迁移](postgres-migration.md#生产启用现状)。
+生产环境已按模块启用 PostgreSQL：身份与 RBAC、命理、博客、资源、知识库、Torn 监控、QQ 登录监控、量化存储、实盘组合、抄底资金、记账和 `qqq-dip` 状态通过 `NAVIGATION_*_POSTGRES_URL` 接入同一 `navigation` schema；仍未设置全局 `NAVIGATION_DATABASE_ENGINE=postgres`，SQLite 文件保留用于回滚。启停与回滚步骤见 [PostgreSQL 迁移](postgres-migration.md#生产启用现状)。

@@ -70,6 +70,12 @@ const portfolio = await createPortfolioBackend({
   dbPath: config.dbPath, database: portfolioDatabase, sqlite: portfolioDb,
   bookkeepingDatabase
 });
+let verifiedBackfill = null;
+if (bookkeepingDatabase) {
+  const { rows } = await bookkeepingDatabase.query(`SELECT user_id,symbol,date,close FROM navigation.bookkeeping_security_prices
+    WHERE source LIKE 'verified-backfill:%'`);
+  verifiedBackfill = new Map(rows.map(row => [row.user_id + '|' + row.symbol + '|' + row.date, Number(row.close)]));
+}
 const store = {
   read: () => portfolio.read(),
   write: (data, options) => portfolio.write(data, options)
@@ -157,6 +163,7 @@ function describeReinvestment(trade) {
 
 function completePortfolioFundQuote(quote, saved) {
   return completeChinaAmcMovement(quote, (symbol, date) => {
+    if (verifiedBackfill) return verifiedBackfill.get(currentPortfolioUserId() + '|' + symbol + '|' + date) ?? null;
     if (!portfolioDb.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bookkeeping_security_prices'").get()) return null;
     return portfolioDb.prepare(`SELECT close FROM bookkeeping_security_prices
       WHERE user_id=? AND symbol=? AND date=? AND source='chinaamc-hk-fund-nav'`)
