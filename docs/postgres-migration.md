@@ -55,6 +55,22 @@ GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访�
 
 解密归档后，在独立实例预先建好一个空的 `navigation_restore_*` 数据库，通过 `python scripts/backup-navigation.py --verify ARCHIVE --restore-postgres-service SERVICE` 核对归档和恢复。恢复使用单一事务。应用数据库账号和授权由部署配置重新建立。
 
+## 生产启用现状
+
+生产 `navigation` 数据库已按 `001-initial.sql` 初始化并完成 SQLite 基线导入（85 张表、1,823,116 行，逐表行数与内容校验通过）。以下模块通过模块级连接变量接入同一数据库：
+
+| 变量 | 使用进程 |
+| --- | --- |
+| `NAVIGATION_RBAC_POSTGRES_URL` | portal、portal-background、codex-worker、qq-bot、torn-monitor-worker |
+| `NAVIGATION_MINGLI_POSTGRES_URL` / `NAVIGATION_BLOG_POSTGRES_URL` / `NAVIGATION_RESOURCES_POSTGRES_URL` / `NAVIGATION_KNOWLEDGE_POSTGRES_URL` | portal、portal-background、codex-worker |
+| `NAVIGATION_TORN_POSTGRES_URL` / `NAVIGATION_TORN_USERS_POSTGRES_URL` | portal、torn-monitor-worker |
+| `NAVIGATION_QQ_MONITOR_POSTGRES_URL` | qq-bot |
+| `NAVIGATION_QUANT_POSTGRES_URL` | stock-manage |
+
+`knowledge-storage-worker` 通过 `/etc/navigation/postgres.env` 读取知识库连接变量。记账、实盘组合、抄底资金和 `qqq-dip` 尚未迁移，因此没有设置 `NAVIGATION_DATABASE_ENGINE=postgres`，这些模块继续使用原 SQLite 文件。
+
+回滚时删除对应进程的上述变量并执行 `pm2 restart <进程> --update-env`，随后 `pm2 save`；systemd worker 移除 `/etc/systemd/system/knowledge-storage-worker.service.d/postgres.conf` 后重启。SQLite 数据文件和 `config.json` 在切换过程中保持原样，删除变量即可回到 SQLite 读写。
+
 ## 应用切换条件
 
 运行时需要 PostgreSQL 连接池，以及将 Portal、后台队列、股票、抄底和 QQ 业务改为异步数据库读写。
