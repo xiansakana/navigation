@@ -51,14 +51,25 @@ export function createPostgresBookkeepingCatalog(db) {
 
   async function seed(uid, run = db) {
     if (await one(run, 'SELECT 1 FROM navigation.bookkeeping_catalog_init WHERE user_id=$1', [uid])) return;
-    const rows = await many(run, `SELECT DISTINCT type,category,subcategory FROM navigation.bookkeeping_entries
+    const rows = await many(run, `SELECT type,category,subcategory FROM navigation.bookkeeping_entries
       WHERE user_id=$1 ORDER BY _sqlite_rowid`, [uid]);
-    for (const row of rows) await ensureCategory(uid, categoryKind(row.type), row.category, row.subcategory, run);
+    const seen = new Set();
+    for (const row of rows) {
+      const key = JSON.stringify([row.type, row.category, row.subcategory]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      await ensureCategory(uid, categoryKind(row.type), row.category, row.subcategory, run);
+    }
     for (const c of ['餐饮', '购物', '交通', '住房', '娱乐', '医疗', '学习', '通讯', '旅行', '人情', '其他']) await ensureCategory(uid, 'expense', c, '', run);
     for (const c of ['工资', '奖金', '福利', '其他']) await ensureCategory(uid, 'income', c, '', run);
-    const groups = await many(run, `SELECT DISTINCT group_name FROM navigation.bookkeeping_accounts
+    const groups = await many(run, `SELECT group_name FROM navigation.bookkeeping_accounts
       WHERE user_id=$1 ORDER BY _sqlite_rowid`, [uid]);
-    for (const row of groups) await ensureGroup(uid, row.group_name, run);
+    const seenGroups = new Set();
+    for (const row of groups) {
+      if (seenGroups.has(row.group_name)) continue;
+      seenGroups.add(row.group_name);
+      await ensureGroup(uid, row.group_name, run);
+    }
     await run.query('INSERT INTO navigation.bookkeeping_catalog_init(user_id) VALUES($1) ON CONFLICT DO NOTHING', [uid]);
   }
 
