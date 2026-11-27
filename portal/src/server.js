@@ -754,9 +754,9 @@ async function handleRequest(req, res) {
         if (!codexSession) return;
         if (!canCodexCli(codexSession)) return sendError(req,res,url,403,'无权访问Codex CLI模块');
         var codexFile = url.pathname.replace(/^\/codex-cli\/?/,'') || 'index.html';
-        if (codexSession.isGuest && !['index.html','public.html','public.js','style.css'].includes(codexFile)) return json(res,403,{ok:false,error:'请登录后访问会话工作台'});
+        if (codexSession.isGuest && !['index.html','public.html','public.js','style.css','generated/main.js'].includes(codexFile)) return json(res,403,{ok:false,error:'请登录后访问会话工作台'});
         if (codexSession.isGuest && codexFile === 'index.html') codexFile = 'public.html';
-        if (!['index.html','app.js','style.css','chat.js','chat.css','todos.js','todos.css','public.html','public.js'].includes(codexFile)) return json(res,404,{ok:false,error:'Not Found'});
+        if (!['index.html','app.js','style.css','chat.js','chat.css','todos.js','todos.css','public.html','public.js','generated/main.js'].includes(codexFile)) return json(res,404,{ok:false,error:'Not Found'});
         return serveStatic(path.join(PUBLIC_DIR,'codex-cli',codexFile),res);
     }
 
