@@ -5,6 +5,7 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
+import { rejects } from 'node:assert/strict';
 import { withTestDatabase, assert, assertEqual } from './postgres-test-harness.mjs';
 import { createPostgresPool } from '../shared/db/postgres/pool.js';
 import { createPortfolioBackend } from '../shared/db/portfolio-runtime.js';
@@ -45,6 +46,17 @@ await withTestDatabase(async ({ url, client, pg }) => {
     assertEqual(restored.getSettings().intervalSeconds, 45, '重启后设置');
     assertEqual(restored.listActionRows({ limit: 5 }).items.length, 1, '重启后操作记录');
     assertEqual(restored.getRound().executed.T1.usd, 12, '重启后执行记录');
+
+    await client.query(`ALTER TABLE navigation.qqq_dip_state ADD CONSTRAINT fixture_reject_interval
+      CHECK (data::jsonb #>> '{settings,intervalSeconds}' <> '67')`);
+    await rejects(() => store.setSettings({ intervalSeconds: 67 }), { code: '23514' });
+    assertEqual(store.getSettings().intervalSeconds, 45, '写失败后继续显示已保存设置');
+    await Promise.all([store.setSettings({ showSpy: false }), restored.setSettings({ soxlEnabled: true })]);
+    await Promise.all([store.markExecuted('T1', { usd: 2 }), restored.markExecuted('T1', { usd: 3 })]);
+    const recovered = await createPostgresStore(config, pool);
+    assertEqual(recovered.getSettings(), { ...restored.getSettings(), intervalSeconds: 45, showSpy: false, soxlEnabled: true },
+      '后续写入恢复，合并同一状态的并发设置');
+    assertEqual(recovered.getRound().executed.T1.usd, 17, '并发执行记录均计入');
     await verifyHttpReadiness({ url, client, dir });
     console.log('qqq-dip postgres ok');
   } finally {

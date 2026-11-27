@@ -38,43 +38,49 @@ function normalizeData(config, raw) {
 export async function createPostgresStore(config, db) {
   const dbPath = path.resolve(resolveRoot(), config.dbPath || 'data/qqq-dip.db');
   const jsonPath = dbPath.replace(/\.db$/i, '.json');
-  let data;
-  const row = (await db.query("SELECT data FROM navigation.qqq_dip_state WHERE id='default'")).rows[0];
-  if (row) data = normalizeData(config, parseJson(row.data, {}));
-  else {
+  const readState = "SELECT data FROM navigation.qqq_dip_state WHERE id='default'";
+  let row = (await db.query(readState)).rows[0];
+  if (!row) {
     const legacy = fs.existsSync(jsonPath) ? parseJson(fs.readFileSync(jsonPath, 'utf8'), {}) : {};
-    data = normalizeData(config, legacy);
-    await db.query(`INSERT INTO navigation.qqq_dip_state(id,data,updated_at) VALUES('default',$1,$2)
-      ON CONFLICT(id) DO NOTHING`, [JSON.stringify(data), new Date().toISOString()]);
+    const payload = JSON.stringify(normalizeData(config, legacy));
+    row = (await db.query(`INSERT INTO navigation.qqq_dip_state(id,data,updated_at) VALUES('default',$1,$2)
+      ON CONFLICT(id) DO NOTHING RETURNING data`, [payload, new Date().toISOString()])).rows[0];
+    row ??= (await db.query(readState)).rows[0];
   }
   const canonicalQqToken = String(config?.notify?.qq?.token || '').trim();
   const resolveNotifyToken = stored => {
     const saved = String(stored || '').trim();
     return canonicalQqToken || saved;
   };
-  const syncNotifyToken = () => {
-    if (!canonicalQqToken) return;
-    if (String(data.notify?.qq?.token || '').trim() !== canonicalQqToken) {
-      data.notify = defaultNotify({ ...data.notify, qq: { ...data.notify?.qq, token: canonicalQqToken } });
-    }
-  };
-  syncNotifyToken();
-  await migrateDipCashOnce({ ...defaultCash(), ...(data.cash || {}) });
-  data.cash = { ...defaultCash(), ...(await getPortfolioCash()) };
+  let data = normalizeData(config, parseJson(row.data, {}));
+  await migrateDipCashOnce(data.cash);
 
   let writeChain = Promise.resolve();
-  function persist() {
-    const payload = JSON.stringify(data);
-    writeChain = writeChain.then(() => db.query(`INSERT INTO navigation.qqq_dip_state(id,data,updated_at)
-      VALUES('default',$1,$2) ON CONFLICT(id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at`,
-    [payload, new Date().toISOString()]));
-    return writeChain;
+  function update(change) {
+    const write = writeChain.then(async () => {
+      const { payload, result } = await db.transaction(async client => {
+        const { rows: [current] } = await client.query(readState + ' FOR UPDATE');
+        if (!current) throw new Error('抄底监控状态不存在');
+        const draft = normalizeData(config, parseJson(current.data, {}));
+        if (canonicalQqToken) draft.notify.qq.token = canonicalQqToken;
+        const result = change(draft);
+        const payload = JSON.stringify(draft);
+        if (payload !== current.data) {
+          await client.query("UPDATE navigation.qqq_dip_state SET data=$1, updated_at=$2 WHERE id='default'",
+            [payload, new Date().toISOString()]);
+        }
+        return { payload, result };
+      });
+      data = JSON.parse(payload);
+      return result;
+    });
+    // A rejected transaction leaves the cache intact and the next write can retry.
+    writeChain = write.catch(() => {});
+    return write;
   }
 
   async function getCash() {
-    const cash = { ...defaultCash(), ...(await getPortfolioCash()) };
-    data.cash = cash;
-    return { ...cash };
+    return { ...defaultCash(), ...(await getPortfolioCash()) };
   }
   async function setCash(cash) {
     const prev = await getCash();
@@ -85,94 +91,115 @@ export async function createPostgresStore(config, db) {
       fxSource: cash.fxSource != null ? cash.fxSource : prev.fxSource,
       fxUpdatedAt: cash.fxUpdatedAt != null ? cash.fxUpdatedAt : prev.fxUpdatedAt
     });
-    data.cash = { ...defaultCash(), ...next };
-    await persist();
-    return data.cash;
+    // The portfolio owns cash. The state document keeps the original migration input.
+    return { ...defaultCash(), ...next };
   }
-  function getRound() { return { ...emptyRound(), ...data.round }; }
-  async function setRound(round) { data.round = round; await persist(); return round; }
+  function getRound() { return structuredClone({ ...emptyRound(), ...data.round }); }
+  function setRound(round) {
+    return update(draft => {
+      draft.round = round;
+      return round;
+    });
+  }
   function getSettings() { return { ...defaultSettings(), ...data.settings }; }
-  async function setSettings(patch) { data.settings = { ...getSettings(), ...patch }; await persist(); return data.settings; }
+  function setSettings(patch) {
+    return update(draft => {
+      draft.settings = { ...draft.settings, ...patch };
+      return draft.settings;
+    });
+  }
   function getNotify() {
-    const n = defaultNotify(data.notify);
+    const n = defaultNotify(structuredClone(data.notify));
     n.qq.token = resolveNotifyToken(n.qq.token);
     return n;
   }
-  async function setNotify(patch, previous = getNotify()) {
-    const prev = defaultNotify(previous);
-    const incoming = patch || {};
-    const qq = { ...prev.qq, ...(incoming.qq || {}) };
-    if (!incoming.qq?.token || !String(incoming.qq.token).trim() || String(incoming.qq.token).includes('*')) {
-      qq.token = resolveNotifyToken(prev.qq.token);
-    }
-    const targets = Array.isArray(incoming.targets) ? incoming.targets : prev.targets;
-    data.notify = {
-      desktop: incoming.desktop ?? prev.desktop,
-      qq,
-      slack: { enabled: incoming.slack?.enabled ?? prev.slack.enabled },
-      targets: targets.map((t, i) => ({ id: t.id || `t-${Date.now()}-${i}`, type: t.type === 'private' ? 'private' : 'group',
-        groupId: String(t.groupId || '').trim(), atUserId: String(t.atUserId || '').trim(), userId: String(t.userId || '').trim() })),
-      events: { ...DEFAULT_EVENTS, ...prev.events, ...(incoming.events || {}) }
-    };
-    await persist();
-    return data.notify;
+  function setNotify(patch, previous) {
+    return update(draft => {
+      const prev = defaultNotify(previous ?? draft.notify);
+      const incoming = patch || {};
+      const qq = { ...prev.qq, ...(incoming.qq || {}) };
+      if (!incoming.qq?.token || !String(incoming.qq.token).trim() || String(incoming.qq.token).includes('*')) {
+        qq.token = resolveNotifyToken(prev.qq.token);
+      }
+      const targets = Array.isArray(incoming.targets) ? incoming.targets : prev.targets;
+      draft.notify = {
+        desktop: incoming.desktop ?? prev.desktop,
+        qq,
+        slack: { enabled: incoming.slack?.enabled ?? prev.slack.enabled },
+        targets: targets.map((t, i) => ({ id: t.id || `t-${Date.now()}-${i}`, type: t.type === 'private' ? 'private' : 'group',
+          groupId: String(t.groupId || '').trim(), atUserId: String(t.atUserId || '').trim(), userId: String(t.userId || '').trim() })),
+        events: { ...DEFAULT_EVENTS, ...prev.events, ...(incoming.events || {}) }
+      };
+      return draft.notify;
+    });
   }
-  function getQuotes() { return data.quotes || {}; }
-  async function setQuotes(quotes) { data.quotes = quotes || {}; await persist(); return data.quotes; }
-  async function addAction(entry) {
+  function getQuotes() { return structuredClone(data.quotes || {}); }
+  function setQuotes(quotes) {
+    return update(draft => {
+      draft.quotes = quotes || {};
+      return draft.quotes;
+    });
+  }
+  function addAction(entry) {
     const row = { id: entry.id || randomUUID(), ts: entry.ts || new Date().toISOString(), type: entry.type || 'signal',
       source: entry.source || 'auto', tier: entry.tier || null, symbol: entry.symbol || null,
       message: String(entry.message || ''), payload: entry.payload != null ? entry.payload : null };
-    data.actions.unshift(row);
-    if (data.actions.length > 1000) data.actions = data.actions.slice(0, 1000);
-    await persist();
-    return row;
+    return update(draft => {
+      draft.actions.unshift(row);
+      if (draft.actions.length > 1000) draft.actions.length = 1000;
+      return row;
+    });
   }
   function listActionRows({ limit = 100, offset = 0, source = 'all' } = {}) {
-    return paginateActions(data.actions, { limit, offset, source });
+    return structuredClone(paginateActions(data.actions, { limit, offset, source }));
   }
-  async function patchAction(id, patch) {
-    const prev = data.actions.find(a => a.id === id);
-    if (!prev || prev.type !== 'note' || prev.source !== 'user' || prev.payload?.syncedTradeIds?.length) return null;
-    if (patch.message != null) prev.message = String(patch.message);
-    await persist();
-    return prev;
+  function patchAction(id, patch) {
+    return update(draft => {
+      const prev = draft.actions.find(a => a.id === id);
+      if (!prev || prev.type !== 'note' || prev.source !== 'user' || prev.payload?.syncedTradeIds?.length) return null;
+      if (patch.message != null) prev.message = String(patch.message);
+      return prev;
+    });
   }
-  async function getLots() {
-    const manual = data.lots.filter(lot => lot.source !== 'portfolio-trade');
-    const fillMetadata = data.actions.flatMap(action => (action.payload?.syncedTradeIds || []).map((id, index) => ({
+  function reconcileLots(state, trades) {
+    const manual = state.lots.filter(lot => lot.source !== 'portfolio-trade');
+    const fillMetadata = state.actions.flatMap(action => (action.payload?.syncedTradeIds || []).map((id, index) => ({
       id: `portfolio:${id}`, otmClass: action.payload?.legs?.[index]?.otmClass
     })));
-    const portfolio = await getPortfolioStore();
-    const synced = portfolioDipLots((await portfolio.read()).trades, [...fillMetadata, ...data.lots], data.hiddenTradeLots || []);
-    const next = [...manual, ...synced];
-    if (JSON.stringify(next) !== JSON.stringify(data.lots)) {
-      data.lots = next;
-      await persist();
-    }
-    return data.lots.slice();
+    return [...manual, ...portfolioDipLots(trades, [...fillMetadata, ...state.lots], state.hiddenTradeLots || [])];
   }
-  async function saveLot(lot) {
+  async function getLots() {
+    const { trades } = await (await getPortfolioStore()).read();
+    const next = reconcileLots(data, trades);
+    if (JSON.stringify(next) === JSON.stringify(data.lots)) return structuredClone(data.lots);
+    return update(draft => {
+      draft.lots = reconcileLots(draft, trades);
+      return draft.lots;
+    });
+  }
+  function saveLot(lot) {
     const id = lot.id || randomUUID();
     const next = { ...lot, id };
-    const idx = data.lots.findIndex(l => l.id === id);
-    if (idx >= 0) data.lots[idx] = next;
-    else data.lots.push(next);
-    await persist();
-    return next;
+    return update(draft => {
+      const idx = draft.lots.findIndex(l => l.id === id);
+      if (idx >= 0) draft.lots[idx] = next;
+      else draft.lots.push(next);
+      return next;
+    });
   }
-  async function removeLot(id) {
-    if (data.lots.some(lot => lot.id === id && lot.source === 'portfolio-trade')) {
-      data.hiddenTradeLots = [...new Set([...(data.hiddenTradeLots || []), id])];
-    }
-    data.lots = data.lots.filter(l => l.id !== id);
-    await persist();
+  function removeLot(id) {
+    return update(draft => {
+      if (draft.lots.some(lot => lot.id === id && lot.source === 'portfolio-trade')) {
+        draft.hiddenTradeLots = [...new Set([...(draft.hiddenTradeLots || []), id])];
+      }
+      draft.lots = draft.lots.filter(l => l.id !== id);
+    });
   }
-  async function markFired(key) {
-    const round = getRound();
-    round.firedAlerts = { ...(round.firedAlerts || {}), [key]: new Date().toISOString() };
-    await setRound(round);
-    return round;
+  function markFired(key) {
+    return update(({ round }) => {
+      round.firedAlerts = { ...(round.firedAlerts || {}), [key]: new Date().toISOString() };
+      return round;
+    });
   }
   async function markExecuted(tier, payload) {
     const cashUsd = Math.max(0, Number(payload.cashUsd) || 0);
@@ -180,21 +207,21 @@ export async function createPostgresStore(config, db) {
     const cash = await getCash();
     const usd = payload.usd != null ? Number(payload.usd) || 0
       : roundMoneyLocal(cashUsd + (cash.usdCnyRate > 0 ? cashCny / cash.usdCnyRate : 0));
-    const round = getRound();
-    const previous = round.executed?.[tier] || {};
-    round.executed = {
-      ...(round.executed || {}),
-      [tier]: {
-        usd: roundMoneyLocal((Number(previous.usd) || 0) + usd),
-        cashUsd: roundMoneyLocal((Number(previous.cashUsd) || 0) + cashUsd),
-        cashCny: roundMoneyLocal((Number(previous.cashCny) || 0) + cashCny),
-        complete: payload.complete !== false,
-        at: new Date().toISOString(),
-        note: payload.note || ''
-      }
-    };
-    await setRound(round);
-    return round;
+    return update(({ round }) => {
+      const previous = round.executed?.[tier] || {};
+      round.executed = {
+        ...(round.executed || {}),
+        [tier]: {
+          usd: roundMoneyLocal((Number(previous.usd) || 0) + usd),
+          cashUsd: roundMoneyLocal((Number(previous.cashUsd) || 0) + cashUsd),
+          cashCny: roundMoneyLocal((Number(previous.cashCny) || 0) + cashCny),
+          complete: payload.complete !== false,
+          at: new Date().toISOString(),
+          note: payload.note || ''
+        }
+      };
+      return round;
+    });
   }
   function roundMoneyLocal(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
