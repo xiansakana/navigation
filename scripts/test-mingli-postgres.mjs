@@ -1069,6 +1069,8 @@ async function verifyRbac(db, t) {
     assert.equal(knowledgeList.status, 200, JSON.stringify(knowledgeList.data));
     assert.ok(knowledgeList.data.cases.some(item => item.id === knowledgeCaseId), JSON.stringify(knowledgeList.data));
     assert.ok(knowledgeList.data.total >= 1);
+    assert.ok(Number.isInteger(knowledgeList.data.uniqueCharts) && knowledgeList.data.uniqueCharts >= 1,
+      JSON.stringify(knowledgeList.data));
     const knowledgeDetail = await running.request('/api/mingli/knowledge-cases/' + knowledgeCaseId, { uid: admin.id });
     assert.equal(knowledgeDetail.status, 200, JSON.stringify(knowledgeDetail.data));
     assert.equal(knowledgeDetail.data.case.id, knowledgeCaseId);

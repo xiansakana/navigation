@@ -36,7 +36,7 @@ export function createPostgresKnowledgeCaseStore(db) {
     const advanced = caseFilterSql(filters, { postgres: true });
     for (const clause of advanced.clauses) add(clause.replace(/\bnotes\b/g, 'c.notes'));
     params.push(...advanced.args);
-    const counts = (await db.query('SELECT count(*) AS total,count(DISTINCT substr(c.case_key,1,8)) AS uniqueCharts' + where, params)).rows[0];
+    const counts = (await db.query('SELECT count(*) AS total,count(DISTINCT substr(c.case_key,1,8)) AS "uniqueCharts"' + where, params)).rows[0];
     const limitIndex = params.length + 1;
     const cases = (await db.query('SELECT c.*,d.title AS document_title,d.topic,d.source_url' + where
       + ' ORDER BY c.updated_at DESC,c.id LIMIT $' + limitIndex + ' OFFSET $' + (limitIndex + 1),
