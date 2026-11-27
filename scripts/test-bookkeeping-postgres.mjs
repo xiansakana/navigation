@@ -18,8 +18,10 @@ await withTestDatabase(async ({ url, client, pg }) => {
 
     const expenseId = await store.saveEntry('u', { type: '支出', amount: 30, currency: 'CNY', category: '餐饮', accountId: cashId, date: '2026-01-02T12:00:00' });
     assert(!!expenseId, '账单创建');
+    const refundSourceId = await store.saveEntry('u', { type: '支出', amount: 20, currency: 'CNY', category: '购物', accountId: cashId,
+      date: '2026-01-03T12:00:00' });
     await store.saveEntry('u', { type: '支出', amount: 20, currency: 'CNY', category: '购物', accountId: cashId,
-      date: '2026-01-03T12:00:00', refund: 5, refundDate: '2026-01-04T12:00:00' });
+      date: '2026-01-03T12:00:00', refund: 5, refundDate: '2026-01-04T12:00:00' }, refundSourceId);
     let entries = await store.entries('u');
     assertEqual(entries.length, 3, '退款联动生成账单');
     accounts = await store.accounts('u');
