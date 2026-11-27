@@ -16,17 +16,15 @@ import { getDatabase } from '../../shared/db/index.js';
 import { createPostgresPool } from '../../shared/db/postgres/pool.js';
 import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
 import { postgresUrlFor } from '../../shared/db/postgres/config.js';
-import { investmentRows, projectInvestments, saveInvestmentAccount, unlinkInvestmentAccount } from '../../shared/investment-accounts.js';
-import { dipCashFunds, setDipCashReserve } from '../../shared/dip-cash-funds.js';
-import { createBookkeepingStore } from '../../portal/src/bookkeeping-store.js';
-import { queueSavedTradeHistory } from '../../portal/src/bookkeeping-security-history.js';
+import { createPortfolioBackend } from '../../shared/db/portfolio-runtime.js';
+import { getBookkeepingBackend } from '../../portal/src/bookkeeping-runtime.js';
 import { configureQuoteNetwork } from '../../shared/quote-network.js';
 import express from 'express';
 import pg from 'pg';
 import path from 'node:path';
 import XLSX from 'xlsx';
 import { fileURLToPath } from 'node:url';
-import { loadConfig, createStore } from './storage.js';
+import { loadConfig } from './storage.js';
 import { createQuoteService } from './quotes.js';
 import { knownTradeNames, normalizeNamedTrade } from './trade-name.js';
 import { computeTradeReview } from './trade-review.js';
@@ -59,10 +57,23 @@ try {
   process.exit(1);
 }
 
-const store = createStore(config);
 const portfolioDb = getDatabase({ dbPath: config.dbPath });
 ensureUserPortfolioSchema(portfolioDb);
 ensureFundHoldings(portfolioDb);
+const portfolioUrl = postgresUrlFor('portfolio');
+const portfolioDatabase = portfolioUrl && createPostgresPool(pg.Pool, portfolioUrl, 'navigation-stock-manage');
+if (portfolioDatabase) await verifyConfiguredPostgres(portfolioDatabase);
+const bookkeepingUrl = postgresUrlFor('bookkeeping');
+const bookkeepingDatabase = bookkeepingUrl && createPostgresPool(pg.Pool, bookkeepingUrl, 'navigation-stock-manage');
+if (bookkeepingDatabase) await verifyConfiguredPostgres(bookkeepingDatabase);
+const portfolio = await createPortfolioBackend({
+  dbPath: config.dbPath, database: portfolioDatabase, sqlite: portfolioDb,
+  bookkeepingDatabase
+});
+const store = {
+  read: () => portfolio.read(),
+  write: (data, options) => portfolio.write(data, options)
+};
 const quotes = createQuoteService(config);
 const quantDatabaseUrl = postgresUrlFor('quant');
 const quantDatabase = quantDatabaseUrl && createPostgresPool(pg.Pool, quantDatabaseUrl, 'navigation-stock-manage');
@@ -77,7 +88,8 @@ app.use(portfolioIdentityMiddleware);
 
 app.get('/readyz', async (_req, res) => {
   try {
-    portfolioDb.prepare('SELECT 1').get();
+    if (portfolioDatabase) await verifyConfiguredPostgres(portfolioDatabase);
+    else portfolioDb.prepare('SELECT 1').get();
     if (quantDatabase) await verifyConfiguredPostgres(quantDatabase);
     res.json({ ok: true, service: 'stock-manage' });
   } catch { res.status(503).json({ ok: false, service: 'stock-manage' }); }
@@ -126,13 +138,16 @@ function requireQuantPermission(req, res, feature, action = 'view') {
   return false;
 }
 
-function openingFundsForAccount(accountId) {
-  return fundHoldings(portfolioDb, currentPortfolioUserId())
-    .filter(fund => !accountId || fund.account_id === accountId);
+async function openingFundsForAccount(accountId) {
+  return (await portfolio.fundHoldings()).filter(fund => !accountId || fund.account_id === accountId);
 }
 
-function tradesForCalculations(req, trades) {
-  return [...openingFundTrades(openingFundsForAccount(req.query.accountId)), ...tradesWithReinvestmentIncome(scopedTrades(req, trades))];
+function openingFundsFrom(funds, accountId) {
+  return funds.filter(fund => !accountId || fund.account_id === accountId);
+}
+
+async function tradesForCalculations(req, trades) {
+  return [...openingFundTrades(await openingFundsForAccount(req.query.accountId)), ...tradesWithReinvestmentIncome(scopedTrades(req, trades))];
 }
 
 function describeReinvestment(trade) {
@@ -149,11 +164,11 @@ function completePortfolioFundQuote(quote, saved) {
   }, saved);
 }
 
-function buildPortfolio(data, pnlOpts = {}) {
+function buildPortfolio(data, pnlOpts = {}, funds = []) {
   const { valuationOnly } = pnlOpts;
   const rate = Number(data.usdCnyRate) > 0 ? Number(data.usdCnyRate) : DEFAULT_USD_CNY_RATE;
   const fxOpts = { ...pnlOpts, usdCnyRate: rate, usdHkdRate: data.usdHkdRate };
-  const openings = openingFundsForAccount(pnlOpts.accountId);
+  const openings = openingFundsFrom(funds, pnlOpts.accountId);
   const calculationTrades = [...openingFundTrades(openings), ...tradesWithReinvestmentIncome(data.trades)];
   const holdings = deriveHoldings(calculationTrades);
   const cashState = {
@@ -248,13 +263,12 @@ function pnlOptsFromReq(req) {
   };
 }
 
-function orderedInvestmentAccounts(accounts) {
-  const row = portfolioDb.prepare('SELECT value FROM portfolio_user_meta WHERE user_id=? AND key=?')
-    .get(currentPortfolioUserId(), 'investment_account_order');
-  if (!row) return accounts;
+async function orderedInvestmentAccounts(accounts) {
+  const ids = await portfolio.orderedAccountIds();
+  if (!ids) return accounts;
   const byId = new Map(accounts.map(account => [account.id, account]));
   const ordered = [];
-  for (const id of JSON.parse(row.value)) {
+  for (const id of ids) {
     if (byId.has(id)) {
       ordered.push(byId.get(id));
       byId.delete(id);
@@ -263,7 +277,9 @@ function orderedInvestmentAccounts(accounts) {
   return [...ordered, ...byId.values()];
 }
 
-function portfolioForRequest(req, data = store.read(), { valuationOnly = false } = {}) {
+async function portfolioForRequest(req, data = null, { valuationOnly = false } = {}) {
+  data ||= await store.read();
+  const funds = await portfolio.fundHoldings();
   const accounts = data.investmentAccounts || [];
   const accountsVisible = hasStockPermission(req, 'accounts');
   const pnlOptions = pnlOptsFromReq(req);
@@ -273,41 +289,41 @@ function portfolioForRequest(req, data = store.read(), { valuationOnly = false }
     const selected = accounts.find((a) => a.id === accountId);
     data = { ...data, trades: data.trades.filter((t) => (t.account_id || 'unassigned') === accountId), cashUsd: selected?.currency === 'USD' ? selected.cash : 0, cashCny: selected?.currency === 'CNY' ? selected.cash : 0, cashHkd: selected?.currency === 'HKD' ? selected.cash : 0 };
   }
-  const portfolio = buildPortfolio(data, { ...pnlOptions, valuationOnly });
+  const view = buildPortfolio(data, { ...pnlOptions, valuationOnly }, funds);
   if (hasStockPermission(req, 'col-note')) {
-    for (const holding of [...portfolio.holdings, ...portfolio.fundHoldings]) {
+    for (const holding of [...view.holdings, ...view.fundHoldings]) {
       const notes = data.holdingsMeta?.[holding.tradeSymbol || holding.symbol]?.notes;
       holding.note = notes?.[holding.accountId || 'unassigned'] || '';
     }
   }
-  portfolio.holdingsMeta = Object.fromEntries(Object.entries(data.holdingsMeta || {}).map(([symbol, value]) => {
+  view.holdingsMeta = Object.fromEntries(Object.entries(data.holdingsMeta || {}).map(([symbol, value]) => {
     const { notes, ...meta } = value || {};
     return [symbol, meta];
   }));
   if (!hasStockPermission(req, 'pnl')) {
-    delete portfolio.chartSparse;
+    delete view.chartSparse;
     for (const field of ['totalBuy', 'totalSell', 'commission', 'otherAmount', 'realizedPL', 'netPL',
       'tradeDailyPnl', 'dailyTotalPnl', 'dailyTotalPnlUsd', 'dailyTotalPnlCny', 'dailyTotalPnlHkd']) {
-      delete portfolio.summary[field];
+      delete view.summary[field];
     }
   }
-  portfolio.investmentAccounts = accountsVisible ? orderedInvestmentAccounts(accounts).map(({ id, name, currency }) => ({ id, name, currency })) : [];
-  if (!hasStockPermission(req, 'trades')) portfolio.trades = [];
-  portfolio.accountCashEnabled = !!data.accountCashEnabled;
+  view.investmentAccounts = accountsVisible ? (await orderedInvestmentAccounts(accounts)).map(({ id, name, currency }) => ({ id, name, currency })) : [];
+  if (!hasStockPermission(req, 'trades')) view.trades = [];
+  view.accountCashEnabled = !!data.accountCashEnabled;
   const incomplete = accounts.filter((a) => (!accountId || accountId === a.id) && a.missingQuotes.length);
-  portfolio.missingQuotes = [...new Set(incomplete.flatMap(a => a.missingQuotes))];
+  view.missingQuotes = [...new Set(incomplete.flatMap(a => a.missingQuotes))];
   if (incomplete.length) {
-    portfolio.summary.totalAssets = null; portfolio.summary.totalAssetsCny = null; portfolio.summary.totalMv = null;
-    if (incomplete.some((a) => a.currency === 'USD')) portfolio.summary.assetsUsd = null;
-    if (incomplete.some((a) => a.currency === 'CNY')) portfolio.summary.assetsCny = null;
-    if (incomplete.some((a) => a.currency === 'HKD')) portfolio.summary.assetsHkd = null;
+    view.summary.totalAssets = null; view.summary.totalAssetsCny = null; view.summary.totalMv = null;
+    if (incomplete.some((a) => a.currency === 'USD')) view.summary.assetsUsd = null;
+    if (incomplete.some((a) => a.currency === 'CNY')) view.summary.assetsCny = null;
+    if (incomplete.some((a) => a.currency === 'HKD')) view.summary.assetsHkd = null;
   }
-  for (const holding of portfolio.holdings) {
+  for (const holding of view.holdings) {
     if (accountsVisible) holding.accountName = accounts.find(a => a.id === holding.accountId)?.name || '待归属';
     else delete holding.accountName;
   }
-  if (!accountsVisible) for (const fund of portfolio.fundHoldings) delete fund.accountName;
-  return hasStockPermission(req, 'cash') ? { ...portfolio, cashVisible: true } : redactPortfolioCash(portfolio);
+  if (!accountsVisible) for (const fund of view.fundHoldings) delete fund.accountName;
+  return hasStockPermission(req, 'cash') ? { ...view, cashVisible: true } : redactPortfolioCash(view);
 }
 
 function scopedTrades(req, trades) {
@@ -323,8 +339,8 @@ function accountEditor(req, res, binding = false) {
   return true;
 }
 
-function hasFundTrades(accountId, code) {
-  return store.read().trades.some(t => t.account_id === accountId && fundCode(t.symbol) === code && t.type !== 'other');
+async function hasFundTrades(accountId, code) {
+  return (await store.read()).trades.some(t => t.account_id === accountId && fundCode(t.symbol) === code && t.type !== 'other');
 }
 
 app.put('/api/fund-holdings/:accountId/:code', async (req, res) => {
@@ -334,27 +350,26 @@ app.put('/api/fund-holdings/:accountId/:code', async (req, res) => {
   const name = String(req.body?.name || '').trim();
   const shares = Number(req.body?.shares);
   const cost = Number(req.body?.cost);
-  if (!investmentRows(portfolioDb, user).some(a => a.id === accountId && a.currency === 'CNY')) {
+  if (!(await portfolio.investmentRows()).some(a => a.id === accountId && a.currency === 'CNY')) {
     return res.status(400).json({ error: '请选择本人名下的人民币渠道账户' });
   }
   if (!/^\d{6}$/.test(code) || !name || name.length > 100 || !Number.isFinite(shares) || shares <= 0 || shares > 1e12 ||
     req.body?.cost == null || req.body.cost === '' || !Number.isFinite(cost) || cost < 0 || cost > 1e12) {
     return res.status(400).json({ error: '请填写有效的基金代码、名称、份额和成本' });
   }
-  const previous = portfolioDb.prepare('SELECT nav,nav_date FROM fund_holdings WHERE user_id=? AND account_id=? AND code=?').get(user, accountId, code);
+  const previous = (await portfolio.fundHoldings()).find(row => row.account_id === accountId && row.code === code);
   try {
-    if (hasFundTrades(accountId, code)) return res.status(409).json({ error: '此基金已有交易记录，期初份额与成本已用于交易核算' });
+    if (await hasFundTrades(accountId, code)) return res.status(409).json({ error: '此基金已有交易记录，期初份额与成本已用于交易核算' });
     if (req.body.edit === true) {
       if (!previous) return res.status(404).json({ error: '基金持仓不存在' });
-      portfolioDb.prepare('UPDATE fund_holdings SET name=?,shares=?,cost=? WHERE user_id=? AND account_id=? AND code=?')
-        .run(name, shares, roundMoney(cost), user, accountId, code);
+      await portfolio.updateFundHolding(user, accountId, code, { name, shares, cost: roundMoney(cost) });
     } else {
       if (previous) return res.status(409).json({ error: '该账户已录入此基金，请使用编辑' });
       const quote = await getFundNav(code);
-      if (hasFundTrades(accountId, code)) return res.status(409).json({ error: '此基金已有交易记录，请从记一笔录入' });
-      const inserted = portfolioDb.prepare('INSERT OR IGNORE INTO fund_holdings(user_id,account_id,code,name,shares,cost,nav,nav_date) VALUES(?,?,?,?,?,?,?,?)')
-        .run(user, accountId, code, name, shares, roundMoney(cost), quote.nav, quote.date);
-      if (!inserted.changes) return res.status(409).json({ error: '该账户已录入此基金，请使用编辑' });
+      if (await hasFundTrades(accountId, code)) return res.status(409).json({ error: '此基金已有交易记录，请从记一笔录入' });
+      const inserted = await portfolio.saveFundHolding(user, accountId, code,
+        { name, shares, cost: roundMoney(cost), nav: quote.nav, navDate: quote.date });
+      if (!inserted) return res.status(409).json({ error: '该账户已录入此基金，请使用编辑' });
     }
     res.json({ ok: true });
   } catch (error) {
@@ -366,119 +381,110 @@ app.put('/api/fund-holdings/:accountId/:code', async (req, res) => {
 app.post('/api/fund-holdings/:accountId/:code/refresh', async (req, res) => {
   if (!requireStockPermission(req, res, 'fund-holdings', 'edit')) return;
   const { accountId, code } = req.params;
-  const symbol = `${code}.OF`;
-  const account = store.read().investmentAccounts?.find(a => a.id === accountId);
+  const symbol = code + '.OF';
+  const account = (await store.read()).investmentAccounts?.find(a => a.id === accountId);
   if (!account?.positions.some(p => p.symbol === symbol && p.type === 'fund')) {
     return res.status(404).json({ error: '基金持仓不存在' });
   }
   try {
     const quote = await quotes.getQuote(symbol);
-    const data = store.read();
-    if (!(data.quotes[symbol]?.asOf > quote.asOf)) store.write({ ...data, quotes: { ...data.quotes, [symbol]: quote } });
+    const data = await store.read();
+    if (!(data.quotes[symbol]?.asOf > quote.asOf)) await store.write({ ...data, quotes: { ...data.quotes, [symbol]: quote } });
     res.json({ ok: true });
   } catch {
     res.status(502).json({ error: '净值更新失败，已保留上次净值' });
   }
 });
 
-app.delete('/api/fund-holdings/:accountId/:code', (req, res) => {
+app.delete('/api/fund-holdings/:accountId/:code', async (req, res) => {
   if (!requireStockPermission(req, res, 'fund-holdings', 'edit')) return;
-  if (hasFundTrades(req.params.accountId, req.params.code)) return res.status(409).json({ error: '此基金已有交易记录，不能移除期初份额' });
-  portfolioDb.prepare('DELETE FROM fund_holdings WHERE user_id=? AND account_id=? AND code=?')
-    .run(currentPortfolioUserId(), req.params.accountId, req.params.code);
+  if (await hasFundTrades(req.params.accountId, req.params.code)) return res.status(409).json({ error: '此基金已有交易记录，不能移除期初份额' });
+  await portfolio.removeFundHolding(currentPortfolioUserId(), req.params.accountId, req.params.code);
   res.json({ ok: true });
 });
 
-app.get('/api/accounts', (req, res) => {
+app.get('/api/accounts', async (req, res) => {
   if (!requireStockPermission(req, res, 'accounts')) return;
-  const data = store.read();
+  const data = await store.read();
   const full = hasStockPermission(req, 'cash');
   if (full) {
-    const funds = dipCashFunds(portfolioDb, currentPortfolioUserId(), data);
+    const funds = await portfolio.dipFunds(undefined, data);
     data.investmentAccounts = data.investmentAccounts?.map((a) => ({ ...a, ...funds.find((f) => f.accountId === a.id) }));
   }
   const permissions = portalPermissions(req) || [];
   const ledgerDetails = permissions.includes('*') || (permissions.includes('bookkeeping:view') && permissions.includes('bookkeeping:accounts:view'));
-  res.json({ accounts: orderedInvestmentAccounts(data.investmentAccounts || []).map((a) => full ? { ...a, movements: a.movements.filter((m) => m.kind === 'stock' || ledgerDetails), ...(!ledgerDetails ? { bookkeepingName: a.bookkeepingId ? '已绑定记账账户' : null, oldLedgerBalance: null } : {}) } : { id: a.id, name: a.name, currency: a.currency }), unassigned: data.trades.filter((t) => !t.account_id).length });
+  res.json({ accounts: (await orderedInvestmentAccounts(data.investmentAccounts || [])).map((a) => full ? { ...a, movements: a.movements.filter((m) => m.kind === 'stock' || ledgerDetails), ...(!ledgerDetails ? { bookkeepingName: a.bookkeepingId ? '已绑定记账账户' : null, oldLedgerBalance: null } : {}) } : { id: a.id, name: a.name, currency: a.currency }), unassigned: data.trades.filter((t) => !t.account_id).length });
 });
-app.put('/api/accounts/order', (req, res) => {
+app.put('/api/accounts/order', async (req, res) => {
   if (!requireStockPermission(req, res, 'accounts')) return;
   const { ids } = req.body || {};
   if (!Array.isArray(ids) || new Set(ids).size !== ids.length || ids.some(id => typeof id !== 'string')) {
     return res.status(400).json({ error: '账户顺序格式无效' });
   }
-  const userId = currentPortfolioUserId();
-  const saved = portfolioDb.transaction(() => {
-    const owned = new Set(investmentRows(portfolioDb, userId).map(account => account.id));
-    if (owned.size !== ids.length || ids.some(id => !owned.has(id))) return false;
-    portfolioDb.prepare(`INSERT INTO portfolio_user_meta(user_id,key,value) VALUES(?,?,?)
-      ON CONFLICT (user_id,key) DO UPDATE SET value = excluded.value`)
-      .run(userId, 'investment_account_order', JSON.stringify(ids));
-    return true;
-  }).immediate();
+  const saved = await portfolio.saveAccountOrder(undefined, ids);
   if (!saved) return res.status(409).json({ error: '账户列表已变化，请重新打开账户管理后再调整顺序' });
   res.json({ ok: true });
 });
-app.put('/api/accounts/:id/dip-reserve', (req, res) => {
+app.put('/api/accounts/:id/dip-reserve', async (req, res) => {
   if (!requireStockPermission(req, res, 'dip-funds', 'edit') || !requireStockPermission(req, res, 'cash', 'edit')) return;
-  try { res.json({ funds: setDipCashReserve(portfolioDb, currentPortfolioUserId(), req.params.id, req.body.amount) }); }
+  try { res.json({ funds: await portfolio.setDipReserve(undefined, req.params.id, req.body.amount) }); }
   catch (error) { res.status(400).json({ error: error.message }); }
 });
-app.get('/api/accounts/bookkeeping-options', (req, res) => {
+app.get('/api/accounts/bookkeeping-options', async (req, res) => {
   if (!requireStockPermission(req, res, 'accounts') || !requireStockPermission(req, res, 'cash')) return;
   const permissions = portalPermissions(req) || [];
   if (!permissions.includes('*') && !permissions.includes('bookkeeping:accounts:view')) return res.status(403).json({ error: '需要记账账户查看权限' });
-  const accounts = createBookkeepingStore(portfolioDb).accounts(currentPortfolioUserId());
+  const accounts = await (await getBookkeepingBackend()).store.accounts(currentPortfolioUserId());
   res.json(accounts.filter((a) => !a.archived && ['USD', 'CNY', 'HKD'].includes(a.currency) && a.accountType !== '信用卡').map(({ id, name, group, currency, balance, balanceSource }) => ({ id, name, group, currency, balance, balanceSource })));
 });
 app.post('/api/accounts', async (req, res) => {
   if (!accountEditor(req, res, !!req.body.bookkeepingId)) return;
   try {
-    if (req.body.currency === 'HKD' && !store.read().usdHkdRate) {
+    if (req.body.currency === 'HKD' && !(await store.read()).usdHkdRate) {
       const { rate } = await quotes.getUsdHkd();
-      store.write({ ...store.read(), usdHkdRate: rate });
+      await store.write({ ...(await store.read()), usdHkdRate: rate });
     }
-    const id = saveInvestmentAccount(portfolioDb, currentPortfolioUserId(), req.body);
+    const id = await portfolio.saveInvestmentAccount(undefined, req.body);
     res.json({ id });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.put('/api/accounts/:id', (req, res) => {
-  const old = investmentRows(portfolioDb, currentPortfolioUserId()).find((a) => a.id === req.params.id);
+app.put('/api/accounts/:id', async (req, res) => {
+  const old = (await portfolio.investmentRows()).find((a) => a.id === req.params.id);
   if (!accountEditor(req, res, !!old?.bookkeeping_id || !!req.body.bookkeepingId)) return;
-  try { const id = saveInvestmentAccount(portfolioDb, currentPortfolioUserId(), req.body, req.params.id); res.json({ id }); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { const id = await portfolio.saveInvestmentAccount(undefined, req.body, req.params.id); res.json({ id }); } catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.post('/api/accounts/:id/unlink', (req, res) => {
+app.post('/api/accounts/:id/unlink', async (req, res) => {
   if (!accountEditor(req, res, true)) return;
-  try { unlinkInvestmentAccount(portfolioDb, currentPortfolioUserId(), req.params.id); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
+  try { await portfolio.unlinkInvestmentAccount(undefined, req.params.id); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.post('/api/accounts/:id/assign', (req, res) => {
+app.post('/api/accounts/:id/assign', async (req, res) => {
   if (!accountEditor(req, res) || !requireStockPermission(req, res, 'trade', 'edit')) return;
   try {
-    const account = investmentRows(portfolioDb, currentPortfolioUserId()).find((a) => a.id === req.params.id);
+    const account = (await portfolio.investmentRows()).find((a) => a.id === req.params.id);
     if (!account) throw new Error('账户不存在');
-    const data = store.read();
+    const data = await store.read();
     let count = 0;
     data.trades = data.trades.map((t) => {
       if (!t.account_id && (t.currency || (/^\d{6}$/.test(t.symbol) ? 'CNY' : 'USD')) === account.currency) { count++; return { ...t, account_id: account.id }; }
       return t;
     });
-    store.write(data); res.json({ count });
+    await store.write(data); res.json({ count });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-function sendPortfolio(res, req) {
-  res.json(portfolioForRequest(req));
+async function sendPortfolio(res, req) {
+  res.json(await portfolioForRequest(req));
 }
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-app.get('/api/portfolio', (req, res) => {
-  sendPortfolio(res, req);
+app.get('/api/portfolio', async (req, res) => {
+  await sendPortfolio(res, req);
 });
 
-app.put('/api/cash', (req, res) => {
+app.put('/api/cash', async (req, res) => {
   if (!requireStockPermission(req, res, 'cash', 'edit')) return;
-  const data = store.read();
+  const data = await store.read();
   if (data.accountCashEnabled) return res.status(400).json({ error: '现金已按账户自动汇总，请在账户管理中核对现金' });
   const body = req.body || {};
   let cashUsd = data.cashUsd;
@@ -511,14 +517,14 @@ app.put('/api/cash', (req, res) => {
   data.cashCny = cashCny;
   data.usdCnyRate = usdCnyRate;
   data.cash = cashUsdEquivalent(cashUsd, cashCny, usdCnyRate);
-  store.write(data);
-  sendPortfolio(res, req);
+  await store.write(data);
+  await sendPortfolio(res, req);
 });
 
-app.put('/api/holdings-meta/:symbol', (req, res) => {
+app.put('/api/holdings-meta/:symbol', async (req, res) => {
   const symbol = normalizeSymbol(req.params.symbol);
   if (!symbol) return res.status(400).json({ error: '无效代码' });
-  const data = store.read();
+  const data = await store.read();
   if (!data.holdingsMeta) data.holdingsMeta = {};
   const prev = data.holdingsMeta[symbol] || {};
   const next = { ...prev };
@@ -535,20 +541,20 @@ app.put('/api/holdings-meta/:symbol', (req, res) => {
     else next.groupWith = normalizeSymbol(v);
   }
   data.holdingsMeta[symbol] = next;
-  store.write(data);
-  sendPortfolio(res, req);
+  await store.write(data);
+  await sendPortfolio(res, req);
 });
 
-app.put('/api/holdings-note/:symbol', (req, res) => {
+app.put('/api/holdings-note/:symbol', async (req, res) => {
   if (!requireStockPermission(req, res, 'col-note') || !requireStockPermission(req, res, 'holding-note', 'edit')) return;
   const symbol = normalizeSymbol(req.params.symbol);
   const { accountId, note } = req.body || {};
   if (typeof accountId !== 'string' || typeof note !== 'string' || note.length > 500) {
     return res.status(400).json({ error: '请选择有效持仓，备注最多 500 字' });
   }
-  const data = store.read();
+  const data = await store.read();
   const trades = data.trades.filter(trade => trade.symbol === symbol && (trade.account_id || '') === accountId);
-  const openings = openingFundTrades(openingFundsForAccount(accountId || 'unassigned')).filter(trade => trade.symbol === symbol);
+  const openings = openingFundTrades(await openingFundsForAccount(accountId || 'unassigned')).filter(trade => trade.symbol === symbol);
   if (!deriveHoldings([...openings, ...trades]).some(row => row.symbol === symbol)) {
     return res.status(404).json({ error: '找不到对应持仓' });
   }
@@ -558,7 +564,7 @@ app.put('/api/holdings-note/:symbol', (req, res) => {
   if (note.trim()) notes[key] = note.trim();
   else delete notes[key];
   data.holdingsMeta[symbol] = { ...meta, notes };
-  store.write(data);
+  await store.write(data);
   res.json({ ok: true });
 });
 
@@ -567,11 +573,11 @@ async function recordNamedTrade(input) {
   const code = input.type !== 'other' && fundIdentifier(symbol);
   if (!code) {
     const trade = await normalizeNamedTrade(input, async sym => ({ name: await quotes.getInstrumentName(sym) }));
-    const quote = trade.historicalBackfill && trade.type !== 'other' && !store.read().quotes[symbol]?.price
+    const quote = trade.historicalBackfill && trade.type !== 'other' && !(await store.read()).quotes[symbol]?.price
       ? await quotes.getQuote(symbol).catch(() => null) : null;
     return { trade, quote };
   }
-  const data = store.read();
+  const data = await store.read();
   if (hongKongFundIsin(symbol)) {
     const info = hkFundInfo(symbol);
     if (!info) throw new Error('暂未接入此香港基金份额');
@@ -579,7 +585,7 @@ async function recordNamedTrade(input) {
     const quote = data.quotes[symbol] ? null : await quotes.getQuote(symbol).catch(() => null);
     return { trade, quote };
   }
-  const opening = openingFundsForAccount().find(fund => fund.code === code);
+  const opening = (await openingFundsForAccount()).find(fund => fund.code === code);
   const existing = data.trades.find(t => t.symbol === symbol && t.type !== 'other');
   let name = opening?.name || existing?.name;
   if (!name) {
@@ -593,9 +599,10 @@ async function recordNamedTrade(input) {
   return { trade, quote };
 }
 
-function backfillSavedTrades(trades) {
+async function backfillSavedTrades(trades) {
   try {
-    queueSavedTradeHistory(portfolioDb, currentPortfolioUserId(), trades, tradeCalendarDate(new Date().toISOString()));
+    const backend = await getBookkeepingBackend();
+    await backend.queueSavedTrades(currentPortfolioUserId(), trades, tradeCalendarDate(new Date().toISOString()));
   } catch (error) {
     console.warn('历史估值补查排队失败:', error.message);
   }
@@ -606,14 +613,14 @@ registerTradeRoutes(app, {
 });
 
 registerTradeImportRoutes(app, {
-  config, store, portfolioDb, quotes, requireStockPermission, lookupInstrumentName,
+  config, store, portfolio, quotes, requireStockPermission, lookupInstrumentName,
   openingFundsForAccount, completePortfolioFundQuote, describeReinvestment, backfillSavedTrades, portfolioForRequest
 });
 
-app.get('/api/pnl', (req, res) => {
+app.get('/api/pnl', async (req, res) => {
   if (!requireStockPermission(req, res, 'pnl')) return;
-  const data = store.read();
-  res.json(computePnl(tradesForCalculations(req, data.trades), {
+  const data = await store.read();
+  res.json(computePnl(await tradesForCalculations(req, data.trades), {
     startDate: req.query.start || undefined,
     endDate: req.query.end || undefined,
     usdCnyRate: data.usdCnyRate,
@@ -621,11 +628,11 @@ app.get('/api/pnl', (req, res) => {
   }));
 });
 
-app.get('/api/trades/review', (req, res) => {
+app.get('/api/trades/review', async (req, res) => {
   if (!requireStockPermission(req, res, 'trade-review') || !requireStockPermission(req, res, 'trades')) return;
   try {
-    const data = store.read();
-    res.json(computeTradeReview(tradesForCalculations(req, data.trades), {
+    const data = await store.read();
+    res.json(computeTradeReview(await tradesForCalculations(req, data.trades), {
       startDate: req.query.start, endDate: req.query.end,
       symbol: req.query.symbol, assetType: req.query.assetType, otherCategory: req.query.otherCategory
     }));
@@ -634,10 +641,10 @@ app.get('/api/trades/review', (req, res) => {
   }
 });
 
-app.get('/api/trades/summary', (req, res) => {
+app.get('/api/trades/summary', async (req, res) => {
   if (!requireStockPermission(req, res, 'trades')) return;
-  const data = store.read();
-  res.json(computeSymbolSummaries(tradesForCalculations(req, data.trades), {
+  const data = await store.read();
+  res.json(computeSymbolSummaries(await tradesForCalculations(req, data.trades), {
     startDate: req.query.start || undefined,
     endDate: req.query.end || undefined,
     usdCnyRate: data.usdCnyRate,
@@ -649,9 +656,9 @@ app.get('/api/trades/summary', (req, res) => {
   }));
 });
 
-app.get('/api/trades/export', (req, res) => {
+app.get('/api/trades/export', async (req, res) => {
   if (!requireStockPermission(req, res, 'trades') || !requireStockPermission(req, res, 'export')) return;
-  const data = store.read();
+  const data = await store.read();
   let trades = [...scopedTrades(req, data.trades)].sort((a, b) => new Date(b.trade_date) - new Date(a.trade_date));
   const sym = String(req.query.symbol || '').trim().toUpperCase();
   const type = req.query.type;
@@ -726,11 +733,12 @@ app.get('/api/instruments/resolve', async (req, res) => {
   const symbol = normalizeSymbol(raw);
   const market = inferMarket(raw);
   const candidate = (symbol, name) => ({ symbol, name, assetType: holdingTypeForSymbol(symbol), currency: inferCurrency(symbol) });
-  const data = store.read();
+  const data = await store.read();
+  const openings = await openingFundsForAccount();
   const names = knownTradeNames(data.trades, data.quotes);
   const storedName = symbol => {
     if (fundCode(symbol)) {
-      const opening = openingFundsForAccount().find(fund => fund.code === fundCode(symbol));
+      const opening = openings.find(fund => fund.code === fundCode(symbol));
       if (opening) return opening.name;
     }
     return names.get(symbol);
@@ -782,11 +790,11 @@ app.get('/api/option/:symbol', async (req, res) => {
 
 app.post('/api/quotes/refresh', async (req, res) => {
   if (!requireStockPermission(req, res, 'refresh', 'edit')) return;
-  const data = store.read();
+  const data = await store.read();
   const symbol = req.body?.symbol;
   const symbols = symbol
     ? [normalizeSymbol(symbol)]
-    : [...new Set(deriveHoldings([...openingFundTrades(openingFundsForAccount()), ...data.trades]).map(h => h.symbol))];
+    : [...new Set(deriveHoldings([...openingFundTrades(await openingFundsForAccount()), ...data.trades]).map(h => h.symbol))];
   if (!symbols.length) {
     return res.status(400).json({ error: '暂无持仓可刷新' });
   }
@@ -834,9 +842,9 @@ app.post('/api/quotes/refresh', async (req, res) => {
       active.delete(sym);
       let valuation;
       if (received && streaming && !res.destroyed && Date.now() - lastSnapshot >= 750) {
-        const live = withRefreshedQuotes(store.read());
-        live.investmentAccounts = projectInvestments(portfolioDb, currentPortfolioUserId(), live);
-        const { holdings, fundHoldings, summary, missingQuotes } = portfolioForRequest(req, live, { valuationOnly: true });
+        const live = withRefreshedQuotes(await store.read());
+        live.investmentAccounts = await portfolio.project(undefined, live);
+        const { holdings, fundHoldings, summary, missingQuotes } = await portfolioForRequest(req, live, { valuationOnly: true });
         valuation = { holdings, fundHoldings, summary, missingQuotes };
         lastSnapshot = Date.now();
       }
@@ -857,8 +865,8 @@ app.post('/api/quotes/refresh', async (req, res) => {
       fx.push(refreshFx('USDHKD', 'usdHkdRate', quotes.getUsdHkd));
     }
     await Promise.all(fx);
-    const saved = store.write({ ...withRefreshedQuotes(store.read()), ...rates });
-    const payload = portfolioForRequest(req, saved);
+    const saved = await store.write({ ...withRefreshedQuotes(await store.read()), ...rates });
+    const payload = await portfolioForRequest(req, saved);
     payload.refresh = { ok, failed: errors.length, errors };
     if (!ok && errors.length) {
       if (streaming) return reply.finish(payload);

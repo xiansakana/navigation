@@ -5,7 +5,7 @@ import { loadConfig } from '../portal/src/config.js';
 import { loadRbac, findUserByUsername, resolveUserPermissions } from '../portal/src/rbac.js';
 import { canBookkeep } from '../portal/src/bookkeeping.js';
 import { parseIcost } from '../portal/src/bookkeeping-import.js';
-import { createBookkeepingStore } from '../portal/src/bookkeeping-store.js';
+import { getBookkeepingBackend } from '../portal/src/bookkeeping-runtime.js';
 
 export async function importForUser({ username, file, accountsFile, dryRun = false }) {
   const config = loadConfig(), rbac = loadRbac(config), user = findUserByUsername(rbac, username);
@@ -18,8 +18,8 @@ export async function importForUser({ username, file, accountsFile, dryRun = fal
   const accounts = Array.isArray(data) ? data : data.accounts;
   if (!Array.isArray(accounts)) throw new Error('账户快照格式无效');
   if (dryRun) return { username, userId: user.id, rows: parsed.rows.length, accounts: accounts.length, warnings: parsed.warnings };
-  const store = createBookkeepingStore(getDatabase());
-  return { username, userId: user.id, ...store.importRows(user.id, parsed.rows, accounts) };
+  const store = (await getBookkeepingBackend()).store;
+  return { username, userId: user.id, ...(await store.importRows(user.id, parsed.rows, accounts)) };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2);

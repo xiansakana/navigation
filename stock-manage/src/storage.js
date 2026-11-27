@@ -7,6 +7,7 @@ import {
   createPortfolioStore,
   defaultPortfolioJsonPath
 } from '../../shared/db/index.js';
+export { createPortfolioBackend } from '../../shared/db/portfolio-runtime.js';
 
 const ROOT = process.cwd();
 

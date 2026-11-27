@@ -1,31 +1,24 @@
 import { sameOriginWrite } from '../../shared/http.js';
-import { createQqBookkeeping } from './bookkeeping-qq.js';
 import { parseCoordinates, resolveAddress } from './blog-address.js';
 import crypto from 'node:crypto';
-import { historicalFx } from './bookkeeping-historical-fx.js';
-import { createAssetHistory, assetDate } from './bookkeeping-asset-history.js';
 import { analyzeBookkeeping } from './bookkeeping-analysis.js';
 import { accountLedger } from './bookkeeping-ledger.js';
-import { getDatabase } from '../../shared/db/index.js';
 import { hasPermission } from './rbac.js';
-import { createBookkeepingStore, summarize } from './bookkeeping-store.js';
+import { summarize } from './bookkeeping-store.js';
 import { parseIcost, exportIcost } from './bookkeeping-import.js';
-import { reviewIcostImport } from './bookkeeping-import-review.js';
 import { effectiveBookkeepingFx, refreshBookkeepingFx } from './bookkeeping-fx.js';
 import { analyticsScope, scopedBills } from './bookkeeping-scope.js';
-import { tradeHistoryReturns } from './bookkeeping-trade-history.js';
-import { securityHistory, snapshotPriceHistory } from './bookkeeping-security-history.js';
+import { getBookkeepingBackend } from './bookkeeping-runtime.js';
+import { snapshotPriceHistory } from './bookkeeping-security-history.js';
 
 const imports = new Map();
 const ttl = 15 * 60 * 1000;
-const portfolioCashAllowed = session => (session?.permissions||[]).some(p=>['*','service:stock-manage:edit','service:stock-manage:cash:view','service:stock-manage:cash:edit'].includes(p));
-function ledgerForAccount(db, uid, entries, account, quote, session) {
+const portfolioCashAllowed = session => (session?.permissions || []).some(p => ['*', 'service:stock-manage:edit', 'service:stock-manage:cash:view', 'service:stock-manage:cash:edit'].includes(p));
+async function ledgerForAccount(backend, uid, entries, account, quote, session) {
   let trades;
   if (account?.balanceSource === 'portfolio' && portfolioCashAllowed(session) &&
     hasPermission(session.permissions || [], 'service:stock-manage:trades:view')) {
-    const portfolio = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='portfolio_users'").get()
-      ?db.prepare('SELECT data FROM portfolio_users WHERE user_id=?').get(uid):null;
-    trades = JSON.parse(portfolio?.data || '{}').trades || [];
+    trades = (await backend.portfolio.readRaw(uid)).trades || [];
   }
   return accountLedger(entries, account, quote, { trades });
 }
@@ -58,7 +51,8 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
   if (!sameOriginWrite(req)) {
     return json(res, 403, { ok: false, error: '不允许跨站写入' });
   }
-  const store = createBookkeepingStore(getDatabase()), uid = session.userId;
+  const backend = await getBookkeepingBackend();
+  const store = backend.store, uid = session.userId;
   const accountsVisible = canBookkeep(session, 'accounts:view');
   const entryFilter = Object.fromEntries(url.searchParams);
   entryFilter.hideAccountSearch = !accountsVisible;
@@ -74,105 +68,114 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
     return result;
   };
   try {
-    if(route==='/location' && method==='GET') {
-      if(!canBookkeep(session,'entries:edit'))return json(res,403,{ok:false,error:'无权获取记账位置'});
-      const coordinates=parseCoordinates(url.searchParams);
-      return json(res,200,{ok:true,label:await resolveAddress(coordinates)});
+    if (route === '/location' && method === 'GET') {
+      if (!canBookkeep(session, 'entries:edit')) return json(res, 403, { ok: false, error: '无权获取记账位置' });
+      const coordinates = parseCoordinates(url.searchParams);
+      return json(res, 200, { ok: true, label: await resolveAddress(coordinates) });
     }
     if (route.startsWith('/qq')) {
-      const service=createQqBookkeeping(getDatabase(),{resolveUser:id=>id===uid?session:null});
-      if(route==='/qq' && method==='GET')return json(res,200,{ok:true,...service.status(uid)});
-      if(route==='/qq' && method==='PUT')return json(res,200,{ok:true,...service.save(uid,await body(req))});
-      if(route==='/qq/code' && method==='POST')return json(res,200,{ok:true,...service.code(uid)});
-      if(route==='/qq' && method==='DELETE'){service.unbind(uid);return json(res,200,{ok:true});}
+      const service = backend.createQq(id => id === uid ? session : null);
+      if (route === '/qq' && method === 'GET') return json(res, 200, { ok: true, ...(await service.status(uid)) });
+      if (route === '/qq' && method === 'PUT') return json(res, 200, { ok: true, ...(await service.save(uid, await body(req))) });
+      if (route === '/qq/code' && method === 'POST') return json(res, 200, { ok: true, ...(await service.code(uid)) });
+      if (route === '/qq' && method === 'DELETE') { await service.unbind(uid); return json(res, 200, { ok: true }); }
     }
-    if (route === '/preferences' && method === 'GET') return json(res,200,{ok:true,period:store.settings(uid).period || null});
-    if (route === '/preferences' && method === 'PUT') return json(res,200,{ok:true,period:store.savePeriodPreferences(uid,await body(req))});
-    if (route === '/analysis-scope' && method === 'PUT') return json(res,200,{ok:true,scope:store.saveAnalysisScope(uid,await body(req))});
+    if (route === '/preferences' && method === 'GET') return json(res, 200, { ok: true, period: (await store.settings(uid)).period || null });
+    if (route === '/preferences' && method === 'PUT') return json(res, 200, { ok: true, period: await store.savePeriodPreferences(uid, await body(req)) });
+    if (route === '/analysis-scope' && method === 'PUT') return json(res, 200, { ok: true, scope: await store.saveAnalysisScope(uid, await body(req)) });
     if (route === '/fx' && method === 'GET') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
     if (route === '/fx/refresh' && method === 'POST') return json(res, 200, { ok: true, fx: await refreshBookkeepingFx(store, uid) });
     if (route === '/state' && method === 'GET') {
-      const history=historicalFx(getDatabase()), allOriginal=store.entries(uid), ownedAccounts=store.accounts(uid), permittedAccounts=canBookkeep(session,'accounts:view')?publicAccounts(ownedAccounts,session):null;
-      const destinations=allOriginal.filter(e=>e.toAccountId && e.toAmount!=null).map(e=>({...e,currency:permittedAccounts?.find(a=>a.id===e.toAccountId)?.currency||'CNY'}));
-      const ledgerAccount=permittedAccounts?.find(a=>a.id===url.searchParams.get('accountId'));
-      const ledgerQuotes=ledgerAccount?allOriginal.filter(e=>e.accountId===ledgerAccount.id || e.toAccountId===ledgerAccount.id).map(e=>({...e,currency:ledgerAccount.currency})):[];
-      await history.ensure([...allOriginal,...destinations,...ledgerQuotes]);
-      const settings=store.settings(uid), fx=effectiveBookkeepingFx(settings);
-      const scope=analyticsScope(permittedAccounts||[],settings.analysisScope);
-      const excluded=new Set(scope.excludedAccountIds);
-      const listed=store.entries(uid,entryFilter).map(history.enrich);
-      const entries=url.searchParams.get('analysisScope')==='1'?scopedBills(listed,excluded):listed;
-      const balances=ledgerForAccount(getDatabase(),uid,allOriginal,ledgerAccount,history.quote,session);
-      for(const e of entries){if(balances.has(e.id))Object.assign(e,balances.get(e.id));delete e.balanceCheckpoint;}
+      const history = backend.fx;
+      const allOriginal = await store.entries(uid), ownedAccounts = await store.accounts(uid), permittedAccounts = canBookkeep(session, 'accounts:view') ? publicAccounts(ownedAccounts, session) : null;
+      const destinations = allOriginal.filter(e => e.toAccountId && e.toAmount != null).map(e => ({ ...e, currency: permittedAccounts?.find(a => a.id === e.toAccountId)?.currency || 'CNY' }));
+      const ledgerAccount = permittedAccounts?.find(a => a.id === url.searchParams.get('accountId'));
+      const ledgerQuotes = ledgerAccount ? allOriginal.filter(e => e.accountId === ledgerAccount.id || e.toAccountId === ledgerAccount.id).map(e => ({ ...e, currency: ledgerAccount.currency })) : [];
+      await history.ensure([...allOriginal, ...destinations, ...ledgerQuotes]);
+      const settings = await store.settings(uid), fx = effectiveBookkeepingFx(settings);
+      const scope = analyticsScope(permittedAccounts || [], settings.analysisScope);
+      const excluded = new Set(scope.excludedAccountIds);
+      const listed = (await store.entries(uid, entryFilter)).map(history.enrich);
+      const entries = url.searchParams.get('analysisScope') === '1' ? scopedBills(listed, excluded) : listed;
+      const balances = await ledgerForAccount(backend, uid, allOriginal, ledgerAccount, history.quote, session);
+      for (const e of entries) { if (balances.has(e.id)) Object.assign(e, balances.get(e.id)); delete e.balanceCheckpoint; }
       const offset = Math.max(0, Math.min(50000, Number(url.searchParams.get('offset')) || 0));
       const limit = Math.max(1, Math.min(200, Number(url.searchParams.get('limit')) || 100));
       const all = allOriginal.map(history.enrich), accounts = permittedAccounts;
-      for(const e of all){if(e.toAccountId){const a=accounts?.find(a=>a.id===e.toAccountId);if(a){e.toHistoricalRate=history.quote(a.currency,e.date.slice(0,10))?.rate||null;if(e.toAmount!=null && !e.toHistoricalRate)e.toFxMissing=a.currency;}}}
-      const scopedAll=scopedBills(all,excluded), scopedAccounts=accounts?.map(a=>({...a,included:a.included&&!excluded.has(a.id)}));
-      const budgetMonth=url.searchParams.get('month'), budgetData=budgetMonth?analyzeBookkeeping(scopedAll.filter(e=>e.date.startsWith(budgetMonth)),scopedAll,null,settings,{month:budgetMonth},undefined,fx.rates):null;
-      const calculation=analyzeBookkeeping(scopedBills(entries,excluded),scopedAll,canBookkeep(session,'analysis:view')?scopedAccounts:null,settings,Object.fromEntries(url.searchParams),undefined,fx.rates,all);
-      const ledgerCalculation=excluded.size?analyzeBookkeeping(entries,all,null,settings,Object.fromEntries(url.searchParams),undefined,fx.rates):calculation;
-      calculation.investmentReturns=null;
-      if (canBookkeep(session,'analysis:view') && accounts?.some(a=>a.included && a.balanceSource==='portfolio') && !accounts.some(a=>a.included && a.investment?.permissionMissing)) {
-        const historyStore=createAssetHistory(getDatabase());
-        historyStore.capture(uid,ownedAccounts,all,fx.rates,Date.now(),{snapshot:false});
-        const included=scopedAccounts.filter(a=>a.included);
-        const currentBalance=included.every(a=>Number.isFinite(a.balance) && fx.rates[a.currency]>0)
-          ? included.reduce((total,a)=>total+a.balance*fx.rates[a.currency],0) : null;
-        const today=assetDate(Date.now());
-        const prices=snapshotPriceHistory(securityHistory(getDatabase()),uid,today);
-        calculation.asset=historyStore.read(uid,Object.fromEntries(url.searchParams),today,currentBalance,{excludedAccountIds:scope.excludedAccountIds,accounts,entries:all,rates:fx.rates,securityHistory:prices}) || calculation.asset;
+      for (const e of all) { if (e.toAccountId) { const a = accounts?.find(a => a.id === e.toAccountId); if (a) { e.toHistoricalRate = history.quote(a.currency, e.date.slice(0, 10))?.rate || null; if (e.toAmount != null && !e.toHistoricalRate) e.toFxMissing = a.currency; } } }
+      const scopedAll = scopedBills(all, excluded), scopedAccounts = accounts?.map(a => ({ ...a, included: a.included && !excluded.has(a.id) }));
+      const budgetMonth = url.searchParams.get('month'), budgetData = budgetMonth ? analyzeBookkeeping(scopedAll.filter(e => e.date.startsWith(budgetMonth)), scopedAll, null, settings, { month: budgetMonth }, undefined, fx.rates) : null;
+      const calculation = analyzeBookkeeping(scopedBills(entries, excluded), scopedAll, canBookkeep(session, 'analysis:view') ? scopedAccounts : null, settings, Object.fromEntries(url.searchParams), undefined, fx.rates, all);
+      const ledgerCalculation = excluded.size ? analyzeBookkeeping(entries, all, null, settings, Object.fromEntries(url.searchParams), undefined, fx.rates) : calculation;
+      calculation.investmentReturns = null;
+      if (canBookkeep(session, 'analysis:view') && accounts?.some(a => a.included && a.balanceSource === 'portfolio') && !accounts.some(a => a.included && a.investment?.permissionMissing)) {
+        await backend.assetHistory.capture(uid, ownedAccounts, all, fx.rates, Date.now(), { snapshot: false });
+        const included = scopedAccounts.filter(a => a.included);
+        const currentBalance = included.every(a => Number.isFinite(a.balance) && fx.rates[a.currency] > 0)
+          ? included.reduce((total, a) => total + a.balance * fx.rates[a.currency], 0) : null;
+        const today = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+        let prices;
+        if (backend.mode === 'postgres') {
+          prices = await backend.security.read(uid);
+          prices.request = (symbol, date) => { backend.security.ensure(uid, [{ symbol, start: new Date(Date.parse(date) - 7 * 86400000).toISOString().slice(0, 10), end: date }]).catch(() => {}); };
+        } else prices = snapshotPriceHistory(backend.security, uid, today);
+        calculation.asset = await backend.assetHistory.read(uid, Object.fromEntries(url.searchParams), today, currentBalance, { excludedAccountIds: scope.excludedAccountIds, accounts, entries: all, rates: fx.rates, securityHistory: prices }) || calculation.asset;
       }
-      if(canBookkeep(session,'analysis:view') && canBookkeep(session,'accounts:returns:view') && accounts && !accounts.some(a=>a.included && a.investment?.permissionMissing))calculation.investmentReturns=createAssetHistory(getDatabase()).returns(uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),accounts,all,fx.rates,scope.excludedAccountIds,portfolioCashAllowed(session));
-      if(url.searchParams.get('investmentHistory')==='1' && calculation.investmentReturns && portfolioCashAllowed(session) && hasPermission(session.permissions||[],'service:stock-manage:trades:view'))calculation.investmentReturns.trading=await tradeHistoryReturns(getDatabase(),uid,Object.fromEntries(url.searchParams),assetDate(Date.now()),accounts,scope.excludedAccountIds,{currentRates:fx.rates});
-      return json(res, 200, { ok: true, equivalentSummary:ledgerCalculation.equivalentSummary, conversionMissing:ledgerCalculation.billing.missingCurrencies, entries: entries.slice(offset, offset + limit).map(visibleEntry), count: entries.length, summary: summarize(entries),
-        budgetExpense: budgetData?(budgetData.billing.missingCurrencies.length?null:budgetData.equivalentSummary.totals.CNY?.expense||0):null,
-        accounts: accounts || [], settings:permittedAccounts?settings:{...settings,analysisScope:undefined}, fx, analysisScope:scope,
-        analysis: canBookkeep(session,'analysis:view') ? calculation : null,
-        categoryTree: canBookkeep(session,'categories:view') ? store.catalog.list(uid) : [], accountGroups: accountsVisible ? store.catalog.groupList(uid) : [],
+      if (canBookkeep(session, 'analysis:view') && canBookkeep(session, 'accounts:returns:view') && accounts && !accounts.some(a => a.included && a.investment?.permissionMissing)) {
+        calculation.investmentReturns = await backend.assetHistory.returns(uid, Object.fromEntries(url.searchParams), new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10), accounts, all, fx.rates, scope.excludedAccountIds, portfolioCashAllowed(session));
+      }
+      if (url.searchParams.get('investmentHistory') === '1' && calculation.investmentReturns && portfolioCashAllowed(session) && hasPermission(session.permissions || [], 'service:stock-manage:trades:view')) {
+        calculation.investmentReturns.trading = await backend.tradeHistoryReturns(uid, Object.fromEntries(url.searchParams), new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10), accounts, scope.excludedAccountIds, { currentRates: fx.rates });
+      }
+      return json(res, 200, { ok: true, equivalentSummary: ledgerCalculation.equivalentSummary, conversionMissing: ledgerCalculation.billing.missingCurrencies, entries: entries.slice(offset, offset + limit).map(visibleEntry), count: entries.length, summary: summarize(entries),
+        budgetExpense: budgetData ? (budgetData.billing.missingCurrencies.length ? null : budgetData.equivalentSummary.totals.CNY?.expense || 0) : null,
+        accounts: accounts || [], settings: permittedAccounts ? settings : { ...settings, analysisScope: undefined }, fx, analysisScope: scope,
+        analysis: canBookkeep(session, 'analysis:view') ? calculation : null,
+        categoryTree: canBookkeep(session, 'categories:view') ? await store.catalog.list(uid) : [], accountGroups: accountsVisible ? await store.catalog.groupList(uid) : [],
         books: [...new Set(all.map(e => e.book))], categories: [...new Set(all.map(e => e.category))],
         months: [...new Set(all.map(e => e.date.slice(0, 7)))].sort().reverse() });
     }
-    if (route === '/accounts' && method === 'GET') return json(res, 200, { ok: true, accounts: publicAccounts(store.accounts(uid),session) });
-    if (route === '/categories' && method === 'GET') return json(res,200,{ok:true,categories:store.catalog.list(uid)});
-    if (route === '/categories' && method === 'POST') return json(res,201,{ok:true,id:store.catalog.save(uid,await body(req))});
-    if (route === '/categories/order' && method === 'PUT') { store.catalog.reorder(uid,'categories',(await body(req)).ids); return json(res,200,{ok:true}); }
+    if (route === '/accounts' && method === 'GET') return json(res, 200, { ok: true, accounts: publicAccounts(await store.accounts(uid), session) });
+    if (route === '/categories' && method === 'GET') return json(res, 200, { ok: true, categories: await store.catalog.list(uid) });
+    if (route === '/categories' && method === 'POST') return json(res, 201, { ok: true, id: await store.catalog.save(uid, await body(req)) });
+    if (route === '/categories/order' && method === 'PUT') { await store.catalog.reorder(uid, 'categories', (await body(req)).ids); return json(res, 200, { ok: true }); }
     const category = /^\/categories\/([a-f0-9]{32})(\/merge)?$/.exec(route);
-    if (category && method === 'PUT' && !category[2]) return json(res,200,{ok:true,id:store.catalog.save(uid,await body(req),category[1])});
-    if (category && method === 'POST' && category[2]) return json(res,200,{ok:true,...store.catalog.merge(uid,category[1],(await body(req)).targetId)});
-    if (category && method === 'DELETE' && !category[2]) { store.catalog.remove(uid,category[1]); return json(res,200,{ok:true}); }
-    if (route === '/groups' && method === 'GET') return json(res,200,{ok:true,groups:store.catalog.groupList(uid)});
-    if (route === '/groups' && method === 'POST') return json(res,201,{ok:true,id:store.catalog.saveGroup(uid,await body(req))});
-    if (route === '/groups/order' && method === 'PUT') { store.catalog.reorder(uid,'groups',(await body(req)).ids); return json(res,200,{ok:true}); }
+    if (category && method === 'PUT' && !category[2]) return json(res, 200, { ok: true, id: await store.catalog.save(uid, await body(req), category[1]) });
+    if (category && method === 'POST' && category[2]) return json(res, 200, { ok: true, ...(await store.catalog.merge(uid, category[1], (await body(req)).targetId)) });
+    if (category && method === 'DELETE' && !category[2]) { await store.catalog.remove(uid, category[1]); return json(res, 200, { ok: true }); }
+    if (route === '/groups' && method === 'GET') return json(res, 200, { ok: true, groups: await store.catalog.groupList(uid) });
+    if (route === '/groups' && method === 'POST') return json(res, 201, { ok: true, id: await store.catalog.saveGroup(uid, await body(req)) });
+    if (route === '/groups/order' && method === 'PUT') { await store.catalog.reorder(uid, 'groups', (await body(req)).ids); return json(res, 200, { ok: true }); }
     const group = /^\/groups\/([a-f0-9]{32})(\/merge)?$/.exec(route);
-    if (group && method === 'PUT' && !group[2]) return json(res,200,{ok:true,id:store.catalog.saveGroup(uid,await body(req),group[1])});
-    if (group && method === 'DELETE' && !group[2]) { store.catalog.removeGroup(uid,group[1]); return json(res,200,{ok:true}); }
-    if (group && method === 'POST' && group[2]) { store.catalog.removeGroup(uid,group[1],(await body(req)).targetId); return json(res,200,{ok:true}); }
-    if (route === '/accounts/order' && method === 'PUT') { store.reorderAccounts(uid,(await body(req)).ids); return json(res,200,{ok:true}); }
+    if (group && method === 'PUT' && !group[2]) return json(res, 200, { ok: true, id: await store.catalog.saveGroup(uid, await body(req), group[1]) });
+    if (group && method === 'DELETE' && !group[2]) { await store.catalog.removeGroup(uid, group[1]); return json(res, 200, { ok: true }); }
+    if (group && method === 'POST' && group[2]) { await store.catalog.removeGroup(uid, group[1], (await body(req)).targetId); return json(res, 200, { ok: true }); }
+    if (route === '/accounts/order' && method === 'PUT') { await store.reorderAccounts(uid, (await body(req)).ids); return json(res, 200, { ok: true }); }
     const archive = /^\/accounts\/([a-f0-9]{32})\/archive$/.exec(route);
-    if (archive && method === 'POST') { store.archiveAccount(uid,archive[1],(await body(req)).archived); return json(res,200,{ok:true}); }
-    if (route === '/entries' && method === 'POST') return json(res, 201, { ok: true, id: store.saveEntry(uid, await body(req)) });
+    if (archive && method === 'POST') { await store.archiveAccount(uid, archive[1], (await body(req)).archived); return json(res, 200, { ok: true }); }
+    if (route === '/entries' && method === 'POST') return json(res, 201, { ok: true, id: await store.saveEntry(uid, await body(req)) });
     const entry = /^\/entries\/([a-f0-9]{32})$/.exec(route);
     if (entry && method === 'GET') {
-      const entries=store.entries(uid),found=entries.find(e=>e.id===entry[1]);
-      if(!found)return json(res,404,{ok:false,error:'账单不存在'});
-      const accountId=url.searchParams.get('accountId');
-      const account=accountsVisible&&accountId&&(found.accountId===accountId||found.toAccountId===accountId)
-        ?publicAccounts(store.accounts(uid),session).find(a=>a.id===accountId):null;
-      const ledgerEntries=account?entries.filter(e=>e.accountId===accountId||e.toAccountId===accountId):[];
-      const history=historicalFx(getDatabase());await history.ensure([found,...ledgerEntries.flatMap(e=>[e,{...e,currency:account.currency}])]);
-      const detail=history.enrich(found);delete detail.balanceCheckpoint;
-      if(account)Object.assign(detail,ledgerForAccount(getDatabase(),uid,ledgerEntries,account,history.quote,session).get(found.id));
-      return json(res,200,{ok:true,entry:visibleEntry(detail)});
+      const entries = await store.entries(uid), found = entries.find(e => e.id === entry[1]);
+      if (!found) return json(res, 404, { ok: false, error: '账单不存在' });
+      const accountId = url.searchParams.get('accountId');
+      const account = accountsVisible && accountId && (found.accountId === accountId || found.toAccountId === accountId)
+        ? publicAccounts(await store.accounts(uid), session).find(a => a.id === accountId) : null;
+      const ledgerEntries = account ? entries.filter(e => e.accountId === accountId || e.toAccountId === accountId) : [];
+      const history = backend.fx;
+      await history.ensure([found, ...ledgerEntries.flatMap(e => [e, { ...e, currency: account.currency }])]);
+      const detail = history.enrich(found); delete detail.balanceCheckpoint;
+      if (account) Object.assign(detail, (await ledgerForAccount(backend, uid, ledgerEntries, account, history.quote, session)).get(found.id));
+      return json(res, 200, { ok: true, entry: visibleEntry(detail) });
     }
-    if (entry && method === 'PUT') return json(res, 200, { ok: true, id: store.saveEntry(uid, await body(req), entry[1]) });
-    if (entry && method === 'DELETE') { store.removeEntry(uid, entry[1]); return json(res, 200, { ok: true }); }
-    if (route === '/accounts' && method === 'POST') return json(res, 201, { ok: true, id: store.saveAccount(uid, await body(req)) });
+    if (entry && method === 'PUT') return json(res, 200, { ok: true, id: await store.saveEntry(uid, await body(req), entry[1]) });
+    if (entry && method === 'DELETE') { await store.removeEntry(uid, entry[1]); return json(res, 200, { ok: true }); }
+    if (route === '/accounts' && method === 'POST') return json(res, 201, { ok: true, id: await store.saveAccount(uid, await body(req)) });
     const account = /^\/accounts\/([a-f0-9]{32})(\/adjust)?$/.exec(route);
-    if (account && method === 'PUT' && !account[2]) return json(res, 200, { ok: true, id: store.saveAccount(uid, await body(req), account[1]) });
-    if (account && method === 'POST' && account[2]) return json(res, 200, { ok: true, id: store.adjust(uid, account[1], await body(req)) });
-    if (account && method === 'DELETE' && !account[2]) { store.removeAccount(uid, account[1]); return json(res, 200, { ok: true }); }
-    if (route === '/settings' && method === 'PUT') return json(res, 200, { ok: true, settings: store.saveSettings(uid, await body(req)) });
+    if (account && method === 'PUT' && !account[2]) return json(res, 200, { ok: true, id: await store.saveAccount(uid, await body(req), account[1]) });
+    if (account && method === 'POST' && account[2]) return json(res, 200, { ok: true, id: await store.adjust(uid, account[1], await body(req)) });
+    if (account && method === 'DELETE' && !account[2]) { await store.removeAccount(uid, account[1]); return json(res, 200, { ok: true }); }
+    if (route === '/settings' && method === 'PUT') return json(res, 200, { ok: true, settings: await store.saveSettings(uid, await body(req)) });
     if (route === '/import/preview' && method === 'POST') {
       const now = Date.now(); for (const [k, v] of imports) if (now - v.at > ttl) imports.delete(k);
       if (imports.size >= 12) throw new Error('导入任务过多，请稍后重试');
@@ -183,28 +186,27 @@ export async function handleBookkeepingApi(req, res, url, session, json) {
       return json(res, 200, { ok: true, token, count: parsed.rows.length, errors: parsed.errors.slice(0, 100), errorCount: parsed.errors.length,
         warnings: parsed.warnings, summary: summarize(parsed.rows), sample: parsed.rows.slice(0, 8).map(({ raw, sourceKey, ...e }) => e) });
     }
-    if (['/import/review','/import/confirm'].includes(route) && method === 'POST') {
+    if (['/import/review', '/import/confirm'].includes(route) && method === 'POST') {
       const input = await body(req), pending = imports.get(input.token);
       if (!pending || pending.uid !== uid || Date.now() - pending.at > ttl) throw new Error('导入预览已过期，请重新选择文件');
       if (pending.errors.length) throw new Error('存在无效行，请修正文件后重新导入');
-      const snapshots=input.accounts||[];
-      if(!Array.isArray(snapshots)||snapshots.length>500)throw new Error('账户快照无效');
-      const names = new Set(store.accounts(uid).map(a => a.name));
-      const createsAccounts = snapshots.length || pending.rows.some((r,i) => input.decisions?.[i]!=='skip' && [r.accountName, r.toAccountName].some(n => n && !names.has(n)));
+      const snapshots = input.accounts || [];
+      if (!Array.isArray(snapshots) || snapshots.length > 500) throw new Error('账户快照无效');
+      const names = new Set((await store.accounts(uid)).map(a => a.name));
+      const createsAccounts = snapshots.length || pending.rows.some((r, i) => input.decisions?.[i] !== 'skip' && [r.accountName, r.toAccountName].some(n => n && !names.has(n)));
       if (createsAccounts && !canBookkeep(session, 'accounts:edit')) return json(res, 403, { ok: false, error: '创建导入账户或账户快照需要账户编辑权限' });
-      const confirm=route.endsWith('/confirm');
-      if(confirm && (typeof input.revision!=='string'||!/^[a-f0-9]{64}$/.test(input.revision)))throw new Error('请先核对余额预览');
-      const db=getDatabase();
-      const result=reviewIcostImport(db,store,uid,pending.rows,snapshots,input.decisions,{
-        visible:a=>canBookkeep(session,'accounts:view')&&(!a.investment||portfolioCashAllowed(session)),
-        canPost:canBookkeep(session,'accounts:view')&&canBookkeep(session,'entries:edit'),quote:historicalFx(db).quote,
-        expected:confirm?input.revision:undefined,
+      const confirm = route.endsWith('/confirm');
+      if (confirm && (typeof input.revision !== 'string' || !/^[a-f0-9]{64}$/.test(input.revision))) throw new Error('请先核对余额预览');
+      const result = await backend.reviewImport(uid, pending.rows, snapshots, input.decisions, {
+        visible: a => canBookkeep(session, 'accounts:view') && (!a.investment || portfolioCashAllowed(session)),
+        canPost: canBookkeep(session, 'accounts:view') && canBookkeep(session, 'entries:edit'), quote: backend.fx.quote,
+        expected: confirm ? input.revision : undefined,
       });
-      if(confirm)imports.delete(input.token);
+      if (confirm) imports.delete(input.token);
       return json(res, 200, { ok: true, ...result });
     }
     if (route === '/export' && method === 'GET') {
-      const buffer = await exportIcost(store.entries(uid, entryFilter).map(visibleEntry));
+      const buffer = await exportIcost((await store.entries(uid, entryFilter)).map(visibleEntry));
       res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': 'attachment; filename="bookkeeping.xlsx"', 'Content-Length': buffer.length }); res.end(buffer); return;
     }

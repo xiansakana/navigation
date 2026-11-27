@@ -77,7 +77,7 @@ function emptyData(config) {
   };
 }
 
-export function createStore(config) {
+export async function createStore(config) {
   const dbPath = path.resolve(resolveRoot(), config.dbPath || 'data/qqq-dip.db');
   const jsonPath = dbPath.replace(/\.db$/i, '.json');
   fs.mkdirSync(path.dirname(jsonPath), { recursive: true });
@@ -116,8 +116,8 @@ export function createStore(config) {
   syncNotifyToken();
 
   // One-time: import dip JSON cash into portfolio only when holdings pocket is 0.
-  migrateDipCashOnce({ ...defaultCash(), ...(data.cash || {}) });
-  data.cash = { ...defaultCash(), ...getPortfolioCash() };
+  await migrateDipCashOnce({ ...defaultCash(), ...(data.cash || {}) });
+  data.cash = { ...defaultCash(), ...(await getPortfolioCash()) };
 
   function persist() {
     const tmp = jsonPath + '.tmp';
@@ -125,15 +125,15 @@ export function createStore(config) {
     fs.renameSync(tmp, jsonPath);
   }
 
-  function getCash() {
-    const cash = { ...defaultCash(), ...getPortfolioCash() };
+  async function getCash() {
+    const cash = { ...defaultCash(), ...(await getPortfolioCash()) };
     data.cash = cash;
     return { ...cash };
   }
 
-  function setCash(cash) {
-    const prev = getCash();
-    const next = setPortfolioCash({
+  async function setCash(cash) {
+    const prev = await getCash();
+    const next = await setPortfolioCash({
       cashUsd: cash.cashUsd != null ? Number(cash.cashUsd) || 0 : prev.cashUsd,
       cashCny: cash.cashCny != null ? Number(cash.cashCny) || 0 : prev.cashCny,
       usdCnyRate: Number(cash.usdCnyRate) > 0 ? Number(cash.usdCnyRate) : prev.usdCnyRate,
@@ -235,12 +235,13 @@ export function createStore(config) {
     return prev;
   }
 
-  function getLots() {
+  async function getLots() {
     const manual = data.lots.filter((lot) => lot.source !== 'portfolio-trade');
     const fillMetadata = data.actions.flatMap((action) => (action.payload?.syncedTradeIds || []).map((id, index) => ({
       id: `portfolio:${id}`, otmClass: action.payload?.legs?.[index]?.otmClass
     })));
-    const synced = portfolioDipLots(getPortfolioStore().read().trades, [...fillMetadata, ...data.lots], data.hiddenTradeLots || []);
+    const portfolio = await getPortfolioStore();
+    const synced = portfolioDipLots((await portfolio.read()).trades, [...fillMetadata, ...data.lots], data.hiddenTradeLots || []);
     const next = [...manual, ...synced];
     if (JSON.stringify(next) !== JSON.stringify(data.lots)) {
       data.lots = next;
@@ -274,12 +275,13 @@ export function createStore(config) {
     return round;
   }
 
-  function markExecuted(tier, payload) {
+  async function markExecuted(tier, payload) {
     const cashUsd = Math.max(0, Number(payload.cashUsd) || 0);
     const cashCny = Math.max(0, Number(payload.cashCny) || 0);
+    const cash = await getCash();
     const usd = payload.usd != null
       ? Number(payload.usd) || 0
-      : roundMoneyLocal(cashUsd + (getCash().usdCnyRate > 0 ? cashCny / getCash().usdCnyRate : 0));
+      : roundMoneyLocal(cashUsd + (cash.usdCnyRate > 0 ? cashCny / cash.usdCnyRate : 0));
     const round = getRound();
     const previous = round.executed?.[tier] || {};
     round.executed = {

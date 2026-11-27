@@ -39,7 +39,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
     return withDeadline(operation, Math.min(limitMs, remainingMs), `监控阶段 ${name}`);
   }
 
-  function status() {
+  async function status() {
     return {
       running,
       busy,
@@ -47,7 +47,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
       lastError,
       lastPush,
       market: lastMarketStatus,
-      intervalSeconds: store.getSettings().intervalSeconds,
+      intervalSeconds: (await store.getSettings()).intervalSeconds,
       phase,
       phaseStartedAt,
       tickStartedAt,
@@ -91,16 +91,17 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
     lastMarketStatus = marketStatus();
     try {
       if (refreshFx) await stage('refreshFx', refreshFx);
-      const settings = store.getSettings();
+      const settings = await store.getSettings();
+      const previousMarkets = await store.getQuotes();
       const bundle = await stage('marketQuotes', () => quotes.getMarketBundle(
         settings.showSpy === false ? ['QQQ', 'TQQQ', 'SOXL'] : SYMBOLS,
-        { previousVxn: store.getQuotes().VXN, previousMarkets: store.getQuotes() }
+        { previousVxn: previousMarkets.VXN, previousMarkets }
       ));
       const markets = bundle.markets;
-      store.setQuotes(markets);
-      const lots = await stage('positionQuotes', () => enrichLots(store.getLots()));
-      const evaluateLatest = (round, suggestedContracts) => {
-        const cash = store.getCash();
+      await store.setQuotes(markets);
+      const lots = await stage('positionQuotes', async () => enrichLots(await store.getLots()));
+      const evaluateLatest = async (round, suggestedContracts) => {
+        const cash = await store.getCash();
         const now = new Date();
         lastMarketStatus = marketStatus(now);
         return evaluate({
@@ -129,10 +130,10 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
       let suggestedContracts = [];
       let optionError;
       try {
-        suggestedContracts = await stage('suggestLeaps', () => suggestLeaps(evaluateLatest(store.getRound())));
+        suggestedContracts = await stage('suggestLeaps', async () => suggestLeaps(await evaluateLatest(await store.getRound())));
       } catch (error) { optionError = error.message; }
-      const round = store.getRound();
-      const ev = evaluateLatest(round, suggestedContracts);
+      const round = await store.getRound();
+      const ev = await evaluateLatest(round, suggestedContracts);
       ev.suggestedContracts = suggestedContracts;
       ev.quoteErrors = { ...bundle.errors, ...(optionError ? { options: optionError } : {}) };
       // Persist observed peaks only, never pretend a suggested sale was filled.
@@ -140,7 +141,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
         const previous = lots.find((row) => row.id === lot.id);
         if (store.saveLot && previous && (lot.holdingHigh > (Number(previous.holdingHigh) || 0)
           || (lot.multiple >= 3 && !previous.reached3x) || (lot.multiple >= 5 && !previous.reached5x))) {
-          store.saveLot({ ...previous, holdingHigh: lot.holdingHigh,
+          await store.saveLot({ ...previous, holdingHigh: lot.holdingHigh,
             reached3x: previous.reached3x || lot.multiple >= 3,
             reached5x: previous.reached5x || lot.multiple >= 5 });
         }
@@ -150,10 +151,10 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
         applyRoundFromEval(round, ev, { sessionDate: lastMarketStatus.ymd }), ev.buyPreview);
       const pendingOptions = activatePendingOptions(nextRound, ev);
       nextRound = pendingOptions.round;
-      store.setRound(nextRound);
+      await store.setRound(nextRound);
       // Notification I/O can overlap plan creation and fill registration.
-      const persistDeliveryState = () => {
-        const current = store.getRound();
+      const persistDeliveryState = async () => {
+        const current = await store.getRound();
         if (current.lastResetAt !== nextRound.lastResetAt) return current;
         for (const key of ['marketDeliveryVersion', 'marketDeliveries', 'pendingRiskAlerts', 'observedAlerts', 'firedAlerts', 'retryAlerts']) {
           current[key] = nextRound[key];
@@ -162,7 +163,9 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
       };
       ev.alerts.push(...pendingOptions.alerts);
       if (!nextRound.marketDeliveryVersion) {
-        const actions = [0, 500].flatMap((offset) => store.listActionRows?.({ limit: 500, offset }).items || []);
+        const page = store.listActionRows ? await store.listActionRows({ limit: 500, offset: 0 }) : { items: [] };
+        const page2 = store.listActionRows ? await store.listActionRows({ limit: 500, offset: 500 }) : { items: [] };
+        const actions = [...(page?.items || []), ...(page2?.items || [])];
         migrateMarketDeliveries(nextRound, ev.alerts, actions);
       }
       nextRound.pendingRiskAlerts = { ...nextRound.pendingRiskAlerts };
@@ -180,11 +183,11 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
       // keys so an A-share reminder cannot consume the US reminder (or vice versa).
       const fresh = newAlertKeys({ ...ev, alerts: candidates }, {}).filter((alert) => alert.key !== 'SOXL:drawdown70:v2'
         || !['US', 'CN'].some((market) => nextRound.marketDeliveries?.[`SOXL:drawdown90:v2:${market}`]));
-      const notify = store.getNotify();
+      const notify = await store.getNotify();
       const pushResults = [];
 
       for (const alert of fresh) {
-        if (!nextRound.observedAlerts?.[alert.key] && !nextRound.firedAlerts?.[alert.key]) store.addAction({
+        if (!nextRound.observedAlerts?.[alert.key] && !nextRound.firedAlerts?.[alert.key]) await store.addAction({
           type: alert.event === 'takeProfit' ? 'alert' : 'signal',
           source: 'auto',
           tier: alert.event,
@@ -215,7 +218,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
             qq = { sent: [], errors: [error.message] };
           }
           pushResults.push({ key: deliveryKey, qq });
-          store.addAction({
+          await store.addAction({
             type: 'notify',
             source: 'auto',
             tier: alert.event,
@@ -231,7 +234,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
           } else {
             nextRound.retryAlerts = { ...nextRound.retryAlerts, [deliveryKey]: Date.now() + 300000 };
           }
-          persistDeliveryState();
+          await persistDeliveryState();
         }
       }
 
@@ -243,7 +246,7 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
         const text = ev.primary ? `${ev.primary.title}：${ev.primary.body}` : '抄底监控已开盘';
         const qq = await stage('openSummary', () => publish(notify, { source: 'stock', eventKey: 'openSummary', message: appendMarketSnapshot(`【美股开盘摘要】${text}`, ev.qqq, 'QQQ') }));
         nextRound.firedAlerts = { ...(nextRound.firedAlerts || {}), [openKey]: new Date().toISOString() };
-        store.addAction({
+        await store.addAction({
           type: 'notify',
           source: 'auto',
           tier: 'openSummary',
@@ -255,8 +258,8 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
         pushResults.push({ key: openKey, qq });
       }
 
-      persistDeliveryState();
-      ev.round = store.getRound();
+      await persistDeliveryState();
+      ev.round = await store.getRound();
       for (const tier of ev.tiers) {
         const plan = ev.round.executionPlans?.[tier.id];
         tier.planBalance = plan ? remainingPlanBalance(plan) : null;
@@ -278,12 +281,12 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
       busy = false;
       phase = 'idle';
       phaseStartedAt = null;
-      if (onSnapshot) onSnapshot(buildSnapshot());
+      if (onSnapshot) onSnapshot(await buildSnapshot());
     }
   }
 
-  function intervalMs() {
-    const sec = Number(store.getSettings().intervalSeconds) || 30;
+  async function intervalMs() {
+    const sec = Number((await store.getSettings()).intervalSeconds) || 30;
     if (!isRth() && !alertMarketOpen('CN')) return Math.max(sec, 120) * 1000;
     return Math.max(10, sec) * 1000;
   }
@@ -292,42 +295,40 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
     if (!running) return;
     tick().catch((e) => {
       lastError = e.message || String(e);
-    }).finally(() => {
+    }).finally(async () => {
       if (!running) return;
-      timer = setTimeout(loop, intervalMs());
+      timer = setTimeout(loop, await intervalMs());
     });
   }
 
-  function start() {
+  async function start() {
     if (running) return status();
     running = true;
     lastError = null;
     loop();
-    if (onSnapshot) onSnapshot(buildSnapshot());
+    if (onSnapshot) onSnapshot(await buildSnapshot());
     return status();
   }
 
-  function stop() {
+  async function stop() {
     running = false;
     if (timer) {
       clearTimeout(timer);
       timer = null;
     }
-    if (onSnapshot) onSnapshot(buildSnapshot());
+    if (onSnapshot) onSnapshot(await buildSnapshot());
     return status();
   }
 
-  function buildSnapshot() {
-    const cash = store.getCash();
-    const settings = store.getSettings();
+  async function buildSnapshot() {
     return {
       ok: true,
-      monitor: status(),
-      cash,
-      settings,
+      monitor: await status(),
+      cash: await store.getCash(),
+      settings: await store.getSettings(),
       evaluation: lastEval,
-      lots: store.getLots(),
-      quotes: store.getQuotes()
+      lots: await store.getLots(),
+      quotes: await store.getQuotes()
     };
   }
 
@@ -335,9 +336,9 @@ export function createMonitor({ store, quotes, onSnapshot, refreshFx, publish = 
     return lastEval;
   }
 
-  function setEvaluation(ev) {
+  async function setEvaluation(ev) {
     lastEval = ev || null;
-    if (onSnapshot) onSnapshot(buildSnapshot());
+    if (onSnapshot) onSnapshot(await buildSnapshot());
     return lastEval;
   }
 

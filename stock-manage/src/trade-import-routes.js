@@ -16,13 +16,13 @@ import { isBrokerPdf, parseBrokerPdf, matchesPdfTrade, combinePdfTrade } from '.
 import { backfillTradeName, knownTradeNames, needsTradeName } from './trade-name.js';
 
 export function registerTradeImportRoutes(app, {
-  config, store, portfolioDb, quotes, requireStockPermission, lookupInstrumentName,
+  config, store, portfolio, quotes, requireStockPermission, lookupInstrumentName,
   openingFundsForAccount, completePortfolioFundQuote, describeReinvestment, backfillSavedTrades, portfolioForRequest
 }) {
-  function brokerImportPlan(req, trades, data) {
+  async function brokerImportPlan(req, trades, data) {
     if (trades.pdfImportInfo) {
       const { currencies, ...info } = trades.pdfImportInfo;
-      const owned = investmentRows(portfolioDb, currentPortfolioUserId());
+      const owned = await portfolio.investmentRows();
       const accounts = [], missingCurrencies = [];
       for (const cur of currencies) {
         const id = req.query[cur === 'USD' ? 'usdAccountId' : 'hkdAccountId'] || req.query.accountId;
@@ -47,13 +47,13 @@ export function registerTradeImportRoutes(app, {
       return { accounts, summary, preview, trades: merged };
     }
     if (trades.fundImportInfo) {
-      const account = investmentRows(portfolioDb, currentPortfolioUserId()).find(a => a.id === req.query.accountId && a.currency === 'CNY');
+      const account = (await portfolio.investmentRows()).find(a => a.id === req.query.accountId && a.currency === 'CNY');
       if (!account) throw new Error('基金交割单请选择本人名下的人民币证券账户');
       const plan = mergeBbaeTrades(data.trades, trades, account.id);
       return { ...plan, summary: { ...plan.summary, ...trades.fundImportInfo } };
     }
     const eastmoney = !!trades.importInfo;
-    const account = investmentRows(portfolioDb, currentPortfolioUserId()).find(a => a.id === req.query.accountId && a.currency === (eastmoney ? 'CNY' : 'USD'));
+    const account = (await portfolio.investmentRows()).find(a => a.id === req.query.accountId && a.currency === (eastmoney ? 'CNY' : 'USD'));
     if (!account) throw new Error(eastmoney ? '东方财富导入请选择本人名下的人民币证券账户' : 'BBAE 导入请选择本人名下的美元证券账户');
     return eastmoney ? mergeEastmoneyTrades(data.trades, trades, account.id, { repoInterestStart: req.query.repoInterestStart || new Date(Date.parse(account.baseline_at) + 8 * 3600000).toISOString().slice(0,10), baselineAt: account.baseline_at, baselineExcluded: req.query.repoInterestBaselineExcluded === '1' }) : mergeBbaeTrades(data.trades, trades, account.id);
   }
@@ -74,7 +74,7 @@ export function registerTradeImportRoutes(app, {
     for (let i = 0; i < trades.length; i++) trades[i] = backfillTradeName(trades[i], names);
   }
 
-  const importAccount = req => investmentRows(portfolioDb, currentPortfolioUserId()).find(a => a.id === req.query.accountId);
+  const importAccount = async req => (await portfolio.investmentRows()).find(a => a.id === req.query.accountId);
   const importFileLimit = 20 * 1024 * 1024;
   const isBrokerImport = trades => !!(trades.pdfImportInfo || trades.importInfo || trades.fundImportInfo || trades[0]?.broker === 'bbae');
   const importContentTypes = ['application/octet-stream', 'application/pdf', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
@@ -94,9 +94,9 @@ export function registerTradeImportRoutes(app, {
     return parseBrokerPdf(file, header ? decodeURIComponent(header) : String(defaultPassword || ''), parsing);
   }
 
-  function stillHeldSymbols(data, candidates) {
+  async function stillHeldSymbols(data, candidates) {
     if (!candidates.size) return [];
-    const trades = [...openingFundTrades(openingFundsForAccount()), ...data.trades].filter(t => candidates.has(t.symbol));
+    const trades = [...openingFundTrades(await openingFundsForAccount()), ...data.trades].filter(t => candidates.has(t.symbol));
     return [...new Set(deriveHoldings(trades).map(h => h.symbol))];
   }
 
@@ -122,8 +122,8 @@ export function registerTradeImportRoutes(app, {
           importQuoteQueue.delete(user);
           await runWithPortfolioUser(user, async () => {
             try {
-              const before = store.read();
-              const started = stillHeldSymbols(before, candidates);
+              const before = await store.read();
+              const started = await stillHeldSymbols(before, candidates);
               const [fetched, hkdRate] = await Promise.all([
                 mapWithConcurrency(started, 3, async symbol => {
                   try { return [symbol, await quotes.getQuote(symbol)]; }
@@ -135,15 +135,15 @@ export function registerTradeImportRoutes(app, {
                 }) : null
               ]);
               if (!fetched.some(([, quote]) => quote?.price > 0) && !(hkdRate > 0)) return;
-              const latest = store.read();
-              const held = new Set(stillHeldSymbols(latest, candidates));
+              const latest = await store.read();
+              const held = new Set(await stillHeldSymbols(latest, candidates));
               const updated = fetched.filter(([symbol, quote]) => held.has(symbol) && quote?.price > 0
                 && JSON.stringify(latest.quotes[symbol]) === JSON.stringify(before.quotes[symbol])
                 && !(fundIdentifier(symbol) && latest.quotes[symbol]?.asOf > quote.asOf));
               const rates = missingHkdRate(latest) && Number.isFinite(hkdRate) && hkdRate > 0 ? { usdHkdRate: hkdRate } : {};
               for (const entry of updated) entry[1] = completePortfolioFundQuote(entry[1], latest.quotes[entry[0]]);
               if (updated.length || rates.usdHkdRate) {
-                store.write({ ...latest, ...rates, quotes: { ...latest.quotes, ...Object.fromEntries(updated) } }, { externalSync: true });
+                await store.write({ ...latest, ...rates, quotes: { ...latest.quotes, ...Object.fromEntries(updated) } }, { externalSync: true });
               }
             } catch (error) {
               console.warn('导入后行情更新失败:', error.message);
@@ -168,11 +168,11 @@ export function registerTradeImportRoutes(app, {
       const trades = await importRequestTrades(buf, req, reply.progress);
       if (!trades.length && !isBrokerImport(trades)) return reply.finish({ error: '未解析到有效记录' }, 400);
       reply.progress('match');
-      const data = store.read();
+      const data = await store.read();
       await fillImportedNames(trades, data);
-      const plan = isBrokerImport(trades) ? brokerImportPlan(req, trades, data) : null;
+      const plan = isBrokerImport(trades) ? await brokerImportPlan(req, trades, data) : null;
       const rows = plan?.preview || trades;
-      const history = importHistoryPlan(buf, rows, plan?.accounts ?? importAccount(req), plan ? 'merge' : String(req.query.mode || 'merge'));
+      const history = importHistoryPlan(buf, rows, plan?.accounts ?? await importAccount(req), plan ? 'merge' : String(req.query.mode || 'merge'));
       const pageSize = 50;
       const pages = Math.max(1, Math.ceil(rows.length / pageSize));
       const page = Math.min(pages, Math.max(1, Math.trunc(Number(req.query.page) || 1)));
@@ -202,14 +202,14 @@ export function registerTradeImportRoutes(app, {
       const imported = await importRequestTrades(file, req, reply.progress);
       if (!imported.length) return reply.finish({ error: isBrokerImport(imported) ? '单据没有本次支持的可导入交易，请查看预览中的未导入原因' : '未解析到有效记录' }, 400);
       reply.progress('match');
-      await fillImportedNames(imported, store.read());
+      await fillImportedNames(imported, await store.read());
       const mode = String(req.query.mode || 'merge');
-      const build = () => {
-        const data = store.read();
-        const account = importAccount(req);
+      const build = async () => {
+        const data = await store.read();
+        const account = await importAccount(req);
         const broker = isBrokerImport(imported);
         if (broker && mode !== 'merge') throw new Error('券商导出可能只含部分日期，请使用合并模式，避免删除其他交易');
-        const plan = broker ? brokerImportPlan(req, imported, data) : null;
+        const plan = broker ? await brokerImportPlan(req, imported, data) : null;
         if (plan?.summary.missingCurrencies?.length) {
           throw new Error(`请选择本人名下 ${plan.summary.missingCurrencies.join('、')} 对应币种的证券账户`);
         }
@@ -227,13 +227,13 @@ export function registerTradeImportRoutes(app, {
         const linkedAccounts = new Set((plan?.accounts ?? [account]).filter(row => row?.bookkeeping_id).map(row => row.id));
         return { data, trades, selected, linkedAccounts, importSummary: plan?.summary };
       };
-      let result = build();
+      let result = await build();
       const needed = [...new Set(result.selected.filter(t => t.type !== 'other' && result.linkedAccounts.has(t.account_id))
         .map(t => t.symbol).filter(s => !(result.data.quotes[s]?.price > 0)))];
       if (needed.length) {
         reply.progress('quotes');
         const fetched = await mapWithConcurrency(needed, 4, async symbol => [symbol, await quotes.getQuote(symbol).catch(() => null)]);
-        result = build();
+        result = await build();
         for (const [symbol, quote] of fetched) if (quote?.price > 0 && !(result.data.quotes[symbol]?.price > 0)) result.data.quotes[symbol] = quote;
       }
       const { data, trades, selected, importSummary } = result;
@@ -252,15 +252,15 @@ export function registerTradeImportRoutes(app, {
         usdHkdRate: data.usdHkdRate
       });
       Object.assign(data, recalc);
-      const saved = store.write(data, { externalSync: true });
-      backfillSavedTrades(changed);
+      const saved = await store.write(data, { externalSync: true });
+      await backfillSavedTrades(changed);
       for (const account of saved.investmentAccounts || []) {
         for (const symbol of account.missingQuotes) quoteCandidates.add(symbol);
       }
-      const refreshSymbols = stillHeldSymbols(saved, quoteCandidates);
+      const refreshSymbols = await stillHeldSymbols(saved, quoteCandidates);
       const importHkdRatePending = Boolean(missingHkdRate(saved));
       queueImportedHoldingQuotes(refreshSymbols, importHkdRatePending);
-      reply.finish({ ...portfolioForRequest(req, saved), importSummary, historicalBackfillCount: selected.length,
+      reply.finish({ ...(await portfolioForRequest(req, saved)), importSummary, historicalBackfillCount: selected.length,
         importQuoteRefreshCount: refreshSymbols.length, importHkdRatePending });
     } catch (e) {
       reply.finish({ error: e.message }, 400);

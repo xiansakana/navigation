@@ -44,19 +44,19 @@ export function executionPlanState(plan, now = new Date()) {
   return '待执行';
 }
 
-export function commitExecution(store, body, prepared, writePortfolio) {
-  const round = store.getRound();
+export async function commitExecution(store, body, prepared, writePortfolio) {
+  const round = await store.getRound();
   const current = round.executionPlans?.[body.tier];
   if (!current || current.id !== body.planId || current.inFlight) throw new Error('计划已变化或写入待核对');
   current.inFlight = body.requestId;
-  store.setRound(round);
-  const result = writePortfolio();
-  store.markExecuted(body.tier, { usd: prepared.usd, cashUsd: prepared.cashUsd,
+  await store.setRound(round);
+  const result = await writePortfolio();
+  await store.markExecuted(body.tier, { usd: prepared.usd, cashUsd: prepared.cashUsd,
     cashCny: prepared.cashCny, complete: prepared.plan.legs.every((leg) => leg.complete), note: body.note });
-  const updated = store.getRound();
+  const updated = await store.getRound();
   prepared.plan.receipts[body.requestId] = new Date().toISOString();
   updated.executionPlans[body.tier] = prepared.plan;
-  store.setRound(updated);
+  await store.setRound(updated);
   return result;
 }
 

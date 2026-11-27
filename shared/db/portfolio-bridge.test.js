@@ -41,28 +41,14 @@ function hasSqliteBindings() {
 
 const HAS_SQLITE = hasSqliteBindings();
 
-test('cash, FX metadata and bridge trades stay with the selected user', { skip: !HAS_SQLITE }, () => {
-  withTempDb(() => {
-    setPortfolioCash({ cashUsd: 100, fxSource: 'a-source' }, { userId: 'a' });
-    setPortfolioCash({ cashUsd: 200, fxSource: 'b-source' }, { userId: 'b' });
-    appendTradesApplyCash([{ type: 'buy', symbol: 'AAPL', name: 'Apple', shares: 1, price: 10 }], { userId: 'a' });
-    assert.equal(getPortfolioCash({ userId: 'a' }).cashUsd, 90);
-    assert.equal(getPortfolioCash({ userId: 'b' }).cashUsd, 200);
-    assert.equal(getPortfolioCash({ userId: 'a' }).fxSource, 'a-source');
-    assert.equal(getPortfolioCash({ userId: 'b' }).fxSource, 'b-source');
-    assert.equal(getPortfolioStore({ userId: 'b' }).read().trades.length, 0);
-    assert.equal(getPortfolioCash().cashUsd, 0);
-  });
-});
-
-function withTempDb(fn) {
+async function withTempDb(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'portfolio-bridge-'));
   const dbPath = path.join(dir, 'navigation.db');
   const prev = process.env.NAVIGATION_DB_PATH;
   process.env.NAVIGATION_DB_PATH = dbPath;
   resetPortfolioBridge();
   try {
-    return runWithPortfolioUser('test-user', () => fn(dbPath));
+    return await runWithPortfolioUser('test-user', () => fn(dbPath));
   } finally {
     resetPortfolioBridge();
     if (prev == null) delete process.env.NAVIGATION_DB_PATH;
@@ -74,6 +60,20 @@ function withTempDb(fn) {
     }
   }
 }
+
+test('cash, FX metadata and bridge trades stay with the selected user', { skip: !HAS_SQLITE }, async () => {
+  await withTempDb(async () => {
+    await setPortfolioCash({ cashUsd: 100, fxSource: 'a-source' }, { userId: 'a' });
+    await setPortfolioCash({ cashUsd: 200, fxSource: 'b-source' }, { userId: 'b' });
+    await appendTradesApplyCash([{ type: 'buy', symbol: 'AAPL', name: 'Apple', shares: 1, price: 10 }], { userId: 'a' });
+    assert.equal((await getPortfolioCash({ userId: 'a' })).cashUsd, 90);
+    assert.equal((await getPortfolioCash({ userId: 'b' })).cashUsd, 200);
+    assert.equal((await getPortfolioCash({ userId: 'a' })).fxSource, 'a-source');
+    assert.equal((await getPortfolioCash({ userId: 'b' })).fxSource, 'b-source');
+    assert.equal((await (await getPortfolioStore({ userId: 'b' })).read()).trades.length, 0);
+    assert.equal((await getPortfolioCash()).cashUsd, 0);
+  });
+});
 
 test('legsToTradeInputs maps equity and call legs', () => {
   const inputs = legsToTradeInputs([
@@ -96,10 +96,10 @@ test('legsToTradeInputs maps sell side', () => {
   assert.equal(inputs[0].type, 'sell');
 });
 
-test('setPortfolioCash then getPortfolioCash round-trip', { skip: !HAS_SQLITE }, () => {
-  withTempDb(() => {
-    setPortfolioCash({ cashUsd: 1000, cashCny: 7000, usdCnyRate: 7, fxSource: 'test', fxUpdatedAt: '2026-01-01T00:00:00.000Z' });
-    const cash = getPortfolioCash();
+test('setPortfolioCash then getPortfolioCash round-trip', { skip: !HAS_SQLITE }, async () => {
+  await withTempDb(async () => {
+    await setPortfolioCash({ cashUsd: 1000, cashCny: 7000, usdCnyRate: 7, fxSource: 'test', fxUpdatedAt: '2026-01-01T00:00:00.000Z' });
+    const cash = await getPortfolioCash();
     assert.equal(cash.cashUsd, 1000);
     assert.equal(cash.cashCny, 7000);
     assert.equal(cash.usdCnyRate, 7);
@@ -107,24 +107,24 @@ test('setPortfolioCash then getPortfolioCash round-trip', { skip: !HAS_SQLITE },
   });
 });
 
-test('migrateDipCashOnce imports only empty pockets once', { skip: !HAS_SQLITE }, () => {
-  withTempDb(() => {
-    setPortfolioCash({ cashUsd: 500, cashCny: 0, usdCnyRate: 7.2 });
-    const first = migrateDipCashOnce({ cashUsd: 999, cashCny: 8000, usdCnyRate: 7 });
+test('migrateDipCashOnce imports only empty pockets once', { skip: !HAS_SQLITE }, async () => {
+  await withTempDb(async () => {
+    await setPortfolioCash({ cashUsd: 500, cashCny: 0, usdCnyRate: 7.2 });
+    const first = await migrateDipCashOnce({ cashUsd: 999, cashCny: 8000, usdCnyRate: 7 });
     assert.equal(first.cash.cashUsd, 500);
     assert.equal(first.cash.cashCny, 8000);
     assert.equal(first.migrated, true);
 
-    const second = migrateDipCashOnce({ cashUsd: 1, cashCny: 1 });
+    const second = await migrateDipCashOnce({ cashUsd: 1, cashCny: 1 });
     assert.equal(second.migrated, false);
     assert.equal(second.cash.cashUsd, 500);
     assert.equal(second.cash.cashCny, 8000);
   });
 });
 
-test('execute legs write trades and deduct form cash once', { skip: !HAS_SQLITE }, () => {
-  withTempDb(() => {
-    setPortfolioCash({ cashUsd: 10000, cashCny: 70000, usdCnyRate: 7 });
+test('execute legs write trades and deduct form cash once', { skip: !HAS_SQLITE }, async () => {
+  await withTempDb(async () => {
+    await setPortfolioCash({ cashUsd: 10000, cashCny: 70000, usdCnyRate: 7 });
     const inputs = legsToTradeInputs([
       { kind: 'equity', symbol: '159509', currency: 'CNY', shares: 100, price: 1.5, cny: 150 },
       { kind: 'equity', symbol: 'QQQ', currency: 'USD', shares: 10, price: 400, usd: 4000 },
@@ -133,7 +133,7 @@ test('execute legs write trades and deduct form cash once', { skip: !HAS_SQLITE 
 
     assert.equal(inputs.length, 3);
 
-    const result = appendTradesDeductFormCash({
+    const result = await appendTradesDeductFormCash({
       trades: inputs,
       deductCashUsd: 4400,
       deductCashCny: 150
@@ -143,8 +143,8 @@ test('execute legs write trades and deduct form cash once', { skip: !HAS_SQLITE 
     assert.equal(result.cash.cashUsd, 5600);
     assert.equal(result.cash.cashCny, 69850);
 
-    const store = getPortfolioStore();
-    const data = store.read();
+    const store = await getPortfolioStore();
+    const data = await store.read();
     const symbols = data.trades.map((t) => t.symbol).sort();
     assert.deepEqual(symbols, ['159509', 'QQQ', 'QQQ260116C00400000'].sort());
     assert.equal(data.cashUsd, 5600);
@@ -152,13 +152,13 @@ test('execute legs write trades and deduct form cash once', { skip: !HAS_SQLITE 
   });
 });
 
-test('sell legs apply cash via trade deltas', { skip: !HAS_SQLITE }, () => {
-  withTempDb(() => {
-    setPortfolioCash({ cashUsd: 1000, cashCny: 0, usdCnyRate: 7 });
+test('sell legs apply cash via trade deltas', { skip: !HAS_SQLITE }, async () => {
+  await withTempDb(async () => {
+    await setPortfolioCash({ cashUsd: 1000, cashCny: 0, usdCnyRate: 7 });
     const inputs = legsToTradeInputs([
       { kind: 'equity', side: 'sell', symbol: 'QQQ', currency: 'USD', shares: 5, price: 420 }
     ]);
-    const result = appendTradesApplyCash(inputs);
+    const result = await appendTradesApplyCash(inputs);
     assert.equal(result.trades.length, 1);
     assert.equal(result.trades[0].type, 'sell');
     assert.equal(result.cash.cashUsd, 1000 + 5 * 420);

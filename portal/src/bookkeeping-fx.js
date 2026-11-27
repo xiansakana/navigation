@@ -25,9 +25,10 @@ export function effectiveBookkeepingFx(settings, now = Date.now()) {
 export async function refreshBookkeepingFx(store, userId, fxService = getService()) {
   const result = await fxService.getRates();
   const quotes = { ...result.quotes };
-  for (const [c, previous] of Object.entries(store.settings(userId).autoRates || {})) {
+  const before = await store.settings(userId);
+  for (const [c, previous] of Object.entries(before.autoRates || {})) {
     if (!quotes[c]) quotes[c] = { ...previous, stale: true };
   }
-  store.saveAutoRates(userId, quotes);
-  return { ...effectiveBookkeepingFx(store.settings(userId)), errors: result.errors };
+  await store.saveAutoRates(userId, quotes);
+  return { ...effectiveBookkeepingFx(await store.settings(userId)), errors: result.errors };
 }

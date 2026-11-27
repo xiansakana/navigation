@@ -56,7 +56,7 @@ export function registerQuantRoutes(app, { config, store, quotes, quantUserId, r
   const quantBacktestStore = database ? createPostgresQuantBacktestStore(database) : createQuantBacktestStore(config);
 
   async function analyzeQuantSymbols(rawSymbols, rawPeriod, rawConfig, userId = 'local') {
-      const data = store.read();
+      const data = await store.read();
       const holdings = deriveHoldings(data.trades);
       const holdingMap = new Map(holdings.map((holding) => [normalizeSymbol(holding.symbol), holding]));
       const saved = (await quantStore.read(userId)).settings;

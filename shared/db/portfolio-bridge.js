@@ -1,59 +1,54 @@
-import { getDatabase, closeDatabase } from './connection.js';
-import { createPortfolioStore, DEFAULT_USD_CNY_RATE, legacyPortfolioOwner } from './portfolio-store.js';
 import { currentPortfolioUserId, requirePortfolioUserId } from '../portfolio-user.js';
-import { dipCashFunds } from '../dip-cash-funds.js';
+import { createPortfolioBackend } from './portfolio-runtime.js';
+import { DEFAULT_USD_CNY_RATE } from './portfolio-store.js';
 import {
   normalizeTrade,
   applyCashDelta,
   roundMoney
 } from '../../stock-manage/src/trades.js';
 
-let storeSingleton = null;
-let dbSingleton = null;
-let storeUserId = null;
+let configuredBackend = null;
 
-function metaApi(db, userId) {
-  requirePortfolioUserId(userId);
-  return {
-    get: { get: (key) => db.prepare('SELECT value FROM portfolio_user_meta WHERE user_id=? AND key=?').get(userId, key) },
-    set: { run: (key, value) => db.prepare(`INSERT INTO portfolio_user_meta(user_id,key,value) VALUES(?,?,?)
-      ON CONFLICT (user_id,key) DO UPDATE SET value = excluded.value`).run(userId, key, value) }
-  };
+export function configurePortfolioBackend(backend) {
+  configuredBackend = backend;
+  return backend;
 }
 
-export function getPortfolioStore(options = {}) {
-  const db = getDatabase({ dbPath: options.dbPath });
-  const userId = requirePortfolioUserId(options.userId ?? currentPortfolioUserId() ?? legacyPortfolioOwner(db));
-  if (storeSingleton && dbSingleton === db && storeUserId === userId) return storeSingleton;
-  dbSingleton = db;
-  storeSingleton = createPortfolioStore(db, userId);
-  storeUserId = userId;
-  return storeSingleton;
-}
-
-/** Reset singleton (tests). */
 export function resetPortfolioBridge() {
-  storeSingleton = null;
-  dbSingleton = null;
-  closeDatabase();
+  configuredBackend = null;
 }
 
-function readFxMeta(db, userId) {
-  const get = metaApi(db, userId).get;
-  const fxSource = get.get('fxSource')?.value || null;
-  const fxUpdatedAt = get.get('fxUpdatedAt')?.value || null;
-  return {
-    fxSource: fxSource || null,
-    fxUpdatedAt: fxUpdatedAt || null
-  };
+async function backendFor(options = {}) {
+  if (!configuredBackend) configuredBackend = await createPortfolioBackend({ dbPath: options.dbPath });
+  return configuredBackend;
+}
+
+async function resolveUser(backend, explicit) {
+  return requirePortfolioUserId(explicit ?? currentPortfolioUserId() ?? await backend.defaultUserId());
+}
+
+export async function getPortfolioStore(options = {}) {
+  const backend = await backendFor(options);
+  return backend.storeFor(await resolveUser(backend, options.userId));
+}
+
+async function readFxMeta(backend, userId) {
+  const [fxSource, fxUpdatedAt] = await Promise.all([
+    backend.meta(userId, 'fxSource'),
+    backend.meta(userId, 'fxUpdatedAt')
+  ]);
+  return { fxSource: fxSource || null, fxUpdatedAt: fxUpdatedAt || null };
 }
 
 /** Shared cash: cashUsd / cashCny / usdCnyRate (+ optional FX metadata). */
-export function getPortfolioCash(options = {}) {
-  const store = getPortfolioStore(options);
-  const data = store.read();
-  const fx = readFxMeta(dbSingleton, store.userId);
-  const funds = dipCashFunds(dbSingleton, store.userId, data);
+export async function getPortfolioCash(options = {}) {
+  const backend = await backendFor(options);
+  const store = backend.storeFor(await resolveUser(backend, options.userId));
+  const data = await store.read();
+  const [fx, funds] = await Promise.all([
+    readFxMeta(backend, store.userId),
+    backend.dipFunds(store.userId, data)
+  ]);
   const strategyCash = (cur) => funds.filter((f) => f.currency === cur && !f.deficit).reduce((sum, f) => sum + f.strategyAvailable, 0);
   return {
     strategyCashUsd: strategyCash('USD'), strategyCashCny: strategyCash('CNY'), strategyFunds: funds,
@@ -66,24 +61,20 @@ export function getPortfolioCash(options = {}) {
   };
 }
 
-export function setPortfolioCash(patch = {}, options = {}) {
-  const store = getPortfolioStore(options);
-  const data = store.read();
+export async function setPortfolioCash(patch = {}, options = {}) {
+  const backend = await backendFor(options);
+  const store = backend.storeFor(await resolveUser(backend, options.userId));
+  const data = await store.read();
   if (data.accountCashEnabled && (('cashUsd' in patch && Number(patch.cashUsd) !== data.cashUsd) || ('cashCny' in patch && Number(patch.cashCny) !== data.cashCny))) throw new Error('账户现金已自动汇总，请在证券账户中核对现金');
   if (patch.cashUsd != null) data.cashUsd = roundMoney(Number(patch.cashUsd) || 0);
   if (patch.cashCny != null) data.cashCny = roundMoney(Number(patch.cashCny) || 0);
   if (patch.usdCnyRate != null && Number(patch.usdCnyRate) > 0) {
     data.usdCnyRate = Number(patch.usdCnyRate);
   }
-  store.write(data);
+  await store.write(data);
 
-  const meta = metaApi(dbSingleton, store.userId);
-  if (patch.fxSource !== undefined) {
-    meta.set.run('fxSource', patch.fxSource == null ? '' : String(patch.fxSource));
-  }
-  if (patch.fxUpdatedAt !== undefined) {
-    meta.set.run('fxUpdatedAt', patch.fxUpdatedAt == null ? '' : String(patch.fxUpdatedAt));
-  }
+  if (patch.fxSource !== undefined) await backend.setMeta(store.userId, 'fxSource', patch.fxSource);
+  if (patch.fxUpdatedAt !== undefined) await backend.setMeta(store.userId, 'fxUpdatedAt', patch.fxUpdatedAt);
   return getPortfolioCash(options);
 }
 
@@ -91,15 +82,15 @@ export function setPortfolioCash(patch = {}, options = {}) {
  * One-time migrate: for each pocket, if portfolio is 0 and dip > 0, copy dip.
  * Holdings page wins when portfolio already has balances.
  */
-export function migrateDipCashOnce(dipCash = {}, options = {}) {
-  const store = getPortfolioStore(options);
-  const meta = metaApi(dbSingleton, store.userId);
-  const flag = meta.get.get('dip_cash_migrated');
-  if (flag?.value === '1') {
-    return { migrated: false, cash: getPortfolioCash(options) };
+export async function migrateDipCashOnce(dipCash = {}, options = {}) {
+  const backend = await backendFor(options);
+  const store = backend.storeFor(await resolveUser(backend, options.userId));
+  const flag = await backend.meta(store.userId, 'dip_cash_migrated');
+  if (flag === '1') {
+    return { migrated: false, cash: await getPortfolioCash(options) };
   }
 
-  const data = store.read();
+  const data = await store.read();
   let cashUsd = Number(data.cashUsd) || 0;
   let cashCny = Number(data.cashCny) || 0;
   let usdCnyRate = Number(data.usdCnyRate) > 0 ? Number(data.usdCnyRate) : DEFAULT_USD_CNY_RATE;
@@ -125,12 +116,12 @@ export function migrateDipCashOnce(dipCash = {}, options = {}) {
     data.cashUsd = cashUsd;
     data.cashCny = cashCny;
     data.usdCnyRate = usdCnyRate;
-    store.write(data);
-    if (dipCash.fxSource != null) meta.set.run('fxSource', String(dipCash.fxSource));
-    if (dipCash.fxUpdatedAt != null) meta.set.run('fxUpdatedAt', String(dipCash.fxUpdatedAt));
+    await store.write(data);
+    if (dipCash.fxSource != null) await backend.setMeta(store.userId, 'fxSource', String(dipCash.fxSource));
+    if (dipCash.fxUpdatedAt != null) await backend.setMeta(store.userId, 'fxUpdatedAt', String(dipCash.fxUpdatedAt));
   }
-  meta.set.run('dip_cash_migrated', '1');
-  return { migrated: changed, cash: getPortfolioCash(options) };
+  await backend.setMeta(store.userId, 'dip_cash_migrated', '1');
+  return { migrated: changed, cash: await getPortfolioCash(options) };
 }
 
 /** Map dip buyPreview / sell legs to stock-manage trade inputs. */
@@ -201,14 +192,14 @@ export function legsToTradeInputs(legs = [], extras = {}) {
  * Append trades WITHOUT applying per-trade cash deltas, then deduct form cash once.
  * Form amounts are the cash truth (plan default).
  */
-export function appendTradesDeductFormCash({
+export async function appendTradesDeductFormCash({
   trades = [],
   deductCashUsd = 0,
   deductCashCny = 0,
   options = {}
 } = {}) {
-  const store = getPortfolioStore(options);
-  const data = store.read();
+  const store = await getPortfolioStore(options);
+  const data = await store.read();
   if (data.accountCashEnabled) throw new Error('已启用证券账户，请在股票管理中选择账户记录抄底交易，避免计划金额与实际成交重复扣款');
   const created = [];
 
@@ -229,20 +220,20 @@ export function appendTradesDeductFormCash({
   const cnySpend = Math.max(0, roundMoney(Number(deductCashCny) || 0));
   data.cashUsd = Math.max(0, roundMoney((Number(data.cashUsd) || 0) - usdSpend));
   data.cashCny = Math.max(0, roundMoney((Number(data.cashCny) || 0) - cnySpend));
-  store.write(data);
+  await store.write(data);
 
   return {
     trades: created,
-    cash: getPortfolioCash(options)
+    cash: await getPortfolioCash(options)
   };
 }
 
 /**
  * Manual sell/buy: apply cash via each trade's native delta.
  */
-export function appendTradesApplyCash(tradeInputs = [], options = {}) {
-  const store = getPortfolioStore(options);
-  const data = store.read();
+export async function appendTradesApplyCash(tradeInputs = [], options = {}) {
+  const store = await getPortfolioStore(options);
+  const data = await store.read();
   const created = [];
   let cashState = {
     cashUsd: Number(data.cashUsd) || 0,
@@ -266,6 +257,6 @@ export function appendTradesApplyCash(tradeInputs = [], options = {}) {
   data.cashUsd = cashState.cashUsd;
   data.cashCny = cashState.cashCny;
   data.usdCnyRate = cashState.usdCnyRate;
-  store.write(data, { strategyFundId: options.strategyFundId });
-  return { trades: created, cash: getPortfolioCash(options) };
+  await store.write(data, { strategyFundId: options.strategyFundId });
+  return { trades: created, cash: await getPortfolioCash(options) };
 }

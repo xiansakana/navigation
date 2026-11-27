@@ -1,14 +1,19 @@
 import { registerExecutionRoutes } from './execution-routes.js';
 import { serveUiAsset } from '../../shared/ui-assets.js';
 import { portfolioIdentityMiddleware, currentPortfolioUserId } from '../../shared/portfolio-user.js';
-import { legacyPortfolioOwner } from '../../shared/db/portfolio-store.js';
 import { getDatabase } from '../../shared/db/index.js';
+import { createPostgresPool } from '../../shared/db/postgres/pool.js';
+import { verifyConfiguredPostgres } from '../../shared/db/postgres/readiness.js';
+import { postgresUrlFor } from '../../shared/db/postgres/config.js';
+import { createPortfolioBackend } from '../../shared/db/portfolio-runtime.js';
+import { configurePortfolioBackend } from '../../shared/db/portfolio-bridge.js';
 import { configureQuoteNetwork } from '../../shared/quote-network.js';
 import express from 'express';
+import pg from 'pg';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.js';
-import { createStore } from './store.js';
+import { openStore } from './store-runtime.js';
 import { createQuoteService } from './quotes.js';
 import { createMonitor } from './monitor.js';
 import { maskNotifyForClient } from './notify.js';
@@ -17,7 +22,6 @@ import { marketStatus, latestCompletedSession } from './market-hours.js';
 import { evaluate } from './playbook.js';
 import { createDocService } from './docs.js';
 import { watchCash } from './cash-sync.js';
-import { getPortfolioStore } from '../../shared/db/portfolio-bridge.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -31,12 +35,24 @@ try {
   process.exit(1);
 }
 
-const store = createStore(config);
+const portfolioUrl = postgresUrlFor('portfolio');
+const portfolioDatabase = portfolioUrl && createPostgresPool(pg.Pool, portfolioUrl, 'navigation-qqq-dip');
+if (portfolioDatabase) await verifyConfiguredPostgres(portfolioDatabase);
+const bookkeepingUrl = postgresUrlFor('bookkeeping');
+const bookkeepingDatabase = bookkeepingUrl && createPostgresPool(pg.Pool, bookkeepingUrl, 'navigation-qqq-dip');
+if (bookkeepingDatabase) await verifyConfiguredPostgres(bookkeepingDatabase);
+const portfolioDb = getDatabase({});
+const portfolioBackend = await createPortfolioBackend({
+  database: portfolioDatabase, sqlite: portfolioDb, bookkeepingDatabase
+});
+configurePortfolioBackend(portfolioBackend);
+
+const store = await openStore(config);
 // Repair the legacy use of a strategy instruction as the security name. Only
 // metadata changes; preserve IDs, fills, cash and all user-authored trade names.
 {
-  const portfolio = getPortfolioStore();
-  const data = portfolio.read();
+  const portfolio = await portfolioBackend.storeFor(await portfolioBackend.defaultUserId());
+  const data = await portfolio.read();
   let changed = false;
   for (const trade of data.trades || []) {
     if (trade.source === 'qqq-dip' && trade.symbol === '159509'
@@ -46,7 +62,7 @@ const store = createStore(config);
       changed = true;
     }
   }
-  if (changed) portfolio.write(data);
+  if (changed) await portfolio.write(data);
 }
 const quotes = createQuoteService(config);
 const docs = createDocService(PUBLIC);
@@ -112,13 +128,13 @@ function broadcast(event, data) {
 const FX_STALE_MS = 6 * 60 * 60 * 1000;
 
 async function maybeRefreshFx() {
-  const cash = store.getCash();
+  const cash = await store.getCash();
   const updatedAt = cash.fxUpdatedAt ? Date.parse(cash.fxUpdatedAt) : 0;
   if (updatedAt && Date.now() - updatedAt < FX_STALE_MS) return;
   try {
     const fx = await quotes.getUsdCny();
     if (!fx?.rate || fx.rate <= 0) return;
-    store.setCash({
+    await store.setCash({
       ...cash,
       usdCnyRate: fx.rate,
       fxSource: fx.source,
@@ -148,11 +164,11 @@ app.get('/api/internal/notification-settings', createInternalNotificationSetting
   getStatus: () => monitor.status()
 }));
 app.use(portfolioIdentityMiddleware);
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   // The existing monitoring round/lots/notifications are a single-owner service.
   // Until those are multi-user too, never expose them or their cash bridge to others.
   if (req.path.startsWith('/api/') && req.path !== '/api/health'
-      && currentPortfolioUserId() !== legacyPortfolioOwner(getDatabase())) {
+      && currentPortfolioUserId() !== await portfolioBackend.defaultUserId()) {
     return res.status(403).json({ error: '该抄底监控属于原账户，暂不支持其他用户访问' });
   }
   next();
@@ -168,12 +184,12 @@ app.use((req, res, next) => {
 });
 app.use(express.static(PUBLIC));
 
-function liveEval() {
+async function liveEval() {
   const now = new Date();
   const market = marketStatus(now);
-  const cash = store.getCash();
-  const settings = store.getSettings();
-  const markets = store.getQuotes();
+  const cash = await store.getCash();
+  const settings = await store.getSettings();
+  const markets = await store.getQuotes();
   const prev = monitor.getEvaluation() || {};
   return evaluate({
     cashUsd: cash.strategyCashUsd ?? cash.cashUsd,
@@ -181,7 +197,7 @@ function liveEval() {
     usdCnyRate: cash.usdCnyRate,
     variant: settings.variant,
     soxlEnabled: settings.soxlEnabled,
-    round: store.getRound(),
+    round: await store.getRound(),
     now,
     rth: market.rth,
     sessionDate: market.ymd,
@@ -195,36 +211,36 @@ function liveEval() {
     cnyProxy: markets['159509'],
     qqqOvernight: markets.qqqOvernight || null,
     cnyFunds: Object.fromEntries(['159509', '513850', '161128'].map((s) => [s, markets[s]])),
-    lots: store.getLots(),
+    lots: await store.getLots(),
     suggestedContracts: prev.suggestedContracts || []
   });
 }
 
-function refreshEvaluation() {
-  const evaluation = liveEval();
-  monitor.setEvaluation(evaluation);
+async function refreshEvaluation() {
+  const evaluation = await liveEval();
+  await monitor.setEvaluation(evaluation);
   return evaluation;
 }
 
-function snapshot() {
-  const snap = monitor.buildSnapshot();
-  snap.evaluation = liveEval();
+async function snapshot() {
+  const snap = await monitor.buildSnapshot();
+  snap.evaluation = await liveEval();
   snap.evaluation.quoteErrors = monitor.getEvaluation()?.quoteErrors || {};
   snap.market = marketStatus();
   snap.notify = maskNotifyForClient(store.getNotify());
-  snap.actions = store.listActionRows({ limit: 20 });
+  snap.actions = await store.listActionRows({ limit: 20 });
   return snap;
 }
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'qqq-dip' }));
 
-app.get('/api/notification-settings', requireDip('qq-config'), (_req, res) => {
-  res.json({ ok: true, notify: maskNotifyForClient(store.getNotify()), monitor: monitor.status() });
+app.get('/api/notification-settings', requireDip('qq-config'), async (_req, res) => {
+  res.json({ ok: true, notify: maskNotifyForClient(store.getNotify()), monitor: await monitor.status() });
 });
 
 app.get('/api/state', async (_req, res) => {
   void maybeRefreshFx();
-  res.json(snapshot());
+  res.json(await snapshot());
 });
 
 app.get('/api/events', async (req, res) => {
@@ -234,19 +250,19 @@ app.get('/api/events', async (req, res) => {
     Connection: 'keep-alive'
   });
   void maybeRefreshFx();
-  const initial = snapshot();
+  const initial = await snapshot();
   res.write(`event: state\ndata: ${JSON.stringify(visibleState(req, initial))}\n\n`);
   sseClients.set(res, req);
-  const stopCash = canViewFunds(req) ? watchCash({ initialCash: initial.cash, read: () => store.getCash(), send: (cash) => {
-    res.write(`event: cash\ndata: ${JSON.stringify(visibleState(req, { cash, evaluation: liveEval() }))}\n\n`);
+  const stopCash = canViewFunds(req) ? watchCash({ initialCash: initial.cash, read: () => store.getCash(), send: async (cash) => {
+    res.write(`event: cash\ndata: ${JSON.stringify(visibleState(req, { cash, evaluation: await liveEval() }))}\n\n`);
   } }) : () => {};
   // Reconnect through Portal so an open stream cannot keep revoked permissions indefinitely.
   const recheck = setTimeout(() => res.end(), 30000);
   res.on('close', () => { clearTimeout(recheck); stopCash(); sseClients.delete(res); });
 });
 
-app.put('/api/cash', requireDip('cash', 'edit'), (req, res) => {
-  const prev = store.getCash();
+app.put('/api/cash', requireDip('cash', 'edit'), async (req, res) => {
+  const prev = await store.getCash();
   const body = req.body || {};
   if ('cashUsd' in body || 'cashCny' in body) return res.status(400).json({ error: '抄底现金来自专用预留，请在账户管理中划拨或释放，不能在此改写账户现金' });
   const next = {
@@ -262,8 +278,8 @@ app.put('/api/cash', requireDip('cash', 'edit'), (req, res) => {
     next.fxSource = body.fxSource || 'manual';
     next.fxUpdatedAt = body.fxUpdatedAt || new Date().toISOString();
   }
-  const cash = store.setCash(next);
-  store.addAction({
+  const cash = await store.setCash(next);
+  await store.addAction({
     type: 'cash',
     source: 'user',
     message: `现金更新：USD ${cash.cashUsd} / CNY ${cash.cashCny} / 汇率 ${cash.usdCnyRate}`
@@ -271,19 +287,19 @@ app.put('/api/cash', requireDip('cash', 'edit'), (req, res) => {
   res.json({
     ok: true,
     cash,
-    evaluation: refreshEvaluation(),
-    actions: store.listActionRows({ limit: 20 }),
-    monitor: monitor.status()
+    evaluation: await refreshEvaluation(),
+    actions: await store.listActionRows({ limit: 20 }),
+    monitor: await monitor.status()
   });
 });
 
-app.put('/api/settings', requireDip('settings', 'edit'), (req, res) => {
-  const settings = store.setSettings(req.body || {});
+app.put('/api/settings', requireDip('settings', 'edit'), async (req, res) => {
+  const settings = await store.setSettings(req.body || {});
   res.json({
     ok: true,
     settings,
-    evaluation: refreshEvaluation(),
-    monitor: monitor.status()
+    evaluation: await refreshEvaluation(),
+    monitor: await monitor.status()
   });
 });
 
@@ -300,20 +316,20 @@ function requireMonitorControl(req, res, next) {
   return res.status(403).json({ error: '无权控制抄底监听' });
 }
 
-app.post('/api/monitor/start', requireMonitorControl, (_req, res) => {
-  res.json({ ok: true, monitor: monitor.start() });
+app.post('/api/monitor/start', requireMonitorControl, async (_req, res) => {
+  res.json({ ok: true, monitor: await monitor.start() });
 });
 
-app.post('/api/monitor/stop', requireMonitorControl, (_req, res) => {
-  res.json({ ok: true, monitor: monitor.stop() });
+app.post('/api/monitor/stop', requireMonitorControl, async (_req, res) => {
+  res.json({ ok: true, monitor: await monitor.stop() });
 });
 
 app.post('/api/quotes/refresh', requireDip('refresh', 'edit'), async (_req, res) => {
   try {
     const ev = await monitor.tick({ silent: false });
-    res.json({ ok: true, evaluation: ev, monitor: monitor.status() });
+    res.json({ ok: true, evaluation: ev, monitor: await monitor.status() });
   } catch (e) {
-    res.status(502).json({ ok: false, error: e.message, monitor: monitor.status() });
+    res.status(502).json({ ok: false, error: e.message, monitor: await monitor.status() });
   }
 });
 
@@ -345,7 +361,6 @@ const { host, port } = config.server;
 app.listen(port, host, () => {
   console.log(`qqq-dip http://${host}:${port}`);
   if (store.getSettings().autoStart) {
-    monitor.start();
-    console.log('qqq-dip autoStart: 监听已启动');
+    void monitor.start().then(() => console.log('qqq-dip autoStart: 监听已启动'));
   }
 });

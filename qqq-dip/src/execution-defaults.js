@@ -69,11 +69,11 @@ export async function executionDefaults(plan, quotes, now = new Date()) {
 export function createExecutionDefaultsHandler({ store, quotes }) {
   return async (req, res) => {
     if (!canExecutePlan(req.headers['x-portal-permissions'])) return res.status(403).json({ error: '无档位成交登记权限' });
-    const current = store.getRound().executionPlans?.[req.params.tier];
+    const current = (await store.getRound()).executionPlans?.[req.params.tier];
     if (!current) return res.status(404).json({ error: '计划不存在' });
     const plan = structuredClone(current);
     const defaults = await executionDefaults(plan, quotes);
-    if (JSON.stringify(store.getRound().executionPlans?.[req.params.tier]) !== JSON.stringify(plan)) {
+    if (JSON.stringify((await store.getRound()).executionPlans?.[req.params.tier]) !== JSON.stringify(plan)) {
       return res.status(409).json({ error: '计划已变化，请关闭并重新打开' });
     }
     res.json(defaults);

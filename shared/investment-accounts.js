@@ -31,7 +31,8 @@ export function tradeAfterCashBaseline(trade, baseline) {
 
 // Linked bookkeeping balances already included these positions. Allocate their
 // value between cash and securities once, using the same marks as the account.
-export function allocateHistoricalPositions(db, userId, before, next, accounts, at) {
+// Pure planner shared by the SQLite store and the PostgreSQL repository.
+export function planHistoricalPositionAllocations({ before, next, accounts, at }) {
   const linked = new Set(accounts.filter(a => a.bookkeeping_id).map(a => a.id));
   const changes = new Map();
   for (const [trades, direction] of [[before.trades, -1], [next.trades, 1]]) {
@@ -42,24 +43,31 @@ export function allocateHistoricalPositions(db, userId, before, next, accounts, 
       changes.set(key, (changes.get(key) || new Decimal(0)).plus(shares));
     }
   }
-  const corrections = [];
-  const update = db.prepare('UPDATE investment_accounts SET baseline_cash=baseline_cash+? WHERE user_id=? AND id=?');
-  const audit = db.prepare("INSERT INTO investment_account_audit(user_id,account_id,action,data,at) VALUES(?,?,'historical-position-allocation',?,?)");
+  const corrections = [], updates = [], audits = [];
   for (const [key, shares] of changes) {
     if (shares.isZero()) continue;
     const [accountId, symbol] = JSON.parse(key);
-    const price = Number(next.quotes[symbol]?.price ?? before.quotes[symbol]?.price);
+    const price = Number(next.quotes?.[symbol]?.price ?? before.quotes?.[symbol]?.price);
     if (!(price > 0) || !Number.isFinite(price)) throw new Error(`${symbol} 缺少有效行情，暂不能从记账余额拆出历史持仓，请先刷新价格`);
     const adjustment = roundDecimal(shares.times(price).times(/^[A-Z]+\d{6}[CP]/.test(symbol) ? -10000 : -100), 0);
     if (!adjustment) continue;
-    update.run(adjustment, userId, accountId);
-    audit.run(userId, accountId, JSON.stringify({ symbol, shares: shares.toNumber(), price, adjustment }), at);
+    updates.push({ accountId, adjustment });
+    audits.push({ accountId, action: 'historical-position-allocation', data: { symbol, shares: shares.toNumber(), price, adjustment }, at });
     corrections.push({ accountId, adjustment, strategy: false });
   }
-  return corrections;
+  return { corrections, updates, audits };
 }
 
-export function applyHistoricalTradeCashCorrections(db, userId, previousTrades, nextTrades, accounts, at) {
+export function allocateHistoricalPositions(db, userId, before, next, accounts, at) {
+  const plan = planHistoricalPositionAllocations({ before, next, accounts, at });
+  const update = db.prepare('UPDATE investment_accounts SET baseline_cash=baseline_cash+? WHERE user_id=? AND id=?');
+  const audit = db.prepare("INSERT INTO investment_account_audit(user_id,account_id,action,data,at) VALUES(?,?,'historical-position-allocation',?,?)");
+  for (const { accountId, adjustment } of plan.updates) update.run(adjustment, userId, accountId);
+  for (const { accountId, data, at: capturedAt } of plan.audits) audit.run(userId, accountId, JSON.stringify(data), capturedAt);
+  return plan.corrections;
+}
+
+export function planHistoricalTradeCashCorrections({ previousTrades, nextTrades, accounts, at }) {
   const previous = new Map(previousTrades.map(trade => [trade.id, trade]));
   const baselines = new Map(accounts.map(account => [account.id, tradeCashBaseline(account)]));
   const corrections = [];
@@ -71,6 +79,11 @@ export function applyHistoricalTradeCashCorrections(db, userId, previousTrades, 
     const adjustment = roundDecimal(tradeCashAmount(trade).minus(tradeCashAmount(old)).times(100), 0);
     if (adjustment) corrections.push({ tradeId: trade.id, accountId: trade.account_id, adjustment, strategy: !!old.dip_fund_account });
   }
+  return corrections;
+}
+
+export function applyHistoricalTradeCashCorrections(db, userId, previousTrades, nextTrades, accounts, at) {
+  const corrections = planHistoricalTradeCashCorrections({ previousTrades, nextTrades, accounts, at });
   if (!corrections.length) return corrections;
   const update = db.prepare('UPDATE investment_accounts SET baseline_cash=baseline_cash+? WHERE user_id=? AND id=?');
   const audit = db.prepare("INSERT INTO investment_account_audit(user_id,account_id,action,data,at) VALUES(?,?,'trade-cash-correction',?,?)");
@@ -109,12 +122,7 @@ export function ledgerCashDelta(e, accountId) {
   return result;
 }
 
-export function projectInvestments(db, userId, input) {
-  const rows = investmentRows(db, userId);
-  if (!rows.length) return [];
-  const raw = input || (tableExists(db, 'portfolio_users') ? JSON.parse(db.prepare('SELECT data FROM portfolio_users WHERE user_id=?').get(userId)?.data || '{}') : {});
-  const funds = fundHoldings(db, userId);
-  const entries = tableExists(db, 'bookkeeping_entries') ? db.prepare('SELECT * FROM bookkeeping_entries WHERE user_id=? AND affects_balance=1').all(userId) : [];
+export function projectInvestmentsFrom({ rows, funds = [], entries = [], ledgers = new Map(), raw = {} }) {
   return rows.map((account) => {
     const trades = (raw.trades || []).filter((t) => t.account_id === account.id).sort(compareTrades);
     const baseline = time(account.baseline_at);
@@ -155,7 +163,7 @@ export function projectInvestments(db, userId, input) {
       if (value != null) marketValue = marketValue.plus(value);
       positions.push({ symbol, ...(code ? { type: 'fund' } : {}), name: q.name, shares: q.shares.toNumber(), price: Number.isFinite(price) ? price : null, marketValue: value, quoteAsOf: quote?.asOf || quote?.updatedAt || quote?.timestamp || quote?.date || null, delayed: !!quote?.delayed });
     }
-    const ledger = account.bookkeeping_id && tableExists(db, 'bookkeeping_accounts') ? db.prepare('SELECT name,archived FROM bookkeeping_accounts WHERE user_id=? AND id=?').get(userId, account.bookkeeping_id) : null;
+    const ledger = account.bookkeeping_id ? ledgers.get(account.bookkeeping_id) || null : null;
     return { id: account.id, name: account.name, currency: account.currency, bookkeepingId: account.bookkeeping_id,
       bookkeepingName: ledger?.name || null, baselineCash: account.baseline_cash / 100, baselineAt: account.baseline_at,
       oldLedgerBalance: account.old_ledger_balance == null ? null : account.old_ledger_balance / 100,
@@ -163,6 +171,23 @@ export function projectInvestments(db, userId, input) {
       missingQuotes: missing, positions, movements: movements.sort((a, b) => time(b.date) - time(a.date)),
       latestLedgerSnapshot: ledger ? true : false, linkedAccountArchived: !!ledger?.archived };
   });
+}
+
+export function projectInvestments(db, userId, input) {
+  const rows = investmentRows(db, userId);
+  if (!rows.length) return [];
+  const raw = input || (tableExists(db, 'portfolio_users') ? JSON.parse(db.prepare('SELECT data FROM portfolio_users WHERE user_id=?').get(userId)?.data || '{}') : {});
+  const funds = fundHoldings(db, userId);
+  const entries = tableExists(db, 'bookkeeping_entries') ? db.prepare('SELECT * FROM bookkeeping_entries WHERE user_id=? AND affects_balance=1').all(userId) : [];
+  const ledgers = new Map();
+  if (tableExists(db, 'bookkeeping_accounts')) {
+    for (const account of rows) {
+      if (!account.bookkeeping_id || ledgers.has(account.bookkeeping_id)) continue;
+      const ledger = db.prepare('SELECT name,archived FROM bookkeeping_accounts WHERE user_id=? AND id=?').get(userId, account.bookkeeping_id);
+      if (ledger) ledgers.set(account.bookkeeping_id, ledger);
+    }
+  }
+  return projectInvestmentsFrom({ rows, funds, entries, ledgers, raw });
 }
 
 export function saveInvestmentAccount(db, userId, input, id) {
@@ -207,8 +232,7 @@ export function saveInvestmentAccount(db, userId, input, id) {
   }).immediate();
 }
 
-export function prepareInvestmentTrades(db, userId, next, before) {
-  const accounts = investmentRows(db, userId);
+export function prepareInvestmentTradesFrom({ next, before, accounts, funds = [] }) {
   if (!accounts.length) {
     if (next.some(t => currency(t) === 'HKD')) throw new Error('请先创建港币证券账户');
     if (next.some(t => t.type !== 'other' && hongKongFundIsin(t.symbol))) throw new Error('请先创建同币种的证券账户');
@@ -237,7 +261,7 @@ export function prepareInvestmentTrades(db, userId, next, before) {
   if (fundTrades.length) {
     const balances = new Map();
     const ordered = fundTrades.sort(compareTrades);
-    for (const t of [...openingFundTrades(fundHoldings(db, userId)), ...ordered]) {
+    for (const t of [...openingFundTrades(funds), ...ordered]) {
       const key = JSON.stringify([t.account_id, t.symbol]);
       const before = balances.get(key) || new Decimal(0);
       const shares = t.type === 'buy' ? before.plus(Number(t.shares)) : before.minus(Number(t.shares));
@@ -248,12 +272,19 @@ export function prepareInvestmentTrades(db, userId, next, before) {
   return prepared;
 }
 
-export function decorateInvestmentBalances(db, userId, accounts) {
-  const investments = projectInvestments(db, userId);
+export function prepareInvestmentTrades(db, userId, next, before) {
+  return prepareInvestmentTradesFrom({ next, before, accounts: investmentRows(db, userId), funds: fundHoldings(db, userId) });
+}
+
+export function decorateInvestmentBalancesFrom(accounts, investments) {
   return accounts.map((a) => {
     const linked = investments.find((i) => i.bookkeepingId === a.id);
     return linked ? { ...a, ledgerBalance: a.balance, balance: linked.equity, balanceSource: 'portfolio', investment: linked } : a;
   });
+}
+
+export function decorateInvestmentBalances(db, userId, accounts) {
+  return decorateInvestmentBalancesFrom(accounts, projectInvestments(db, userId));
 }
 
 export function assertUnboundLedgerAccount(db, userId, accountId) {

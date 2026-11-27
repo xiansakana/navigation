@@ -95,7 +95,7 @@ test('execution permissions fail closed, preserving the existing tier-exec permi
   assert.equal(canExecutePlan(Buffer.from('["service:qqq-dip:tier-exec:edit"]').toString('base64url')), true);
 });
 
-test('commit persists partial leg state and receipt; interruption leaves retry guard', () => {
+test('commit persists partial leg state and receipt; interruption leaves retry guard', async () => {
   const { plan, body } = fixture();
   let round = { executionPlans: { T2: plan } };
   let writeCount = 0;
@@ -103,7 +103,7 @@ test('commit persists partial leg state and receipt; interruption leaves retry g
   const store = { getRound: () => structuredClone(round), setRound: (value) => { round = structuredClone(value); },
     markExecuted: (_, value) => { execution = value; } };
   const prepared = prepareExecution(plan, body, evaluation, cash, fillTime);
-  commitExecution(store, body, prepared, () => { writeCount++; return { trades: [] }; });
+  await commitExecution(store, body, prepared, () => { writeCount++; return { trades: [] }; });
   assert.equal(execution.complete, false);
   assert.equal(round.executionPlans.T2.legs[0].complete, true);
   assert.equal(round.executionPlans.T2.legs[1].spent, 0);
@@ -112,7 +112,7 @@ test('commit persists partial leg state and receipt; interruption leaves retry g
   const usTime = new Date('2026-10-09T14:00Z');
   const nextBody = { ...body, requestId: 'request-456', filledAt: usTime.toISOString(), fills: [{ legId: '1', shares: 1, price: 100 }] };
   const next = prepareExecution(round.executionPlans.T2, nextBody, evaluation, cash, usTime);
-  assert.throws(() => commitExecution(store, nextBody, next, () => { throw new Error('disk write failed'); }), /disk/);
+  await assert.rejects(commitExecution(store, nextBody, next, () => { throw new Error('disk write failed'); }), /disk/);
   assert.equal(round.executionPlans.T2.inFlight, 'request-456');
   assert.throws(() => prepareExecution(round.executionPlans.T2, nextBody, evaluation, cash, usTime), /核对/);
 });

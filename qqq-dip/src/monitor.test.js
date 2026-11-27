@@ -184,13 +184,13 @@ test('hung quotes release busy state and a subsequent tick completes', async () 
     onSnapshot: (snapshot) => snapshots.push(snapshot)
   });
   await assert.rejects(monitor.tick({ silent: true }), /marketQuotes.*超时/);
-  assert.equal(monitor.status().busy, false);
-  assert.equal(monitor.status().phase, 'idle');
-  assert.equal(monitor.status().consecutiveFailures, 1);
+  assert.equal((await monitor.status()).busy, false);
+  assert.equal((await monitor.status()).phase, 'idle');
+  assert.equal((await monitor.status()).consecutiveFailures, 1);
   await monitor.tick({ silent: true });
-  assert.equal(monitor.status().checks, 1);
-  assert.equal(monitor.status().consecutiveFailures, 0);
-  assert.ok(monitor.status().lastCompletedAt);
+  assert.equal((await monitor.status()).checks, 1);
+  assert.equal((await monitor.status()).consecutiveFailures, 0);
+  assert.ok((await monitor.status()).lastCompletedAt);
   assert.ok(snapshots.every((snapshot) => snapshot.monitor.busy === false));
 });
 
@@ -203,6 +203,6 @@ test('overall tick budget bounds an otherwise longer stage deadline', async () =
     tickTimeoutMs: 20
   });
   await assert.rejects(monitor.tick({ silent: true }), /refreshFx.*超时/);
-  assert.equal(monitor.status().busy, false);
-  assert.equal(monitor.status().checks, 0);
+  assert.equal((await monitor.status()).busy, false);
+  assert.equal((await monitor.status()).checks, 0);
 });
