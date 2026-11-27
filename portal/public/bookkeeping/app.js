@@ -1,4 +1,4 @@
-import { createBookkeepingEntryList } from './entry-list.js?v=vue-shell-1';
+import { createBookkeepingEntryList } from './entry-list.js?v=vue-shell-3';
 
 (async function () {
   'use strict';
@@ -45,7 +45,7 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-shell-1';
     return list.map(x => '<button class="bk-category bk-category-drill"'+analysis.attr({category:x.category,currency:equivalent?$('currency').value:x.currency,flow})+'><div class="bk-category-title"><span>' + esc(x.category) + ' <small class="bk-muted">' + esc(x.currency) + '</small>'+(flow==='income'?'<small> · '+x.count+' 笔 · '+(x.amount>0?(x.amount/(totals[x.currency]||1)*100).toFixed(1)+'%':'冲减')+'</small>':'')+'</span>' + m(x.amount,x.currency) + '</div><div class="bk-bar"><span style="width:' + Math.max(0,Math.min(100,x.amount/(totals[x.currency] || 1)*100)) + '%"></span></div></button>').join('') || '<p class="bk-empty">'+(flow==='income'?'暂无非零分类收入':'暂时没有支出记录')+'</p>';
   }
 
-  const epoch = window.__bookkeepingViewEpoch || 'vue-shell-1';
+  const epoch = window.__bookkeepingViewEpoch || 'vue-shell-3';
   let viewModule;
   try {
     viewModule = await import('../generated/bookkeeping-app-view.js?epoch=' + encodeURIComponent(epoch));
@@ -141,7 +141,7 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-shell-1';
   const analysis = window.createBookkeepingAnalysis({ $, esc, m, money, can, load, tab, getState:()=>state, periods });
   const management = window.createBookkeepingManagement({ $, esc, can, api, write, load, field, select, options, getState:()=>state, openEditor });
   const details = window.createBookkeepingDetails({ $, esc, m, can, api, getState:()=>state, getAccountId:()=>$('account').value, tab, openEditor, copyEntry, remove:removeEntry });
-  const entryList = createBookkeepingEntryList({ $, esc, m, money, can, transferTypes, getState:()=>state, openEditor, copyEntry, removeEntry, openDetails:details.open });
+  const entryList = createBookkeepingEntryList({ $, esc, m, money, can, mountEntries: viewModule.mountBookkeepingEntries, getState:()=>state, openEditor, copyEntry, removeEntry, openDetails:details.open });
   async function removeEntry(item) {
     if(!item || !can('entries:edit'))return false;
     if(!window.confirm('删除这条账单？新账单会撤销对账户余额的影响。'))return false;

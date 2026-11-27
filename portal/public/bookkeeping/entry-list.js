@@ -1,21 +1,6 @@
-export function createBookkeepingEntryList({ $, esc, m, money, can, transferTypes, getState, openEditor, copyEntry, removeEntry, openDetails }) {
+export function createBookkeepingEntryList({ $, esc, m, money, can, mountEntries, getState, openEditor, copyEntry, removeEntry, openDetails }) {
   const entryList = $('entry-list');
-  let swipeStart = null, suppressSwipeClickUntil = 0, view, viewLoad, pending;
-  function ensureView() {
-    if (!viewLoad) {
-      // The view ships as a standalone module so multi-fixture tests can load a
-      // fresh Vue instance per window; production uses the default epoch.
-      const epoch = window.__bookkeepingViewEpoch || '1';
-      viewLoad = import('../generated/bookkeeping-entries-view.js?epoch=' + epoch).then(mod => {
-        view = mod.mountBookkeepingEntries(entryList, {
-          money,
-          balanceText: entry => window.bookkeepingBalanceText(entry, m, esc)
-        });
-        if (pending) view.render(pending);
-      });
-    }
-    return viewLoad;
-  }
+  let swipeStart = null, suppressSwipeClickUntil = 0, view;
 
   entryList.addEventListener('pointerdown', event => {
     swipeStart = null;
@@ -68,12 +53,12 @@ export function createBookkeepingEntryList({ $, esc, m, money, can, transferType
         ? '<p class="bk-muted bk-ledger-note">证券现金按当前现金、记账流水和证券交收反推。持仓市值见资产页。</p>'
         : '<p class="bk-muted bk-ledger-note">历史余额按当前余额、账单及余额调整反推；截图核对的调整余额按原币显示，其他反推或跨币种估算值标注 ≈。</p>')
       : '';
-    pending = {
+    view ??= mountEntries(entryList, { money, balanceText: entry => window.bookkeepingBalanceText(entry, m, esc) });
+    view.render({
       entries: state.entries, dayTotals, converted, missing, ledgerNote,
       accountId: $('account').value, canViewAccounts: can('accounts:view'), canEdit: can('entries:edit'),
       categoryTree: state.categoryTree
-    };
-    if (view) view.render(pending); else ensureView();
+    });
     $('more').classList.toggle('hidden', state.entries.length >= state.count);
   }
 

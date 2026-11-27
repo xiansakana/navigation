@@ -1,5 +1,7 @@
 import { createApp, h, reactive, watch, Teleport } from 'vue';
 
+export { mountBookkeepingEntries } from './bookkeeping-entries-view';
+
 export type BookkeepingTab = 'entries' | 'stats' | 'accounts' | 'catalog' | 'import' | 'entry-detail';
 
 export interface MiniCategory {
