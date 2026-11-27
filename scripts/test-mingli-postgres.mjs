@@ -1052,6 +1052,26 @@ async function verifyRbac(db, t) {
       tags: [], notes: '',
     } });
     assert.equal(written.status, 201, JSON.stringify(written.data));
+    const knowledgeDocumentId = 'fixture-doc-' + randomUUID();
+    const knowledgeCaseId = randomUUID().replaceAll('-', '');
+    const knowledgeNow = new Date().toISOString();
+    await db.query(`INSERT INTO navigation.knowledge_documents
+      (id,user_id,title,original_name,byte_size,mime_type,backend,status,notes,created_at,updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [knowledgeDocumentId, admin.id, 'PostgreSQL 知识库案例', 'fixture.mp4', 1, 'video/mp4', 'codex', 'ready',
+      '四柱：甲子 丙寅 戊辰 庚申', knowledgeNow, knowledgeNow]);
+    await db.query(`INSERT INTO navigation.mingli_knowledge_cases
+      (id,user_id,document_id,case_key,title,birth_json,chart_json,notes,metadata_json,created_at,updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [knowledgeCaseId, admin.id, knowledgeDocumentId, '甲子丙寅戊辰庚申', 'PostgreSQL 知识库案例',
+      '{"gender":null}', '{"pillars":[]}', '案例正文', '{"anchor":"案例一"}', knowledgeNow, knowledgeNow]);
+    const knowledgeList = await running.request('/api/mingli/knowledge-cases', { uid: admin.id });
+    assert.equal(knowledgeList.status, 200, JSON.stringify(knowledgeList.data));
+    assert.ok(knowledgeList.data.cases.some(item => item.id === knowledgeCaseId), JSON.stringify(knowledgeList.data));
+    assert.ok(knowledgeList.data.total >= 1);
+    const knowledgeDetail = await running.request('/api/mingli/knowledge-cases/' + knowledgeCaseId, { uid: admin.id });
+    assert.equal(knowledgeDetail.status, 200, JSON.stringify(knowledgeDetail.data));
+    assert.equal(knowledgeDetail.data.case.id, knowledgeCaseId);
     const deadline = Date.now() + 3000;
     let audit;
     while (!(audit = (await db.query("SELECT actor_id,owner_id,status FROM navigation.data_access_audit WHERE module_id='mingli'")).rows[0])) {

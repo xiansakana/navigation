@@ -83,10 +83,10 @@ export async function handleMingliApi(req, res, url, session, json, getCaseStore
   try {
     if (action === 'knowledge:view') {
       const store = await activeKnowledgeCaseStore(), uid = session.userId;
-      if (knowledgeCase) { const item = store.get(uid, knowledgeCase[1]); return json(res, item ? 200 : 404, item ? { ok: true, case: item } : { ok: false, error: '知识库案例不存在' }); }
+      if (knowledgeCase) { const item = await store.get(uid, knowledgeCase[1]); return json(res, item ? 200 : 404, item ? { ok: true, case: item } : { ok: false, error: '知识库案例不存在' }); }
       const filters = parseCaseFilters(url.searchParams.get('filters'));
       if (Object.keys(filters).length && !canMingli(session, 'knowledge:filter')) return json(res, 403, { ok: false, error: '无权使用知识库案例高级筛选' });
-      return json(res, 200, { ok: true, ...store.list(uid, { search: url.searchParams.get('search') || '', documentId: url.searchParams.get('documentId') || '', filters,
+      return json(res, 200, { ok: true, ...await store.list(uid, { search: url.searchParams.get('search') || '', documentId: url.searchParams.get('documentId') || '', filters,
         offset: Math.min(100000, Math.max(0, Math.floor(Number(url.searchParams.get('offset')) || 0))), limit: Math.max(1, Math.min(100, Math.floor(Number(url.searchParams.get('limit')) || 30))) }) });
     }
     if (route === '/chart') return json(res, 200, { ok: true, chart: calculateChart(await body(req, session.isGuest ? 4096 : 128 * 1024)) });
