@@ -34,10 +34,19 @@ def postgres_connection(service):
     return f'service={service}'
 
 
+def postgres_command(client):
+    container = os.environ.get('NAVIGATION_POSTGRES_CLIENT_CONTAINER')
+    if not container:
+        return [client]
+    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}', container):
+        raise ValueError('Invalid PostgreSQL client container name')
+    return ['docker', 'exec', '-i', '-e', 'PGSERVICEFILE=/var/lib/postgresql/data/navigation-backup.pg_service.conf', container, client]
+
+
 def restore_postgres(snapshot, service):
     connection = postgres_connection(service)
     database, schemas = subprocess.check_output([
-        'psql', '--no-psqlrc', '--no-password', '--tuples-only', '--no-align',
+        *postgres_command('psql'), '--no-psqlrc', '--no-password', '--tuples-only', '--no-align',
         '--set=ON_ERROR_STOP=1', '--dbname', connection, '--command',
         """SELECT current_database(), count(*) FILTER (WHERE nspname NOT IN
         ('pg_catalog','information_schema','public') AND nspname NOT LIKE 'pg_toast%')
@@ -47,7 +56,7 @@ def restore_postgres(snapshot, service):
         raise RuntimeError('PostgreSQL restore requires an empty navigation_restore_* database')
     with snapshot.open('rb') as source:
         subprocess.run([
-            'pg_restore', '--no-password', '--single-transaction', '--exit-on-error',
+            *postgres_command('pg_restore'), '--no-password', '--single-transaction', '--exit-on-error',
             '--no-owner', '--no-privileges', '--dbname', connection,
         ], stdin=source, check=True)
 
@@ -230,7 +239,7 @@ def snapshot_sqlite(database, snapshot, destination, logical):
 
 def snapshot_postgres(service, snapshot, destination):
     command = [
-        'pg_dump', '--no-password', '--format=custom', '--schema=navigation',
+        *postgres_command('pg_dump'), '--no-password', '--format=custom', '--schema=navigation',
         '--no-owner', '--no-privileges', '--dbname', postgres_connection(service),
     ]
     with snapshot.open('xb') as output, subprocess.Popen(command, stdout=subprocess.PIPE) as dump:

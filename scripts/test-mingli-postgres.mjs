@@ -633,7 +633,7 @@ async function verifyKnowledgeProductionStore(db) {
   assert.equal((await store.queue.list(outside)).total, 0);
 
   const first = await store.queue.claim();
-  assert.equal(first.url, firstUrl);
+  assert.equal(first.url, firstUrl + '/');
   const selection = JSON.parse(first.settings_json);
   const item = await store.queue.submit(first,
     { title: 'Batch fixture', topic: 'Batch', tags: ['fixture'], sourceUrl: firstUrl }, selection, null, 15 * 1024 ** 3);

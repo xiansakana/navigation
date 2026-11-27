@@ -30,6 +30,9 @@ export function createStaticHandler(publicDir, sharedDir) {
         var root = publicDir;
         if (urlPath === '/style.css' && sharedDir) {
             root = sharedDir;
+        } else if (urlPath === '/shared/generated/main.js' && sharedDir) {
+            root = sharedDir;
+            urlPath = '/generated/main.js';
         } else if (urlPath.startsWith('/shared/') && sharedDir) {
             root = sharedDir;
         } else if (urlPath === '/') {
