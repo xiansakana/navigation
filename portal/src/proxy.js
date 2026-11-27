@@ -385,6 +385,9 @@ function shouldPipeJsonResponse(service, reqUrl) {
     if (service.id === 'siyuan-publish') {
         return url.pathname.startsWith(prefix + '/api/');
     }
+    if (service.id === 'stock-manage') {
+        return url.pathname === prefix + '/api/portfolio';
+    }
     return false;
 }
 

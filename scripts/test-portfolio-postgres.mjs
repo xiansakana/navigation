@@ -53,6 +53,8 @@ await withTestDatabase(async ({ url, client, pg }) => {
     assert(audit.n >= 1, '投资账户审计写入');
     const { rows: [reserve] } = await client.query("SELECT reserved FROM navigation.dip_cash_funds WHERE user_id='u'");
     assertEqual(Number(reserve.reserved), 10000, '抄底预留持久化（分）');
+    await client.query(`UPDATE navigation.portfolio_users
+      SET data=jsonb_set(data::jsonb, '{trades,0,note}', to_jsonb(repeat('测试备注', 600)))::text WHERE user_id='u'`);
     await withTestDatabase(bookkeeping => verifyStockReadiness(url, bookkeeping));
     console.log('portfolio postgres ok');
   } finally {
@@ -93,6 +95,15 @@ async function verifyStockReadiness(portfolioUrl, { url: bookkeepingUrl, client 
     await client.query("INSERT INTO navigation.navigation_schema_migrations(version) VALUES ('002-qqq-dip-state')");
     assertEqual((await request('/readyz')).status, 200, '记账 schema 恢复后重新就绪');
     assertEqual((await write()).status, 200, '记账 schema 恢复后允许修改现金');
+    const headers = { 'x-portal-user-id': 'u', 'x-portal-permissions': Buffer.from('["*"]').toString('base64url') };
+    const read = encoding => request('/api/portfolio', { headers: { ...headers, 'accept-encoding': encoding } });
+    const [compressed, plain] = await Promise.all([read('gzip'), read('identity')]);
+    assertEqual([compressed.status, plain.status], [200, 200], '两种响应编码都可读取持仓');
+    assertEqual([compressed.headers.get('content-encoding'), plain.headers.get('content-encoding')], ['gzip', null],
+      '保持支持与不支持压缩的客户端兼容');
+    assert(Number(compressed.headers.get('content-length')) < Number(plain.headers.get('content-length')),
+      '压缩降低实际传输大小');
+    assertEqual(await compressed.json(), await plain.json(), '两种编码的持仓数据一致');
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
       const exited = once(child, 'exit');

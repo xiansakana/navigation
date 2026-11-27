@@ -24,6 +24,8 @@ import pg from 'pg';
 import path from 'node:path';
 import XLSX from 'xlsx';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+import { gzip } from 'node:zlib';
 import { loadConfig } from './storage.js';
 import { createQuoteService } from './quotes.js';
 import { knownTradeNames, normalizeNamedTrade } from './trade-name.js';
@@ -47,6 +49,7 @@ import { redactPortfolioCash } from './portfolio-visibility.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
+const gzipAsync = promisify(gzip);
 console.info('行情网络策略:', JSON.stringify(configureQuoteNetwork()));
 
 let config;
@@ -500,7 +503,13 @@ async function sendPortfolio(res, req) {
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 app.get('/api/portfolio', async (req, res) => {
-  await sendPortfolio(res, req);
+  const portfolio = await portfolioForRequest(req);
+  res.vary('Accept-Encoding');
+  if (req.acceptsEncodings('gzip', 'identity') !== 'gzip') return res.json(portfolio);
+  const json = JSON.stringify(portfolio);
+  if (Buffer.byteLength(json) < 1024) return res.json(portfolio);
+  const body = await gzipAsync(json, { level: 3 });
+  return res.set({ 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip' }).send(body);
 });
 
 app.put('/api/cash', async (req, res) => {

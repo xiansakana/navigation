@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
+import { gzipSync } from 'node:zlib';
 import { proxyHttpRequest } from './proxy.js';
 
 test('uploads reach upstream before completion and preserve chunked bytes', { timeout: 10000 }, async () => {
@@ -32,6 +33,34 @@ test('uploads reach upstream before completion and preserve chunked bytes', { ti
     assert.equal(result.csp, "default-src 'none'");
   } finally {
     client?.destroy();
+    portal.closeAllConnections(); upstream.closeAllConnections();
+    await Promise.all([new Promise(resolve => portal.close(resolve)), new Promise(resolve => upstream.close(resolve))]);
+  }
+});
+
+test('the stock portfolio API forwards gzip while preserving the JSON representation', { timeout: 10000 }, async () => {
+  const portfolio = { trades: [{ note: '/webui is literal text in these notes' }] };
+  const upstream = http.createServer((req, res) => {
+    const gzip = req.headers['accept-encoding'] === 'gzip';
+    const body = JSON.stringify(portfolio);
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Vary': 'Accept-Encoding',
+      ...(gzip ? { 'Content-Encoding': 'gzip' } : {}) });
+    res.end(gzip ? gzipSync(body) : body);
+  });
+  upstream.listen(0, '127.0.0.1'); await once(upstream, 'listening');
+  const service = { id: 'stock-manage', path: '/stock-manage', internalUrl: `http://127.0.0.1:${upstream.address().port}` };
+  const portal = http.createServer((req, res) => void proxyHttpRequest(service, req, res));
+  portal.listen(0, '127.0.0.1'); await once(portal, 'listening');
+  try {
+    const url = `http://127.0.0.1:${portal.address().port}/stock-manage/api/portfolio`;
+    const [compressed, identity] = await Promise.all(['gzip', 'identity'].map(encoding =>
+      fetch(url, { headers: { 'accept-encoding': encoding } })));
+    assert.equal(compressed.headers.get('content-encoding'), 'gzip');
+    assert.equal(compressed.headers.get('vary'), 'Accept-Encoding');
+    assert.equal(identity.headers.get('content-encoding'), null);
+    assert.deepEqual(await compressed.json(), portfolio);
+    assert.deepEqual(await identity.json(), portfolio);
+  } finally {
     portal.closeAllConnections(); upstream.closeAllConnections();
     await Promise.all([new Promise(resolve => portal.close(resolve)), new Promise(resolve => upstream.close(resolve))]);
   }
