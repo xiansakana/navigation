@@ -1,12 +1,15 @@
 import { postgresProductionTarget } from './config.js';
 
-const SCHEMA_VERSION = '001-initial';
+const SCHEMA_VERSIONS = ['001-initial', '002-qqq-dip-state', '003-runtime-state'];
+const APPLICATION_SCHEMA_VERSION = SCHEMA_VERSIONS.at(-1);
 
-export async function verifyPostgresSchema(db, { expectedDatabase } = {}) {
+export async function verifyPostgresSchema(db, { expectedDatabase, expectedVersion } = {}) {
   try {
     const { rows } = await db.query(`SELECT current_database() AS database, version
       FROM navigation.navigation_schema_migrations ORDER BY version DESC LIMIT 1`);
-    if (rows[0]?.version === SCHEMA_VERSION && (!expectedDatabase || rows[0].database === expectedDatabase)) return rows[0];
+    const current = rows[0];
+    if (SCHEMA_VERSIONS.includes(current?.version) && (!expectedVersion || current.version === expectedVersion) &&
+        (!expectedDatabase || current.database === expectedDatabase)) return current;
   } catch {
     // An unavailable or uninitialized target must keep the selected backend offline.
   }
@@ -14,10 +17,13 @@ export async function verifyPostgresSchema(db, { expectedDatabase } = {}) {
 }
 
 export async function verifyPostgresApplicationTarget(db, database) {
-  const schema = await verifyPostgresSchema(db, { expectedDatabase: database });
+  const schema = await verifyPostgresSchema(db, { expectedDatabase: database, expectedVersion: APPLICATION_SCHEMA_VERSION });
   try {
     const { rows: [role] } = await db.query(`SELECT current_setting('transaction_read_only') = 'off'
       AND NOT pg_is_in_recovery()
+      AND to_regclass('navigation.qqq_dip_state') IS NOT NULL
+      AND to_regclass('navigation.torn_company_monitor_state') IS NOT NULL
+      AND to_regclass('navigation.qq_bot_state') IS NOT NULL
       AND has_schema_privilege('navigation', 'USAGE')
       AND NOT EXISTS (
         SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace

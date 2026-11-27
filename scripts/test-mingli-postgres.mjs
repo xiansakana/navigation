@@ -968,7 +968,15 @@ test('Mingli HTTP entry point uses PostgreSQL for owner-scoped cases, categories
     });
     schemaCreated = true;
     assert.deepEqual(await verifyPostgresSchema(db), { database: database.name, version: '001-initial' });
-    assert.deepEqual(await verifyPostgresApplicationTarget(db, database.name), { database: database.name, version: '001-initial' });
+    await assert.rejects(() => verifyPostgresApplicationTarget(db, database.name), { code: 'POSTGRES_NOT_READY' });
+    for (const migration of ['002-qqq-dip-state', '003-runtime-state']) {
+      const sql = await readFile(new URL('../shared/db/postgres/' + migration + '.sql', import.meta.url), 'utf8');
+      await db.transaction(async client => {
+        await client.query('SET LOCAL search_path = navigation, pg_catalog');
+        await client.query(sql);
+      });
+    }
+    assert.deepEqual(await verifyPostgresApplicationTarget(db, database.name), { database: database.name, version: '003-runtime-state' });
     await assert.rejects(() => verifyPostgresApplicationTarget(db, 'incorrect_fixture_database'), { code: 'POSTGRES_NOT_READY' });
     await db.transaction(client => assert.rejects(() => verifyPostgresApplicationTarget(client, database.name), { code: 'POSTGRES_NOT_WRITABLE' }), { readOnly: true });
     await verifyTornUsers(db);
