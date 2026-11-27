@@ -13,15 +13,16 @@ function installDomGlobals(w) {
   for (const name of names) { try { globalThis[name] = w[name]; } catch { /* keep the host value */ } }
 }
 
-async function fixture(extra={},permissions=['*'],{additionalEntries=[],pageLimit=Infinity}={}) {
+async function fixture(extra={},permissions=['*'],{additionalEntries=[],pageLimit=Infinity,refreshedUsd=7}={}) {
   const html=fs.readFileSync(new URL('../public/bookkeeping/index.html',import.meta.url),'utf8');
   const dom=new JSDOM(html,{url:'http://localhost/bookkeeping/',runScripts:'outside-only'}),w=dom.window;
   const $=id=>w.document.getElementById(id),writes=[];
   let entry={id:'a'.repeat(32),date:'2026-10-17T12:00:00',type:'支出',amount:10,currency:'CNY',category:'餐饮',subcategory:'',accountId:'cash',toAccountId:null,toAmount:null,
     accountName:'现金',note:'<img src=x onerror=alert(1)>',tags:'午餐',location:'天津',book:'个人账本',fee:1.23,refund:0,discount:2,historical:false,cnyAmount:10,cnyFee:1.23,historicalRate:1,rateDate:'2026-10-17',...extra};
   const accounts=[{id:'cash',name:'现金',currency:'CNY',balance:100,included:true,group:'资金账户'}, {id:'usd',name:'美元卡',currency:'USD',balance:7,included:true,group:'资金账户'}];
+  let usd = 7, stateRequests = 0;
   const state=()=>{
-    const entries=entry?[entry,...additionalEntries]:additionalEntries,settings={budgets:{},rates:{CNY:1,USD:7}},analysis=analyzeBookkeeping(entries,entries,accounts,settings,{},'2026-10-17');
+    const entries=entry?[entry,...additionalEntries]:additionalEntries,settings={budgets:{},rates:{CNY:1,USD:usd}},analysis=analyzeBookkeeping(entries,entries,accounts,settings,{},'2026-10-17');
     return {ok:true,entries:entries.slice(0,pageLimit),accounts,summary:summarize(entries),equivalentSummary:analysis.equivalentSummary,analysis,settings,fx:{rates:settings.rates,quotes:{}},books:['个人账本'],categories:['餐饮'],categoryTree:[{id:'cat',name:'餐饮',kind:'expense',parentId:null,icon:'◈',count:1}],accountGroups:[{id:'group',name:'资金账户',count:2}],count:entries.length};
   };
   let scrollY=1800;
@@ -43,8 +44,11 @@ async function fixture(extra={},permissions=['*'],{additionalEntries=[],pageLimi
     let data;
     if(url==='/api/me')data={ok:true,username:'test',userId:'test',permissions};
     else if(url.includes('/preferences'))data={ok:true,period:null};
-    else if(url.includes('/state'))data=state();
-    else if(url.endsWith('/fx'))data={ok:true,fx:state().fx};
+    else if(url.includes('/state')){stateRequests++;data=state();}
+    else if(url.endsWith('/fx')){
+      usd=refreshedUsd;
+      data={ok:true,fx:{...state().fx,quotes:{USD:{rate:usd,source:'automatic'}},errors:[]}};
+    }
     else if(url.includes('/entries/')) {
       if(options.method==='PUT') {
         const payload=JSON.parse(options.body);writes.push(payload);
@@ -70,8 +74,20 @@ async function fixture(extra={},permissions=['*'],{additionalEntries=[],pageLimi
   $('entry-list').querySelector('[data-entry]').click();
   const edit=key=>$('entry-detail-view').querySelector('[data-detail-field="'+key+'"]:not(.btn)').click();
   const submit=async()=>{$('editor-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await wait(()=>!$('editor').open);};
-  return {dom,w,$,writes,edit,submit,wait,advanceFrame,pendingFrames:()=>frames.size};
+  return {dom,w,$,writes,edit,submit,wait,advanceFrame,pendingFrames:()=>frames.size,stateRequests:()=>stateRequests};
 }
+
+test('automatic FX refresh only reloads financial data when a conversion rate changes',async()=>{
+  for(const [rate,requests] of [[7,1],[7.5,2]]) {
+    const f=await fixture({},['*'],{refreshedUsd:rate});
+    try {
+      await f.wait(()=>f.$('fx-status').textContent.includes('参考汇率已更新'));
+      assert.equal(f.stateRequests(),requests);
+      assert.match(f.$('assets-summary').textContent,rate===7?/149\.00/:/152\.50/);
+      if(rate===7) assert.match(f.$('fx-rates').textContent,/1 USD = 7 CNY/);
+    } finally {f.dom.window.close();}
+  }
+});
 
 test('entry click opens details; amount popup is compact and preserves every other financial field',async()=>{
   const f=await fixture();

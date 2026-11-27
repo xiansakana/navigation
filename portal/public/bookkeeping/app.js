@@ -107,7 +107,13 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-shell-3';
     for (const id of ['refresh-fx','refresh-asset-fx']) { $(id).disabled = true; $(id).textContent = '获取汇率中…'; }
     try {
       const data = await api(manual ? '/fx/refresh' : '/fx', manual ? { method:'POST' } : {});
-      state.fx = data.fx; await load(); renderAccounts(); renderFx();
+      const ratesChanged = currencies.some(currency => state.fx?.rates?.[currency] !== data.fx.rates[currency]);
+      state.fx = data.fx;
+      if (manual || ratesChanged) {
+        await load();
+        renderAccounts();
+      }
+      renderFx();
       $('fx-status').textContent = data.fx.errors.length ? data.fx.errors.join('；') + '。优先使用手动备用值，其次使用上次成功值。' : '参考汇率已更新；行情来源可能存在延迟，请查看各币种的数据日期。';
     } catch (e) { $('fx-status').textContent = '汇率获取失败：' + e.message + '，保留已保存的汇率。'; }
     finally { for (const id of ['refresh-fx','refresh-asset-fx']) { $(id).disabled = false; $(id).textContent = '更新参考汇率'; } }
