@@ -1,7 +1,7 @@
 (function () {
   if (window.portalNavbarDropdown) return;
   window.portalNavbarDropdown = true;
-  var style = document.createElement('link'); style.rel = 'stylesheet'; style.href = '/navbar-dropdown.css?v=4'; document.head.append(style);
+  var style = document.createElement('link'); style.rel = 'stylesheet'; style.href = '/navbar-dropdown.css?v=5'; document.head.append(style);
   function touchMenu() { return matchMedia('(hover: none), (pointer: coarse), (max-width: 640px)').matches; }
   async function boot() {
     var navbar = document.querySelector('.navbar');

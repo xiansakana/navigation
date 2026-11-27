@@ -13,7 +13,7 @@
 
 @media (max-width: 640px) {
   body.has-navbar:has(.navbar-inner > .portal-data-scope) { --navbar-height: 98px; }
-  .navbar-inner:has(> .portal-data-scope) {
+  .navbar .navbar-inner:has(> .portal-data-scope) {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     grid-template-rows: 56px 42px;
