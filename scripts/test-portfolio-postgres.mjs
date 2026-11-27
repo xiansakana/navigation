@@ -1,6 +1,13 @@
 import { withTestDatabase, assert, assertEqual } from './postgres-test-harness.mjs';
 import { createPostgresPool } from '../shared/db/postgres/pool.js';
 import { createPortfolioBackend } from '../shared/db/portfolio-runtime.js';
+import fs from 'node:fs/promises';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { once } from 'node:events';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 await withTestDatabase(async ({ url, client, pg }) => {
   const pool = createPostgresPool(pg.Pool, url, 'navigation-test-portfolio');
@@ -46,8 +53,52 @@ await withTestDatabase(async ({ url, client, pg }) => {
     assert(audit.n >= 1, '投资账户审计写入');
     const { rows: [reserve] } = await client.query("SELECT reserved FROM navigation.dip_cash_funds WHERE user_id='u'");
     assertEqual(Number(reserve.reserved), 10000, '抄底预留持久化（分）');
+    await withTestDatabase(bookkeeping => verifyStockReadiness(url, bookkeeping));
     console.log('portfolio postgres ok');
   } finally {
     await pool.close();
   }
 });
+
+async function verifyStockReadiness(portfolioUrl, { url: bookkeepingUrl, client }) {
+  const listener = net.createServer();
+  await new Promise((resolve, reject) => listener.once('error', reject).listen(0, '127.0.0.1', resolve));
+  const port = listener.address().port;
+  await new Promise(resolve => listener.close(resolve));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'navigation-stock-ready-'));
+  await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ server: { port } }));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.endsWith('_POSTGRES_URL')));
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../stock-manage/src/server.js', import.meta.url))], {
+    cwd: dir, windowsHide: true, stdio: ['ignore', 'ignore', 'inherit'],
+    env: { ...env, NAVIGATION_DATABASE_ENGINE: 'sqlite', NAVIGATION_PORTFOLIO_POSTGRES_URL: portfolioUrl,
+      NAVIGATION_QUANT_POSTGRES_URL: portfolioUrl, NAVIGATION_BOOKKEEPING_POSTGRES_URL: bookkeepingUrl }
+  });
+  const base = `http://127.0.0.1:${port}`;
+  const request = (route, options) => fetch(base + route, { signal: AbortSignal.timeout(4000), ...options });
+  const write = () => request('/api/cash', { method: 'PUT',
+    headers: { 'content-type': 'application/json', 'x-portal-user-id': 'ready-fixture',
+      'x-portal-permissions': Buffer.from('["*"]').toString('base64url') },
+    body: JSON.stringify({ cashUsd: 271 }) });
+  try {
+    const deadline = Date.now() + 8000;
+    while (true) {
+      try { if ((await request('/readyz', { signal: AbortSignal.timeout(500) })).ok) break; } catch { /* Wait for listening. */ }
+      assert(Date.now() < deadline && child.exitCode === null, '股票管理未能启动');
+      await new Promise(resolve => setTimeout(resolve, 40));
+    }
+    await client.query('DELETE FROM navigation.navigation_schema_migrations');
+    assertEqual((await request('/readyz')).status, 503, '记账连接 schema 不符时股票管理未就绪');
+    assertEqual((await request('/api/health')).status, 200, '记账 schema 不符时股票管理进程仍存活');
+    assertEqual((await write()).status, 503, '记账 schema 不符时拒绝现金变更');
+    await client.query("INSERT INTO navigation.navigation_schema_migrations(version) VALUES ('002-qqq-dip-state')");
+    assertEqual((await request('/readyz')).status, 200, '记账 schema 恢复后重新就绪');
+    assertEqual((await write()).status, 200, '记账 schema 恢复后允许修改现金');
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, 'exit');
+      child.kill();
+      await exited;
+    }
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}

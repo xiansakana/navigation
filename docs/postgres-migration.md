@@ -91,12 +91,12 @@ NAVIGATION_POSTGRES_DATABASE=navigation
 
 抄底资金在组合写入事务内维护，必须随 `NAVIGATION_PORTFOLIO_POSTGRES_URL` 一起切换，不单独配置变量。
 
-`qqq_dip_state`、`torn_company_monitor_state`、`qq_bot_state` 属于 PostgreSQL 专有表，分别由 `002-qqq-dip-state.sql`、`003-runtime-state.sql` 幂等创建，不写入 `001-initial.sql`，也不提升 `navigation_schema_migrations` 的版本；SQLite 基线导入只比对 SQLite 快照中真实存在的表。执行方式：
+`qqq_dip_state`、`torn_company_monitor_state`、`qq_bot_state` 属于 PostgreSQL 专有表，分别由 `002-qqq-dip-state.sql`、`003-runtime-state.sql` 幂等创建，并在 `navigation_schema_migrations` 记录对应版本。生产就绪检查要求 `003-runtime-state`。恢复早于 002、003 版本标记的归档后，在开放流量前执行这两份 SQL。SQLite 基线导入只比对 SQLite 快照中真实存在的表。执行方式：
 
 ```bash
-docker exec -i navigation-postgres-postgres-1 psql -U navigation_db_admin -d navigation \
+docker exec -i navigation-postgres-postgres-1 psql -X -v ON_ERROR_STOP=1 --single-transaction -U navigation_db_admin -d navigation \
   < shared/db/postgres/002-qqq-dip-state.sql
-docker exec -i navigation-postgres-postgres-1 psql -U navigation_db_admin -d navigation \
+docker exec -i navigation-postgres-postgres-1 psql -X -v ON_ERROR_STOP=1 --single-transaction -U navigation_db_admin -d navigation \
   < shared/db/postgres/003-runtime-state.sql
 ```
 
@@ -122,3 +122,7 @@ docker exec -i navigation-postgres-postgres-1 psql -U navigation_db_admin -d nav
 - 上述检查通过后，在停写窗口导入最终快照并验证记录数、归属和关键业务行为，再切换应用连接。恢复生产写入后，回退前需处理 PostgreSQL 中新增的写入。
 
 维护窗口开始前，确认源站 HTTPS 已由 `scripts/sync-blog-upload-nginx.py` 安装维护开关。创建 `/run/navigation/maintenance` 并确认公网 HTTPS 返回 503，再停止所有业务写入。维护期间从 ECS 本机访问 Portal 的回环端口执行就绪和业务验收。允许业务恢复写入后移除标记，通过公网验证首页、登录及核心 API。
+
+## Navicat 生产只读连接
+
+生产 PostgreSQL 仅监听 ECS 的回环地址。通过 ECS SSH 隧道连接数据库主机 `127.0.0.1`、端口 `5432`，数据库名 `navigation`，用户名 `navigation_reader`。使用既有只读连接密码。该账户可以读取 `navigation.navigation_schema_migrations` 和全站共享的 `navigation.bookkeeping_fx_history`，默认以只读事务连接。私人账务、登录和权限数据仍由业务接口按账户授权。

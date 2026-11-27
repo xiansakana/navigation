@@ -64,10 +64,13 @@ jobs:
       - run: npm ci --prefix portal
       - run: npm ci --prefix qq-bot
       - run: npm ci --prefix qqq-dip
+      - run: npm ci --prefix stock-manage
       - run: node --test scripts/test-mingli-postgres.mjs
         env:
           PGPORT: ${{ job.services.postgres.ports[5432] }}
-      - run: node scripts/test-qqq-dip-postgres.mjs
+      - run: |
+          node scripts/test-qqq-dip-postgres.mjs
+          node scripts/test-portfolio-postgres.mjs
         env:
           NAVIGATION_TEST_POSTGRES_URL: postgresql://rehearsal:rehearsal-ci@127.0.0.1:${{ job.services.postgres.ports[5432] }}/navigation_rehearsal_ci
       - name: Verify PostgreSQL archive and restore

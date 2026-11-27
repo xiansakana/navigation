@@ -86,6 +86,8 @@ const quotes = createQuoteService(config);
 const quantDatabaseUrl = postgresUrlFor('quant');
 const quantDatabase = quantDatabaseUrl && createPostgresPool(pg.Pool, quantDatabaseUrl, 'navigation-stock-manage');
 if (quantDatabase) await verifyConfiguredPostgres(quantDatabase);
+const postgresDatabases = [portfolioDatabase, bookkeepingDatabase, quantDatabase].filter(Boolean);
+const checkPostgres = () => Promise.all(postgresDatabases.map(db => verifyConfiguredPostgres(db)));
 const app = express();
 app.use((req, res, next) => { if (!serveUiAsset(req, res)) next(); });
 
@@ -96,12 +98,20 @@ app.use(portfolioIdentityMiddleware);
 
 app.get('/readyz', async (_req, res) => {
   try {
-    if (portfolioDatabase) await verifyConfiguredPostgres(portfolioDatabase);
-    else if (portfolioDb) portfolioDb.prepare('SELECT 1').get();
-    else throw new Error('组合存储未配置');
-    if (quantDatabase) await verifyConfiguredPostgres(quantDatabase);
+    if (portfolioDb) portfolioDb.prepare('SELECT 1').get();
+    await checkPostgres();
     res.json({ ok: true, service: 'stock-manage' });
   } catch { res.status(503).json({ ok: false, service: 'stock-manage' }); }
+});
+
+app.use('/api', async (req, res, next) => {
+  if (!postgresDatabases.length || ['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  try {
+    await checkPostgres();
+  } catch {
+    return res.status(503).json({ error: '股票管理数据库暂不可用' });
+  }
+  return next();
 });
 
 function quantUserId(req) {
