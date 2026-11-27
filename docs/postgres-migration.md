@@ -69,7 +69,26 @@ GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访�
 
 `knowledge-storage-worker` 通过 `/etc/navigation/postgres.env` 读取知识库连接变量。记账、实盘组合、抄底资金和 `qqq-dip` 尚未迁移，因此没有设置 `NAVIGATION_DATABASE_ENGINE=postgres`，这些模块继续使用原 SQLite 文件。
 
-回滚时删除对应进程的上述变量并执行 `pm2 restart <进程> --update-env`，随后 `pm2 save`；systemd worker 移除 `/etc/systemd/system/knowledge-storage-worker.service.d/postgres.conf` 后重启。SQLite 数据文件和 `config.json` 在切换过程中保持原样，删除变量即可回到 SQLite 读写。
+剩余四个模块使用以下模块级变量，未设置时回退 SQLite：
+
+| 变量 | 覆盖范围 | 使用进程 |
+| --- | --- | --- |
+| `NAVIGATION_PORTFOLIO_POSTGRES_URL` | 实盘组合、投资账户、基金持仓、行情快照、抄底资金预留 | portal、stock-manage、qqq-dip |
+| `NAVIGATION_BOOKKEEPING_POSTGRES_URL` | 记账账本、分类分组、资产历史、汇率历史、证券价格历史、记账 QQ | portal、stock-manage |
+| `NAVIGATION_QQQ_DIP_POSTGRES_URL` | `qqq_dip_state` 单行状态文档 | qqq-dip |
+
+抄底资金在组合写入事务内维护，必须随 `NAVIGATION_PORTFOLIO_POSTGRES_URL` 一起切换，不单独配置变量。
+
+`qqq_dip_state` 属于 PostgreSQL 专有表，由 `shared/db/postgres/002-qqq-dip-state.sql` 幂等创建，不写入 `001-initial.sql`，也不提升 `navigation_schema_migrations` 的版本；SQLite 基线导入只比对 SQLite 快照中真实存在的表。执行方式：
+
+```bash
+docker exec -i navigation-postgres-postgres-1 psql -U navigation_db_admin -d navigation \
+  < shared/db/postgres/002-qqq-dip-state.sql
+```
+
+切换顺序：先部署代码（不设置变量）并确认 SQLite 正常；备份 `data/navigation.db` 与 `data/qqq-dip.json`；执行 002；portal、stock-manage、qqq-dip 同批设置组合变量并重启；portal、stock-manage 同批设置记账变量并重启；最后为 qqq-dip 设置状态变量并重启。每批切换后逐页验证，最后 `pm2 save`。
+
+回滚时删除对应进程的上述变量并执行 `pm2 restart <进程> --update-env`，随后 `pm2 save`；systemd worker 移除 `/etc/systemd/system/knowledge-storage-worker.service.d/postgres.conf` 后重启。SQLite 数据文件和 `config.json` 在切换过程中保持原样，删除变量即可回到 SQLite 读写。切换后写入 PostgreSQL 的新数据不会自动回流 SQLite，回滚前需人工核对。
 
 ## 应用切换条件
 
