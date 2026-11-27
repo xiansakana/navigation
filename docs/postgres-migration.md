@@ -31,9 +31,9 @@ PGSERVICE=navigation-target python scripts/rehearse-postgres.py \
 
 ## 应用读写适配
 
-Portal 的命理个人案例已接入异步 PostgreSQL 查询和事务。独立验证环境通过 `NAVIGATION_MINGLI_POSTGRES_URL` 选择 PostgreSQL。此配置仅接管命理的个人案例、分类和问真导入，排盘仍在应用内计算，知识库案例仍依赖现有知识库。正式全站切换前生产不启用这一独立配置。
+Portal 的命理个人案例已接入异步 PostgreSQL 查询和事务。独立验证环境可通过 `NAVIGATION_MINGLI_POSTGRES_URL` 验证命理个人案例、分类和问真导入。排盘在应用内计算，知识库案例使用知识库的 PostgreSQL 存储。
 
-GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访客拒绝、不同账号的数据隔离、分类约束、条件筛选、批量归类及并发导入。待其余业务适配后再执行全站切换。
+GitHub Actions 使用 PostgreSQL 17 验证 Portal HTTP、OAuth 撤权和并发权限更新、知识库与 Torn 工作器、记账、证券组合、抄底状态和 Codex 任务。测试覆盖访客拒绝、不同账号的数据隔离、事务回滚、队列领取及重启恢复。
 
 隔离环境的 Portal 和 `portal-background` 同时设置 `NAVIGATION_BLOG_POSTGRES_URL`，可验证博客、评论、旧媒体记录、视频分片和媒体清理共用同一数据库。对象存储和临时视频文件继续沿用既有路径。视频编码与清理维持单个后台工作进程的部署方式。
 
@@ -43,7 +43,7 @@ GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访�
 
 `NAVIGATION_QQ_MONITOR_POSTGRES_URL` 用于隔离验证 QQ 登录监控、重启冷却记录、Codex 登录告警去重和工作器心跳。Codex PostgreSQL 仓库已覆盖会话 API、任务进度、Web 与 QQ 入队、并发领取、队列上限、执行中断以及结果和回执原子写入；Portal、qq-bot 与 Codex 工作器现已统一使用这套存储，待办、设置、运行时偏好、附件与出站队列同样落在 `codex_*` / `qq_codex_*` 表。
 
-股票服务通过 `NAVIGATION_QUANT_POSTGRES_URL` 验证量化设置、模拟盘和回测记录的读写。量化状态使用同一账号行锁串行更新，行情请求在事务外完成。实盘组合、记账关联和抄底资金仍须完成迁移。
+股票服务通过 `NAVIGATION_QUANT_POSTGRES_URL` 验证量化设置、模拟盘和回测记录的读写。量化状态使用同一账号行锁串行更新，行情请求在事务外完成。生产的实盘组合、记账关联和抄底资金使用同一个 PostgreSQL 目标库。
 
 知识库的 PostgreSQL 仓库已覆盖设备、租约、上传、导入、115 归档队列、笔记读写、版本恢复和公开浏览。隔离测试涵盖容量并发、分片重传、下载任务接管、编辑版本冲突、跨账号访问、公开投影字段和工作器从配对到发布笔记的 HTTP 路径。批量导入队列、生产 HTTP、调度和 115 归档工作器通过 `NAVIGATION_KNOWLEDGE_POSTGRES_URL` 与文档、租约和扫码账号共用同一数据库；隔离测试同时覆盖批量队列领取、容量回退、失败重试与删除，以及 Portal 就绪检查。未配置该变量时知识库继续使用 SQLite。
 
@@ -53,7 +53,7 @@ GitHub Actions 使用 PostgreSQL 17 执行命理 HTTP 集成测试，覆盖访�
 
 在备份机器安装与 PostgreSQL 服务端同版本的 `pg_dump`、`pg_restore` 和 `psql`。全站切换后，为现有 115 备份任务配置 `NAVIGATION_DATABASE_ENGINE=postgres` 和 `NAVIGATION_POSTGRES_BACKUP_SERVICE`，由 libpq 服务配置提供连接。备份账号需可读 `navigation` 下的表及序列。数据库使用事务一致的 `pg_dump` 自定义格式，备份任务继续用既有加密和上传验证流程。
 
-解密归档后，在独立实例预先建好一个空的 `navigation_restore_*` 数据库，通过 `python scripts/backup-navigation.py --verify ARCHIVE --restore-postgres-service SERVICE` 核对归档和恢复。恢复使用单一事务。应用数据库账号和授权由部署配置重新建立。
+从 115 下载并解密归档后，在生产数据库之外预先建好一个空的 `navigation_restore_*` 数据库，通过 `python scripts/backup-navigation.py --verify ARCHIVE --restore-postgres-service SERVICE` 核对归档和恢复。恢复使用单一事务。应用数据库账号和授权由部署配置重新建立。2026-11-27 的实测从 115 下载了全部 55 个加密分片，解密后与上传前的归档逐字节一致，独立恢复库共恢复 89 张业务表。
 
 ## 生产启用现状
 

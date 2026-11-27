@@ -63,7 +63,7 @@ Tests use Node's built-in `node:test` and `node:assert/strict`. Name files `*.te
 
 ## Authorization & User Data
 
-Every new page, menu, tab, or action button must define a permission in `portal/src/rbac.js` with a `permissionPath` matching its menu/page hierarchy. Enforce it in browser and API; hiding controls alone is insufficient. Persist user-specific feature data in shared SQLite keyed by the authenticated Portal `userId`. Do not use global JSON files or browser storage for multi-user state.
+Every new page, menu, tab, or action button must define a permission in `portal/src/rbac.js` with a `permissionPath` matching its menu/page hierarchy. Enforce it in browser and API; hiding controls alone is insufficient. Persist user-specific feature data in the shared database keyed by the Portal-authorized data owner. Production uses PostgreSQL and validates the configured database name and schema before accepting business writes. Keep SQLite support for legacy data and tests without falling back to SQLite in PostgreSQL mode. Do not use global JSON files or browser storage for multi-user state.
 
 ## Commit & Pull Request Guidelines
 

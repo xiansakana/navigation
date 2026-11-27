@@ -68,9 +68,13 @@ jobs:
       - run: node --test scripts/test-mingli-postgres.mjs
         env:
           PGPORT: ${{ job.services.postgres.ports[5432] }}
-      - run: |
-          node scripts/test-qqq-dip-postgres.mjs
-          node scripts/test-portfolio-postgres.mjs
+      - name: Verify PostgreSQL business services
+        run: >-
+          node --test
+          scripts/test-qqq-dip-postgres.mjs
+          scripts/test-portfolio-postgres.mjs
+          scripts/test-bookkeeping-postgres.mjs
+          scripts/test-codex-postgres.mjs
         env:
           NAVIGATION_TEST_POSTGRES_URL: postgresql://rehearsal:rehearsal-ci@127.0.0.1:${{ job.services.postgres.ports[5432] }}/navigation_rehearsal_ci
       - name: Verify PostgreSQL archive and restore
