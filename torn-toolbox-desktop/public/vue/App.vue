@@ -18,7 +18,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="app" data-skeleton="dashboard" data-skeleton-key="page">
+  <div class="app" data-layout-container data-skeleton="dashboard" data-skeleton-key="page">
     <header class="header">
       <div>
         <h1>Torn 工具箱 Desktop</h1>
