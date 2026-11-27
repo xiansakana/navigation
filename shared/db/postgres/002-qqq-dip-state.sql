@@ -1,5 +1,7 @@
 -- 增量迁移：qqq-dip 独立状态文档。
 -- 该表只存在于 PostgreSQL，不参与 SQLite 基线导入的表集合比对。
+SET search_path TO navigation;
+
 CREATE TABLE IF NOT EXISTS qqq_dip_state (
   id TEXT PRIMARY KEY,
   data TEXT NOT NULL,
