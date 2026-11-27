@@ -54,7 +54,9 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-shell-1';
     return;
   }
   const ui = viewModule.mountBookkeepingShell(document.querySelector('.bk-shell'));
-  try { await import('./qq.js?epoch=' + encodeURIComponent(epoch)); } catch (error) { /* QQ 面板保持不可用，不影响记账 */ }
+  void import('./qq.js?epoch=' + encodeURIComponent(epoch)).then(() => {
+    if (state) window.initQqBookkeeping?.(can, state);
+  }).catch(() => { /* QQ 面板保持不可用，不影响记账 */ });
   const periods = ui.periods;
   let periodSave = Promise.resolve(), periodReload=0;
   periods.configure({
