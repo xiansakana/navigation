@@ -68,9 +68,9 @@ export function createPostgresHistoricalFx(db, { request = fetchQuoteResource, c
     return null;
   }
   async function ensure(entries) {
+    await loadCache();
     const needed = entries.filter(e => e.currency !== 'CNY');
     if (!needed.length) return;
-    await loadCache();
     const meta = (await db.query("SELECT updated_at FROM navigation.bookkeeping_fx_history_meta WHERE key='h10'")).rows[0];
     if (needed.every(e => quote(e.currency, e.date.slice(0, 10)))
       && meta && clock() - Number(meta.updated_at) < 21600000) return;
