@@ -1,7 +1,7 @@
 import { fetchQuoteResource } from '../../shared/quote-network.js';
 import { createCnyHistoryLoader } from './cny-history.js';
 import { latestCompletedSession, nyParts } from './market-hours.js';
-import { expectedVxnSession, parseVxnClose } from './vxn-session.js';
+import { expectedVxnSession, parseVxnClose, parseVxnDailyClose, vxnCloseMinutes } from './vxn-session.js';
 import { createSentimentLoader } from './market-sentiment.js';
 import { createCboeChainLoader } from './option-chain.js';
 import { createCnyFundLoader } from './cny-fund-quotes.js';
@@ -280,12 +280,18 @@ export function createQuoteService(config) {
       ['Cboe', async () => parseVxnClose(await fetchQuoteResource('https://cdn.cboe.com/api/global/delayed_quotes/quotes/_VXN.json', {
         headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://www.cboe.com/' }, retries: 1, timeoutMs: 8000
       }), new Date(now))],
+      ['Cboe 日线', async () => parseVxnDailyClose(await fetchQuoteResource(
+        'https://cdn.cboe.com/api/global/us_indices/daily_prices/VXN_History.csv',
+        { json: false, retries: 1, timeoutMs: 8000 }
+      ), expected)],
       ['FRED', getVxnFromFred],
       ['Yahoo', async () => {
         const q = await getYahooQuote('^VXN');
         const at = Date.parse(q.asOf);
-        if (!Number.isFinite(at) || at > now || nyParts(new Date(at)).minutes < 975) throw new Error('未取得带时间的收盘报价');
-        return { ...q, symbol: 'VXN', source: 'yahoo', asOf: nyParts(new Date(at)).ymd, quoteAt: q.asOf };
+        if (!Number.isFinite(at) || at > now) throw new Error('未取得带时间的收盘报价');
+        const market = nyParts(new Date(at));
+        if (market.minutes < vxnCloseMinutes(market.ymd)) throw new Error('未取得带时间的收盘报价');
+        return { ...q, symbol: 'VXN', source: 'yahoo', asOf: market.ymd, quoteAt: q.asOf };
       }]
     ];
     for (const [label, fetchClose] of providers) {

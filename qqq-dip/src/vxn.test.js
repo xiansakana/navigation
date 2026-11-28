@@ -2,9 +2,35 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createQuoteService } from './quotes.js';
 import { evaluate } from './playbook.js';
-import { parseVxnClose } from './vxn-session.js';
+import { expectedVxnSession, parseVxnClose } from './vxn-session.js';
 
 const now = new Date('2026-11-06T02:25:00Z');
+
+test('Black Friday VXN rolls to the new session at 13:15 Eastern and accepts the Cboe close', () => {
+  const before = new Date('2026-11-27T18:14:59Z');
+  const after = new Date('2026-11-27T18:16:00Z');
+  const row = { index: 'VXN', last_trade_time: '2026-11-27T12:15:01.404000-06:00',
+    close: 33.34, current_price: 33.34, prev_day_close: 38.53 };
+  assert.equal(expectedVxnSession(before), '2026-11-25');
+  assert.equal(expectedVxnSession(after), '2026-11-27');
+  assert.equal(parseVxnClose({ data: row }, after).price, 33.34);
+  assert.throws(() => parseVxnClose({ data: { ...row, last_trade_time: '2026-11-27T12:14:59-06:00' } }, after), /未取得/);
+});
+
+test('Cboe daily fallback accepts only the expected VXN session', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-28T04:00:00Z') });
+  const original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const previous = { price: 38.53, asOf: '2026-11-25', source: 'fred' };
+  let csv = 'DATE,OPEN,HIGH,LOW,CLOSE\n11/25/2026,41.15,44.18,38.27,38.53\n';
+  globalThis.fetch = async (url) => new URL(url).pathname.endsWith('VXN_History.csv')
+    ? { ok: true, arrayBuffer: async () => Buffer.from(csv) }
+    : { ok: false, status: 403 };
+  assert.equal((await createQuoteService({}).getVxn(previous)).stale, true);
+  csv += '11/27/2026,36.28,37.74,33.15,33.34\n';
+  const quote = await createQuoteService({}).getVxn(previous);
+  assert.deepEqual([quote.asOf, quote.price, quote.source, quote.stale], ['2026-11-27', 33.34, 'cboe', false]);
+});
 
 test('Cboe midnight rollover retains the finished session only when the close fields agree', () => {
   const afterRollover = new Date('2026-11-06T06:38:54Z');
@@ -65,25 +91,26 @@ test('FRED uses a recent window and successful VXN responses are cached', async 
   assert.equal(first.asOf, date);
   assert.equal(first.stale, false);
   assert.deepEqual(await quotes.getVxn(), first);
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   context.mock.timers.setTime(Date.parse('2026-11-06T21:16:00Z'));
   const late = await quotes.getVxn();
   assert.equal(late.stale, true, 'a cached previous session must expire at the next VXN close');
 });
 
 test('source failures preserve bounded previous VXN and back off retries', async (context) => {
+  context.mock.timers.enable({ apis: ['Date'], now });
   const original = globalThis.fetch;
   context.after(() => { globalThis.fetch = original; });
   let calls = 0;
   globalThis.fetch = async () => { calls += 1; return { ok: false, status: 403 }; };
-  const previous = { price: 40, source: 'fred', asOf: new Date(Date.now() - 86400000).toISOString().slice(0, 10) };
+  const previous = { price: 40, source: 'fred', asOf: '2026-11-04' };
   const quotes = createQuoteService({});
   const result = await quotes.getVxn(previous);
   assert.equal(result.price, 40);
   assert.equal(result.stale, true);
   assert.match(result.warning, /FRED.*Yahoo/);
   await quotes.getVxn(previous);
-  assert.equal(calls, 3);
+  assert.equal(calls, 4);
   const ev = evaluate({ cashUsd: 1000, cashCny: 0, usdCnyRate: 7, vxn: result, qqq: { price: 100, close: 100, candles: [{ h: 100, c: 100 }] } });
   assert.equal(ev.vxn, null);
   assert.equal(ev.vxnGates.t2.ok, false);
