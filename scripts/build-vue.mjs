@@ -1,12 +1,27 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir, unlink } from 'node:fs/promises';
 
 const [outdir, ...entryPoints] = process.argv.slice(2);
 if (!outdir || !entryPoints.length) throw new Error('Usage: build-vue.mjs <output-dir> <entry> [...]');
 const require = createRequire(path.resolve('package.json'));
 const { build } = require('esbuild');
 const { parse, compileScript } = require('vue/compiler-sfc');
+
+// Remove stale hashed chunks from previous builds so deploy artifacts stay bounded.
+// Only generated JS files are touched; hand-written assets in outdir are preserved.
+let stale = [];
+try {
+  for (const name of await readdir(outdir)) {
+    if (!name.endsWith('.js')) continue;
+    if (!/^chunk-|^bookkeeping-entries-view\.js$/.test(name)) continue;
+    stale.push(path.join(outdir, name));
+  }
+} catch { /* first build: outdir may not exist yet */ }
+if (stale.length) {
+  await Promise.all(stale.map(file => unlink(file)));
+  console.log('[build-vue] removed ' + stale.length + ' stale generated chunk(s)');
+}
 
 const singleFileComponents = {
   name: 'vue-single-file-components',

@@ -11,7 +11,9 @@ test('direct and proxied pages can share scripts without double-initializing the
     const html = injectPageScripts(dashboard);
     assert.equal(injectPageScripts(html), html);
     assert.equal(html.match(/src="\/portal-page\.js\?/g).length, 1);
-    assert.ok(html.indexOf('/portal-page.js') < html.indexOf('/navbar-dropdown.js'));
+    assert.equal(html.match(/src="\/command-palette\.js\?/g).length, 1);
+    assert.ok(html.indexOf('/portal-page.js') < html.indexOf('/command-palette.js'));
+    assert.ok(html.indexOf('/command-palette.js') < html.indexOf('/navbar-dropdown.js'));
 });
 
 test('shared input and back-to-top behavior loads once on native and proxied pages', () => {

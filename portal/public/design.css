@@ -186,6 +186,34 @@ a, button, input, textarea, select { font-family: inherit; }
 
 .btn.ghost:hover { color: var(--ds-text); background: var(--hover-bg); }
 
+/* Command palette launcher in navbar */
+[data-portal-command-hint] {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--ds-border);
+  border-radius: 8px;
+  background: var(--hover-bg);
+  color: var(--ds-muted);
+  font-family: var(--ds-mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: color .15s ease, border-color .15s ease, background .15s ease;
+}
+[data-portal-command-hint]::before {
+  content: '⌕';
+  font-size: 14px;
+  line-height: 1;
+}
+[data-portal-command-hint]:hover {
+  color: var(--ds-text);
+  border-color: var(--ds-border-strong);
+  background: var(--ds-accent-soft);
+}
+@media (max-width: 640px) { [data-portal-command-hint] { display: none; } }
+
 /* ── Page header & service grid ────────────────────────── */
 .page-header { max-width: 1180px; padding: 36px 24px 12px; }
 .page-header h1 { font-size: 30px; margin: 0 0 6px; }
@@ -678,6 +706,59 @@ html body.portal-experience :is(.kb-markdown code, .sm-doc-body code) {
   padding: 1px 5px;
   font-family: var(--ds-mono);
   font-size: .92em;
+}
+
+/* ── Component primitives: empty states, loaders, inline notices ──── */
+html body.portal-experience :is(
+  .blog-empty, .service-empty, .ml-empty, .kb-empty, .bk-empty,
+  .chat-empty, .resource-empty, .empty, .sm-empty
+) {
+  display: block;
+  padding: 42px 20px;
+  text-align: center;
+  color: var(--ds-faint);
+  border: 1px dashed var(--ds-border-strong);
+  border-radius: var(--ds-radius);
+  background: transparent;
+}
+
+html body.portal-experience :is(
+  .blog-spinner, .business-spinner, .resource-spinner
+) {
+  border: 3px solid var(--ds-border);
+  border-top-color: var(--ds-accent);
+  border-radius: 50%;
+  animation: ds-spin .8s linear infinite;
+}
+@keyframes ds-spin { to { transform: rotate(360deg); } }
+
+html body.portal-experience :is(
+  .notice, .notice-bar, .resource-notice, .chat-notice, .biz-hint,
+  .kb-hint, .ml-hint, .sm-hint, .hint
+) {
+  border-radius: 10px;
+  border: 1px solid var(--ds-border);
+  background: var(--ds-surface-2);
+  color: var(--ds-muted);
+  padding: 10px 14px;
+  line-height: 1.6;
+}
+
+html body.portal-experience :is(.kb-error, .ml-error, .bk-error, .biz-error, .sm-error, .error) {
+  color: var(--ds-bad);
+  border-color: color-mix(in srgb, var(--ds-bad) 35%, transparent);
+  background: color-mix(in srgb, var(--ds-bad) 8%, transparent);
+}
+
+/* Subtle entrance for card grids; no layout shift, motion-safe */
+@media (prefers-reduced-motion: no-preference) {
+  html body.portal-experience :is(.service-card, .kb-panel, .ml-panel, .bk-panel, .resource-panel) {
+    animation: ds-rise .32s cubic-bezier(.2, .8, .2, 1) both;
+  }
+  @keyframes ds-rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 }
 
 /* Semantic colors that were standalone hex values */
