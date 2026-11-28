@@ -18,16 +18,18 @@ export async function reanalysisTargets(store, uid, input, includeTranscript = f
 }
 export async function scheduleReanalysis(store, uid, items, mode, directoryFor, preview = false) {
   if (!['reuse', 'full'].includes(mode)) throw new Error('重新分析方式无效');
+  const settings = await store.settings(uid);
   const results = [];
   for (const item of items) {
     try {
       const d = await store.get(uid, item.id);
       if (!d || !['ready', 'failed'].includes(d.status) || !d.notes || d.revision !== item.revision) throw new Error('笔记不存在、已更新或正在处理');
       if (mode === 'reuse') {
+        if (settings.backend === 'gemini') throw new Error('Gemini 需要原视频，请选择重新提取原视频');
         if (!d.duration || !d.transcript.length && !d.frames.length) throw new Error('缺少可复用素材，请选择重新提取原视频');
         if (d.frames.some(f => !/^[a-z0-9.-]+\.jpg$/.test(f.name) || !fs.existsSync(path.join(directoryFor(d.id), f.name)))) throw new Error('关键画面文件缺失，请选择重新提取原视频');
       } else if (!fs.existsSync(path.join(directoryFor(d.id), 'source')) && !(d.storage.provider === '115' && ['ready', 'verified'].includes(d.storage.state))) throw new Error('原视频尚不可用，请等待115归档完成或改用已有素材');
-      if (!preview) await store.reanalysis.schedule(uid, d.id, item.revision, mode, await store.settings(uid));
+      if (!preview) await store.reanalysis.schedule(uid, d.id, item.revision, mode, settings);
       results.push({ ...item, accepted: true });
     } catch (e) { results.push({ ...item, accepted: false, error: /^SQLITE_/.test(e.code || '') ? '知识库忙，请稍后重试' : e.message }); }
   }

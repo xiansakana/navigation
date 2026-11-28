@@ -61,14 +61,17 @@ async function settings() {
   text('storage-policy', state.settings.storage?.provider === '115' ? '原视频保存至115，上传和处理期间使用临时缓存。' : '原视频保存在服务器。');
   $('backend').value = state.settings.backend;
   $('backend').disabled = !can('settings:edit');
-  const prefix = state.settings.backend === 'codex' ? 'codex' : 'api';
+  const prefix = state.settings.backend === 'codex' ? 'codex' : (state.settings.backend === 'gemini' ? 'gemini' : 'api');
+  const usingGemini = state.settings.backend === 'gemini';
+  $('summary-effort-label').hidden = usingGemini;
+  $('summary-model').placeholder = usingGemini ? (state.settings.gemini?.model || '服务器默认 Gemini 模型') : '留空使用工作器默认模型';
   if (!state.modelDirty) {
     $('summary-model').value = state.settings[prefix + 'Model'] || '';
     $('summary-effort').value = state.settings[prefix + 'Effort'] || '';
   }
   $('summary-model').disabled = $('summary-effort').disabled = !can('model:edit') || !can('settings:edit');
   show('model-save', can('model:edit') && can('settings:edit'));
-  show('asr-settings', can('asr:edit') && can('settings:edit'));
+  show('asr-settings', !usingGemini && can('asr:edit') && can('settings:edit'));
   if (!state.asrDirty) for (const [id, key] of [['asr-model', 'asrModel'], ['asr-language', 'asrLanguage'], ['asr-profile', 'asrProfile'], ['asr-hotwords', 'asrHotwords']]) $(id).value = state.settings[key] || '';
   show('concurrency-settings', can('concurrency:edit') && can('settings:edit'));
   if (!state.concurrencyDirty) {
@@ -76,9 +79,11 @@ async function settings() {
     $('summary-concurrency').value = String(state.settings.summaryConcurrency);
   }
   const worker = state.settings.worker, c = worker.capabilities;
-  text('worker-status', worker.online ? `${worker.label || 'GPU工作器'} · 在线 · 仅GPU处理，已禁用CPU接单 · ${c.pipeline?.version === 1 ? '分阶段并发已启用' : '当前设备为旧版，空闲更新后启用并发'}` : worker.configured ? '等待本机GPU工作器就绪，任务已暂停等待；不会切换到CPU。' : '尚未连接GPU工作器，请安装并配对本机工作器。任务会保留在队列中等待。');
+  text('worker-status', worker.online ? `${worker.label || 'GPU工作器'} · 在线 · 仅GPU处理，已禁用CPU接单 · ${c.pipeline?.version === 1 ? '分阶段并发已启用' : '当前设备为旧版，空闲更新后启用并发'}` : worker.configured ? '等待本机GPU工作器就绪，使用 GPU 工作器的任务在队列中等待。' : '尚未连接GPU工作器，请安装并配对本机工作器。使用 GPU 工作器的任务会保留在队列中。');
   const info = c[state.settings.backend];
-  text('backend-description', info ? `${worker.online && info.ready ? '工作器已就绪' : '工作器未就绪'} · ${state.settings[prefix + 'Model'] || info.model || info.detail || ''} · 强度：${state.settings[prefix + 'Effort'] || '工作器默认'}` : '选择总结方式后，由已连接工作器执行。');
+  text('backend-description', usingGemini
+    ? (state.settings.gemini?.configured ? '由服务器提交原视频，工作器离线也可处理。' : '服务器尚未配置此账号的 Gemini API Key，任务会等待配置。')
+    : info ? `${worker.online && info.ready ? '工作器已就绪' : '工作器未就绪'} · ${state.settings[prefix + 'Model'] || info.model || info.detail || ''} · 强度：${state.settings[prefix + 'Effort'] || '工作器默认'}` : '选择总结方式后，由已连接工作器执行。');
   $('upload-toggle').disabled = $('settings-toggle').disabled = $('worker-token').disabled = false;
 }
 function renderBatch() {
@@ -209,7 +214,7 @@ function renderDocument(d) {
   text('document-title', d.title);
   show('publication', can('publish:edit') && d.status === 'ready');
   $('document-visibility').value = d.visibility || 'private';
-  text('document-meta', `${d.topic || '未分类'} · ${time(d.duration)} · ${d.originalName} · ${d.backend === 'codex' ? 'Codex CLI' : '兼容 API'} · ${new Date(d.updatedAt).toLocaleString('sv-SE')}`);
+  text('document-meta', `${d.topic || '未分类'} · ${time(d.duration)} · ${d.originalName} · ${d.backend === 'gemini' ? 'Gemini API' : d.backend === 'codex' ? 'Codex CLI' : '兼容 API'} · ${new Date(d.updatedAt).toLocaleString('sv-SE')}`);
   $('document-tags').innerHTML = d.tags.map(t => '<span>' + escape(t) + '</span>').join('');
   text('job-status', d.error ? failureMessage(d.error, d.stage) : [phaseLabel(d), d.stage].filter(Boolean).join(' · ') + (d.status === 'processing' ? ' · ' + d.progress + '%' : ''));
   $('job-status').className = d.status;
@@ -219,8 +224,8 @@ function renderDocument(d) {
   $('export').href = '/api/knowledge/documents/' + d.id + '/export';
   const p = d.provenance;
   const media = d.sourceMedia || {};
-  const profile = d.modelSettings || {}, prefix = d.backend === 'codex' ? 'codex' : 'api';
-  text('provenance', p.generatedAt ? `生成于 ${new Date(p.generatedAt).toLocaleString('sv-SE')} · ${p.model || p.backend} · 推理强度：${p.reasoningEffort || '模型默认'} · ${p.vision ? '含抽样画面核对' : '未进行模型视觉核对'}。${(p.warnings || []).join(' ')}` : `本次任务模型：${profile[prefix + 'Model'] || '工作器默认'} · 强度：${profile[prefix + 'Effort'] || '工作器默认'}。任务完成后在这里阅读完整笔记。`);
+  const profile = d.modelSettings || {}, prefix = d.backend === 'codex' ? 'codex' : (d.backend === 'gemini' ? 'gemini' : 'api');
+  text('provenance', p.generatedAt ? `生成于 ${new Date(p.generatedAt).toLocaleString('sv-SE')} · ${p.model || p.backend} · 推理强度：${p.reasoningEffort || '模型默认'} · ${p.backend === 'gemini' ? '直接分析视频音画' : p.vision ? '含抽样画面核对' : '未进行模型视觉核对'}。${(p.warnings || []).join(' ')}` : `本次任务模型：${profile[prefix + 'Model'] || '工作器默认'} · 强度：${profile[prefix + 'Effort'] || '工作器默认'}。任务完成后在这里阅读完整笔记。`);
   if (media.width) $('provenance').textContent += ` 原片：${media.width}×${media.height}${media.downgraded ? '（已按设置自动降级）' : ''}。`;
   $('note-content').innerHTML = DOMPurify.sanitize(marked.parse(d.notes || ''), { USE_PROFILES: { html: true }, FORBID_TAGS: ['img', 'video', 'audio', 'iframe', 'form', 'input', 'button', 'style'], FORBID_ATTR: ['style', 'id', 'name'] });
   for (const a of $('note-content').querySelectorAll('a')) { a.rel = 'noopener noreferrer'; a.target = '_blank'; }
@@ -311,7 +316,7 @@ async function uploadFile(file, metadata, entry = null, report = () => {}) {
       item = result.document; state.resume = item; if (entry) entry.resume = item;
     }
     const { parts, chunkBytes } = await api('/documents/' + item.id + '/parts');
-    const localTransfer = can('local-input:edit') ? sendLocalInput({ file, documentId: item.id, send, status: value => text('local-input-status', value) }) : Promise.resolve(false);
+    const localTransfer = item.backend !== 'gemini' && can('local-input:edit') ? sendLocalInput({ file, documentId: item.id, send, status: value => text('local-input-status', value) }) : Promise.resolve(false);
     const transfer = await uploadParts({ file, parts, chunkBytes, url: `/api/knowledge/documents/${item.id}/parts/`, onProgress(p) {
       const progress = Math.min(99, Math.floor(p.loaded / p.total * 100));
       $('upload-progress').value = progress; report('上传中 · ' + progress + '%');
@@ -322,7 +327,7 @@ async function uploadFile(file, metadata, entry = null, report = () => {}) {
     const mergeStarted = performance.now();
     await send('/documents/' + item.id + '/complete', 'POST'); state.resume = null;
     const elapsed = `本次上传用时 ${time(transfer.elapsedMs / 1000)}，合并用时 ${time((performance.now() - mergeStarted) / 1000)}。`;
-    text('message', elapsed + (localReady ? '已启用本机原视频处理，无需等待115归档或下载；归档在后台独立继续。' : state.settings.storage?.provider === '115' ? '接下来保存至115并校验，之后自动生成笔记。' : '视频已保存，工作器将按队列生成笔记。')); $('upload-progress').value = 100; text('upload-status', '上传完成'); show('upload-panel', false); $('upload-form').reset();
+    text('message', elapsed + (localReady ? '已启用本机原视频处理，无需等待115归档或下载；归档在后台独立继续。' : item.backend === 'gemini' ? '视频已上传，等待服务器提交给 Gemini。' : state.settings.storage?.provider === '115' ? '接下来保存至115并校验，之后自动生成笔记。' : '视频已保存，工作器将按队列生成笔记。')); $('upload-progress').value = 100; text('upload-status', '上传完成'); show('upload-panel', false); $('upload-form').reset();
     await load(); await open(item.id); if (entry) entry.resume = null; return item;
   } catch (e) { error(e); text('upload-status', '上传未完成，可重新提交继续上传。'); await load().catch(() => {}); throw e; }
   finally { if (entry) state.resume = null; state.uploading = false; $('upload-submit').disabled = false; $('upload-mode').disabled = false; $('video-file').disabled = false; linkImport.mode(); }
@@ -420,10 +425,10 @@ $('asr-save').onclick = async () => {
   finally { $('asr-save').disabled = false; }
 };
 $('model-save').onclick = async () => {
-  const prefix = state.settings.backend === 'codex' ? 'codex' : 'api';
+  const prefix = state.settings.backend === 'codex' ? 'codex' : (state.settings.backend === 'gemini' ? 'gemini' : 'api');
   try {
-    await send('/settings', 'PUT', { [prefix + 'Model']: $('summary-model').value.trim(), [prefix + 'Effort']: $('summary-effort').value });
-    state.modelDirty = false; await settings(); text('message', '模型和强度已保存，用于新上传和失败重试；已排队和正在处理的任务保留原配置。');
+    await send('/settings', 'PUT', { [prefix + 'Model']: $('summary-model').value.trim(), ...(prefix !== 'gemini' ? { [prefix + 'Effort']: $('summary-effort').value } : {}) });
+    state.modelDirty = false; await settings(); text('message', '模型设置已保存，用于新上传和失败重试；已排队和正在处理的任务保留原配置。');
   } catch (e) { error(e); }
 };
 $('worker-token').onclick = async () => {
@@ -439,7 +444,7 @@ async function retryFailed(all) {
   retrying = true; $('retry').disabled = $('retry-failed').disabled = true; show('error', false);
   try {
     const result = await send(all ? '/documents/retry-failed' : '/documents/' + id + '/retry', 'POST', {});
-    text('message', all ? `已重新排队 ${result.accepted} 个失败任务；未重试 ${result.skipped} 个。` + [...new Set(result.results.filter(r => r.error).map(r => r.error))].join('；') : '已重新排队，等待GPU工作器；使用当前模型和强度。');
+    text('message', all ? `已重新排队 ${result.accepted} 个失败任务；未重试 ${result.skipped} 个。` + [...new Set(result.results.filter(r => r.error).map(r => r.error))].join('；') : '已重新排队，使用当前处理方式和模型设置。');
     if (state.current && (all || state.current.id === id)) await open(state.current.id);
     await load();
   } catch (e) { error(e); }

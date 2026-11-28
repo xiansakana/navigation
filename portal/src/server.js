@@ -67,6 +67,7 @@ import { canTornChain } from './torn-chain.js';
 import { canKnowledge } from './knowledge.js';
 import { handleKnowledgeWorkerApi } from './knowledge-worker-api.js';
 import { knowledgeDirectory } from './knowledge-http.js';
+import { startGeminiJobs } from './knowledge-gemini.js';
 import { startKnowledgeImports } from './knowledge-import.js';
 import { checkKnowledgeDatabase, getKnowledgeDatabase, knowledgePostgresDatabase } from './knowledge-runtime.js';
 import { createPostgresKnowledgeStore } from './knowledge-postgres-store.js';
@@ -899,6 +900,11 @@ server.listen(port, host, async function() {
             startThumbnailWorker(blogDb);
         } catch (error) { console.error('[portal background start]', error.code || error.name); }
     }
+    startGeminiJobs(getKnowledgeDatabase(), knowledgeDirectory, async uid => {
+        const ctx = resolveSessionUser({ userId: uid }, config, await readIdentity());
+        const s = ctx && { userId: uid, permissions: ctx.permissions, isGuest: ctx.user.username === (config.auth?.guestUsername || 'guest') };
+        return ctx?.rbac?.accessPolicy?.modules?.knowledge?.enabled !== false && canKnowledge(s) && canKnowledge(s, 'process:edit');
+    });
     startKnowledgeImports(getKnowledgeDatabase(), knowledgeDirectory, async (uid, batch = false) => {
         const ctx = resolveSessionUser({ userId: uid }, config, await readIdentity());
         const s = ctx && { userId: uid, permissions: ctx.permissions, isGuest: ctx.user.username === (config.auth?.guestUsername || 'guest') };

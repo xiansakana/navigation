@@ -46,7 +46,7 @@ export function createPostgresKnowledgeStore(db) {
         const backend = backendName(input.backend || settings?.backend || 'codex');
         await client.query(`UPDATE navigation.knowledge_documents SET status=$3,stage=$4,backend=$5,
           model_settings_json=$6,progress=0,error='',lease=NULL,updated_at=$7 WHERE user_id=$1 AND id=$2`,
-        [uid, id, link ? 'importing' : 'queued', link ? '等待下载B站视频' : '等待GPU工作器', backend,
+        [uid, id, link ? 'importing' : 'queued', link ? '等待下载B站视频' : backend === 'gemini' ? '等待 Gemini' : '等待GPU工作器', backend,
           JSON.stringify(modelSettings({}, JSON.parse(settings?.model_settings_json || '{}'))), new Date().toISOString()]);
         return true;
       });

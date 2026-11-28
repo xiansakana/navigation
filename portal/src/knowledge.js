@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { geminiAccounts, defaultGeminiModel } from './knowledge-gemini.js';
 import { getKnowledgeDatabase } from './knowledge-runtime.js';
 import { createPostgresKnowledgeStore } from './knowledge-postgres-store.js';
 import { storageConfig } from './knowledge-storage.js';
@@ -167,7 +168,10 @@ async function knowledgeApi(req, res, url, session, json) {
       if (!canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要知识库处理权限' });
       const approved = await store.devices.approve(uid, code); return json(res, approved ? 200 : 409, { ok: approved, ...(approved ? {} : { error: '配对码已失效或已使用' }) });
     }
-    if (route === '/settings' && method === 'GET') return json(res, 200, { ok: true, ...await store.settings(uid), linkDefaults: qualitySettings({}, await bilibiliAccount(db).public(uid)), storage: { provider: storageConfig(uid) ? '115' : 'local' }, worker: await store.worker(uid), chunkBytes: CHUNK_BYTES, maxBytes: MAX_VIDEO_BYTES });
+    if (route === '/settings' && method === 'GET') {
+      const account = geminiAccounts().get(uid);
+      return json(res, 200, { ok: true, ...await store.settings(uid), linkDefaults: qualitySettings({}, await bilibiliAccount(db).public(uid)), storage: { provider: storageConfig(uid) ? '115' : 'local' }, worker: await store.worker(uid), chunkBytes: CHUNK_BYTES, maxBytes: MAX_VIDEO_BYTES, gemini: { configured: !!account, model: account?.model || defaultGeminiModel } });
+    }
     if (route === '/settings' && method === 'PUT') {
       const input = await body(req, 4096);
       if (MODEL_FIELDS.some(key => Object.hasOwn(input, key)) && !canKnowledge(session, 'model:edit')) return json(res, 403, { ok: false, error: '没有模型和强度设置权限' });
@@ -234,6 +238,7 @@ async function knowledgeApi(req, res, url, session, json) {
         if (!canKnowledge(session, 'upload:edit') || !canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要上传和生成笔记权限' });
         const input = await body(req, 1024);
         if (input.cancel) { await store.localInputs.remove(uid, id); return json(res, 200, { ok: true }); }
+        if (item.backend === 'gemini') throw new Error('Gemini 使用服务器原视频');
         return json(res, 200, { ok: true, ...await store.localInputs.offer(uid, id, input.workerId) });
       }
       if (!operation && method === 'GET') return json(res, 200, { ok: true, document: visible(item) });

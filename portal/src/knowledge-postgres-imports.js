@@ -46,7 +46,7 @@ export function createPostgresKnowledgeImports(db) {
         [job.user_id, job.document_id, job.lease, JSON.stringify(media), Date.now() - 120000]);
         if (!claim.rowCount) return false;
         if (publish) await publish();
-        await client.query(`UPDATE navigation.knowledge_documents SET byte_size=$3,status='queued',stage='等待GPU工作器',
+        await client.query(`UPDATE navigation.knowledge_documents SET byte_size=$3,status='queued',stage=CASE WHEN backend='gemini' THEN '等待 Gemini' ELSE '等待GPU工作器' END,
           source_sha256=$4,progress=0,error='',updated_at=$5 WHERE user_id=$1 AND id=$2`,
         [job.user_id, job.document_id, hashes.bytes, hashes.sha256, new Date().toISOString()]);
         await client.query(`UPDATE navigation.knowledge_sources SET state='pending'

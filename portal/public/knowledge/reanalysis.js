@@ -38,7 +38,7 @@ export function createReanalysisPanel({ element: $, can, state, api, send, onErr
     busy = true; $('reanalysis-confirm').disabled = $('reanalysis-mode').disabled = $('reanalysis-close').disabled = true;
     try {
       const result = await send(target ? '/documents/' + target.id + '/reanalyze' : '/reanalysis', 'POST', target ? { revision: previewItems[0].revision, mode: $('reanalysis-mode').value } : { items: previewItems, mode: $('reanalysis-mode').value });
-      $('message').textContent = `已排队重新分析 ${result.accepted} 篇；未提交 ${result.skipped} 篇。旧正文已保留，等待支持重新分析的GPU工作器。` + [...new Set(result.results.filter(r => r.error).map(r => r.error))].join('；');
+      $('message').textContent = `已排队重新分析 ${result.accepted} 篇；未提交 ${result.skipped} 篇。旧正文已保留，将按当前处理方式生成。` + [...new Set(result.results.filter(r => r.error).map(r => r.error))].join('；');
       state.selected.clear(); dialog.close(); await onDone();
     } catch (e) { previewError(e); }
     finally { busy = false; $('reanalysis-mode').disabled = $('reanalysis-close').disabled = false; $('reanalysis-confirm').disabled = false; }

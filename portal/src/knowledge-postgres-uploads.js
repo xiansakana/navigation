@@ -116,7 +116,7 @@ export function createPostgresKnowledgeUploads(db) {
             parts.some(({ part, bytes }, i) => part !== i + 1 || bytes !== Math.min(CHUNK_BYTES, size - i * CHUNK_BYTES))) {
           throw new Error('视频尚未上传完整');
         }
-        await client.query(`UPDATE navigation.knowledge_documents SET status='queued',stage='等待GPU工作器',progress=0,
+        await client.query(`UPDATE navigation.knowledge_documents SET status='queued',stage=CASE WHEN backend='gemini' THEN '等待 Gemini' ELSE '等待GPU工作器' END,progress=0,
           source_sha256=$3,updated_at=$4 WHERE user_id=$1 AND id=$2`, [uid, id, sha256, new Date().toISOString()]);
         await client.query(`UPDATE navigation.knowledge_sources SET state='pending'
           WHERE user_id=$1 AND document_id=$2 AND state='waiting'`, [uid, id]);

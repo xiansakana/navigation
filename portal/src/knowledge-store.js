@@ -15,20 +15,21 @@ import { connectionStore } from './connection-store.js';
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
 export const ACTIVE_STATES = ['processing'];
-export const MODEL_FIELDS = ['codexModel', 'codexEffort', 'apiModel', 'apiEffort'];
+export const MODEL_FIELDS = ['codexModel', 'codexEffort', 'apiModel', 'apiEffort', 'geminiModel'];
 const efforts = ['', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 export function modelSettings(raw, previous = {}) {
   const result = {};
   for (const key of MODEL_FIELDS) {
     const value = raw[key] === undefined ? previous[key] || '' : String(raw[key]).trim();
     if (key.endsWith('Model') ? value && !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,119}$/.test(value) : !efforts.includes(value)) throw new Error('模型名称或推理强度无效');
+    if (key === 'geminiModel' && value && !/^gemini-[a-z0-9][a-z0-9.-]{0,110}$/.test(value)) throw new Error('Gemini 模型名称无效');
     result[key] = value;
   }
   for (const prefix of ['codex', 'api']) if (/^gpt-(6|5\.6)-luna$/.test(result[prefix + 'Model']) && result[prefix + 'Effort'] === 'ultra') throw new Error('Luna最高支持max，请降低推理强度');
   return { ...result, ...asrSettings(raw, previous) };
 }
 export const backendName = value => {
-  if (!['codex', 'openai'].includes(value)) throw new Error('请选择 Codex CLI 或兼容 API');
+  if (!['codex', 'openai', 'gemini'].includes(value)) throw new Error('请选择 Codex CLI、兼容 API 或 Gemini');
   return value;
 };
 const id = () => crypto.randomBytes(16).toString('hex');
@@ -132,7 +133,7 @@ function initializeKnowledgeStore(db) {
     });
   };
   const get = (uid, key) => { const row = getRow(uid, key); return row && row.status !== 'deleting' ? read(row) : null; };
-  const expire = uid => db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待GPU工作器恢复',error='',lease=NULL,worker_id='',processing_phase='',progress=0,updated_at=? WHERE user_id=? AND status='processing' AND heartbeat<?")
+  const expire = uid => db.prepare("UPDATE knowledge_documents SET status='queued',stage=CASE WHEN backend='gemini' THEN '等待 Gemini 恢复' ELSE '等待GPU工作器恢复' END,error='',lease=NULL,worker_id='',processing_phase='',progress=0,updated_at=? WHERE user_id=? AND status='processing' AND heartbeat<?")
     .run(now(), uid, new Date(Date.now() - 15 * 60000).toISOString());
   const onlineWorkers = uid => db.prepare('SELECT worker_id,label,last_seen,capabilities_json FROM knowledge_worker_instances WHERE user_id=? AND last_seen>?')
     .all(uid, new Date(Date.now() - 90000).toISOString())
@@ -247,7 +248,7 @@ function initializeKnowledgeStore(db) {
     },
     enqueue(uid, key, sha256 = '') {
       return db.transaction(() => {
-        const changed = db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待GPU工作器',progress=0,error='',updated_at=? WHERE user_id=? AND id=? AND status='uploading'").run(now(), uid, key).changes > 0;
+        const changed = db.prepare("UPDATE knowledge_documents SET status='queued',stage=CASE WHEN backend='gemini' THEN '等待 Gemini' ELSE '等待GPU工作器' END,progress=0,error='',updated_at=? WHERE user_id=? AND id=? AND status='uploading'").run(now(), uid, key).changes > 0;
         if (changed) sources.enqueue(uid, key);
         if (changed && /^[a-f0-9]{64}$/.test(sha256)) db.prepare('UPDATE knowledge_documents SET source_sha256=? WHERE user_id=? AND id=?').run(sha256, uid, key);
         return changed;
@@ -335,7 +336,7 @@ function initializeKnowledgeStore(db) {
             .run(backend, JSON.stringify(modelSettings({}, this.settings(uid))), now(), uid, key).changes > 0;
         })();
       }
-      return db.prepare("UPDATE knowledge_documents SET status='queued',stage='等待GPU工作器',backend=?,model_settings_json=?,progress=0,error='',lease=NULL,updated_at=? WHERE user_id=? AND id=? AND status='failed'").run(backend, JSON.stringify(modelSettings({}, this.settings(uid))), now(), uid, key).changes > 0;
+      return db.prepare("UPDATE knowledge_documents SET status='queued',stage=?,backend=?,model_settings_json=?,progress=0,error='',lease=NULL,updated_at=? WHERE user_id=? AND id=? AND status='failed'").run(backend === 'gemini' ? '等待 Gemini' : '等待GPU工作器', backend, JSON.stringify(modelSettings({}, this.settings(uid))), now(), uid, key).changes > 0;
     },
     edit(uid, key, raw) {
       const previous = get(uid, key);

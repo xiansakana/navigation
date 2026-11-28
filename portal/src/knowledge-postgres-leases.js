@@ -12,7 +12,7 @@ export async function lockKnowledgeWorkerOwner(client, uid) {
 
 export async function expireKnowledgeLeases(client, uid) {
   await client.query(`UPDATE navigation.knowledge_documents
-    SET status='queued',stage='等待GPU工作器恢复',error='',lease=NULL,worker_id='',processing_phase='',progress=0,updated_at=$2
+    SET status='queued',stage=CASE WHEN backend='gemini' THEN '等待 Gemini 恢复' ELSE '等待GPU工作器恢复' END,error='',lease=NULL,worker_id='',processing_phase='',progress=0,updated_at=$2
     WHERE user_id=$1 AND status='processing' AND heartbeat<$3`, [uid, now(), expired()]);
 }
 

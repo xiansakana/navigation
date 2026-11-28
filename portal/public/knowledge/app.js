@@ -21,15 +21,15 @@ function restoreLegacy() {
         template.innerHTML = dialogMarkup;
         document.body.insertBefore(template.firstElementChild, document.body.querySelector('script[src*="/knowledge/app.js"]'));
     }
-    import('./app-legacy.js?v=vue-fallback-1');
+    import('./app-legacy.js?v=vue-fallback-gemini-1');
 }
 
 if (!host) {
-    import('./app-legacy.js?v=vue-fallback-1');
+    import('./app-legacy.js?v=vue-fallback-gemini-1');
 } else {
     legacy?.remove();
     dialog?.remove();
-    import('../generated/knowledge-page-view.js?v=knowledge-page-vue-1')
+    import('../generated/knowledge-page-view.js?v=knowledge-page-vue-gemini-1')
         .then(mod => { mod.mountKnowledgePage(host); })
         .catch(error => {
             console.error(error);

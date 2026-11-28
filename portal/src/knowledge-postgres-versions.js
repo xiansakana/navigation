@@ -50,7 +50,7 @@ export function createPostgresKnowledgeVersions(db) {
         await client.query(`UPDATE navigation.knowledge_documents SET status='queued',stage=$3,backend=$4,
           model_settings_json=$5,error='',lease=NULL,worker_id='',processing_phase='',progress=0,revision=revision+1,updated_at=$6
           WHERE user_id=$1 AND id=$2`, [
-          uid, id, mode === 'reuse' ? '等待GPU工作器重新分析 · 复用转写与画面' : '等待GPU工作器重新提取原视频',
+          uid, id, settings.backend === 'gemini' ? '等待 Gemini 重新分析' : mode === 'reuse' ? '等待GPU工作器重新分析 · 复用转写与画面' : '等待GPU工作器重新提取原视频',
           settings.backend, JSON.stringify(settings), now(),
         ]);
         return runId;
