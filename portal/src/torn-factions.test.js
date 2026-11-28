@@ -14,6 +14,15 @@ const meta = { today, lastAction: (today - 1) * DAY, daysInFaction: 10 };
 const config = patch => factionConfig({ dailyDropAmount: 200, peakDropAmount: 200, ...patch });
 function fixture(t) { const db = new Database(':memory:'); t.after(() => db.close()); const store = createFactionStore(db); store.save('a', { apiKey: key, batchSize: 1, dailyDropAmount: 200, peakDropAmount: 200 }); return store; }
 const faction = (id, respect) => ({ id, respect, name: 'Faction ' + id, leader: { id: id + 1000, name: 'Leader ' + id }, is_destroyed: false });
+
+test('FactionScanner keeps an empty run when the store returns a Promise and honors explicit run states', () => {
+  const request = async () => ({});
+  const asyncStore = { get: async () => ({ config: {}, run: { cursor: 3 } }) };
+  assert.deepEqual(new FactionScanner({ uid: 'a', store: asyncStore, request }).run, {});
+  const syncStore = { get: () => ({ run: { cursor: 4 } }) };
+  assert.deepEqual(new FactionScanner({ uid: 'a', store: syncStore, request }).run, { cursor: 4 });
+  assert.deepEqual(new FactionScanner({ uid: 'a', store: syncStore, request, initialRun: { cursor: 9 } }).run, { cursor: 9 });
+});
 function mockRequest(calls = []) {
   return async path => {
     calls.push(path); const url = new URL(path, 'https://api.torn.com/v2/'), id = Number(url.pathname.split('/')[3]);

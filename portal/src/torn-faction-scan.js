@@ -46,7 +46,12 @@ export function createFactionStore(db) {
 export class FactionScanner {
   constructor({ uid, store, request, initialRun, authorize = () => true, now = () => Math.floor(Date.now() / 1000), wait = waitForRetry }) {
     Object.assign(this, { uid, store, request, authorize, now, wait });
-    this.running = false; this.busy = false; this.run = initialRun ?? store.get(uid).run;
+    this.running = false; this.busy = false;
+    if (initialRun !== undefined) this.run = initialRun;
+    else {
+      const saved = store.get(uid);
+      this.run = saved && typeof saved.then !== 'function' ? (saved.run ?? {}) : {};
+    }
   }
   status() { return { ...this.run, running: this.running, busy: this.busy }; }
   stop() { this.running = false; this.controller?.abort(); this.request.release?.('factions:' + this.uid); }
