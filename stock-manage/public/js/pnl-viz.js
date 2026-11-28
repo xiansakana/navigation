@@ -507,7 +507,7 @@ function buildLineOption(rangeSlice) {
     ],
     series: [{
       type: 'line',
-      name: '区间净盈亏',
+      name: '累计已实现净盈亏',
       data: values,
       showSymbol: dates.length === 1,
       sampling: 'lttb',
@@ -593,7 +593,7 @@ function buildCandleOption(rangeSlice) {
     ],
     series: [{
       type: 'candlestick',
-      name: '区间净盈亏 K线',
+      name: '累计已实现净盈亏 K线',
       data: candles.map((candle) => [candle.open, candle.close, candle.low, candle.high]),
       itemStyle: {
         color: colors.good,
@@ -762,6 +762,7 @@ function ensureShell(container) {
         <div class="sm-pnl-echarts" id="sm-pnl-echarts"></div>
         <div class="sm-pnl-line-hint">
           <span class="sm-pnl-candle-hint">K 线按区间聚合：开=区间首日、收=末日，影线为区间最高与最低；阳线绿色、阴线红色。</span>
+          <span>曲线只含已实现盈亏（已扣手续费与其他），未实现浮盈见上方「总盈亏」卡片。</span>
           <span>拖动平移，滚轮缩放。</span>
           <button type="button" class="btn ghost sm-btn-sm" data-pnl-reset>复位视窗</button>
         </div>
