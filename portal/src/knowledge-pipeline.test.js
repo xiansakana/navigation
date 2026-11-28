@@ -112,6 +112,8 @@ import fs from 'node:fs/promises'; import path from 'node:path';
 export const createStageGate = ${gateSource};
 export const workerPortalRequest = ${workerPortalRequest.toString()};
 export const resolveCodexBinary = () => 'stub';
+export const workerCodexModels = async () => ['stub'];
+export const summaryModelIds = () => [];
 export const modelConfiguration = () => { throw new Error('No API'); };
 export async function runProcess(binary, args, options = {}) {
   if (String(args[0]).endsWith('video_runtime.py')) return 'cuda';

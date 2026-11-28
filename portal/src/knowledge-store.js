@@ -42,8 +42,11 @@ export function knowledgeWorkerHeartbeat(raw, time = new Date().toISOString()) {
     const value = raw.capabilities?.[key] || {};
     capabilities[key] = { ready: value.ready === true, model: String(value.model || '').slice(0, 120), detail: String(value.detail || '').slice(0, 160) };
   }
-  const models = raw.capabilities?.codex?.models;
-  if (Array.isArray(models)) capabilities.codex.models = [...new Set(models.slice(0, 25).filter(id => typeof id === 'string' && /^[a-zA-Z0-9][\w.-]{0,79}$/.test(id)))];
+  for (const key of ['codex', 'openai']) {
+    const models = raw.capabilities?.[key]?.models;
+    if (Array.isArray(models)) capabilities[key].models = [...new Set(models.slice(0, 25)
+      .filter(id => typeof id === 'string' && /^[a-zA-Z0-9][\w./:-]{0,119}$/.test(id)))];
+  }
   for (const feature of ['pipeline', 'reanalysis']) {
     if (raw.capabilities?.[feature]?.version === 1) capabilities[feature] = { version: 1 };
   }

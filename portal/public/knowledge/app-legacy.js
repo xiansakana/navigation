@@ -1,4 +1,4 @@
-import { createKnowledgeModelPicker } from './model-picker.js?v=provider-1';
+import { createKnowledgeModelPicker } from './model-picker.js?v=live-models-1';
 import { uploadParts } from './upload.js?v=1';
 import { createDevicePanel } from './devices.js?v=datetime-20261110';
 import { createSourcePlayer } from './source.js?v=1';

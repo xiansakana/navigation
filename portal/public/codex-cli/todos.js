@@ -85,7 +85,12 @@
       closeTodo();notice('待办已保存。');await load(true);
     }catch(error){$('todo-form-error').textContent=error.message;}finally{$('todo-save').disabled=false;}
   };
-  document.addEventListener('codex-status',event=>{catalog=event.detail;});
+  document.addEventListener('codex-status',event=>{
+    catalog=event.detail;
+    const field=$('todo-model'), selected=field.value, effort=$('todo-effort').value;
+    choices(field,[{value:'',label:'执行时继承默认模型'},...catalog.models.map(m=>({value:m.id,label:m.id}))],selected);
+    efforts(effort);
+  });
   document.addEventListener('codex-view',event=>{if(event.detail==='todos')void load();});
   setInterval(()=>{if(!document.hidden&&!$('todos-view').hidden&&!mutating)void load();},5000);
   void load();

@@ -28,7 +28,7 @@ export function createKnowledgeModelPicker({ element: $, api, send, onError, ref
       if (ticket !== generation) return;
       catalog = result.models;
       options(field.value || selected);
-      status.textContent = catalog.length ? '已读取服务商返回的模型' : '服务商未返回可用于总结的模型';
+      status.textContent = catalog.length ? (result.source === 'worker' ? '来自在线工作器所连接的 API' : '已读取服务商返回的模型') : '服务商未返回可用于总结的模型';
     } catch (error) {
       if (ticket !== generation) return;
       catalog = [];
@@ -74,7 +74,7 @@ export function createKnowledgeModelPicker({ element: $, api, send, onError, ref
         + (backend === 'openai' ? ' 服务地址 ' + (input.openaiBaseUrl || '') + '。' : '');
       if (backend === 'codex') {
         catalog = (input.worker?.capabilities?.codex?.models || []).map(id => ({ id, name: id }));
-        status.textContent = catalog.length ? '来自在线工作器的 Codex 模型缓存' : '等待工作器提供模型列表，可使用 CLI 默认模型';
+        status.textContent = catalog.length ? '来自在线工作器的 Codex CLI' : '等待工作器提供模型列表，可使用 CLI 默认模型';
       }
       options(selection);
       if (changed && hasProvider && canEdit) void reload();

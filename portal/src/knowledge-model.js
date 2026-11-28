@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import fsp from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -49,6 +50,59 @@ export function runProcess(binary, args, { cwd, input = '', onLine = () => {}, t
     if (signal?.aborted) abort();
   });
 }
+// Query the same CLI and login used for summary tasks. Only model listing is requested.
+export function workerCodexModels(binary, { proxyUrl, spawnProcess = spawn, timeout = 9000 } = {}) {
+  return new Promise(resolve => {
+    const env = proxyUrl ? { ...process.env, HTTPS_PROXY: proxyUrl, HTTP_PROXY: proxyUrl, ALL_PROXY: proxyUrl } : process.env;
+    const child = spawnProcess(binary, ['app-server'], { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const output = createInterface({ input: child.stdout });
+    const models = new Set(), seen = new Set();
+    let id = 1, finished = false;
+    function finish(value = []) {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      output.close();
+      child.stdin.destroy();
+      child.kill();
+      resolve(value);
+    }
+    const timer = setTimeout(finish, timeout);
+    child.stderr.resume();
+    child.once('error', () => finish());
+    child.once('close', () => finish());
+    child.stdin.on('error', () => finish());
+    const write = message => child.stdin.write(JSON.stringify(message) + '\n');
+    const list = cursor => write({ id: ++id, method: 'model/list', params: { limit: 100, includeHidden: false, ...(cursor ? { cursor } : {}) } });
+    output.on('line', line => {
+      try {
+        const event = JSON.parse(line);
+        if (event.id !== id) return;
+        if (event.error) return finish();
+        if (id === 1) {
+          write({ method: 'initialized', params: {} });
+          return list();
+        }
+        for (const m of event.result?.data || []) {
+          const slug = m.model || m.id;
+          if (!m.hidden && typeof slug === 'string' && /^[a-zA-Z0-9][\w.-]{0,79}$/.test(slug)) models.add(slug);
+        }
+        const cursor = event.result?.nextCursor;
+        if (typeof cursor !== 'string' || !cursor || seen.has(cursor) || id >= 6 || models.size >= 25) return finish([...models].slice(0, 25));
+        seen.add(cursor);
+        list(cursor);
+      } catch { finish(); }
+    });
+    write({ id, method: 'initialize', params: { clientInfo: { name: 'navigation_knowledge_worker', version: '1.0.0' } } });
+  });
+}
+
+export function summaryModelIds(models, limit = Infinity) {
+  return [...new Set(models.filter(m => m?.capabilities?.chat !== false).map(m => m?.id).filter(id =>
+    typeof id === 'string' && /^[a-zA-Z0-9][\w./:-]{0,119}$/.test(id)
+    && !/(?:embedding|(?:^|-)image(?:-|$)|imagen|(?:^|-)tts(?:-|$)|realtime|(?:^|-)live(?:-|$)|whisper|audio-preview|moderation|dall-e|^sora|^veo|^lyria)/i.test(id)))].slice(0, limit);
+}
+
 export function codexArguments({ output, cwd, images = [], model = '', reasoningEffort = '' }) {
   // Isolated, tool-free invocation: video contents must never become shell/MCP actions.
   const args = ['-a', 'never', 'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral', '--json', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', '-C', cwd,

@@ -66,7 +66,7 @@ async function workerApi(req, res, url, json, authorize, store = createKnowledge
     if (route === '/package' && method === 'GET') return sendWorkerPackage(res);
     if (route === '/release' && method === 'GET') { const { version, sha256, bytes } = knowledgeWorkerPackage(); return json(res, 200, { ok: true, version, sha256, bytes }); }
     if (route === '/heartbeat' && method === 'POST') {
-      const raw = await body(req, 4096);
+      const raw = await body(req, 16384);
       const managed = !!device && raw.portalApiCredentials === 1 && (await store.providerCredentials?.status(uid))?.openai;
       if (managed) raw.capabilities = { ...raw.capabilities, openai: { ready: true, detail: '使用处理设置中的 API Key' } };
       const accepted = await store.heartbeatWorker(uid, device ? { ...raw, workerId: device.id, label: device.label } : raw, token, device);

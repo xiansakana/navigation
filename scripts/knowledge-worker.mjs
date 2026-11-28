@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { downloadVideo, originDownloadRequest } from '../portal/src/knowledge-download.js';
 import { startLocalInputServer, localDocuments, verifyLocalInput, pruneLocalInputs } from '../portal/src/knowledge-local-input.js';
-import { runProcess, summarizeVideo, modelConfiguration, resolveCodexBinary, createStageGate, workerPortalRequest } from '../portal/src/knowledge-model.js';
+import { runProcess, summarizeVideo, modelConfiguration, resolveCodexBinary, workerCodexModels, summaryModelIds, createStageGate, workerPortalRequest } from '../portal/src/knowledge-model.js';
 import { restartWithWorkerProxy } from './knowledge-worker-launcher.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -53,20 +53,32 @@ async function capabilities() {
     await runProcess(binary, ['login', 'status'], { timeout: 15000 });
     const help = await runProcess(binary, ['exec', '--help'], { timeout: 10000 });
     if (!help.includes('--ignore-user-config') || !help.includes('--ignore-rules')) throw new Error('Codex CLI 版本过旧');
-    let models = [];
-    try {
-      const file = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'models_cache.json');
-      const catalog = JSON.parse(await fsp.readFile(file, 'utf8'));
-      models = (catalog.models || []).filter(model => model.visibility === 'list' && model.supported_in_api !== false
-        && typeof model.slug === 'string' && /^[a-zA-Z0-9][\w.-]{0,79}$/.test(model.slug)).slice(0, 25).map(model => model.slug);
-    } catch { /* No catalog has been cached by this CLI yet. */ }
+    const models = await workerCodexModels(binary, { proxyUrl: config.codex?.proxyUrl });
     result.codex = { ready: true, model: config.codex?.model || 'CLI 默认模型', models };
   } catch { result.codex = { ready: false, detail: '请安装新版 Codex CLI，并在运行工作器的账号下登录' }; }
   try {
     const api = config.openai || {}, url = new URL(api.baseUrl || 'https://api.openai.com/v1');
     const configured = !!(api.apiKey || process.env[api.apiKeyEnv || 'KNOWLEDGE_API_KEY']) || ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
     const probe = !api.model && configured ? { ...config, openai: { ...api, model: '由任务设置指定' } } : config;
-    const m = modelConfiguration(probe, 'openai'); result.openai = { ready: true, model: m.model, detail: m.vision ? '支持关键画面核对' : '仅文字总结' };
+    const m = modelConfiguration(probe, 'openai');
+    let models = [];
+    try {
+      const response = await fetch(m.baseUrl + '/models', {
+        headers: m.apiKey ? { Authorization: 'Bearer ' + m.apiKey } : {},
+        redirect: 'error', signal: AbortSignal.timeout(6000)
+      });
+      if (response.ok) {
+        const chunks = []; let size = 0;
+        for await (const chunk of response.body) {
+          size += chunk.length;
+          if (size > 2 * 1024 ** 2) throw new Error('模型列表过大');
+          chunks.push(Buffer.from(chunk));
+        }
+        const catalog = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        if (Array.isArray(catalog.data)) models = summaryModelIds(catalog.data, 25);
+      } else await response.body?.cancel();
+    } catch { /* Keep configured summarization available if model discovery fails. */ }
+    result.openai = { ready: true, model: m.model, detail: m.vision ? '支持关键画面核对' : '仅文字总结', models };
   }
   catch { result.openai = { ready: false, detail: '兼容 API 尚未配置模型' }; }
   return result;

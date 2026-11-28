@@ -183,6 +183,11 @@ async function knowledgeApi(req, res, url, session, json) {
       }
       if (operation === 'models' && method === 'GET') {
         const key = await store.providerCredentials.read(uid, provider) || (provider === 'gemini' ? geminiAccounts().get(uid)?.apiKey : '');
+        if (!key && provider === 'openai') {
+          const worker = await store.worker(uid);
+          const models = worker.online ? worker.capabilities?.openai?.models : [];
+          if (models?.length) return json(res, 200, { ok: true, models: models.map(id => ({ id, name: id })), source: 'worker' });
+        }
         const proxyUrl = provider === 'gemini' ? geminiServerConfig().proxyUrl
           : process.env.KNOWLEDGE_OPENAI_PROXY || (new URL(compatibleBaseUrl()).hostname === 'api.openai.com' ? geminiServerConfig().proxyUrl : undefined);
         return json(res, 200, { ok: true, models: await providerModels(provider, key, { proxyUrl }) });

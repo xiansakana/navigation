@@ -321,4 +321,4 @@ OpenCC在读取私有时间线时转换为简体，旧笔记立即生效，无�
 
 在「知识库 → 处理设置」切换 Gemini API 或兼容 OpenAI API，填写并保存该后端的 API Key，再从服务返回的模型列表选择总结模型。网页 Key 按 Portal 账号及服务分别加密保存，密钥主文件默认为 `portal/data/knowledge-provider.key`，备份数据库时需要一并妥善保存此文件。旧有 Gemini 私有文件可继续提供服务器代理和账号备用配置，网页保存的 Key 优先。
 
-网页配置的兼容 API 使用服务器环境变量 `KNOWLEDGE_OPENAI_BASE_URL` 指定的受信任 HTTPS 服务，默认 `https://api.openai.com/v1`。Portal 需要能访问其 `/models`，也可为该查询设置 `KNOWLEDGE_OPENAI_PROXY`。兼容总结仍由已配对的新版工作器执行，仅该设备的有效任务租约可以读取对应 Key。既有工作器私有配置仍可运行。Codex 列表由在线工作器上报 CLI 已缓存的模型。
+网页配置的兼容 API 使用服务器环境变量 `KNOWLEDGE_OPENAI_BASE_URL` 指定的受信任 HTTPS 服务，默认 `https://api.openai.com/v1`。Portal 需要能访问其 `/models`，也可为该查询设置 `KNOWLEDGE_OPENAI_PROXY`。兼容总结仍由已配对的新版工作器执行，仅该设备的有效任务租约可以读取对应 Key。既有工作器私有配置仍可运行。Codex 列表由在线工作器向同一套 CLI 的 app-server 查询并上报。旧版工作器私有配置的兼容 API 也可以由新版工作器查询其服务商模型列表。工作器离线或查询失败时，网页只显示能确认的可用项，并提示当前状态。

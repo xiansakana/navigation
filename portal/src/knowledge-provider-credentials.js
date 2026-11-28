@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ProxyAgent } from 'undici';
+import { summaryModelIds } from './knowledge-model.js';
 
 const field = 'providerCredentials';
 function masterKey() {
@@ -112,9 +113,8 @@ export async function providerModels(provider, key, { baseUrl = compatibleBaseUr
       ? (result.models || []).filter(m => m.supportedGenerationMethods?.includes('generateContent'))
         .map(m => ({ id: String(m.name || '').replace(/^models\//, ''), name: m.displayName }))
       : (result.data || []).filter(m => m.capabilities?.chat !== false).map(m => ({ id: m.id, name: m.id }));
-    return [...new Map(entries.filter(m => /^[a-zA-Z0-9][\w./:-]{0,119}$/.test(m.id || '')
-      && (provider !== 'gemini' || /^gemini-/.test(m.id))
-      && !/(?:embedding|imagegen|image-preview|gpt-image|imagen|tts|realtime|live|whisper|audio-preview|moderation|dall-e|^sora)/i.test(m.id))
+    const allowed = new Set(summaryModelIds(entries));
+    return [...new Map(entries.filter(m => allowed.has(m.id) && (provider !== 'gemini' || /^gemini-/.test(m.id)))
       .map(m => [m.id, { id: m.id, name: String(m.name || m.id).slice(0, 160) }])).values()];
   } finally { await dispatcher?.destroy(); }
 }

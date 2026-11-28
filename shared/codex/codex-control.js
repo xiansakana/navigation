@@ -8,15 +8,17 @@ const level=value=>typeof value==='string'&&/^[a-z0-9_-]{1,24}$/.test(value);
 export async function readCodexCatalog(config, options={}) {
   return (options.client || withCodexClient)(config,async({call})=>{
     const current=await call('config/read',{includeLayers:true});
-    const models=[];let cursor;
+    const models=[], seen=new Set(), cursors=new Set();let cursor;
     for(let page=0;page<5;page++){
       const result=await call('model/list',{limit:100,includeHidden:false,...(cursor?{cursor}:{})});
       for(const model of result.data || []){
-        if(!slug(model.model || model.id)||model.hidden)continue;
+        const id=model.model || model.id;
+        if(!slug(id)||model.hidden||seen.has(id))continue;
+        seen.add(id);
         const efforts=(model.supportedReasoningEfforts || []).map(e=>e.reasoningEffort).filter(level);
         models.push({id:model.model || model.id,name:String(model.displayName || model.model || model.id).slice(0,160),efforts,defaultEffort:efforts.includes(model.defaultReasoningEffort)?model.defaultReasoningEffort:efforts[0] || '',isDefault:!!model.isDefault,inputModalities:(model.inputModalities || ['text','image']).filter(m=>['text','image'].includes(m))});
       }
-      cursor=result.nextCursor;if(!cursor)break;
+      cursor=result.nextCursor;if(!cursor||cursors.has(cursor))break;cursors.add(cursor);
     }
     if(!models.length)throw new Error('服务器未返回可用模型，请检查CLI登录状态。');
     const raw=current.config || {},userLayer=(current.layers || []).find(l=>l.name?.type==='user'&&!l.name?.profile);
