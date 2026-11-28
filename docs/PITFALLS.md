@@ -81,3 +81,23 @@ PORTAL_CONFIG_PATH=/d/code/navigation/portal/config.preview.json node src/server
 
 **教训**：线上验证一条命令跑完：`chrome --headless=new --no-proxy-server --remote-debugging-port=N --remote-allow-origins=* ... &` → sleep → `curl /json` 取 ws → 同一个 node 脚本里 `Runtime.evaluate` + `Page.captureScreenshot`。用 `Log.enable` + `Runtime.exceptionThrown` 收集控制台错误，比看截图更能证明脚本没崩。
 
+## 2026-11-28 · 流量序列画 K 线会变成「条形码」
+
+**现象**：记账「收支走势」改成 K 线后，收入/净支出的蜡烛全是从 0 到峰值的细长竖线，和累计结余（百万级）挤在一根 y 轴上，几乎看不见。
+
+**根因**：收入/支出是**流量**（每月合计），开高低收没有金融含义——open 常是 0、close 也是 0、high 是当月某天的峰值，画出来就是一根竖线。再加上量级差 80 倍，同一根轴必然压扁。
+
+**修复**：K 线模式只画**存量**序列（累计结余/资产余额/收益），流量序列在图例里置灰并提示切折线；另加兜底——可见序列量级差超过 8 倍时，小量级序列单独走右轴。
+
+**教训**：把折线改成 K 线前先问「这个量有开高低收吗」。存量（余额、累计收益、净值）可以，流量（当日/当月发生额）不行；量级差异大的多序列必须分轴，否则默认视图就是坏的。
+
+## 2026-11-28 · 生成产物的 `?v=` 写死会让用户看不到新代码
+
+**现象**：股票页 K 线本地正常、部署也成功，但线上仍显示旧折线（若无登录检查根本发现不了）。
+
+**根因**：`stock-manage/public/app-vue.js` 里 `import('./generated/holdings-page.js?v=vue-page-1')` 与 `index.html` 的 `app-vue.js?v=vue-page-1` 都是写死的版本号，`generated/` 又被 gitignore、由部署时重新构建，URL 不变 → 浏览器直接用缓存里的旧包。
+
+**修复**：改 `pnl-viz.js` 这类会被打进 generated 包的源文件时，同步把 `app-vue.js` 与 `index.html` 的版本号 +1（`vue-page-2`）。记账那边 `app.js` 用 `?epoch=` + `__bookkeepingViewEpoch` 动态破缓存，没有这个问题。
+
+**教训**：判断「改动是否会被用户看到」要顺着入口 HTML 的 script 引用走一遍，看每个 `?v=` 是否会变；`curl` 到 200 不代表浏览器会重新下载。
+
