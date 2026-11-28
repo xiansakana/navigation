@@ -197,7 +197,10 @@
 
     function draw() {
       var theme = colors();
-      chart.setOption(mode === 'candle' ? candleOption(theme) : lineOption(theme), { notMerge: true });
+      // Without candles.js (or a bucket) the OHLC path cannot run; degrade to the
+      // line instead of throwing and leaving an empty canvas.
+      var useCandle = mode === 'candle' && window.bkCandles && state.bucket;
+      chart.setOption(useCandle ? candleOption(theme) : lineOption(theme), { notMerge: true });
       requestAnimationFrame(function () { chart && chart.resize(); });
     }
 
@@ -207,6 +210,9 @@
 
     function mount() {
       host.innerHTML = '';
+      // A cached stylesheet may not carry .bk-asset-chart's height yet; without
+      // it ECharts initialises a 0-height canvas and the chart looks missing.
+      if (host.clientHeight < 40) host.style.height = '320px';
       loadEcharts().then(function (echarts) {
         chart = echarts.init(host, null, { renderer: 'canvas' });
         chart.getZr().on('dblclick', function () {
@@ -234,12 +240,19 @@
         return;
       }
       var key = fingerprint();
-      if (key === lastKey) {
+      // The accounts tab starts hidden; a chart mounted while it is display:none
+      // has a 0x0 canvas until something re-measures it.
+      var settle = function () {
         requestAnimationFrame(function () { chart && chart.resize(); });
+        setTimeout(function () { chart && chart.resize(); }, 260);
+      };
+      if (key === lastKey) {
+        settle();
         return;
       }
       lastKey = key;
       draw();
+      settle();
     }
 
     function setMode(next) {
