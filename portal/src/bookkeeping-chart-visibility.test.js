@@ -12,6 +12,14 @@ function fixture() {
   ]},insights:[],comparisonNote:'',asset:{points:[{date:'2026-09-30',currency:'CNY',balance:500},{date:'2026-10-02',currency:'CNY',balance:600}],historyMode:'hybrid',missingCurrencies:[],note:''}}};
   w.HTMLElement.prototype.scrollIntoView=function(){};
   w.eval(fs.readFileSync(new URL('../public/bookkeeping/candles.js',import.meta.url),'utf8'));
+  w.__assetCalls=[];w.__assetMode='candle';
+  // ECharts cannot render in jsdom; record the wiring instead of the pixels.
+  w.createBookkeepingAssetChart=()=>({
+    mode:()=>w.__assetMode,
+    render:(points,currency,bucket)=>w.__assetCalls.push({points:points.length,currency,unit:bucket&&bucket.unit}),
+    setMode:mode=>{w.__assetMode=mode;},
+    dispose(){}
+  });
   w.eval(fs.readFileSync(new URL('../public/bookkeeping/analysis.js',import.meta.url),'utf8'));
   const money=(amount,currency)=>currency+' '+amount.toFixed(2);
   const esc=s=>String(s).replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;').replaceAll('>','&gt;');
@@ -74,97 +82,20 @@ test('visibility survives period data reload, no-data and missing-FX views',()=>
   } finally {f.dom.window.close();}
 });
 
-test('asset return tab is accessible, retains selection across reloads, masks amounts and handles unavailable history',()=>{
-  const f=fixture();
-  try {
-    assert.equal(f.$('asset-tab-returns').hidden,true);
-    f.state.analysis.investmentReturns={points:[{date:'2026-10-26',currency:'CNY',profit:0},{date:'2026-10-28',currency:'CNY',profit:30,source:'current'}],note:'真实估值观测',period:{openingAsOf:'2026-10-26',closingAsOf:'2026-10-28',assetChange:100,netFlow:60,adjustments:10,profit:30,provisional:true,partial:true}};
-    f.controller.render();f.$('asset-tab-returns').click();
-    assert.equal(f.$('asset-tab-returns').getAttribute('aria-selected'),'true');
-    assert.equal(f.$('asset-overview-charts').getAttribute('aria-labelledby'),'asset-tab-returns');
-    assert.equal(f.$('asset-overview-charts').querySelectorAll('.bk-metric').length,0);
-    assert.match(f.$('asset-overview-charts').textContent,/暂无证券收益数据/);
-    assert.doesNotMatch(f.$('asset-overview-charts').textContent,/综合投资收益|全资产收益|账单净资金流/);
-    f.controller.render();assert.equal(f.$('asset-tab-returns').getAttribute('aria-selected'),'true');
-    f.state.analysis.investmentReturns={points:[],period:null,note:'缺少可比快照'};f.controller.render();
-    assert.match(f.$('asset-overview-note').textContent,/证券收益/);assert.equal(f.$('asset-overview-charts').querySelector('polyline'),null);
-    f.$('asset-tab-returns').dispatchEvent(new f.w.KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));
-    assert.equal(f.$('asset-tab-balance').getAttribute('aria-selected'),'true');
-    f.state.analysis.investmentReturns=null;f.controller.render();assert.equal(f.$('asset-tab-returns').hidden,true);
-  } finally {f.dom.window.close();}
-});
-
-test('historical trading curves connect across missing dates without inventing observations',()=>{
+test('the accounts tab renders one balance chart with the portfolio style switch',()=>{
   const f=fixture();
   try{
-    f.state.analysis.investmentReturns={note:'snapshot',points:[],period:null,trading:{note:'historical',issues:[],missingSymbols:['AAPL'],pending:1,points:[
-      {date:'2026-10-25',currency:'CNY',realized:0,unrealized:0,total:0},
-      {date:'2026-10-26',currency:'CNY',realized:1,unrealized:null,total:null},
-      {date:'2026-10-27',currency:'CNY',realized:2,unrealized:3,total:5},
-      {date:'2026-10-28',currency:'CNY',realized:2,unrealized:null,total:null}
-    ]}};
-    f.controller.render();f.$('accounts-view').classList.remove('hidden');f.$('asset-tab-returns').click();
-    const total=f.$('asset-overview-charts').querySelector('[data-chart-series=total]');
-    assert.equal(total.querySelectorAll('polyline').length,1);
-    const markers=[...total.querySelectorAll('circle')];
-    assert.deepEqual(markers.map(marker=>marker.querySelector('title').textContent.slice(0,10)),['2026-10-25','2026-10-27']);
-    assert.equal(total.querySelector('polyline').getAttribute('points'),markers.map(marker=>marker.getAttribute('cx')+','+marker.getAttribute('cy')).join(' '));
-    assert.match(f.$('asset-overview-charts').querySelector('[data-trading-series=total]').textContent,/待补齐/);
-    assert.match(f.$('asset-overview-charts').textContent,/后台正在补齐/);
-    assert.doesNotMatch(f.$('asset-overview-charts').innerHTML,/NaN|Infinity/);
-    assert.equal(f.controller.query().investmentHistory,'1');
-    f.$('asset-tab-balance').click();assert.equal(f.controller.query().investmentHistory,undefined);
-  }finally{f.dom.window.close();}
-});
-
-test('securities legends toggle independently, retain choices on data reload and never change billing or restore removed snapshot charts',()=>{
-  const f=fixture();
-  try{
-    f.state.analysis.investmentReturns={note:'snapshot',points:[{date:'2026-10-25',currency:'CNY',profit:0},{date:'2026-10-28',currency:'CNY',profit:9}],period:null,trading:{note:'history',issues:[],points:[
-      {date:'2026-10-25',currency:'CNY',realized:1000,unrealized:0,total:1000},
-      {date:'2026-10-26',currency:'CNY',realized:1000,unrealized:null,total:null},
-      {date:'2026-10-28',currency:'CNY',realized:1000,unrealized:30,total:1030}
-    ]}};
-    f.controller.render();f.$('asset-tab-returns').click();
-    const host=f.$('asset-overview-charts'),button=key=>host.querySelector('[data-trading-series="'+key+'"]');
-    const billing=f.$('billing-charts').innerHTML;
-    const totals=host.querySelector('.bk-trading-history .bk-chart-legend').textContent;
-    const originalAxis=[...host.querySelectorAll('[data-chart-series=unrealized] polyline')].at(-1).getAttribute('points');
-    host.querySelector('.bk-trading-history details').open=true;
-    button('realized').click();button('total').click();
-    assert.equal(host.querySelectorAll('.bk-trading-history [data-chart-series]').length,1);
-    assert.equal(button('realized').getAttribute('aria-pressed'),'false');
-    assert.equal(button('unrealized').getAttribute('aria-pressed'),'true');
-    assert.notEqual([...host.querySelectorAll('[data-chart-series=unrealized] polyline')].at(-1).getAttribute('points'),originalAxis);
-    assert.equal(host.querySelector('.bk-trading-history details').open,true);
-    assert.equal(f.w.document.activeElement,button('total'));
-    button('unrealized').click();assert.match(host.querySelector('.bk-trading-history').textContent,/所有折线已隐藏/);
-    assert.equal(host.querySelectorAll('.bk-trading-history polyline').length,0);
-    button('total').click();assert.equal(host.querySelectorAll('.bk-trading-history [data-chart-series]').length,1);
-    assert.equal(host.querySelector('[data-chart-series=total]').querySelectorAll('polyline').length,1);
-    assert.equal(host.querySelector('.bk-trading-history .bk-chart-legend').textContent,totals);
-    assert.equal(f.$('billing-charts').innerHTML,billing);assert.equal(host.querySelector('[data-chart-series=profit]'),null);
-    f.state.analysis.investmentReturns.trading.points=[];f.controller.render();
-    f.state.analysis.investmentReturns.trading.points=[{date:'2026-11-01',currency:'CNY',realized:10,unrealized:null,total:null}];f.controller.render();
-    assert.equal(button('realized').getAttribute('aria-pressed'),'false');assert.equal(button('unrealized').getAttribute('aria-pressed'),'false');assert.equal(button('total').getAttribute('aria-pressed'),'true');
-    assert.match(button('total').textContent,/待补齐/);assert.doesNotMatch(host.innerHTML,/NaN|Infinity/);
-  }finally{f.dom.window.close();}
-});
-
-test('hybrid securities chart discloses omitted floating returns and keeps the cutover marker when toggling',()=>{
-  const f=fixture();
-  try{
-    f.state.analysis.investmentReturns={points:[],period:null,note:'snapshot',trading:{mode:'hybrid',valuationCutover:'2026-10-26',points:[
-      {date:'2026-10-25',currency:'CNY',realized:10,unrealized:0,total:10,floatingIncluded:false},
-      {date:'2026-10-26',currency:'CNY',realized:10,unrealized:0,total:10,floatingIncluded:true,valuationBoundary:true},
-      {date:'2026-10-27',currency:'CNY',realized:20,unrealized:5,total:25,floatingIncluded:true}
-    ],note:'仅按已实现收益',pending:0}};
-    f.controller.render();f.$('asset-tab-returns').click();
-    assert.match(f.$('asset-overview-note').textContent,/未计历史浮盈/);
-    assert.match(f.$('asset-overview-charts').textContent,/浮盈起算基准：2026-10-26/);
-    assert.equal(f.$('asset-overview-charts').querySelectorAll('[data-valuation-boundary]').length,1);
-    assert.match(f.$('asset-overview-charts').querySelector('circle title').textContent,/未计历史浮盈/);
-    f.$('asset-overview-charts').querySelector('[data-trading-series=realized]').click();
-    assert.equal(f.$('asset-overview-charts').querySelectorAll('[data-valuation-boundary]').length,1);
+    const host=f.$('asset-overview-charts');
+    assert.ok(host.querySelector('.bk-chart-card'),'asset card should render');
+    assert.equal(host.querySelectorAll('[data-asset-mode]').length,2);
+    assert.equal(host.querySelector('[data-asset-mode="candle"]').getAttribute('aria-pressed'),'true');
+    assert.equal(f.w.__assetCalls.length,1);
+    assert.equal(f.w.__assetCalls[0].points,2);
+    assert.equal(f.w.__assetCalls[0].unit,'week');
+    assert.match(host.textContent,/K 线按「周」聚合/);
+    host.querySelector('[data-asset-mode="line"]').click();
+    assert.equal(host.querySelector('[data-asset-mode="line"]').getAttribute('aria-pressed'),'true');
+    assert.equal(f.w.__assetMode,'line');
+    assert.match(host.textContent,/折线为逐日观测值/);
   }finally{f.dom.window.close();}
 });

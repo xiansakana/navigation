@@ -70,7 +70,8 @@
    * Pick the smallest period that keeps the candle count readable.
    * `dates` must be date strings; order does not matter.
    */
-  function chooseBucket(dates) {
+  function chooseBucket(dates, maxCandles) {
+    var limit = Number.isFinite(maxCandles) && maxCandles > 0 ? maxCandles : MAX_CANDLES;
     var times = (dates || []).map(time).filter(function (value) { return Number.isFinite(value); }).sort(function (a, b) { return a - b; });
     if (times.length < 2) return BUCKETS[0];
     var rangeDays = (times[times.length - 1] - times[0]) / DAY;
@@ -79,7 +80,7 @@
     for (var i = 0; i < BUCKETS.length; i++) {
       var bucket = BUCKETS[i];
       if (bucket.days < minDays) continue;
-      if (rangeDays / bucket.days <= MAX_CANDLES) return bucket;
+      if (rangeDays / bucket.days <= limit) return bucket;
     }
     return BUCKETS[BUCKETS.length - 1];
   }

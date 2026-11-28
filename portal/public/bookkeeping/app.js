@@ -174,7 +174,6 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-shell-3';
     ui.setTab(name);
     periodDock.setTab(name);
     accountScope.setTab(name);
-    if(name==='accounts' && analysis.query().investmentHistory)load();
     if(name==='entries' && previousTab==='entry-detail')details.restoreList(()=>activeTab==='entries');
   }
   function field(name, label, value = '', extra = '') { return '<label>' + esc(label) + '<input name="' + name + '" value="' + esc(value) + '" ' + extra + '></label>'; }

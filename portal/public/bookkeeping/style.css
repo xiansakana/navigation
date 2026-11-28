@@ -112,12 +112,6 @@
 .bk-anchor-row input { min-width:0; }
 .bk-anchor-row button { flex-shrink:0; }
 @media(max-width:760px) { .bk-anchor-field { grid-column:1/-1; }.bk-anchor-row input { flex:1; } }
-.bk-asset-chart-tabs { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
-.bk-asset-chart-tabs button { font:inherit; font-weight:600; border:1px solid var(--border); border-radius:12px; padding:10px 16px; color:var(--text); background:var(--card); cursor:pointer; }
-.bk-asset-chart-tabs button[aria-selected=true] { background:var(--bk-gold); color:#231b08; border-color:var(--bk-gold); }
-.bk-asset-chart-tabs button:focus-visible { outline:2px solid var(--bk-gold); outline-offset:3px; }
-.bk-return-summary { grid-template-columns:repeat(4,minmax(0,1fr)); }
-@media(max-width:760px) { .bk-return-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }.bk-asset-chart-tabs button { padding:10px 12px; } }
 
 .bk-entry-swipe { position:relative; overflow:hidden; touch-action:pan-y; }
 .bk-entry-swipe .bk-entry { position:relative; transition:transform .16s ease; }
@@ -156,3 +150,5 @@
 .bk-series-static::before { content:''; width:10px; height:10px; flex:0 0 10px; border-radius:50%; background:var(--line-color); opacity:.45; }
 /* K 线模式下图例色点表示「阳绿阴红」，不再沿用序列色 */
 .bk-series-toggle[data-candle="1"]::before { background:linear-gradient(90deg,var(--green) 50%,var(--red) 50%); }
+.bk-asset-chart { width:100%; height:320px; min-width:0; }
+@media(max-width:760px) { .bk-asset-chart { height:260px; } }

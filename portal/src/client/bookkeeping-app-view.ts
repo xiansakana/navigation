@@ -329,12 +329,8 @@ export function mountBookkeepingShell(host: HTMLElement): BookkeepingShell {
     ]),
     h('div', { id: 'assets-summary', class: 'bk-summary' }),
     h('article', { id: 'asset-overview', class: 'bk-panel bk-analysis-panel hidden' }, [
-      h('div', { id: 'asset-chart-tabs', class: 'bk-asset-chart-tabs', role: 'tablist', 'aria-label': '资产图表' }, [
-        h('button', { type: 'button', id: 'asset-tab-balance', role: 'tab', 'data-asset-chart': 'balance', 'aria-selected': 'true', 'aria-controls': 'asset-overview-charts' }, '资产余额走势'),
-        h('button', { type: 'button', id: 'asset-tab-returns', role: 'tab', 'data-asset-chart': 'returns', 'aria-selected': 'false', 'aria-controls': 'asset-overview-charts', tabindex: '-1', hidden: true }, '证券收益走势')
-      ]),
       h('p', { id: 'asset-overview-note', class: 'bk-muted' }),
-      h('div', { id: 'asset-overview-charts', role: 'tabpanel', 'aria-labelledby': 'asset-tab-balance' })
+      h('div', { id: 'asset-overview-charts' })
     ]),
     h('details', { class: 'bk-fx-assets' }, [
       h('summary', null, '折算汇率与来源'),
