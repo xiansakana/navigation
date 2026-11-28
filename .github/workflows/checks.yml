@@ -71,6 +71,7 @@ jobs:
       - name: Verify PostgreSQL business services
         run: >-
           node --test
+          scripts/test-postgres-aliases.mjs
           scripts/test-qqq-dip-postgres.mjs
           scripts/test-portfolio-postgres.mjs
           scripts/test-bookkeeping-postgres.mjs
