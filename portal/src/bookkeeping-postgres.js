@@ -239,7 +239,7 @@ export function createPostgresBookkeepingStore(db, { portfolio } = {}) {
       if (!['expense', 'income', 'net'].includes(filter.flow)) fail('收支范围无效');
       clauses.push(filter.flow === 'expense' ? expense : filter.flow === 'income' ? "e.type='收入'" : "(e.type='收入' OR " + expense + ')');
     }
-    if (filter.accountId) { const p = add(filter.accountId); clauses.push(`(e.account_id=${p} OR e.to_account_id=${p})`); args.push(filter.accountId); }
+    if (filter.accountId) { const p = add(filter.accountId); clauses.push(`(e.account_id=${p} OR e.to_account_id=${p})`); }
     if (filter.q) {
       const fields = ['e.note', 'e.category', 'e.subcategory', 'e.tags', 'e.location'];
       if (!filter.hideAccountSearch) fields.push('a.name', 'b.name');
@@ -323,7 +323,7 @@ export function createPostgresBookkeepingStore(db, { portfolio } = {}) {
   }
   async function removeAccount(uid, aid) {
     await assertUnbound(uid, aid);
-    if (await one(db, 'SELECT 1 FROM navigation.bookkeeping_entries WHERE user_id=$1 AND (account_id=$2 OR to_account_id=$2)', [uid, aid, aid])) fail('账户存在账单，请先处理关联账单');
+    if (await one(db, 'SELECT 1 FROM navigation.bookkeeping_entries WHERE user_id=$1 AND (account_id=$2 OR to_account_id=$2)', [uid, aid])) fail('账户存在账单，请先处理关联账单');
     const result = await db.query('DELETE FROM navigation.bookkeeping_accounts WHERE user_id=$1 AND id=$2', [uid, aid]);
     if (!result.rowCount) fail('账户不存在');
   }

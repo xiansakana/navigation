@@ -85,7 +85,16 @@ await withTestDatabase(async ({ url, client, pg }) => {
     const owner = 'linked-valuation';
     const bank = await store.saveAccount(owner, { name: '银行', currency: 'CNY', balance: 100 });
     const ledger = await store.saveAccount(owner, { name: '证券', currency: 'CNY', balance: 50 });
-    await store.saveEntry(owner, { type: '转账', amount: 4, currency: 'CNY', accountId: bank, toAccountId: ledger, date: '2026-01-01T12:00:00' });
+    const transfer = await store.saveEntry(owner, { type: '转账', amount: 4, currency: 'CNY', accountId: bank, toAccountId: ledger, date: '2026-01-01T12:00:00' });
+    assertEqual((await store.entries(owner, { accountId: bank })).map(e => e.id), [transfer], '按转出账户筛选');
+    assertEqual((await store.entries(owner, { accountId: ledger, start: '2026-01-01', end: '2026-01-01' })).map(e => e.id), [transfer], '按转入账户和日期范围筛选');
+    assertEqual(await store.entries('other-owner', { accountId: bank }), [], '账户筛选不能跨用户');
+    let removalError;
+    try { await store.removeAccount(owner, bank); } catch (error) { removalError = error; }
+    assert(removalError?.message.includes('账户存在账单'), '有转账账单的账户保留删除保护');
+    const empty = await store.saveAccount(owner, { name: '空账户', currency: 'CNY' });
+    await store.removeAccount(owner, empty);
+    assert(!(await store.accounts(owner)).some(a => a.id === empty), '可删除空账户');
     const investmentId = await portfolio.saveInvestmentAccount(owner, { name: '券商', currency: 'CNY', bookkeepingId: ledger, baselineCash: 50 });
     const [investment] = await portfolio.investmentRows(owner);
     assertEqual(investment.old_ledger_balance, 5400, '实收转账金额以数值计入绑定前的账面余额');
