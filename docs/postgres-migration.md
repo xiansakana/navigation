@@ -102,6 +102,8 @@ docker exec -i navigation-postgres-postgres-1 psql -X -v ON_ERROR_STOP=1 --singl
 
 实际切换顺序：先部署代码（不设置变量）并确认 SQLite 正常；备份 `data/navigation.db` 与 `data/qqq-dip.json`（快照时间 `20261127095008`）；执行 002；portal、portal-background、stock-manage、qqq-dip 同批设置组合变量并重启；上述进程再加上记账变量并重启；最后为 qqq-dip 设置状态变量并重启。每批切换后检查 `/readyz`、`/api/health` 和页面数据，最后 `pm2 save`。
 
+部署 Gemini 模型冷却功能前，使用知识库数据库的表所有者执行一次 `shared/db/postgres/knowledge-gemini-cooldowns.sql`。此脚本只创建知识库冷却状态表，可重复执行。表使用同一知识库数据库的业务角色和备份权限。
+
 切换完成后验证：
 
 - `scripts/test-portfolio-postgres.mjs`、`scripts/test-bookkeeping-postgres.mjs`、`scripts/test-qqq-dip-postgres.mjs` 在 ECS 上使用临时数据库（`navigation_test_*`）全部通过，覆盖组合写入、账户绑定、抄底预留、记账退款、导入去重、资产历史、汇率/证券价格、QQ 状态与 qqq-dip 重启恢复。

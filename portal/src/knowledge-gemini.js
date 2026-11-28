@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { knowledgeProviderCredentials } from './knowledge-provider-credentials.js';
 import { ProxyAgent } from 'undici';
 import { uploadGeminiFile } from './knowledge-gemini-upload.js';
+import { clearGeminiCooldown, geminiQuotaHint, initializeSqliteGeminiCooldowns, pauseGeminiJob } from './knowledge-gemini-cooldown.js';
 import fsp from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
@@ -149,9 +150,13 @@ async function submitGeminiVideo({ apiKey, model, file, size, mimeType, title, s
       throw Object.assign(new Error('Gemini ' + stage + '连接中断' + detail + '，请稍后重试'), { code: 'GEMINI_TRANSPORT' });
     }
     if (!response.ok) {
-      await response.body?.cancel();
+      const onModel = url.startsWith(origin + '/v1beta/models/');
+      const circuit = response.status === 429 || (onModel && [402, 404, 503].includes(response.status));
+      const quota = response.status === 429 ? await geminiQuotaHint(response) : {};
+      if (response.status !== 429) await response.body?.cancel();
       const hint = { 400: '请检查模型是否支持该视频和时长', 401: '请检查 API Key', 403: '请检查 API Key、服务权限或地区', 404: '请检查所选模型', 429: '请检查配额和频率限制' }[response.status] || '请稍后重试';
-      throw Object.assign(new Error('Gemini ' + stage + '失败（HTTP ' + response.status + '），' + hint), { status: response.status });
+      throw Object.assign(new Error('Gemini ' + stage + '失败（HTTP ' + response.status + '），' + hint),
+        { status: response.status, circuit, ...quota });
     }
     return response;
   };
@@ -263,6 +268,7 @@ async function submitGeminiVideo({ apiKey, model, file, size, mimeType, title, s
           completed++;
         } catch (error) {
           signal.throwIfAborted();
+          if (error.circuit) throw error;
           warnings.push('逐句转写在 ' + start + ' 秒处中断。' + String(error.message).slice(0, 150));
           transcribe = false;
         }
@@ -290,22 +296,30 @@ async function submitGeminiVideo({ apiKey, model, file, size, mimeType, title, s
   }
 }
 
-async function claim(db, owners) {
+async function claim(db, models) {
   const lease = randomBytes(24).toString('hex'), time = now(), expired = new Date(Date.now() - GEMINI_LEASE_MS).toISOString();
+  const defaults = JSON.stringify(models);
   if (db.query) return db.transaction(async client => {
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended('knowledge:gemini', 0))");
     await client.query("UPDATE navigation.knowledge_documents SET status='queued',lease=NULL,stage='等待恢复 Gemini',progress=0 WHERE backend='gemini' AND status='processing' AND heartbeat<$1", [expired]);
     const { rows: [row] } = await client.query(`UPDATE navigation.knowledge_documents SET status='processing',stage='准备 Gemini 视频',
       progress=1,worker_id='portal-gemini',processing_phase='summary',lease=$1,heartbeat=$2,updated_at=$2,attempt=attempt+1
-      WHERE id=(SELECT id FROM navigation.knowledge_documents WHERE backend='gemini' AND status='queued' AND user_id=ANY($3::text[])
+      WHERE id=(SELECT d.id FROM navigation.knowledge_documents d WHERE d.backend='gemini' AND d.status='queued'
+        AND $3::jsonb ? d.user_id
+        AND NOT EXISTS (SELECT 1 FROM navigation.knowledge_gemini_cooldowns c WHERE c.user_id=d.user_id AND c.retry_at>$2
+          AND c.model=COALESCE(NULLIF(d.model_settings_json::jsonb->>'geminiModel',''),$3::jsonb->>d.user_id))
         AND NOT EXISTS (SELECT 1 FROM navigation.knowledge_documents WHERE backend='gemini' AND status='processing')
-        ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *`, [lease, time, owners]);
+        ORDER BY d.created_at,d.id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *`, [lease, time, defaults]);
     return row;
   });
   return db.transaction(() => {
     db.prepare("UPDATE knowledge_documents SET status='queued',lease=NULL,stage='等待恢复 Gemini',progress=0 WHERE backend='gemini' AND status='processing' AND heartbeat<?").run(expired);
     if (db.prepare("SELECT 1 FROM knowledge_documents WHERE backend='gemini' AND status='processing' LIMIT 1").get()) return;
-    const row = db.prepare("SELECT id FROM knowledge_documents WHERE backend='gemini' AND status='queued' AND user_id IN (SELECT value FROM json_each(?)) ORDER BY created_at,id LIMIT 1").get(JSON.stringify(owners));
+    const row = db.prepare(`SELECT d.id FROM knowledge_documents d JOIN json_each(?) owner ON owner.key=d.user_id
+      WHERE d.backend='gemini' AND d.status='queued'
+        AND NOT EXISTS (SELECT 1 FROM knowledge_gemini_cooldowns c WHERE c.user_id=d.user_id AND c.retry_at>?
+          AND c.model=COALESCE(NULLIF(json_extract(d.model_settings_json,'$.geminiModel'),''),owner.value))
+      ORDER BY d.created_at,d.id LIMIT 1`).get(defaults, time);
     return row && db.prepare(`UPDATE knowledge_documents SET status='processing',stage='准备 Gemini 视频',progress=1,
       worker_id='portal-gemini',processing_phase='summary',lease=?,heartbeat=?,updated_at=?,attempt=attempt+1 WHERE id=? RETURNING *`).get(lease, time, time, row.id);
   }).immediate();
@@ -331,7 +345,9 @@ export async function runGeminiJob(db, directoryFor, authorize, { accounts, gene
   const owners = accounts ? [...accounts.keys()] : [...new Set([...configured.keys(), ...await credentials.geminiOwners()])];
   if (!owners.length) return false;
   // Failed after a concurrent removal instead of uploading with a different account's key.
-  const row = await claim(db, owners);
+  if (!db.query) initializeSqliteGeminiCooldowns(db);
+  const models = Object.fromEntries(owners.map(uid => [uid, configured.get(uid)?.model || defaultGeminiModel]));
+  const row = await claim(db, models);
   if (!row) return false;
   const { id, user_id: uid, lease } = row;
   const controller = new AbortController(), signal = AbortSignal.any([controller.signal, AbortSignal.timeout(120 * 60000)]);
@@ -350,7 +366,7 @@ export async function runGeminiJob(db, directoryFor, authorize, { accounts, gene
     try { await progress(); } catch { controller.abort(new Error('Gemini 任务连接已中断')); }
     finally { beating = false; }
   }, 20000);
-  let directory, apiKey, finished = false;
+  let directory, apiKey, model, finished = false;
   const published = [], temporary = [];
   try {
     await progress();
@@ -372,7 +388,7 @@ export async function runGeminiJob(db, directoryFor, authorize, { accounts, gene
     if (!(duration > 0 && duration <= 14400)) throw new Error('视频时长无效或超过4小时');
     const account = configured.get(uid) || {};
     const settings = JSON.parse(row.model_settings_json || '{}');
-    const model = settings.geminiModel || account.model || defaultGeminiModel;
+    model = settings.geminiModel || models[uid];
     const checkpoint = await documentCheckpoint({ directory: directoryFor(id), uid, row, run: await store.reanalysis.get(uid, id),
       file, duration, model, apiKey, ensureLease: progress });
     const summary = await generate({ checkpoint, apiKey, model, file, size, mimeType: row.mime_type, title: row.title, sourceUrl: row.source_url, duration,
@@ -416,10 +432,11 @@ export async function runGeminiJob(db, directoryFor, authorize, { accounts, gene
     }
     result.frames = frames.map(({ name, time }) => ({ name, time }));
     finished = await store.finish(uid, id, lease, result);
-    if (finished) await checkpoint.clear().catch(() => {});
+    if (finished) await Promise.allSettled([checkpoint.clear(), clearGeminiCooldown(db, uid, model)]);
   } catch (error) {
     const message = signal.aborted ? 'Gemini 任务超时、已取消或权限已变化' : error.message;
-    await store.fail(uid, id, lease, apiKey ? String(message).replaceAll(apiKey, '[已隐藏]') : String(message));
+    if (!signal.aborted && model && error.circuit) await pauseGeminiJob(db, row, model, error);
+    else await store.fail(uid, id, lease, apiKey ? String(message).replaceAll(apiKey, '[已隐藏]') : String(message));
   } finally {
     clearInterval(heartbeat);
     await Promise.allSettled([...temporary, ...(!finished ? published : [])].map(file => fsp.rm(file, { force: true })));

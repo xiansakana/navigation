@@ -6,10 +6,41 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { createKnowledgeStore } from './knowledge-store.js';
 import { uploadGeminiFile } from './knowledge-gemini-upload.js';
+import { cooldownFor, geminiQuotaHint } from './knowledge-gemini-cooldown.js';
 import { generateGeminiVideo, runGeminiJob } from './knowledge-gemini.js';
 
 const origin = 'https://generativelanguage.googleapis.com';
 const notes = '# 视频笔记\n\n[00:03] 结合原视频的讲解和画面，记录这一段的核心观点、案例和需要回看核对的细节。';
+
+test('Gemini cooldown honors retry hints and backs off longer for a daily quota', async () => {
+  const hint = await geminiQuotaHint(Response.json({ error: { details: [
+    { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '73.4s' },
+    { '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel' }] },
+  ] } }, { status: 429, headers: { 'Retry-After': '90' } }));
+  assert.deepEqual(hint, { retryAfterMs: 90000, dailyQuota: true });
+  assert.equal(cooldownFor({ status: 429, ...hint }, 0, 0).retryAt, '1970-01-02T00:00:00.000Z');
+  assert.equal(cooldownFor({ status: 429, retryAfterMs: 90000 }, 0, 0).retryAt, '1970-01-01T00:01:30.000Z');
+  assert.equal(cooldownFor({ status: 429 }, 2, 0).retryAt, '1970-01-01T00:04:00.000Z');
+});
+
+test('Gemini quota during transcription keeps segment evidence and reaches the queue as a circuit error', async () => {
+  const state = { remoteName: 'files/video', evidence: {}, captions: {} };
+  let saved;
+  await assert.rejects(generateGeminiVideo({
+    apiKey: 'test-key', model: 'gemini-test', title: '视频', duration: 40, mimeType: 'video/mp4', includeTranscript: true,
+    signal: AbortSignal.timeout(5000), progress: async () => {}, checkpoint: { state, save: async () => { saved = structuredClone(state); } },
+    async fetcher(url, options) {
+      if (options.method === 'GET') return Response.json({ name: 'files/video', uri: url, state: 'ACTIVE' });
+      assert.equal(options.method, 'POST');
+      const schema = JSON.parse(options.body).generationConfig.responseSchema;
+      if (schema.type === 'ARRAY') return Response.json({}, { status: 429, headers: { 'Retry-After': '9' } });
+      const text = JSON.stringify({ spokenNotes: '本段讲解', visualNotes: '本段画面', frameTimes: [], charts: [] });
+      return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text }] } }] });
+    },
+  }), error => error.status === 429 && error.circuit && error.retryAfterMs === 9000);
+  assert.equal(saved.evidence[0].spoken, '本段讲解');
+  assert.deepEqual(saved.captions, {});
+});
 
 test('Gemini uploads original bytes, waits for ACTIVE, summarizes audio and video, then removes the remote file', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'gemini-api-'));
@@ -182,6 +213,56 @@ test('Gemini reuses the uploaded video and completed segments, then assembles th
   assert.deepEqual(saved[2].result, result);
   assert.deepEqual(result.frameTimes, [3, 181]);
   assert.deepEqual(result.transcript, [state.captions[0][0], state.captions[1][0]]);
+});
+
+test('Gemini requeues quota failures, skips a cooling account/model, and resumes saved evidence', async () => {
+  const db = new Database(':memory:');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'gemini-cooldown-'));
+  const store = createKnowledgeStore(db), directoryFor = id => path.join(root, id);
+  const add = async (uid, model) => {
+    store.saveSettings(uid, { geminiModel: model });
+    const doc = store.create(uid, { backend: 'gemini', title: '视频', originalName: 'source.mp4', mimeType: 'video/mp4', bytes: 32 });
+    await fs.mkdir(directoryFor(doc.id));
+    await fs.writeFile(path.join(directoryFor(doc.id), 'source'), Buffer.alloc(32));
+    store.enqueue(uid, doc.id);
+    return doc.id;
+  };
+  try {
+    const first = await add('owner', 'gemini-primary');
+    const second = await add('owner', 'gemini-primary');
+    const alternate = await add('owner', 'gemini-alternate');
+    const other = await add('other', 'gemini-primary');
+    [first, second, alternate, other].forEach((id, i) =>
+      db.prepare("UPDATE knowledge_documents SET created_at=? WHERE id=?").run('2026-01-01T00:00:0' + i + '.000Z', id));
+    let limited = false;
+    const accounts = new Map([['owner', { apiKey: 'key-one' }], ['other', { apiKey: 'key-two' }]]);
+    const options = { accounts, probe: async () => '60', async generate({ model, apiKey, checkpoint }) {
+      if (apiKey === 'key-one' && model === 'gemini-primary') {
+        if (!limited) {
+          limited = true;
+          checkpoint.state.evidence[0] = { spoken: '保留证据' };
+          await checkpoint.save();
+          throw Object.assign(new Error('429'), { status: 429, circuit: true, dailyQuota: true });
+        }
+        assert.equal(checkpoint.state.evidence[0]?.spoken, '保留证据');
+      }
+      return { notes, frameTimes: [], transcript: [], warnings: [] };
+    } };
+    const next = () => runGeminiJob(db, directoryFor, () => true, options);
+    assert.equal(await next(), true);
+    assert.equal(store.get('owner', first).status, 'queued');
+    assert.match(store.get('owner', first).stage, /HTTP 429.*自动续跑/);
+    assert.equal(await next(), true);
+    assert.equal(store.get('owner', alternate).status, 'ready');
+    assert.equal(await next(), true);
+    assert.equal(store.get('other', other).status, 'ready');
+    assert.equal(await next(), false);
+    assert.equal(store.get('owner', second).status, 'queued');
+    db.prepare("UPDATE knowledge_gemini_cooldowns SET retry_at='2020-01-01T00:00:00.000Z'").run();
+    assert.equal(await next(), true);
+    assert.equal(store.get('owner', first).status, 'ready');
+    assert.equal(db.prepare('SELECT count(*) AS count FROM knowledge_gemini_cooldowns').get().count, 0);
+  } finally { db.close(); await fs.rm(root, { recursive: true, force: true }); }
 });
 
 test('Gemini resumes from Google-confirmed bytes after a lost chunk response', async () => {
