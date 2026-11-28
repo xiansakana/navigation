@@ -95,15 +95,26 @@ test('Portal completes a Gemini job without a GPU and leaves other accounts and 
         const jpeg = Buffer.alloc(40); jpeg.set([255, 216, 255]);
         await fs.writeFile(args.at(-1), jpeg);
       },
-      async generate({ file, progress, includeTranscript }) {
+      async generate({ checkpoint, file, progress, includeTranscript }) {
         assert.equal((await fs.stat(file)).size, 32);
         assert.equal(store.getRow('owner', gemini).status, 'processing');
         assert.equal(await runGeminiJob(db, directoryFor, () => true, options), false);
         await progress('Gemini 正在观看视频并生成笔记', 70);
         assert.equal(includeTranscript, true);
+        if (!checkpoint.state.evidence[0]) {
+          checkpoint.state.evidence[0] = { spoken: '第一段讲解' };
+          await checkpoint.save();
+          throw new Error('第一轮未完成');
+        }
+        assert.equal(checkpoint.state.evidence[0].spoken, '第一段讲解');
         return { notes, frameTimes: [3], transcript: [{ start: 3, end: 4, text: '一句话' }], warnings: [] };
       }
     };
+    assert.equal(await runGeminiJob(db, directoryFor, uid => uid === 'owner', options), true);
+    assert.equal(store.getRow('owner', gemini).status, 'failed');
+    // Reproduce the persisted lease left behind by a process restart.
+    db.prepare("UPDATE knowledge_documents SET status='processing', lease='old-lease', heartbeat=? WHERE id=?")
+      .run(new Date(Date.now() - 100_000).toISOString(), gemini);
     assert.equal(await runGeminiJob(db, directoryFor, uid => uid === 'owner', options), true);
     assert.equal(store.get('owner', gemini).notes, notes);
     assert.equal(store.get('owner', gemini).provenance.backend, 'gemini');
@@ -118,6 +129,59 @@ test('Portal completes a Gemini job without a GPU and leaves other accounts and 
     await runGeminiJob(db, directoryFor, () => false, { ...options, generate: () => assert.fail('permission required') });
     assert.equal(store.getRow('owner', denied).status, 'failed');
   } finally { db.close(); await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('Gemini reuses the uploaded video and completed segments, then assembles the full result', async () => {
+  const state = {
+    remoteName: 'files/video',
+    evidence: { 0: { spoken: '已保存的第一段讲解', visual: '第一段画面', frames: [3], charts: [] } },
+    captions: { 0: [{ start: 3, end: 5, text: '第一段' }] },
+  };
+  const saved = [];
+  const requests = [];
+  const result = await generateGeminiVideo({
+    apiKey: 'test-key', model: 'gemini-test', title: '视频', duration: 185, mimeType: 'video/mp4', includeTranscript: true,
+    signal: AbortSignal.timeout(5000), progress: async () => {}, wait: async () => {},
+    checkpoint: { state, save: async () => saved.push(structuredClone(state)) },
+    async fetcher(url, options) {
+      if (options.method === 'GET') {
+        assert.equal(url, origin + '/v1beta/files/video');
+        requests.push('check');
+        return Response.json({ name: 'files/video', uri: url, state: 'ACTIVE' });
+      }
+      if (options.method === 'DELETE') {
+        assert.equal(url, origin + '/v1beta/files/video');
+        requests.push('delete');
+        return new Response(null, { status: 204 });
+      }
+      assert.equal(url, origin + '/v1beta/models/gemini-test:generateContent');
+      const input = JSON.parse(options.body);
+      const part = input.contents[0].parts[0];
+      let output;
+      if (!part.fileData) {
+        requests.push('assemble');
+        assert.match(part.text, /已保存的第一段讲解/);
+        assert.match(part.text, /第二段讲解/);
+        output = notes;
+      } else {
+        assert.equal(part.videoMetadata.startOffset, '180s');
+        if (input.generationConfig.responseSchema.type === 'ARRAY') {
+          requests.push('captions');
+          output = JSON.stringify([{ start: 1, end: 4, text: '第二段' }]);
+        } else {
+          requests.push('evidence');
+          output = JSON.stringify({ spokenNotes: '第二段讲解', visualNotes: '第二段画面', frameTimes: [1], charts: [] });
+        }
+      }
+      return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: output }] } }] });
+    },
+  });
+  assert.deepEqual(requests, ['check', 'evidence', 'captions', 'assemble', 'delete']);
+  assert.equal(saved[0].evidence[1].spoken, '第二段讲解');
+  assert.deepEqual(saved[1].captions[1], [{ start: 181, end: 184, text: '第二段' }]);
+  assert.deepEqual(saved[2].result, result);
+  assert.deepEqual(result.frameTimes, [3, 181]);
+  assert.deepEqual(result.transcript, [state.captions[0][0], state.captions[1][0]]);
 });
 
 test('Gemini resumes from Google-confirmed bytes after a lost chunk response', async () => {
