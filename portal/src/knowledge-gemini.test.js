@@ -235,7 +235,7 @@ test('Gemini requeues quota failures, skips a cooling account/model, and resumes
     [first, second, alternate, other].forEach((id, i) =>
       db.prepare("UPDATE knowledge_documents SET created_at=? WHERE id=?").run('2026-01-01T00:00:0' + i + '.000Z', id));
     let limited = false;
-    const accounts = new Map([['owner', { apiKey: 'key-one' }], ['other', { apiKey: 'key-two' }]]);
+    const accounts = new Map([['owner', { apiKey: 'key-one', fallbackModels: [] }], ['other', { apiKey: 'key-two' }]]);
     const options = { accounts, probe: async () => '60', async generate({ model, apiKey, checkpoint }) {
       if (apiKey === 'key-one' && model === 'gemini-primary') {
         if (!limited) {
@@ -262,6 +262,51 @@ test('Gemini requeues quota failures, skips a cooling account/model, and resumes
     assert.equal(await next(), true);
     assert.equal(store.get('owner', first).status, 'ready');
     assert.equal(db.prepare('SELECT count(*) AS count FROM knowledge_gemini_cooldowns').get().count, 0);
+  } finally { db.close(); await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('Gemini falls back in order without replacing the primary model or starting over', async () => {
+  const db = new Database(':memory:');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'gemini-fallback-'));
+  const store = createKnowledgeStore(db), directoryFor = id => path.join(root, id);
+  try {
+    store.saveSettings('owner', { geminiModel: 'gemini-primary' });
+    const doc = store.create('owner', { backend: 'gemini', title: '视频', originalName: 'source.mp4', mimeType: 'video/mp4', bytes: 32 });
+    await fs.mkdir(directoryFor(doc.id));
+    await fs.writeFile(path.join(directoryFor(doc.id), 'source'), Buffer.alloc(32));
+    store.enqueue('owner', doc.id);
+    const calls = [];
+    const options = {
+      accounts: new Map([['owner', { apiKey: 'key', fallbackModels: ['gemini-first-backup', 'gemini-second-backup'] }]]),
+      probe: async () => '365',
+      async generate({ checkpoint, model, progress }) {
+        calls.push(model);
+        if (model === 'gemini-primary') {
+          checkpoint.state.evidence[0] = { spoken: '保留证据' };
+          checkpoint.state.captions[0] = [{ start: 0, end: 1, text: '保留字幕' }];
+          await checkpoint.save();
+          throw Object.assign(new Error('429'), { status: 429, circuit: true });
+        }
+        assert.equal(checkpoint.state.evidence[0].spoken, '保留证据');
+        assert.equal(checkpoint.state.captions[0][0].text, '保留字幕');
+        if (model === 'gemini-first-backup') throw Object.assign(new Error('404'), { status: 404, circuit: true });
+        await progress('整理分段', 70);
+        assert.match(store.get('owner', doc.id).stage, /^gemini-second-backup/);
+        return { notes, frameTimes: [], transcript: checkpoint.state.captions[0], warnings: [], model };
+      },
+    };
+    const next = () => runGeminiJob(db, directoryFor, () => true, options);
+    assert.equal(await next(), true);
+    assert.match(store.get('owner', doc.id).stage, /等待备用模型接单/);
+    assert.equal(await next(), true);
+    assert.equal(await next(), true);
+    assert.deepEqual(calls, ['gemini-primary', 'gemini-first-backup', 'gemini-second-backup']);
+    const result = store.get('owner', doc.id);
+    assert.equal(result.status, 'ready');
+    assert.equal(result.modelSettings.geminiModel, 'gemini-primary');
+    assert.equal(result.provenance.model, 'gemini-second-backup');
+    assert.equal(result.provenance.asrModel, 'gemini-primary');
+    assert.match(result.provenance.warnings[0], /gemini-primary.*gemini-second-backup/);
   } finally { db.close(); await fs.rm(root, { recursive: true, force: true }); }
 });
 
