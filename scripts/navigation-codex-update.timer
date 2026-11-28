@@ -1,0 +1,9 @@
+[Unit]
+Description=Check for a stable Codex CLI release daily
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 Asia/Shanghai
+Persistent=true
+
+[Install]
+WantedBy=timers.target

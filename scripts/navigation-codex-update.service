@@ -1,0 +1,13 @@
+[Unit]
+Description=Verify and update the Navigation Codex CLI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/navigation
+Environment=HOME=/root
+EnvironmentFile=-/etc/navigation/postgres.env
+UMask=0022
+ExecStart=/usr/bin/flock -n /run/navigation-codex-update.lock /usr/bin/node /opt/navigation/scripts/update-codex-cli.mjs
+TimeoutStartSec=12min
