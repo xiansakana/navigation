@@ -44,6 +44,7 @@
   function bucketKey(date, unit) {
     var p = parseDay(date);
     if (!p) return '';
+    if (unit === 'day') return p.y + '-' + pad(p.mo) + '-' + pad(p.d);
     if (unit === 'week') {
       var base = new Date(Date.UTC(p.y, p.mo - 1, p.d, 12));
       var offset = (base.getUTCDay() + 6) % 7; // Monday start
@@ -59,6 +60,7 @@
   function bucketLabel(start, unit) {
     var p = parseDay(start);
     if (!p) return start;
+    if (unit === 'day') return start;
     if (unit === 'week') return p.y + '-' + pad(p.mo) + '-' + pad(p.d) + ' 起一周';
     if (unit === 'month') return p.y + '-' + pad(p.mo);
     if (unit === 'quarter') return p.y + ' Q' + (Math.floor((p.mo - 1) / 3) + 1);
@@ -90,8 +92,9 @@
    * Points without a finite value are skipped, so gaps stay gaps.
    */
   function buildCandles(points, key, bucket) {
-    var unit = bucket && bucket.unit ? bucket.unit : 'week';
+    var unit = bucket && bucket.unit ? bucket.unit : 'day';
     var groups = new Map();
+    var previous = null;
     for (var i = 0; i < (points || []).length; i++) {
       var point = points[i];
       var raw = point ? point[key] : null;
@@ -109,17 +112,20 @@
         group.to = point.date;
         group.count++;
       } else {
+        // 开 = 上一个观测值（K 线惯例），首根才用区间首值；这样日 K 也有实体。
+        var open = previous === null ? value : previous;
         groups.set(start, {
           start: start,
           from: point.date,
           to: point.date,
-          open: value,
+          open: open,
           close: value,
-          high: value,
-          low: value,
+          high: Math.max(open, value),
+          low: Math.min(open, value),
           count: 1
         });
       }
+      previous = value;
     }
     return Array.from(groups.values())
       .sort(function (a, b) { return a.start < b.start ? -1 : a.start > b.start ? 1 : 0; })

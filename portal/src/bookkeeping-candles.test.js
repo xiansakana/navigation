@@ -42,9 +42,10 @@ test('each candle carries open, high, low and close from the points it groups', 
     const rows = candles.buildCandles(points, 'balance', { unit: 'week' });
     assert.equal(rows.length, 2);
     assert.equal(rows.length, 2);
+    // 开 = 上一个观测值（K 线惯例），所以第二根从上一根的收盘 5 起跳。
     assert.deepEqual([...rows].map(r => [r.start, r.open, r.high, r.low, r.close, r.count].join('|')), [
       '2026-10-05|10|30|5|5|3',
-      '2026-10-12|20|25|20|25|2'
+      '2026-10-12|5|25|5|25|2'
     ]);
   } finally { dom.window.close(); }
 });
@@ -115,7 +116,9 @@ test('the bookkeeping trend card opens as candlesticks and can switch back to li
     const title = candles[0].querySelector('title').textContent;
     assert.match(title, /开 .* 高 .* 低 .* 收 /);
     assert.match(title, /个数据点/);
-    assert.match(host.textContent, /每根 K 线按「周」聚合/);
+    assert.match(host.textContent, /每根 K 线对应一个观测日/);
+    // 日 K 是默认值：14 天数据应该得到 14 根蜡烛，而不是聚合后的 2 根。
+    assert.equal(candles.length, 14);
     // Direction, not series colour: 阳线绿、阴线红（与股票模块一致）。
     const up = host.querySelector('[data-chart-series="cumulative"] .bk-candle[data-dir="up"] rect');
     assert.ok(up, 'a rising period should render an up candle');
@@ -149,4 +152,23 @@ test('a falling period draws a red candle', () => {
     assert.equal(down.getAttribute('fill'), 'var(--red)');
     assert.match(down.closest('.bk-candle').querySelector('title').textContent, /区间收低/);
   } finally { f.dom.window.close(); }
+});
+
+test('day candles use the previous close as open so every bar has a body', () => {
+  const { dom, candles } = api();
+  try {
+    const points = [
+      { date: '2026-10-01', v: 100 },
+      { date: '2026-10-02', v: 120 },
+      { date: '2026-10-03', v: 90 }
+    ];
+    const rows = candles.buildCandles(points, 'v', { unit: 'day' });
+    assert.equal(rows.length, 3);
+    assert.deepEqual([...rows].map(r => [r.start, r.open, r.high, r.low, r.close].join('|')), [
+      '2026-10-01|100|100|100|100',
+      '2026-10-02|100|120|100|120',
+      '2026-10-03|120|120|90|90'
+    ]);
+    assert.equal(rows[1].label, '2026-10-02');
+  } finally { dom.window.close(); }
 });

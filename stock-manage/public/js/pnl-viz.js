@@ -1,4 +1,5 @@
 let vizMode = 'kline';
+let candleUnit = 'day';
 let calGranularity = 'month';
 let calYM = '';
 let calYearFocus = '';
@@ -100,6 +101,7 @@ function candleStart(date, unit) {
   const y = d.getUTCFullYear();
   const mo = d.getUTCMonth() + 1;
   const pad = (n) => String(n).padStart(2, '0');
+  if (unit === 'day') return `${y}-${pad(mo)}-${pad(d.getUTCDate())}`;
   if (unit === 'week') {
     d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
     return d.toISOString().slice(0, 10);
@@ -112,15 +114,16 @@ function candleStart(date, unit) {
 
 function candleLabels(start, unit) {
   const [y, mo, da] = start.split('-');
-  const short = { week: `${mo}-${da}`, month: `${y}-${mo}`, quarter: `${y.slice(2)}Q${Math.floor((+mo - 1) / 3) + 1}`, half: `${y.slice(2)}${+mo <= 6 ? 'H1' : 'H2'}`, year: y }[unit];
-  const long = { week: `${start} 起一周`, month: `${y}-${mo}`, quarter: `${y} 第 ${Math.floor((+mo - 1) / 3) + 1} 季度`, half: `${y} ${+mo <= 6 ? '上半年' : '下半年'}`, year: `${y} 年` }[unit];
+  const short = { day: `${mo}-${da}`, week: `${mo}-${da}`, month: `${y}-${mo}`, quarter: `${y.slice(2)}Q${Math.floor((+mo - 1) / 3) + 1}`, half: `${y.slice(2)}${+mo <= 6 ? 'H1' : 'H2'}`, year: y }[unit];
+  const long = { day: start, week: `${start} 起一周`, month: `${y}-${mo}`, quarter: `${y} 第 ${Math.floor((+mo - 1) / 3) + 1} 季度`, half: `${y} ${+mo <= 6 ? '上半年' : '下半年'}`, year: `${y} 年` }[unit];
   return { short, long };
 }
 
 /** Group a dated value series into OHLC candles; gaps stay gaps. */
 export function buildCandles(points, bucket) {
-  const unit = bucket?.unit || 'week';
+  const unit = bucket?.unit || 'day';
   const groups = new Map();
+  let previous = null;
   for (const point of points || []) {
     const raw = point?.cumulativeNet;
     // Number(null) is 0, so an explicit guard keeps gaps as gaps.
@@ -137,8 +140,11 @@ export function buildCandles(points, bucket) {
       group.to = point.date;
       group.count++;
     } else {
-      groups.set(start, { start, from: point.date, to: point.date, open: value, close: value, high: value, low: value, count: 1 });
+      // 开 = 上一个观测值，这样日 K 也有实体，而不是一排十字星。
+      const open = previous === null ? value : previous;
+      groups.set(start, { start, from: point.date, to: point.date, open, close: value, high: Math.max(open, value), low: Math.min(open, value), count: 1 });
     }
+    previous = value;
   }
   return [...groups.values()]
     .sort((a, b) => (a.start < b.start ? -1 : 1))
@@ -541,8 +547,7 @@ function buildChartOption(rangeSlice) {
 
 function buildCandleOption(rangeSlice) {
   const colors = chartColors();
-  const bucket = chooseCandleBucket(rangeSlice.map((p) => p.date));
-  const candles = buildCandles(rangeSlice, bucket);
+  const candles = buildCandles(rangeSlice, { unit: candleUnit });
   const zoom = zoomRange && Number.isFinite(zoomRange.start) ? zoomRange : defaultZoom();
   return {
     animation: false,
@@ -715,6 +720,11 @@ function bindShell(container) {
     if (annualEl) lastCallbacks?.onCalendarYear?.(annualEl.dataset.calAnnualYear);
   });
   container.addEventListener('change', (e) => {
+    if (e.target.id === 'pnl-candle-unit') {
+      candleUnit = e.target.value || 'day';
+      scheduleRender();
+      return;
+    }
     if (e.target.id === 'pnl-cal-year') {
       const y = +e.target.value;
       const mo = ymParts().m;
@@ -755,6 +765,9 @@ function ensureShell(container) {
             <button type="button" class="sm-seg-btn" data-pnl-mode="line">折线</button>
             <button type="button" class="sm-seg-btn" data-pnl-mode="calendar">日历</button>
           </div>
+          <label class="sm-candle-unit">周期<select id="pnl-candle-unit" aria-label="K 线周期">
+            <option value="day">日K</option><option value="week">周K</option><option value="month">月K</option><option value="quarter">季K</option><option value="year">年K</option>
+          </select></label>
         </div>
         <span class="sm-muted sm-pnl-cum-badge"></span>
       </div>
@@ -794,6 +807,8 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
 
   ensureShell(container);
   container.querySelector('.sm-pnl-viz')?.classList.toggle('sm-pnl-viz--kline', vizMode === 'kline');
+  const unitSelect = container.querySelector('#pnl-candle-unit');
+  if (unitSelect && unitSelect.value !== candleUnit) unitSelect.value = candleUnit;
 
   const badge = container.querySelector('.sm-pnl-cum-badge');
   badge.classList.toggle('hidden', !isChart);

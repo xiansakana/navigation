@@ -1476,3 +1476,6 @@ select:focus {
   .sm-import-preview .sm-table td { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; white-space: normal; overflow-wrap: anywhere; }
   .sm-import-preview .sm-table td::before { content: attr(data-label); color: var(--muted); }
 }
+.sm-candle-unit { display:none; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
+.sm-pnl-viz--kline .sm-candle-unit { display:inline-flex; }
+.sm-candle-unit select { font:inherit; font-size:12px; padding:6px 8px; border:1px solid var(--border); border-radius:8px; background:var(--input-bg,var(--card)); color:var(--text); }

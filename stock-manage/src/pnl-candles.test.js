@@ -27,7 +27,7 @@ test('candles aggregate cumulative net profit into open, high, low and close', (
   assert.equal(candles.length, 2);
   assert.deepEqual(
     candles.map((candle) => [candle.start, candle.open, candle.high, candle.low, candle.close, candle.count].join('|')),
-    ['2026-10-05|100|160|40|120|4', '2026-10-12|-20|30|-20|30|2']
+    ['2026-10-05|100|160|40|120|4', '2026-10-12|120|120|-20|30|2']
   );
   assert.equal(candles[0].short, '10-05');
   assert.match(candles[0].long, /起一周/);
@@ -42,4 +42,17 @@ test('a gap in the series does not create a flat candle', () => {
   assert.equal(candles.length, 1);
   assert.equal(candles[0].count, 1);
   assert.equal(candles[0].open, candles[0].close);
+});
+
+test('daily candles open at the previous close so each day has a body', () => {
+  const candles = buildCandles([
+    { date: '2026-10-05', cumulativeNet: 100 },
+    { date: '2026-10-06', cumulativeNet: 40 },
+    { date: '2026-10-07', cumulativeNet: 160 }
+  ], { unit: 'day' });
+  assert.deepEqual(
+    candles.map((candle) => [candle.start, candle.open, candle.high, candle.low, candle.close].join('|')),
+    ['2026-10-05|100|100|100|100', '2026-10-06|100|100|40|40', '2026-10-07|40|160|40|160']
+  );
+  assert.equal(candles[1].short, '10-06');
 });

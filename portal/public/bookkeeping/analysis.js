@@ -5,6 +5,9 @@
     let focus={}, saved=null;
     let chartMode='candle';
     let assetMode='candle';
+    const CANDLE_UNITS=[['day','日K'],['week','周K'],['month','月K'],['quarter','季K'],['year','年K']];
+    let candleUnit='day';
+    let assetUnit='day';
     let assetChartInstance=null, assetChartHost=null, assetBucket=null;
     const hiddenBillingSeries=new Set(), billingLines=[{key:'income',label:'收入',color:'var(--green)'},{key:'expense',label:'净支出',color:'var(--red)'},{key:'cumulative',label:'累计账单结余',color:'#d89812'}];
     function assetModeName(){return assetChartInstance&&assetChartInstance.mode?assetChartInstance.mode():assetMode;}
@@ -12,10 +15,18 @@
       const note=$('asset-overview-charts').querySelector('.bk-candle-note');
       if(!note)return;
       note.textContent=assetModeName()==='candle'&&assetBucket
-        ?'每根 K 线按「'+BUCKET_NAMES[assetBucket.unit]+'」聚合：阳线（区间收高）绿色、阴线（区间收低）红色，拖动下方滑块可缩放。'
+        ?(assetBucket.unit==='day'?'每根 K 线对应一个观测日':'每根 K 线按「'+BUCKET_NAMES[assetBucket.unit]+'」聚合')+'：开=上一根收盘（首根取观测值），阳线绿色、阴线红色，拖动下方滑块可缩放。'
         :'折线为逐日观测值，拖动下方滑块可缩放。';
       for(const item of $('asset-overview-charts').querySelectorAll('[data-asset-mode]'))item.setAttribute('aria-pressed',String(item.dataset.assetMode===assetModeName()));
+      const unitSelect=$('asset-overview-charts').querySelector('[data-asset-unit]');
+      if(unitSelect)unitSelect.value=assetUnit;
     }
+    $('asset-overview-charts').addEventListener('change',event=>{
+      const select=event.target.closest('[data-asset-unit]');
+      if(!select)return;
+      assetUnit=select.value;
+      renderAsset();
+    });
     $('asset-overview-charts').addEventListener('click',event=>{
       const button=event.target.closest('[data-asset-mode]');
       if(!button||!assetChartInstance)return;
@@ -40,6 +51,12 @@
       $('drill-label').textContent=[$('category').value,focus.day||$('month').value, focus.through?'截至 '+focus.through:'',$('currency').value,names[focus.flow],focus.analysisScope&&getState()?.analysisScope?.excludedAccountIds?.length?'已排除社保公积金等账户':''].filter(Boolean).join(' · ');
       $('drill-context').classList.remove('hidden');tab('entries');load();$('drill-context').scrollIntoView({block:'nearest'});
     }
+    document.querySelector('.bk-shell').addEventListener('change',e=>{
+      const select=e.target.closest('[data-candle-unit]');
+      if(!select)return;
+      candleUnit=select.value;
+      renderBilling();
+    });
     document.querySelector('.bk-shell').addEventListener('click',e=>{
       const modeButton=e.target.closest('[data-chart-mode]');
       if(modeButton){
@@ -61,7 +78,7 @@
       if(flow==='cumulative')return {currency:$('currency').value,through:granularity==='month'?new Date(Date.UTC(Number(point.date.slice(0,4)),Number(point.date.slice(5,7)),0)).toISOString().slice(0,10):point.date,flow:'net'};
       return {currency:$('currency').value,month:point.date.slice(0,7),...(granularity==='day'?{day:point.date}:{}),flow};
     }
-    const BUCKET_NAMES={week:'周',month:'月',quarter:'季度',half:'半年',year:'年'};
+    const BUCKET_NAMES={day:'日',week:'周',month:'月',quarter:'季度',half:'半年',year:'年'};
     // 收入/支出是流量，开高低收没有金融含义，K 线模式只画存量序列。
     const FLOW_KEYS=new Set(['income','expense']);
     const candleApi=window.bkCandles;
@@ -179,12 +196,13 @@
       const hiddenSeries=hiddenBillingSeries, seriesAttribute='data-billing-series';
       const visibleLines=toggle?lines.filter(line=>!hiddenSeries.has(line.key)):lines;
       const candles=chartMode==='candle'&&candleApi;
-      const bucket=candles?candleApi.chooseBucket(points.map(p=>p.date)):null;
+      const bucket=candles?{unit:candleUnit}:null;
       const candleLines=candles?visibleLines.filter(line=>!FLOW_KEYS.has(line.key)):[];
       const candleResult=candles?candleSvg(points,candleLines,granularity,bucket,label):null;
       const body=candleResult?candleResult.svg:lineSvg(points,visibleLines,granularity,toggle,label);
-      const note=candles?'<p class="bk-muted bk-candle-note">'+(candleLines.length?'每根 K 线按「'+BUCKET_NAMES[bucket.unit]+'」聚合：阳线（区间收高）绿色、阴线（区间收低）红色，上下影线是区间最高与最低'+(candleResult?.dual?'；右侧刻度对应量级较小的序列':'')+(granularity?'；点击可查看该区间账单':'')+'。':'K 线只展示存量序列，请切换到折线查看收入与净支出。')+'</p>':'';
-      return '<div class="bk-chart-card"><div class="bk-chart-head"><h3>'+esc(label)+'</h3>'+modeButtons()+'</div>'+legend(points,lines,toggle,seriesAttribute,hiddenSeries,candles?FLOW_KEYS:null)+body+note+(points.length===1?'<p class="bk-muted">目前仅有一个基准点，后续账单会形成走势。</p>':'')+'</div>';
+      const unitText=!bucket?'':(bucket.unit==='day'?'每根 K 线对应一个观测日':'每根 K 线按「'+BUCKET_NAMES[bucket.unit]+'」聚合');
+      const note=candles?'<p class="bk-muted bk-candle-note">'+(candleLines.length?unitText+'：开=上一根收盘（首根取观测值），阳线（收高）绿色、阴线（收低）红色'+(candleResult?.dual?'；右侧刻度对应量级较小的序列':'')+(granularity?'；点击可查看该区间账单':'')+'。':'K 线只展示存量序列，请切换到折线查看收入与净支出。')+'</p>':'';
+      return '<div class="bk-chart-card"><div class="bk-chart-head"><h3>'+esc(label)+'</h3>'+modeButtons()+(candles?'<label class="bk-candle-unit">周期<select data-candle-unit aria-label="K 线周期">'+CANDLE_UNITS.map(([unit,text])=>'<option value="'+unit+'"'+(candleUnit===unit?' selected':'')+'>'+text+'</option>').join('')+'</select></label>':'')+'</div>'+legend(points,lines,toggle,seriesAttribute,hiddenSeries,candles?FLOW_KEYS:null)+body+note+(points.length===1?'<p class="bk-muted">目前仅有一个基准点，后续账单会形成走势。</p>':'')+'</div>';
     }
     function suggestion(item,currency) {
       if(item.kind==='concentration')return '“'+esc(item.category)+'”占正向分类支出的 '+(item.share*100).toFixed(1)+'%。“固定、一次性和可选支出”应分别核对，优先检查大额项目。'+(item.target!==null?'如有可调整部分，下期可试设比该完整月份低 10% 的参考目标 '+m(item.target,currency)+'。':'选择最近一个完整月份后，再为可调整的消费设置下期预算。');
@@ -230,7 +248,7 @@
           +'<div class="bk-chart-modes" role="group" aria-label="图表类型">'
           +'<button type="button" data-asset-mode="candle" aria-pressed="'+(assetMode==='candle')+'">K线</button>'
           +'<button type="button" data-asset-mode="line" aria-pressed="'+(assetMode==='line')+'">折线</button>'
-          +'</div></div><div class="bk-asset-chart" data-asset-chart-host></div>'
+          +'</div><label class="bk-candle-unit">周期<select data-asset-unit aria-label="K 线周期">'+CANDLE_UNITS.map(([unit,text])=>'<option value="'+unit+'"'+(assetUnit===unit?' selected':'')+'>'+text+'</option>').join('')+'</select></label></div><div class="bk-asset-chart" data-asset-chart-host></div>'
           +'<p class="bk-muted bk-candle-note"></p>'
           +'<p class="bk-muted"></p></div>';
       }
@@ -240,7 +258,7 @@
         return;
       }
       if(instance.mode && assetMode!==instance.mode())instance.setMode(assetMode);
-      const bucket=window.bkCandles?window.bkCandles.chooseBucket(assets.points.map(point=>point.date),60):null;
+      const bucket=window.bkCandles?{unit:assetUnit}:null;
       assetBucket=bucket;
       instance.render(assets.points,assets.points.at(-1)?.currency,bucket);
       refreshAssetNote();
