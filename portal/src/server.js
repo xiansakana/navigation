@@ -134,7 +134,22 @@ function serveStatic(filePath, res) {
         const html = injectPageScripts(fs.readFileSync(filePath, 'utf8'));
         res.writeHead(200, { 'Content-Type': types[ext], 'Cache-Control': 'no-store' }); return res.end(html);
     }
-    res.writeHead(200, { 'Content-Type': types[ext] || 'application/octet-stream' });
+    // Static JS/CSS used to ship without validators, so browsers applied
+    // heuristic freshness and kept running yesterday's bundle after a deploy.
+    // Revalidate every time; unchanged files still answer 304.
+    const stat = fs.statSync(filePath);
+    const etag = 'W/"' + stat.size.toString(16) + '-' + Math.floor(stat.mtimeMs).toString(16) + '"';
+    const headers = {
+        'Content-Type': types[ext] || 'application/octet-stream',
+        'Cache-Control': 'no-cache',
+        ETag: etag,
+        'Last-Modified': stat.mtime.toUTCString()
+    };
+    if (res.req && res.req.headers['if-none-match'] === etag) {
+        res.writeHead(304, headers);
+        return true;
+    }
+    res.writeHead(200, headers);
     fs.createReadStream(filePath).pipe(res);
     return true;
 }
