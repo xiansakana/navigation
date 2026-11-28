@@ -154,3 +154,5 @@
 .bk-candle-chart .bk-axis-right { fill:var(--muted); opacity:.8; }
 .bk-series-static { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border:1px dashed var(--border); border-radius:999px; color:var(--muted); font-size:12px; }
 .bk-series-static::before { content:''; width:10px; height:10px; flex:0 0 10px; border-radius:50%; background:var(--line-color); opacity:.45; }
+/* K 线模式下图例色点表示「阳绿阴红」，不再沿用序列色 */
+.bk-series-toggle[data-candle="1"]::before { background:linear-gradient(90deg,var(--green) 50%,var(--red) 50%); }

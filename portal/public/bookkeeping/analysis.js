@@ -79,7 +79,7 @@
       return '<div class="bk-chart-legend"'+(toggle?' role="group" aria-label="'+kind+'显隐，点击图例切换"':'')+'>'+lines.map(l=>{
         const title=l.label+(FLOW_KEYS.has(l.key)?'合计':''),amount=Number.isFinite(last[l.key])?m(FLOW_KEYS.has(l.key)?Math.round(points.reduce((n,p)=>n+p[l.key],0)*100)/100:last[l.key],last.currency):'待补齐';
         if(staticKeys&&staticKeys.has(l.key))return '<span class="bk-series-static" style="--line-color:'+l.color+'" title="K 线只展示存量序列；切到折线查看'+esc(title)+'">'+esc(title)+' '+amount+'</span>';
-        return toggle?'<button type="button" class="bk-series-toggle" '+seriesAttribute+'="'+l.key+'" aria-pressed="'+!hiddenSeries.has(l.key)+'" aria-label="'+esc(title+kind)+'" style="--line-color:'+l.color+'"><span class="bk-series-label">'+esc(title)+'</span>'+amount+'</button>':'<span style="--line-color:'+l.color+'">'+esc(title)+' '+amount+'</span>';
+        return toggle?'<button type="button" class="bk-series-toggle"'+(kind==='K线'?' data-candle="1"':'')+' '+seriesAttribute+'="'+l.key+'" aria-pressed="'+!hiddenSeries.has(l.key)+'" aria-label="'+esc(title+kind)+'" style="--line-color:'+l.color+'"><span class="bk-series-label">'+esc(title)+'</span>'+amount+'</button>':'<span style="--line-color:'+l.color+'">'+esc(title)+' '+amount+'</span>';
       }).join('')+'</div>';
     }
     function lineSvg(points,visibleLines,granularity,toggle,label){
@@ -159,17 +159,19 @@
         svg+='<g data-valuation-boundary><line x1="'+lineX+'" x2="'+lineX+'" y1="'+top+'" y2="'+(height-bottom)+'" stroke="var(--muted)" stroke-dasharray="5 4"/><text x="'+Math.max(left+65,Math.min(width-right-65,lineX))+'" y="'+(top+12)+'" text-anchor="middle">首份快照基准</text></g>';
       }
       const currency=points.at(-1)?.currency;
+      // 与股票模块一致：阳线（收高）绿、阴线（收低）红，方向即颜色。
+      const UP='var(--green)',DOWN='var(--red)';
       groups.forEach((group,groupIndex)=>{
-        const color=group.line.color,offset=(groupIndex-(count-1)/2)*(bodyWidth+1.5);
+        const offset=(groupIndex-(count-1)/2)*(bodyWidth+1.5);
         let inner='';
         for(const candle of group.candles){
           const index=starts.indexOf(candle.start),cx=left+(index+0.5)*slot+offset;
           if(cx<left-bodyWidth||cx>width-right+bodyWidth)continue;
-          const up=candle.close>=candle.open,yOpen=yOf(groupIndex,candle.open),yClose=yOf(groupIndex,candle.close);
+          const up=candle.close>=candle.open,tone=up?UP:DOWN,yOpen=yOf(groupIndex,candle.open),yClose=yOf(groupIndex,candle.close);
           const bodyTop=Math.min(yOpen,yClose),bodyHeight=Math.max(1.2,Math.abs(yClose-yOpen));
           const title=candle.label+' · '+group.line.label+' 开 '+money(candle.open,currency)+' 高 '+money(candle.high,currency)+' 低 '+money(candle.low,currency)+' 收 '+money(candle.close,currency)+'（'+candle.count+' 个数据点）'+(up?' · 区间收高':' · 区间收低')+(side[groupIndex]==='right'?' · 右轴':'');
           const drill=granularity?' tabindex="0" role="button" aria-label="'+esc(title+'，查看账单')+'"'+attr(period({date:candle.start},granularity,group.line.key==='income'?'income':group.line.key==='expense'?'expense':'cumulative')):'';
-          inner+='<g class="bk-candle" data-dir="'+(up?'up':'down')+'"><title>'+esc(title)+'</title><line x1="'+cx+'" x2="'+cx+'" y1="'+yOf(groupIndex,candle.high)+'" y2="'+yOf(groupIndex,candle.low)+'" stroke="'+color+'" stroke-width="1.2"/><rect x="'+(cx-bodyWidth/2)+'" y="'+bodyTop+'" width="'+bodyWidth+'" height="'+bodyHeight+'" fill="'+(up?'transparent':color)+'" stroke="'+color+'" stroke-width="1.2"'+drill+'/></g>';
+          inner+='<g class="bk-candle" data-dir="'+(up?'up':'down')+'"><title>'+esc(title)+'</title><line x1="'+cx+'" x2="'+cx+'" y1="'+yOf(groupIndex,candle.high)+'" y2="'+yOf(groupIndex,candle.low)+'" stroke="'+tone+'" stroke-width="1.2"/><rect x="'+(cx-bodyWidth/2)+'" y="'+bodyTop+'" width="'+bodyWidth+'" height="'+bodyHeight+'" fill="'+tone+'" stroke="'+tone+'" stroke-width="1.2"'+drill+'/></g>';
         }
         svg+='<g data-chart-series="'+group.line.key+'">'+inner+'</g>';
       });
@@ -187,7 +189,7 @@
       const candleLines=candles?visibleLines.filter(line=>!FLOW_KEYS.has(line.key)):[];
       const candleResult=candles?candleSvg(points,candleLines,granularity,bucket,label):null;
       const body=candleResult?candleResult.svg:lineSvg(points,visibleLines,granularity,toggle,label);
-      const note=candles?'<p class="bk-muted bk-candle-note">'+(candleLines.length?'每根 K 线按「'+BUCKET_NAMES[bucket.unit]+'」聚合：空心为区间收高、实心为区间收低，上下影线是区间最高与最低'+(candleResult?.dual?'；右侧刻度对应量级较小的序列':'')+(granularity?'；点击可查看该区间账单':'')+'。':'K 线只展示存量序列，请切换到折线查看收入与净支出。')+'</p>':'';
+      const note=candles?'<p class="bk-muted bk-candle-note">'+(candleLines.length?'每根 K 线按「'+BUCKET_NAMES[bucket.unit]+'」聚合：阳线（区间收高）绿色、阴线（区间收低）红色，上下影线是区间最高与最低'+(candleResult?.dual?'；右侧刻度对应量级较小的序列':'')+(granularity?'；点击可查看该区间账单':'')+'。':'K 线只展示存量序列，请切换到折线查看收入与净支出。')+'</p>':'';
       return '<div class="bk-chart-card"><div class="bk-chart-head"><h3>'+esc(label)+'</h3>'+modeButtons()+'</div>'+legend(points,lines,toggle,seriesAttribute,hiddenSeries,candles?FLOW_KEYS:null)+body+note+(points.length===1?'<p class="bk-muted">目前仅有一个基准点，后续账单会形成走势。</p>':'')+'</div>';
     }
     function suggestion(item,currency) {

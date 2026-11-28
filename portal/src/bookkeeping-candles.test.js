@@ -116,6 +116,12 @@ test('the bookkeeping trend card opens as candlesticks and can switch back to li
     assert.match(title, /开 .* 高 .* 低 .* 收 /);
     assert.match(title, /个数据点/);
     assert.match(host.textContent, /每根 K 线按「周」聚合/);
+    // Direction, not series colour: 阳线绿、阴线红（与股票模块一致）。
+    const up = host.querySelector('[data-chart-series="cumulative"] .bk-candle[data-dir="up"] rect');
+    assert.ok(up, 'a rising period should render an up candle');
+    assert.equal(up.getAttribute('fill'), 'var(--green)');
+    assert.equal(up.getAttribute('stroke'), 'var(--green)');
+    assert.equal(host.querySelector('.bk-series-toggle[data-candle="1"]')?.dataset.candle, '1');
     // Candles are drillable exactly like the old data points.
     const rect = candles[0].querySelector('rect[data-drill]');
     assert.ok(rect, 'candle bodies keep the period drill-down');
@@ -128,5 +134,19 @@ test('the bookkeeping trend card opens as candlesticks and can switch back to li
     host.querySelector('[data-chart-mode="candle"]').click();
     assert.ok(host.querySelectorAll('.bk-candle').length >= 2);
     assert.equal(host.querySelector('.bk-chart-modes [aria-pressed="true"]').dataset.chartMode, 'candle');
+  } finally { f.dom.window.close(); }
+});
+
+test('a falling period draws a red candle', () => {
+  const points = Array.from({ length: 10 }, (_, i) => ({
+    date: new Date(Date.parse('2026-10-05T12:00:00Z') + i * 86400000).toISOString().slice(0, 10),
+    currency: 'CNY', income: 0, expense: 50, cumulative: 1000 - i * 40
+  }));
+  const f = page(points);
+  try {
+    const down = f.$('billing-charts').querySelector('[data-chart-series="cumulative"] .bk-candle[data-dir="down"] rect');
+    assert.ok(down, 'a declining period should render a down candle');
+    assert.equal(down.getAttribute('fill'), 'var(--red)');
+    assert.match(down.closest('.bk-candle').querySelector('title').textContent, /区间收低/);
   } finally { f.dom.window.close(); }
 });
