@@ -416,3 +416,277 @@ input[type="email"]:focus, input[type="number"]:focus, textarea:focus, select:fo
   .btn, .service-card, .service-card::after { transition: none; }
   .btn:hover, .service-card:hover { transform: none; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Full-platform visual unification
+   experience.css sets these variables on body.portal-experience with
+   higher specificity than :root, so we re-map them here using a
+   stronger selector. Component rules below use html body prefixes to
+   outrank experience.css :is() groups on proxied sub-apps.
+   ═══════════════════════════════════════════════════════════════════ */
+
+html[data-theme] body.portal-experience {
+  --bg: var(--ds-bg);
+  --card: var(--ds-surface);
+  --panel: var(--ds-surface);
+  --panel2: var(--ds-surface-2);
+  --surface: var(--ds-surface);
+  --elevated: var(--ds-surface-2);
+  --border: var(--ds-border);
+  --line: var(--ds-border);
+  --text: var(--ds-text);
+  --text-soft: var(--ds-muted);
+  --muted: var(--ds-muted);
+  --label: var(--ds-muted);
+  --accent: var(--ds-accent);
+  --accent-hover: var(--ds-accent-strong);
+  --accent-text: #fff;
+  --input-bg: #0d121c;
+  --input: #0d121c;
+  --hover-bg: rgba(255, 255, 255, 0.055);
+  --row-hover: rgba(255, 255, 255, 0.03);
+  --navbar-bg: rgba(9, 12, 19, 0.86);
+  --ui-shadow: var(--ds-shadow-sm);
+  --ui-ring: 0 0 0 3px var(--ds-accent-soft);
+  background: var(--ds-bg);
+  font-family: var(--ds-font);
+}
+
+html[data-theme="light"] body.portal-experience {
+  --input-bg: #ffffff;
+  --input: #ffffff;
+  --navbar-bg: rgba(255, 255, 255, 0.88);
+  --hover-bg: rgba(20, 40, 80, 0.045);
+  --row-hover: rgba(20, 40, 80, 0.03);
+}
+
+/* ── Shared panels / cards across every module ─────────────────── */
+html body.portal-experience :is(
+  .sm-panel, .card, .quant-card, .kb-panel, .ml-panel, .bk-panel,
+  .resource-panel, .admin-panel, .piclist-panel, .channel-card,
+  .monitor-card, .business-card, .watcher-card, .sm-summary-card,
+  .sm-stat, .quant-stat, .resource-stat, .error-card, .codex-card,
+  .codex-cli .panel, .login-card
+) {
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius);
+  background: linear-gradient(160deg, var(--ds-surface-2), var(--ds-surface) 65%);
+  box-shadow: var(--ds-shadow-sm);
+}
+
+html body.portal-experience :is(
+  .sm-panel, .card, .kb-panel, .ml-panel, .bk-panel, .resource-panel,
+  .admin-panel, .piclist-panel, .channel-card, .monitor-card, .business-card
+):hover {
+  border-color: var(--ds-border-strong);
+}
+
+/* Panel / section headings */
+html body.portal-experience :is(
+  .kb-heading, .ml-heading, .bk-heading, .resource-heading,
+  .codex-heading, .piclist-hero, .header h1
+) {
+  letter-spacing: -0.025em;
+  font-weight: 650;
+}
+
+html body.portal-experience :is(
+  .sm-panel-head h2, .card h2, .quant-card-head h2,
+  .kb-panel h2, .ml-panel h2, .bk-panel h2,
+  .resource-panel h2, .admin-panel h2, .piclist-panel h2
+) { letter-spacing: -0.015em; }
+
+/* ── Tabs ───────────────────────────────────────────────────────── */
+html body.portal-experience :is(
+  .sm-feature-tabs, .sm-tabs, .kb-tabs, .ml-tabs, .bk-tabs,
+  .codex-tabs, .tabs, .bk-asset-chart-tabs
+) {
+  border-bottom: 1px solid var(--ds-border);
+  gap: 4px;
+}
+
+html body.portal-experience :is(
+  .sm-feature-tab, .sm-tab, .kb-tab, .ml-tab, .bk-tab,
+  .codex-tab, .tab, .admin-tab
+) {
+  color: var(--ds-muted);
+  border-radius: 9px;
+  transition: color .15s ease, background .15s ease;
+}
+
+html body.portal-experience :is(
+  .sm-feature-tab:hover, .sm-tab:hover, .kb-tab:hover, .ml-tab:hover,
+  .bk-tab:hover, .codex-tab:hover, .tab:hover, .admin-tab:hover
+) { color: var(--ds-text); background: var(--hover-bg); }
+
+html body.portal-experience :is(
+  .sm-feature-tab.active, .sm-tab.active, .kb-tab.active, .ml-tab.active,
+  .bk-tab.active, .codex-tab.active, .tab.active, .admin-tab.active
+) {
+  color: var(--ds-accent-strong);
+  background: var(--ds-accent-soft);
+  font-weight: 600;
+}
+
+/* ── Tables ─────────────────────────────────────────────────────── */
+html body.portal-experience :is(
+  .sm-table-wrap, .admin-table-wrap, .quant-table-wrap,
+  .ml-table-scroll, .bk-table-wrap, .kb-table-wrap
+) {
+  border: 1px solid var(--ds-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+html body.portal-experience :is(
+  .sm-table, .admin-table, .quant-table, .ml-table, .bk-table,
+  .resource-panel table, .kb-table
+) { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+
+html body.portal-experience :is(
+  .sm-table, .admin-table, .quant-table, .ml-table, .bk-table,
+  .resource-panel table, .kb-table
+) th {
+  background: var(--ds-surface-2);
+  color: var(--ds-muted);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: .02em;
+}
+
+html body.portal-experience :is(
+  .sm-table, .admin-table, .quant-table, .ml-table, .bk-table,
+  .resource-panel table, .kb-table
+) tbody tr:hover { background: var(--hover-bg); }
+
+/* ── Form fields (including untyped inputs used by qq-bot) ─────── */
+html body.portal-experience :is(
+  input:not([type]), input[type="text"], input[type="password"],
+  input[type="email"], input[type="number"], input[type="date"],
+  input[type="search"], textarea, select
+) {
+  background: var(--input-bg);
+  border: 1px solid var(--ds-border);
+  border-radius: 10px;
+  color: var(--ds-text);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+html body.portal-experience :is(
+  input:not([type]), input[type="text"], input[type="password"],
+  input[type="email"], input[type="number"], input[type="date"],
+  input[type="search"], textarea, select
+):focus {
+  border-color: var(--ds-accent);
+  box-shadow: var(--ui-ring);
+  outline: none;
+}
+
+html body.portal-experience :is(.field, .form-grid, .sm-form-grid, .ml-form-grid, .checks) label,
+html body.portal-experience :is(.kb-hint, .ml-hint, .bk-muted, .kb-muted, .hint, .biz-hint, .eyebrow) {
+  color: var(--ds-muted);
+}
+
+/* ── Buttons across sub-apps ────────────────────────────────────── */
+html body.portal-experience :is(
+  .test-btn, .save-btn, .sm-btn-sm, .sm-pnl-control, .sm-pnl-apply,
+  .biz-link, .btn.green, .btn.red, .btn.small
+) {
+  border-radius: 9px;
+  font-weight: 550;
+  transition: transform .15s ease, background .15s ease, border-color .15s ease;
+}
+
+html body.portal-experience :is(.test-btn, .save-btn, .biz-link):hover {
+  transform: translateY(-1px);
+}
+
+html body.portal-experience .btn.green {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ds-good) 88%, white), var(--ds-good));
+  border-color: transparent;
+  color: #fff;
+}
+
+html body.portal-experience .btn.red {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ds-bad) 88%, white), var(--ds-bad));
+  border-color: transparent;
+  color: #fff;
+}
+
+/* ── Badges, chips, status dots ────────────────────────────────── */
+html body.portal-experience :is(
+  .chip, .sm-market-pill, .monitor-badge, .quant-badge, .ml-badge,
+  .resource-badge, .sm-badge, .kb-badge
+) {
+  border: 1px solid var(--ds-border);
+  border-radius: 999px;
+  background: var(--ds-surface-2);
+  color: var(--ds-muted);
+  font-size: 11px;
+  letter-spacing: .02em;
+  padding: 3px 9px;
+}
+
+/* ── Modals / dialogs ───────────────────────────────────────────── */
+html body.portal-experience :is(
+  .sm-modal, .portal-dialog, .admin-dialog-inner, .todo-dialog,
+  .chat-dialog, .sm-review-card
+) {
+  border: 1px solid var(--ds-border-strong);
+  border-radius: 18px;
+  background: var(--ds-surface-2);
+  box-shadow: var(--ds-shadow);
+}
+
+html body.portal-experience :is(
+  .sm-modal-backdrop, .kb-dialog::backdrop, .admin-dialog::backdrop,
+  .bk-dialog::backdrop, .chat-dialog::backdrop, .todo-dialog::backdrop,
+  dialog::backdrop
+) { background: rgba(4, 7, 14, 0.66); backdrop-filter: blur(3px); }
+
+/* ── Codex / knowledge / bookkeeping specific polish ──────────── */
+html body.portal-experience :is(.kb-eyebrow, .ml-eyebrow, .bk-eyebrow, .eyebrow, .resource-eyebrow) {
+  color: var(--ds-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+html body.portal-experience :is(.kb-panel, .ml-panel, .bk-panel, .resource-panel) h2,
+html body.portal-experience :is(.kb-heading, .ml-heading, .bk-heading, .resource-heading) h1 {
+  color: var(--ds-text);
+}
+
+html body.portal-experience :is(.kb-markdown, .sm-doc-body, .biz-state) {
+  color: var(--ds-text);
+  line-height: 1.75;
+}
+
+html body.portal-experience :is(.kb-markdown pre, .sm-doc-body pre, .command-help pre, .biz-endpoint code) {
+  background: var(--ds-bg);
+  border: 1px solid var(--ds-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-family: var(--ds-mono);
+  font-size: 12.5px;
+}
+
+html body.portal-experience :is(.kb-markdown code, .sm-doc-body code) {
+  background: var(--ds-accent-soft);
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-family: var(--ds-mono);
+  font-size: .92em;
+}
+
+/* Semantic colors that were standalone hex values */
+html body.portal-experience .resource-meter.warn i { background: #e6a43b; }
+html body.portal-experience .todos .state-waiting_quota { color: #d9a959; }
+html body.portal-experience :is(.up, .pos) { color: var(--ds-good); }
+html body.portal-experience :is(.down, .neg) { color: var(--ds-bad); }
+
+@media (prefers-reduced-motion: reduce) {
+  html body.portal-experience :is(.btn, .test-btn, .save-btn, .biz-link) { transition: none; }
+  html body.portal-experience :is(.test-btn, .save-btn, .biz-link):hover { transform: none; }
+}

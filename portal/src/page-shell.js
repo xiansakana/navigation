@@ -1,7 +1,7 @@
 const pageAsset = '/portal-page.js?v=2';
 const scopeAsset = '/data-scope.js?v=1';
 const navbarAsset = '/navbar-dropdown.js?v=9';
-const designAsset = '/design.css?v=design-1';
+const designAsset = '/design.css?v=design-2';
 const sharedAssets = ['/ui/input-guard.js?v=20261011-2', '/ui/back-to-top.js?v=1'];
 
 export function injectPageScripts(html) {
