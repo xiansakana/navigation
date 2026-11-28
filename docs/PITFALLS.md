@@ -129,3 +129,13 @@ PORTAL_CONFIG_PATH=/d/code/navigation/portal/config.preview.json node src/server
 - 图表类组件要假设容器可能没高度：挂载时给兜底高度，并在可见性变化后 resize。
 - 静态服务缺少校验头时浏览器会“猜”缓存时长，这类问题只在真实用户机上复现；给 `no-cache` + `ETag` 比每次手动提醒用户强刷可靠。
 
+## 2026-11-28 · 两张图共用一个模式变量，点「折线」立刻被拉回「K线」
+
+**现象**：资产页点「折线」后按钮闪一下又回到「K线」，图也还是蜡烛。
+
+**根因**：资产图的按钮写的是 `data-asset-mode`，但挂载时读的是**账单图**的 `chartMode`（模块级共享变量），点击只改了 echarts 实例内部的 mode，没有回写 `chartMode`。于是任何一次 `renderAsset()`（筛选变更、汇率刷新、重新 load）都执行 `setMode(chartMode)`，把用户的选择覆盖掉。
+
+**修复**：资产图独立一个 `assetMode`，点击时先写 `assetMode` 再 `setMode`，重渲染时以 `assetMode` 为准；按钮 `aria-pressed` 也读它。补了回归断言：点折线后调用一次 `controller.render()`，模式必须保持折线。
+
+**教训**：同一个变量不要给两个独立图表的 UI 状态用；凡是「用户选了 A，稍后自动变回 B」，先查有没有第二条代码路径按旧值重设状态。
+
