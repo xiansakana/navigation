@@ -154,3 +154,6 @@
 @media(max-width:760px) { .bk-asset-chart { height:260px; } }
 .bk-candle-unit { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
 .bk-candle-unit select { font:inherit; font-size:12px; padding:6px 10px; border:1px solid var(--border); border-radius:10px; background:var(--card); color:var(--text); }
+/* 周期按钮始终占位，折线模式下隐藏，保证 K线/折线 切换位置不动 */
+.bk-chart-modes-slot { display:inline-flex; }
+.bk-chart-modes-slot.is-hidden { visibility:hidden; }

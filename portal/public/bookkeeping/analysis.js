@@ -204,7 +204,7 @@
       const body=candleResult?candleResult.svg:lineSvg(points,visibleLines,granularity,toggle,label);
       const unitText=!bucket?'':(bucket.unit==='day'?'每根 K 线对应一个观测日':'每根 K 线按「'+BUCKET_NAMES[bucket.unit]+'」聚合');
       const note=candles?'<p class="bk-muted bk-candle-note">'+(candleLines.length?unitText+'：开=上一根收盘（首根取观测值），阳线（收高）绿色、阴线（收低）红色'+(candleResult?.dual?'；右侧刻度对应量级较小的序列':'')+(granularity?'；点击可查看该区间账单':'')+'。':'K 线只展示存量序列，请切换到折线查看收入与净支出。')+'</p>':'';
-      return '<div class="bk-chart-card"><div class="bk-chart-head"><h3>'+esc(label)+'</h3>'+modeButtons()+(candles?unitButtons('data-candle-unit'):'')+'</div>'+legend(points,lines,toggle,seriesAttribute,hiddenSeries,candles?FLOW_KEYS:null)+body+note+(points.length===1?'<p class="bk-muted">目前仅有一个基准点，后续账单会形成走势。</p>':'')+'</div>';
+      return '<div class="bk-chart-card"><div class="bk-chart-head"><h3>'+esc(label)+'</h3>'+modeButtons()+'<span class="bk-chart-modes-slot'+(candles?'':' is-hidden')+'">'+unitButtons('data-candle-unit')+'</span>'+'</div>'+legend(points,lines,toggle,seriesAttribute,hiddenSeries,candles?FLOW_KEYS:null)+body+note+(points.length===1?'<p class="bk-muted">目前仅有一个基准点，后续账单会形成走势。</p>':'')+'</div>';
     }
     function suggestion(item,currency) {
       if(item.kind==='concentration')return '“'+esc(item.category)+'”占正向分类支出的 '+(item.share*100).toFixed(1)+'%。“固定、一次性和可选支出”应分别核对，优先检查大额项目。'+(item.target!==null?'如有可调整部分，下期可试设比该完整月份低 10% 的参考目标 '+m(item.target,currency)+'。':'选择最近一个完整月份后，再为可调整的消费设置下期预算。');

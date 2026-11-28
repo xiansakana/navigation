@@ -226,7 +226,9 @@
           observer.observe(host);
         }
         lastKey = '';
-        render(state.points, state.currency);
+        // Keep the bucket: without it the first paint falls back to the line and
+        // the chart looks like it ignored the default 日K selection.
+        render(state.points, state.currency, state.bucket);
       }).catch(function () {
         fail('图表组件加载失败，请刷新重试');
       });
