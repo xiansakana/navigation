@@ -35,25 +35,37 @@ test('Gemini uploads original bytes, waits for ACTIVE, summarizes audio and vide
         if (options.method === 'DELETE') return new Response(null, { status: 204 });
         if (target.pathname === '/upload/v1beta/files') return new Response(null, { headers: { 'x-goog-upload-url': origin + '/upload/v1beta/files?upload_id=test' } });
         if (options.method === 'GET') return Response.json({ name: 'files/video', uri: origin + '/v1beta/files/video', state: 'ACTIVE' });
-        const input = JSON.parse(options.body);
-        assert.equal(input.contents[0].parts[0].fileData.fileUri, origin + '/v1beta/files/video');
+        const input = JSON.parse(options.body), parts = input.contents[0].parts;
+        const answer = text => Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text }] } }] });
         assert.equal(input.tools, undefined);
-        if (input.generationConfig.responseMimeType) {
-          const offset = input.contents[0].parts[0].videoMetadata;
-          assert.ok(['0s', '180s'].includes(offset.startOffset));
-          if (offset.startOffset === '180s') {
-            assert.equal(offset.endOffset, '185s');
-            return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '[{"start":1,"end":4,"text":"第二段"}]' }] } }] });
-          }
-          return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '[{"start":3,"end":5,"text":"第一段"}]' }] } }] });
+        if (!parts[0].fileData) {
+          assert.match(parts[0].text, /## 时间导航/);
+          assert.match(parts[0].text, /## 复习提纲/);
+          assert.match(parts[0].text, /第一段讲解.*第一段画面/);
+          assert.match(parts[0].text, /第二段讲解.*第二段画面/);
+          assert.match(parts[0].text, /字幕校验摘录/);
+          return answer(notes);
         }
-        return Response.json({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: notes + '\nKEYFRAME_SECONDS: 9, 3, 3, 999, -10' }] } }] });
+        assert.equal(parts[0].fileData.fileUri, origin + '/v1beta/files/video');
+        const offset = parts[0].videoMetadata;
+        assert.ok(['0s', '180s'].includes(offset.startOffset));
+        const tail = offset.startOffset === '180s';
+        assert.equal(offset.endOffset, tail ? '185s' : '180s');
+        if (input.generationConfig.responseSchema.type === 'ARRAY') {
+          return answer(JSON.stringify(tail ? [{ start: 1, end: 4, text: '第二段' }] : [{ start: 3, end: 5, text: '第一段' }]));
+        }
+        return answer(JSON.stringify(tail
+          ? { spokenNotes: '第二段讲解', visualNotes: '第二段画面', frameTimes: [1, 10], charts: [] }
+          : { spokenNotes: '第一段讲解', visualNotes: '第一段画面', frameTimes: [9, 3, 3, 999, -10], charts: [
+            { time: 3, pillars: ['甲申', '癸酉', '甲寅', '丙寅'], marker: '元男', subject: '案例一', position: '左盘', relation: 'comparison' }
+          ] }));
       }
     });
     assert.equal(result.notes, notes);
-    assert.deepEqual(result.frameTimes, [3, 9]);
+    assert.deepEqual(result.frameTimes, [3, 9, 181]);
+    assert.equal(result.charts[0].marker, '元男');
     assert.deepEqual(result.transcript, [{ start: 3, end: 5, text: '第一段' }, { start: 181, end: 184, text: '第二段' }]);
-    assert.deepEqual(calls, ['POST /upload/v1beta/files', 'POST /upload/v1beta/files', 'GET /v1beta/files/video', 'POST /v1beta/models/gemini-test:generateContent', 'POST /v1beta/models/gemini-test:generateContent', 'POST /v1beta/models/gemini-test:generateContent', 'DELETE /v1beta/files/video']);
+    assert.deepEqual(calls, ['POST /upload/v1beta/files', 'POST /upload/v1beta/files', 'GET /v1beta/files/video', ...Array(5).fill('POST /v1beta/models/gemini-test:generateContent'), 'DELETE /v1beta/files/video']);
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 
