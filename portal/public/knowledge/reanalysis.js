@@ -23,7 +23,10 @@ export function createReanalysisPanel({ element: $, can, state, api, send, onErr
     target = single ? { ...state.current } : null;
     $('reanalysis-heading').textContent = single ? '重新分析：' + target.title : '批量重新分析';
     $('reanalysis-scope').textContent = single ? '仅此篇笔记。' : state.selected.size ? `本次处理已勾选的 ${state.selected.size} 篇笔记（含跨页选择）。` : '本次处理当前搜索词和分类下所有已生成笔记，跨全部分页；状态筛选不影响此范围。';
-    $('reanalysis-mode').value = 'reuse'; $('reanalysis-preview').textContent = '正在核对素材和版本…';
+    const mode = $('reanalysis-mode');
+    const gemini = state.settings?.backend === 'gemini';
+    mode.querySelector('[value="reuse"]').disabled = gemini;
+    mode.value = gemini ? 'full' : 'reuse'; $('reanalysis-preview').textContent = '正在核对素材和版本…';
     dialog.showModal(); await preview();
   }
   const previewError = e => { $('reanalysis-preview').textContent = e.message || '核对失败，请重试'; onError(e); };
