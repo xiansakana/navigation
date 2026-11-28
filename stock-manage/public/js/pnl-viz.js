@@ -821,7 +821,11 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
   const calBlock = container.querySelector('.sm-cal-block');
 
   if (isChart) {
-    const rangeSlice = sliceSeries(expandDailySeries(chartSparse), pnlStart, pnlEnd);
+    // Candles only want real observation days: the daily-expanded series repeats
+    // the previous value on every calendar day and would render as a doji flood.
+    const rangeSlice = vizMode === 'kline'
+      ? sliceSeries(chartSparse, pnlStart, pnlEnd)
+      : sliceSeries(expandDailySeries(chartSparse), pnlStart, pnlEnd);
     const fp = rangeFingerprint(rangeSlice);
     if (fp !== viewFingerprint) {
       viewFingerprint = fp;
