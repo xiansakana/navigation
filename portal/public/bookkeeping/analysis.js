@@ -89,8 +89,8 @@
       if(!points.length)return '<p class="bk-empty">暂无记录</p>';
       const hiddenSeries=hiddenBillingSeries, seriesAttribute='data-billing-series';
       const candle=chartMode==='candle';
-      if(granularity==='month'&&['day','week'].includes(candleUnit))candleUnit='month';
-      return '<div class="bk-chart-card"><div class="bk-chart-head"><h3>'+esc(label)+'</h3>'+modeButtons()+'<span class="bk-chart-modes-slot'+(candle?'':' is-hidden')+'">'+unitButtons('data-candle-unit',granularity==='month'?'month':'day')+'</span></div>'
+      const fineGrain=granularity==='month'&&['day','week'].includes(candleUnit)?'（当前区间为月度数据，日K／周K 与月K 等效）':'';
+      return '<div class="bk-chart-card"><div class="bk-chart-head"><h3>'+esc(label)+'</h3>'+modeButtons()+'<span class="bk-chart-modes-slot'+(candle?'':' is-hidden')+'">'+unitButtons('data-candle-unit')+'</span></div>'
         +legend(points,lines,toggle,seriesAttribute,hiddenSeries,candle?FLOW_KEYS:null)
         +'<div class="bk-asset-chart" data-billing-chart-host></div>'
         +'<p class="bk-muted bk-candle-note">'+(candle?candleNoteText()+'：开=上一根收盘（首根取观测值），阳线绿色、阴线红色，拖动下方滑块可缩放。'+'':'折线为逐日观测值，拖动下方滑块可缩放。')+(candle?'':'')+'</p></div>';
