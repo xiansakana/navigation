@@ -8,19 +8,24 @@ const require = createRequire(path.resolve('package.json'));
 const { build } = require('esbuild');
 const { parse, compileScript } = require('vue/compiler-sfc');
 
-// Remove stale hashed chunks from previous builds so deploy artifacts stay bounded.
-// Only generated JS files are touched; hand-written assets in outdir are preserved.
-let stale = [];
-try {
-  for (const name of await readdir(outdir)) {
-    if (!name.endsWith('.js')) continue;
-    if (!/^chunk-|^bookkeeping-entries-view\.js$/.test(name)) continue;
-    stale.push(path.join(outdir, name));
+// Prune generated leftovers without ever deleting a chunk that a sibling entry
+// still imports. This must run *after* the build: earlier builds are separate
+// processes, and a single-entry build has splitting disabled, so anything we
+// delete up front would never be regenerated.
+async function pruneGenerated(outdir) {
+  let names;
+  try { names = await readdir(outdir); } catch { return; }
+  const jsFiles = names.filter(name => name.endsWith('.js'));
+  const referenced = new Set();
+  for (const name of jsFiles) {
+    const source = await readFile(path.join(outdir, name), 'utf8').catch(() => '');
+    for (const match of source.matchAll(/\.\/(chunk-[A-Za-z0-9_-]+\.js)/g)) referenced.add(match[1]);
   }
-} catch { /* first build: outdir may not exist yet */ }
-if (stale.length) {
-  await Promise.all(stale.map(file => unlink(file)));
-  console.log('[build-vue] removed ' + stale.length + ' stale generated chunk(s)');
+  const stale = jsFiles.filter(name =>
+    (/^chunk-/.test(name) && !referenced.has(name)) || name === 'bookkeeping-entries-view.js');
+  if (!stale.length) return;
+  await Promise.all(stale.map(name => unlink(path.join(outdir, name))));
+  console.log('[build-vue] removed ' + stale.length + ' stale generated file(s)');
 }
 
 const singleFileComponents = {
@@ -56,3 +61,5 @@ await build({
     __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: 'false'
   }
 });
+
+await pruneGenerated(outdir);

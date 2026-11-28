@@ -43,8 +43,8 @@ window.createUnifiedBlogEditor = function(root, post) {
     ['有序列表', () => editor.chain().focus().toggleOrderedList().run()],
     ['引用', () => editor.chain().focus().toggleBlockquote().run()],
     ['代码块', () => editor.chain().focus().toggleCodeBlock().run()],
-    ['链接', () => {
-      const href = prompt('输入链接地址（https://、http:// 或 mailto:）');
+    ['链接', async () => {
+      const href = await window.portalUI.prompt('输入链接地址（https://、http:// 或 mailto:）', '', { title: '插入链接' });
       if (!href) return;
       if (!/^(https?:\/\/|mailto:)/i.test(href.trim())) return window.portalToast?.error('请输入有效链接');
       editor.chain().focus().setLink({ href: href.trim() }).run();

@@ -216,7 +216,7 @@ document.body.addEventListener('click', async function(e) {
     }
     var delUser = e.target.closest('[data-del-user]');
     if (delUser) {
-        if (!await window.portalDialog.confirm('删除用户', '确定删除该用户？')) return;
+        if (!await window.portalUI.confirm('确定删除该用户？该用户将立即失去全部访问权限。', { title: '删除用户', danger: true, okText: '删除' })) return;
         try {
             await api('admin/users/' + delUser.dataset.delUser, { method: 'DELETE' });
             window.portalToast?.success('用户已删除');
@@ -234,7 +234,7 @@ document.body.addEventListener('click', async function(e) {
     }
     var delRole = e.target.closest('[data-del-role]');
     if (delRole) {
-        if (!await window.portalDialog.confirm('删除角色', '确定删除该角色？')) return;
+        if (!await window.portalUI.confirm('确定删除该角色？已分配该角色的用户会失去对应权限。', { title: '删除角色', danger: true, okText: '删除' })) return;
         try {
             await api('admin/roles/' + delRole.dataset.delRole, { method: 'DELETE' });
             window.portalToast?.success('角色已删除');

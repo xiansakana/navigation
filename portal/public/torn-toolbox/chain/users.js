@@ -63,7 +63,7 @@
     try { await api('config', 'POST', body); dirty = false; $('users-apiKeys').value = ''; $('users-message').textContent = '已保存，请启动用户监控'; await refresh(); } catch (error) { $('users-message').textContent = error.message; }
   };
   for (const action of ['start', 'stop', 'clear', 'clear-keys']) $('users-' + action).onclick = async () => {
-    if (['clear', 'clear-keys'].includes(action) && !confirm('确认' + (action === 'clear' ? '清空记录（去重保留）' : '删除全部 Keys 并停止用户监控') + '？')) return;
+    if (['clear', 'clear-keys'].includes(action) && !(await window.portalUI.confirm('确认' + (action === 'clear' ? '清空记录（去重保留）' : '删除全部 Keys 并停止用户监控') + '？', { title: '确认操作', danger: true }))) return;
     try { await api(action === 'clear' ? 'history' : action === 'clear-keys' ? 'config' : action, action === 'clear' ? 'DELETE' : 'POST', action === 'clear-keys' ? { apiKeys: [] } : {}); $('users-message').textContent = '操作成功'; await refresh(); } catch (error) { $('users-message').textContent = error.message; }
   };
   $('users-prev').onclick = () => { offset = Math.max(0, offset - 20); historyRows(); }; $('users-next').onclick = () => { offset += 20; historyRows(); };

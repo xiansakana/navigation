@@ -27,6 +27,27 @@ test('shared input and back-to-top behavior loads once on native and proxied pag
     }
 });
 
+test('every page gets one copy of the dialog runtime, whatever it already shipped', () => {
+    const pages = [
+        readFileSync(new URL('../public/dashboard.html', import.meta.url), 'utf8'), // ships dialog + toast
+        readFileSync(new URL('../public/mingli/index.html', import.meta.url), 'utf8'), // ships dialog only
+        readFileSync(new URL('../public/knowledge/index.html', import.meta.url), 'utf8'), // ships neither
+        readFileSync(new URL('../public/bookkeeping/index.html', import.meta.url), 'utf8') // ships toast only
+    ];
+    const count = (html, asset) => (html.match(new RegExp(`src=["']${asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\?[^"']*)?["']`, 'g')) || []).length;
+    for (const source of pages) {
+        const html = injectPageScripts(source);
+        for (const asset of ['/dialog.js', '/toast.js', '/portal-ui.js']) assert.equal(count(html, asset), 1, asset);
+        assert.equal(injectPageScripts(html), html);
+    }
+    // The facade must be parsed after the implementations it wraps; check the
+    // injected block itself so a body-level <script> on one page cannot skew it.
+    const bare = injectPageScripts('<html><head></head><body></body></html>');
+    assert.ok(bare.indexOf('/dialog.js') < bare.indexOf('/toast.js'));
+    assert.ok(bare.indexOf('/toast.js') < bare.indexOf('/portal-ui.js'));
+    assert.ok(bare.indexOf('/portal-ui.js') < bare.indexOf('/portal-page.js'));
+});
+
 test('page startup coalesces concurrent reads and retries after a transient error', async () => {
     const { window } = new JSDOM('', { runScripts: 'outside-only' });
     try {

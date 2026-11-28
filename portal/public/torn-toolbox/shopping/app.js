@@ -87,7 +87,7 @@ async function refresh(){
   }
 }
 $('form').oninput=()=>{dirty=true;};$('form').onsubmit=async e=>{e.preventDefault();try{const items=Array.from($('items').children,div=>Object.fromEntries(Array.from(div.querySelectorAll('input'),i=>[i.dataset.field,i.value])));await api('config','POST',{items,intervalSeconds:$('interval').value,apiIntervalSeconds:$('apiInterval').value,...($('keys').value.trim()?{apiKeys:$('keys').value.trim()}: {})});dirty=false;configuredRows=undefined;catalogLoaded=false;$('keys').value='';closePicker();$('message').textContent='已保存，请启动';await refresh();}catch(e){$('message').textContent=e.message;}};
-for(const id of ['start','stop','clear'])$(id).onclick=async()=>{if(id==='clear'&&!confirm('清空历史？去重保留。'))return;try{await api(id==='clear'?'history':id,id==='clear'?'DELETE':'POST');await refresh();}catch(e){$('message').textContent=e.message;}};
+for(const id of ['start','stop','clear'])$(id).onclick=async()=>{if(id==='clear'&&!(await window.portalUI.confirm('清空历史？去重保留。',{title:'清空历史',danger:true,okText:'清空'})))return;try{await api(id==='clear'?'history':id,id==='clear'?'DELETE':'POST');await refresh();}catch(e){$('message').textContent=e.message;}};
 function refreshVisible(){if(!document.hidden&&!activeReads)void refresh();}
 void refresh();
 document.addEventListener('visibilitychange',refreshVisible);

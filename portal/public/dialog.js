@@ -1,4 +1,5 @@
 (function () {
+  if (window.portalDialog) return; // idempotent: page shell may inject us twice
   var queue = [];
   var busy = false;
   var host = null;

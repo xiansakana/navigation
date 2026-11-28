@@ -150,7 +150,7 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-shell-3';
   const entryList = createBookkeepingEntryList({ $, esc, m, money, can, mountEntries: viewModule.mountBookkeepingEntries, getState:()=>state, openEditor, copyEntry, removeEntry, openDetails:details.open });
   async function removeEntry(item) {
     if(!item || !can('entries:edit'))return false;
-    if(!window.confirm('删除这条账单？新账单会撤销对账户余额的影响。'))return false;
+    if(!(await window.portalUI.confirm('删除这条账单？新账单会撤销对账户余额的影响。',{title:'删除账单',danger:true,okText:'删除'})))return false;
     await api('/entries/'+item.id,{method:'DELETE'});await load();return true;
   }
   async function load(append = false) {
@@ -282,7 +282,7 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-shell-3';
     } catch(e) { ui.editor.setError(e.message); } finally { $('save-item').disabled=false; }
   });
   $('delete-item').addEventListener('click',async()=>{
-    if(!window.confirm(editing.mode==='entry'?'删除这条账单？新账单会撤销对账户余额的影响。':'删除这个账户？存在关联账单时不能删除。')) return;
+    if(!(await window.portalUI.confirm(editing.mode==='entry'?'删除这条账单？新账单会撤销对账户余额的影响。':'删除这个账户？存在关联账单时不能删除。',{title:'确认删除',danger:true,okText:'删除'}))) return;
     try { await api('/'+(editing.mode==='entry'?'entries':'accounts')+'/'+editing.item.id,{method:'DELETE'}); await load(); ui.editor.close(); } catch(e) { ui.editor.setError(e.message); }
   });
   for(const id of ['editor','manager-editor']) {

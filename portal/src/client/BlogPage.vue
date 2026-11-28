@@ -403,7 +403,7 @@ async function renderComments(article, before, detailPanel) {
       if (comment.canDelete) {
         const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '删除评论'; remove.className = 'blog-action';
         remove.addEventListener('click', async () => {
-          if (!confirm('确定删除这条评论吗？')) return;
+          if (!(await window.portalUI.confirm('确定删除这条评论吗？', { title: '删除评论', danger: true, okText: '删除' }))) return;
           remove.disabled = true;
           try { await request('comments/' + comment.id, { method: 'DELETE' }); await renderComments(article, null, detailPanel); }
           catch (error) { window.portalToast?.error(error.message); remove.disabled = false; }
@@ -497,7 +497,7 @@ async function onFeedClick(event) {
   const action = actionButton.dataset.action;
   if (action === 'delete') {
     if (state.saving) { window.portalToast?.warn('请等待当前上传完成'); return; }
-    if (!confirm('确定删除这篇动态吗？')) return;
+    if (!(await window.portalUI.confirm('确定删除这篇动态吗？', { title: '删除动态', danger: true, okText: '删除' }))) return;
     try {
       const result = await request('posts/' + actionButton.dataset.id, { method: 'DELETE' });
       state.editing?.editor.destroy();

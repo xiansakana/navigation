@@ -57,7 +57,7 @@
     catch (error) { $('faction-message').textContent = error.message; }
   };
   for (const name of ['start', 'stop', 'reset']) $('faction-' + name).onclick = async () => {
-    if (name === 'reset' && !confirm('重新获取帮派列表并清空本次结果？已缓存的历史数据保留。')) return;
+    if (name === 'reset' && !(await window.portalUI.confirm('重新获取帮派列表并清空本次结果？已缓存的历史数据保留。', { title: '重置扫描' }))) return;
     try { await api(name, 'POST'); if (name === 'reset') offset = 0; $('faction-message').textContent = '操作成功'; await refresh(); }
     catch (error) { $('faction-message').textContent = error.message; }
   };

@@ -19,7 +19,7 @@ export function createDevicePanel({ can, api, send, onError }) {
       if (!device.revokedAt && can('devices:edit')) {
         const button = document.createElement('button'); button.type = 'button'; button.className = 'btn ghost'; button.textContent = '停用';
         button.onclick = async () => {
-          if (!window.confirm(`停用“${device.label}”？这台设备将不能再领取视频，正在处理的任务需重试，其他设备不受影响。`)) return;
+          if (!(await window.portalUI.confirm(`停用“${device.label}”？这台设备将不能再领取视频，正在处理的任务需重试，其他设备不受影响。`, { title: '停用设备', danger: true }))) return;
           try { await api('/devices/' + device.id, { method: 'DELETE' }); await refresh(); } catch (e) { onError(e); }
         };
         row.append(button);

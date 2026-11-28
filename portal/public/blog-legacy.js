@@ -356,7 +356,7 @@
                 if (comment.canDelete) {
                     var remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '删除评论'; remove.className = 'blog-action';
                     remove.addEventListener('click', async function() {
-                        if (!confirm('确定删除这条评论吗？')) return;
+                        if (!(await window.portalUI.confirm('确定删除这条评论吗？', { title: '删除评论', danger: true, okText: '删除' }))) return;
                         remove.disabled = true;
                         try { await request('comments/' + comment.id, { method: 'DELETE' }); await renderComments(article, null, detailPanel); }
                         catch (error) { window.portalToast?.error(error.message); remove.disabled = false; }
@@ -412,7 +412,7 @@
         if (state.saving) { window.portalToast?.warn('请等待当前上传完成'); return; }
         var article = button.closest('.blog-post');
         if (button.dataset.action === 'delete') {
-            if (!confirm('确定删除这篇动态吗？')) return;
+            if (!(await window.portalUI.confirm('确定删除这篇动态吗？', { title: '删除动态', danger: true, okText: '删除' }))) return;
             try { var result = await request('posts/' + button.dataset.id, { method: 'DELETE' }); state.editing?.editor.destroy(); state.editing = null; await load(true); window.portalToast?.success(result.cleanupPending ? '已删除，媒体将在后台清理' : '已删除'); }
             catch (error) { window.portalToast?.error(error.message); }
             return;

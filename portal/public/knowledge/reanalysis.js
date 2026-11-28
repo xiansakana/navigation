@@ -37,7 +37,7 @@ export function createReanalysisPanel({ element: $, can, state, api, send, onErr
   dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); else previewSequence++; });
   $('reanalysis-confirm').onclick = async () => {
     if (busy || !previewItems.length) return;
-    if (state.editing && !window.confirm('当前编辑尚未保存，继续会基于已保存的笔记重新分析。继续？')) return;
+    if (state.editing && !(await window.portalUI.confirm('当前编辑尚未保存，继续会基于已保存的笔记重新分析。继续？', { title: '未保存的修改' }))) return;
     busy = true; $('reanalysis-confirm').disabled = $('reanalysis-mode').disabled = $('reanalysis-close').disabled = true;
     try {
       const result = await send(target ? '/documents/' + target.id + '/reanalyze' : '/reanalysis', 'POST', target ? { revision: previewItems[0].revision, mode: $('reanalysis-mode').value } : { items: previewItems, mode: $('reanalysis-mode').value });
@@ -69,7 +69,7 @@ export function createReanalysisPanel({ element: $, can, state, api, send, onErr
   $('history-select').onchange = renderVersion;
   $('history-restore').onclick = async () => {
     const d = state.current, versionId = $('history-select').value;
-    if (!versionId || !window.confirm('恢复此版本的正文和素材？当前版本也会先保存，可再次恢复。')) return;
+    if (!versionId || !(await window.portalUI.confirm('恢复此版本的正文和素材？当前版本也会先保存，可再次恢复。', { title: '恢复历史版本' }))) return;
     $('history-restore').disabled = true;
     try { await send('/documents/' + d.id + '/restore', 'POST', { versionId, revision: d.revision }); $('message').textContent = '已恢复历史版本，并同步命理案例。'; await onDone(); }
     catch (e) { onError(e); } finally { renderVersion(); }

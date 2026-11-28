@@ -120,7 +120,7 @@ async function run(fn) {
 }
 
 async function discard() {
-  return !dirty || !can('cases:edit') || await window.portalDialog.confirm('当前修改尚未保存，确定离开当前案例吗？', { title: '未保存的修改' });
+  return !dirty || !can('cases:edit') || await window.portalUI.confirm('当前修改尚未保存，确定离开当前案例吗？', { title: '未保存的修改' });
 }
 
 function tab(name) {
@@ -340,7 +340,7 @@ async function onCategoryManagerClick(event) {
   if (event.target.closest('[data-delete-category]')) {
     await run(async () => {
       const category = categoryData.categories.find(c => c.id === row.dataset.category);
-      if (!await window.portalDialog.confirm(`删除分类「${category.name}」？其中 ${category.count} 个案例将归入未分类，案例及笔记会保留。`, { title: '删除分类', danger: true })) return;
+      if (!await window.portalUI.confirm(`删除分类「${category.name}」？其中 ${category.count} 个案例将归入未分类，案例及笔记会保留。`, { title: '删除分类', danger: true })) return;
       await api('/categories/' + category.id, 'DELETE');
       if (current?.categoryId === category.id) { current.categoryId = null; $('case-category').value = ''; }
       await loadCases();
@@ -476,7 +476,7 @@ async function saveCase() {
 
 async function deleteCase() {
   await run(async () => {
-    if (!current || !await window.portalDialog.confirm(`确定删除案例「${current.name}」及其笔记？`, { title: '删除案例', danger: true })) return;
+    if (!current || !await window.portalUI.confirm(`确定删除案例「${current.name}」及其笔记？`, { title: '删除案例', danger: true })) return;
     await api('/cases/' + current.id, 'DELETE');
     current = null;
     dirty = true;

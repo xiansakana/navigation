@@ -8,7 +8,8 @@ import { bindLinkImport } from './link-import.js?v=5';
 import { createUploadQueuePanel, parseBatchLinks } from './queue.js?v=vue-queue-1';
 import { createFileQueue } from './file-queue.js?v=1';
 import { createBilibiliPanel } from './bilibili-account.js?v=datetime-20261110';
-import { createNotePager } from './pagination.js?v=1';
+import { createNotePager } from './pagination.js?v=2';
+import { pagePosition, pageSummary } from '../ui/pager.js?v=1';
 import { failureMessage } from './failure.js?v=1';
 import { createReanalysisPanel } from './reanalysis.js?v=gemini-evidence-1';
 const $ = id => document.getElementById(id);
@@ -150,9 +151,10 @@ function renderList() {
   }));
   renderBatch();
   show('notes-pagination', can('notes:view'));
-  text('notes-page', `第 ${Math.floor(state.offset / 30) + 1} / ${Math.max(1, Math.ceil(state.total / 30))} 页 · 共 ${state.total} 篇`);
-  $('notes-prev').disabled = state.offset === 0;
-  $('notes-next').disabled = state.offset + 30 >= state.total;
+  const notesPosition = pagePosition({ offset: state.offset, total: state.total, pageSize: 30 });
+  text('notes-page', pageSummary(state.total, 30, notesPosition.page, '篇'));
+  $('notes-prev').disabled = notesPosition.prevDisabled;
+  $('notes-next').disabled = notesPosition.nextDisabled;
 }
 async function load(offset, quiet = false) {
   const [result] = await Promise.all([
@@ -249,7 +251,7 @@ function renderDocument(d) {
   tab('notes'); renderList();
 }
 async function open(id, quiet = false) {
-  if (!quiet && state.editing && !window.confirm('当前编辑还未保存，放弃修改并打开其他笔记？')) return;
+  if (!quiet && state.editing && !(await window.portalUI.confirm('当前编辑还未保存，放弃修改并打开其他笔记？', { title: '未保存的修改' }))) return;
   const d = (await api('/documents/' + id)).document;
   if (quiet && state.current?.id !== id) return;
   if (quiet && d.revision === state.current?.revision && d.status === state.current?.status) { state.current = d; renderStorage(d); text('job-status', d.error ? failureMessage(d.error, d.stage) : d.stage + (d.status === 'processing' ? ' · ' + d.progress + '%' : '')); return; }
@@ -394,7 +396,7 @@ $('batch-clear').onclick = () => { state.selected.clear(); renderList(); };
 $('batch-save').onclick = async () => {
   if (state.batchBusy || !state.selected.size) return;
   const visibility = $('batch-visibility').value, documents = [...state.selected].map(([id, revision]) => ({ id, revision }));
-  if (!window.confirm(`将选中的 ${documents.length} 篇笔记设为${visibility === 'public' ? '公开' : '私有'}？` + (visibility === 'public' ? '访客将能读取标题、分类、标签和完整正文，请确认不含私人信息。' : '公开知识库将不再展示这些笔记。'))) return;
+  if (!(await window.portalUI.confirm(`将选中的 ${documents.length} 篇笔记设为${visibility === 'public' ? '公开' : '私有'}？` + (visibility === 'public' ? '访客将能读取标题、分类、标签和完整正文，请确认不含私人信息。' : '公开知识库将不再展示这些笔记。'), { title: '批量修改可见范围' }))) return;
   state.batchBusy = true; renderList();
   try {
     const result = await send('/documents/visibility', 'PUT', { visibility, documents });
@@ -436,7 +438,7 @@ $('model-save').onclick = async () => {
   } catch (e) { error(e); }
 };
 $('worker-token').onclick = async () => {
-  if (state.settings.worker.configured && !window.confirm('这会撤销旧版共享凭据，使用该凭据的工作器需重新配置；独立绑定的设备不受影响。继续？')) return;
+  if (state.settings.worker.configured && !(await window.portalUI.confirm('这会撤销旧版共享凭据，使用该凭据的工作器需重新配置；独立绑定的设备不受影响。继续？', { title: '更新工作器凭据', danger: true }))) return;
   try { const result = await send('/worker-token', 'POST'); $('new-token').value = result.token; show('token-result', true); await settings(); } catch (e) { error(e); }
 };
 $('tabs').onclick = event => { const button = event.target.closest('[data-tab]'); if (button) tab(button.dataset.tab); };
@@ -458,7 +460,7 @@ $('retry').onclick = () => retryFailed(false);
 $('retry-failed').onclick = () => retryFailed(true);
 $('resume-upload').onclick = () => { $('upload-mode').value = 'file'; linkImport.mode(); state.resume = state.current; $('upload-title').value = state.current.title; text('upload-heading', '继续上传：' + state.current.title); show('upload-panel', true); $('video-file').click(); };
 $('delete').onclick = async () => {
-  if (!window.confirm('删除这篇笔记及其原视频、转写和截图？')) return;
+  if (!(await window.portalUI.confirm('删除这篇笔记及其原视频、转写和截图？', { title: '删除笔记', danger: true, okText: '删除' }))) return;
   try { await api('/documents/' + state.current.id, { method: 'DELETE' }); state.selected.delete(state.current.id); state.current = null; state.editing = false; sourcePlayer.reset(null); show('detail', false); show('empty', true); await load(); } catch (e) { error(e); }
 };
 $('edit').onclick = () => {
@@ -469,7 +471,7 @@ $('cancel-edit').onclick = () => renderDocument(state.current);
 $('visibility-save').onclick = async () => {
   const value = $('document-visibility').value;
   if (value === 'public' && state.current.visibility !== 'public'
-    && !window.confirm('公开后，任何有浏览权限的访客都能读取这篇笔记的标题、分类、标签和完整正文。请确认正文不含私人信息。继续公开？')) return;
+    && !(await window.portalUI.confirm('公开后，任何有浏览权限的访客都能读取这篇笔记的标题、分类、标签和完整正文。请确认正文不含私人信息。继续公开？', { title: '公开笔记' }))) return;
   $('visibility-save').disabled = true;
   try {
     await send('/documents/' + state.current.id + '/visibility', 'PUT', { visibility: value, revision: state.current.revision });

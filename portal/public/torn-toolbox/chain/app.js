@@ -59,8 +59,8 @@
     try { await api('config', 'POST', body); dirty = false; $('api-key').value = ''; $('message').textContent = '配置已保存，请启动监控'; await refresh(); } catch (error) { $('message').textContent = error.message; }
   };
   $('start').onclick = () => action('start'); $('stop').onclick = () => action('stop');
-  $('clear-key').onclick = () => { if (confirm('删除全部 Keys 并停止监控？')) action('config', 'POST', { apiKeys: [] }); };
-  $('clear-history').onclick = () => { if (confirm('清空摧毁记录？去重状态保留。')) action('history', 'DELETE'); };
+  $('clear-key').onclick = async () => { if (await window.portalUI.confirm('删除全部 Keys 并停止监控？', { title: '清空 Keys', danger: true, okText: '删除' })) action('config', 'POST', { apiKeys: [] }); };
+  $('clear-history').onclick = async () => { if (await window.portalUI.confirm('清空摧毁记录？去重状态保留。', { title: '清空记录', danger: true, okText: '清空' })) action('history', 'DELETE'); };
   $('monitor-filter').onchange = () => { offset = 0; refresh(); };
   $('monitor-prev').onclick = () => { offset = Math.max(0, offset - 50); refresh(); }; $('monitor-next').onclick = () => { offset += 50; refresh(); };
   function refreshVisible() {

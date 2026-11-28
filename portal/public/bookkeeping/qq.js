@@ -23,7 +23,7 @@
   $('qq-close').onclick=()=>$('qq-dialog').close();
   $('qq-code').onclick=async()=>{try{const d=await api('/code',{},'POST');$('qq-code-text').textContent='请在10分钟内私聊机器人发送：绑定记账 '+d.code;}catch(e){$('qq-error').textContent=e.message;}};
   $('qq-refresh').onclick=async()=>{try{render(await api(''));}catch(e){$('qq-error').textContent=e.message;}};
-  $('qq-unbind').onclick=async()=>{if(!confirm('解绑 QQ 并清除指令偏好？已有账单会保留。'))return;try{await api('',null,'DELETE');render(await api(''));$('qq-code-text').textContent='';}catch(e){$('qq-error').textContent=e.message;}};
+  $('qq-unbind').onclick=async()=>{if(!(await window.portalUI.confirm('解绑 QQ 并清除指令偏好？已有账单会保留。',{title:'解绑 QQ',danger:true,okText:'解绑'})))return;try{await api('',null,'DELETE');render(await api(''));$('qq-code-text').textContent='';}catch(e){$('qq-error').textContent=e.message;}};
   $('qq-form').onsubmit=async e=>{e.preventDefault();$('qq-save').disabled=true;try{render(await api('',{defaultAccountId:$('qq-account').value,groups:$('qq-groups').value,aliases:$('qq-aliases').value},'PUT'));$('qq-error').textContent='已保存';}catch(e){$('qq-error').textContent=e.message;}finally{$('qq-save').disabled=false;}};
   const dialog=$('qq-dialog');let outside=false;
   const isOutside=e=>{const r=dialog.getBoundingClientRect();return e.target===dialog&&(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom);};

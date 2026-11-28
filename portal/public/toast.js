@@ -1,4 +1,5 @@
 (function () {
+  if (window.portalToast) return; // idempotent: page shell may inject us twice
   var DEFAULT_DURATION = 3200;
   var host = null;
   var active = new Map();

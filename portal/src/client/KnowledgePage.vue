@@ -10,10 +10,12 @@ import { bindLinkImport } from '../../public/knowledge/link-import.js';
 import { createFileQueue } from '../../public/knowledge/file-queue.js';
 import { createBilibiliPanel } from '../../public/knowledge/bilibili-account.js';
 import { createNotePager } from '../../public/knowledge/pagination.js';
+import { pagePosition, pageSummary } from '../../public/ui/pager.js';
 import { failureMessage } from '../../public/knowledge/failure.js';
 import { createReanalysisPanel } from '../../public/knowledge/reanalysis.js';
 
 const $ = id => document.getElementById(id);
+const NOTES_PAGE_SIZE = 30;
 const time = value => {
   const s = Math.floor(value || 0);
   return (s >= 3600 ? String(Math.floor(s / 3600)).padStart(2, '0') + ':' : '')
@@ -273,9 +275,10 @@ function renderList() {
   }));
   renderBatch();
   notesVisible.value = can('notes:view');
-  notesPage.value = `第 ${Math.floor(state.offset / 30) + 1} / ${Math.max(1, Math.ceil(state.total / 30))} 页 · 共 ${state.total} 篇`;
-  notesPrevDisabled.value = state.offset === 0 || listLoading.value;
-  notesNextDisabled.value = state.offset + 30 >= state.total || listLoading.value;
+  const notesPosition = pagePosition({ offset: state.offset, total: state.total, pageSize: NOTES_PAGE_SIZE });
+  notesPage.value = pageSummary(state.total, NOTES_PAGE_SIZE, notesPosition.page, '篇');
+  notesPrevDisabled.value = notesPosition.prevDisabled || listLoading.value;
+  notesNextDisabled.value = notesPosition.nextDisabled || listLoading.value;
 }
 
 async function load(offset, quiet = false) {
@@ -393,7 +396,7 @@ function renderDocument(d) {
 }
 
 async function open(id, quiet = false) {
-  if (!quiet && editing.value && !window.confirm('当前编辑还未保存，放弃修改并打开其他笔记？')) return;
+  if (!quiet && editing.value && !(await window.portalUI.confirm('当前编辑还未保存，放弃修改并打开其他笔记？', { title: '未保存的修改' }))) return;
   const d = (await api('/documents/' + id)).document;
   if (quiet && state.current?.id !== id) return;
   if (quiet && d.revision === state.current?.revision && d.status === state.current?.status) {
@@ -610,8 +613,8 @@ function onUploadReset() {
 }
 function onSearchSubmit() { load(0).catch(setError); }
 function onFilterChange() { load(0).catch(setError); }
-function onNotesPrev() { if (can('notes:view')) load(state.offset - 30).catch(setError); }
-function onNotesNext() { if (can('notes:view')) load(state.offset + 30).catch(setError); }
+function onNotesPrev() { if (can('notes:view')) load(state.offset - NOTES_PAGE_SIZE).catch(setError); }
+function onNotesNext() { if (can('notes:view')) load(state.offset + NOTES_PAGE_SIZE).catch(setError); }
 function batchAll() {
   for (const d of state.documents) if (d.status === 'ready' && state.selected.size < 100) state.selected.set(d.id, d.revision);
   renderList();
@@ -621,7 +624,7 @@ async function batchSave() {
   if (batchBusy.value || !state.selected.size) return;
   const visibility = batchVisibility.value;
   const documents = [...state.selected].map(([id, revision]) => ({ id, revision }));
-  if (!window.confirm(`将选中的 ${documents.length} 篇笔记设为${visibility === 'public' ? '公开' : '私有'}？` + (visibility === 'public' ? '访客将能读取标题、分类、标签和完整正文，请确认不含私人信息。' : '公开知识库将不再展示这些笔记。'))) return;
+  if (!(await window.portalUI.confirm(`将选中的 ${documents.length} 篇笔记设为${visibility === 'public' ? '公开' : '私有'}？` + (visibility === 'public' ? '访客将能读取标题、分类、标签和完整正文，请确认不含私人信息。' : '公开知识库将不再展示这些笔记。'), { title: '批量修改可见范围' }))) return;
   batchBusy.value = true;
   renderList();
   try {
@@ -676,7 +679,7 @@ async function saveModel() {
   } catch (e) { setError(e); }
 }
 async function renewWorkerToken() {
-  if (state.settings.worker.configured && !window.confirm('这会撤销旧版共享凭据，使用该凭据的工作器需重新配置；独立绑定的设备不受影响。继续？')) return;
+  if (state.settings.worker.configured && !(await window.portalUI.confirm('这会撤销旧版共享凭据，使用该凭据的工作器需重新配置；独立绑定的设备不受影响。继续？', { title: '更新工作器凭据', danger: true }))) return;
   try {
     const result = await send('/worker-token', 'POST');
     $('new-token').value = result.token;
@@ -721,7 +724,7 @@ function resumeUpload() {
   $('video-file').click();
 }
 async function deleteDocument() {
-  if (!window.confirm('删除这篇笔记及其原视频、转写和截图？')) return;
+  if (!(await window.portalUI.confirm('删除这篇笔记及其原视频、转写和截图？', { title: '删除笔记', danger: true, okText: '删除' }))) return;
   try {
     await api('/documents/' + state.current.id, { method: 'DELETE' });
     state.selected.delete(state.current.id);
@@ -746,7 +749,7 @@ function cancelEdit() { renderDocument(state.current); }
 async function saveVisibility() {
   const value = documentVisibility.value;
   if (value === 'public' && state.current.visibility !== 'public'
-    && !window.confirm('公开后，任何有浏览权限的访客都能读取这篇笔记的标题、分类、标签和完整正文。请确认正文不含私人信息。继续公开？')) return;
+    && !(await window.portalUI.confirm('公开后，任何有浏览权限的访客都能读取这篇笔记的标题、分类、标签和完整正文。请确认正文不含私人信息。继续公开？', { title: '公开笔记' }))) return;
   $('visibility-save').disabled = true;
   try {
     await send('/documents/' + state.current.id + '/visibility', 'PUT', { visibility: value, revision: state.current.revision });
@@ -780,7 +783,7 @@ onMounted(async () => {
     player: $('player'), frame: $('original-frame'), select: $('playback-source'),
     link: $('original-link'), hint: $('playback-hint'), allowed: () => can('source:view')
   });
-  notePager = createNotePager(params => api('/documents?' + new URLSearchParams(params)));
+  notePager = createNotePager(params => api('/documents?' + new URLSearchParams(params)), NOTES_PAGE_SIZE);
   linkImport = bindLinkImport({
     element: $, can: () => can('import:edit'),
     canBatch: () => can('queue:edit') && can('import:edit'),

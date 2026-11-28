@@ -111,7 +111,7 @@
 
   restartButton.addEventListener('click', async function () {
     if (!canEdit) return;
-    var ok = await window.portalDialog?.confirm('上传服务会短暂中断，确定现在重启吗？', {
+    var ok = await window.portalUI.confirm('上传服务会短暂中断，确定现在重启吗？', {
       title: '重启 PicList',
       okText: '重启'
     });

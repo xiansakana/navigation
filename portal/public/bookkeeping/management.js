@@ -54,7 +54,7 @@
       if(a.startsWith('merge-'))return open(a,item);
       await perform(async()=>{
         if(a==='toggle-category')await write('/categories/'+id,{...item,archived:!item.archived},'PUT');
-        else if(a.startsWith('delete-')){if(!window.confirm('删除未使用的'+(isCategory?'分类（包括其二级分类）':'分组')+'？'))return;await api('/'+(isCategory?'categories':'groups')+'/'+id,{method:'DELETE'});}
+        else if(a.startsWith('delete-')){if(!(await window.portalUI.confirm('删除未使用的'+(isCategory?'分类（包括其二级分类）':'分组')+'？',{title:'删除分类',danger:true,okText:'删除'})))return;await api('/'+(isCategory?'categories':'groups')+'/'+id,{method:'DELETE'});}
         else await move(isCategory?categories():groups(),item,a.endsWith('up')?-1:1,'/'+(isCategory?'categories':'groups')+'/order',isCategory?categories().filter(c=>c.kind===item.kind && c.parentId===item.parentId):groups());
       });
     }

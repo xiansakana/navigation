@@ -1,19 +1,20 @@
 import { createCaseFilters } from './case-filters.js?v=2';
+import { offsetForPage, pageCount, pagePosition, pageSummary, pageWindow } from '../ui/pager.js?v=1';
 
 const $ = id => document.getElementById(id);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export function createKnowledgeCases({ run, api, tab }) {
   const pageSize = 30;
-  let query = null, currentPage = 1, pageCount = 1, loading = false;
+  let query = null, currentPage = 1, totalPages = 1, loading = false;
   const filters = createCaseFilters(action => run(() => action(() => load())), { prefix: 'kc-', anchor: 'kc-search-form', search: 'kc-search', category: 'kc-document', basicFields: ['gender'] });
   async function load(target = 1, paging = false) {
     const params = paging && query ? query : { search: $('kc-search').value, documentId: $('kc-document').value, filters: JSON.stringify(filters.value()) };
     let page = Math.max(1, Math.floor(Number(target) || 1));
-    const fetchPage = n => api('/knowledge-cases?' + new URLSearchParams({ ...params, offset: (n - 1) * pageSize, limit: pageSize }));
+    const fetchPage = n => api('/knowledge-cases?' + new URLSearchParams({ ...params, offset: offsetForPage(n, pageSize), limit: pageSize }));
     let result = await fetchPage(page);
-    const pages = Math.max(1, Math.ceil(result.total / pageSize));
+    const pages = pageCount(result.total, pageSize);
     if (page > pages) { page = pages; result = await fetchPage(page); }
-    query = params; currentPage = page; pageCount = Math.max(1, Math.ceil(result.total / pageSize));
+    query = params; currentPage = page; totalPages = pageCount(result.total, pageSize);
     $('kc-list').replaceChildren(); $('kc-detail').hidden = true;
     $('kc-document').innerHTML = '<option value="">全部来源</option>' + result.documents.map(d => `<option value="${d.id}">${escape(d.title)}（${d.count}）</option>`).join('');
     $('kc-document').value = params.documentId;
@@ -29,21 +30,23 @@ export function createKnowledgeCases({ run, api, tab }) {
     if (paging) $('kc-count').scrollIntoView({ block: 'start' });
   }
   function renderPagination(total) {
-    $('kc-pagination').hidden = !total;
-    $('kc-page-info').textContent = `共 ${total} 条，每页 ${pageSize} 条，第 ${currentPage} / ${pageCount} 页`;
-    $('kc-prev').disabled = loading || currentPage <= 1;
-    $('kc-next').disabled = loading || currentPage >= pageCount;
-    const pages = [...new Set([1, ...Array.from({ length: 5 }, (_, i) => currentPage - 2 + i), pageCount])].filter(n => n >= 1 && n <= pageCount).sort((a, b) => a - b);
+    const position = pagePosition({ offset: offsetForPage(currentPage, pageSize), total, pageSize });
+    currentPage = position.page; totalPages = position.count;
+    $('kc-pagination').hidden = !position.total;
+    $('kc-page-info').textContent = pageSummary(position.total, pageSize, position.page);
+    $('kc-prev').disabled = loading || position.prevDisabled;
+    $('kc-next').disabled = loading || position.nextDisabled;
+    const pages = pageWindow(position.page, position.count);
     $('kc-pages').replaceChildren();
     pages.forEach((n, i) => {
       if (i && n > pages[i - 1] + 1) { const gap = document.createElement('span'); gap.textContent = '…'; gap.setAttribute('aria-hidden', 'true'); $('kc-pages').append(gap); }
       const button = document.createElement('button'); button.type = 'button'; button.className = 'btn ghost'; button.dataset.page = n; button.textContent = n; button.setAttribute('aria-label', '第 ' + n + ' 页');
-      if (n === currentPage) button.setAttribute('aria-current', 'page');
-      button.disabled = loading || n === currentPage; $('kc-pages').append(button);
+      if (n === position.page) button.setAttribute('aria-current', 'page');
+      button.disabled = loading || n === position.page; $('kc-pages').append(button);
     });
-    $('kc-page-input').max = pageCount; $('kc-page-input').value = currentPage;
+    $('kc-page-input').max = position.count; $('kc-page-input').value = position.page;
   }
-  const go = n => { if (!loading && Number.isInteger(n) && n >= 1 && n <= pageCount && n !== currentPage) run(() => load(n, true)); };
+  const go = n => { if (!loading && Number.isInteger(n) && n >= 1 && n <= totalPages && n !== currentPage) run(() => load(n, true)); };
   function show(item) {
     const p = item.chart.pillars;
     $('kc-title').textContent = item.title;
@@ -80,7 +83,7 @@ export function createKnowledgeCases({ run, api, tab }) {
     busy(value) {
       loading = value; filters.busy(value);
       for (const id of ['knowledge-tab', 'kc-document', 'kc-page-input', 'kc-jump']) $(id).disabled = value;
-      $('kc-prev').disabled = value || currentPage <= 1; $('kc-next').disabled = value || currentPage >= pageCount;
+      $('kc-prev').disabled = value || currentPage <= 1; $('kc-next').disabled = value || currentPage >= totalPages;
       $('kc-pages').querySelectorAll('button').forEach(b => { b.disabled = value || Number(b.dataset.page) === currentPage; });
       $('kc-search-form').querySelector('button').disabled = value; $('kc-list').querySelectorAll('button').forEach(b => { b.disabled = value; });
     }
