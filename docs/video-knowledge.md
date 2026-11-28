@@ -313,7 +313,7 @@ OpenCC在读取私有时间线时转换为简体，旧笔记立即生效，无�
 
 在 Portal 服务器的私有文件 `portal/data/knowledge-gemini.json`（或 `KNOWLEDGE_GEMINI_CONFIG` 指定的位置）按 Portal 用户 ID 配置 Gemini Developer API Key，例如 `{"users":{"usr_admin":{"apiKey":"在服务器上填写实际密钥","model":"gemini-4-hydrogen"}}}`。文件应仅允许运行 Portal 的用户读写。Portal 会自动读取配置，知识库设置页只显示配置状态与模型。ECS 需要能连接 `generativelanguage.googleapis.com`。直连不可用时可在该文件顶层设置 `"proxyUrl":"http://127.0.0.1:17890"`，仅 Gemini 请求使用此代理。配额及区域可用性取决于项目和出口。
 
-切换「处理设置 → 默认总结方式 → Gemini API」后，新视频和按当前设置重试的任务由 Portal 处理。B站链接仍由现有导入流程获取原片，本地上传走服务器。Portal 读取临时原片或已验证的115归档，上传至 Gemini Files API，等待文件可用后根据画面和音轨生成带时间点的 Markdown 笔记。任务结束会尝试删除 Google 临时文件。服务器同时处理一条 Gemini 任务，原视频会发给 Google，并消耗 Gemini API 配额。该方式不生成独立逐句转写和截图附件。Gemini 重新分析请选择「重新提取原视频」。
+切换「处理设置 → 默认总结方式 → Gemini API」后，新视频和按当前设置重试的任务由 Portal 处理。B站链接仍由现有导入流程获取原片，本地上传走服务器。Portal 读取临时原片或已验证的115归档，上传至 Gemini Files API，等待文件可用后根据画面和音轨生成带时间点的 Markdown 笔记。任务结束会尝试删除 Google 临时文件。服务器同时处理一条 Gemini 任务，原视频会发给 Google，并消耗 Gemini API 配额。Gemini 会在同次笔记生成中标注关键画面时间，Portal 用 FFmpeg 从原片截取 JPEG 并放入「关键画面」。可在处理设置勾选「同时生成逐句转写」并保存模型设置，Gemini 会复用已上传文件，按三分钟一段生成时间线。这会增加 API 用量和处理时间。转写失败时保留已完成的笔记、截图和转写片段，并标明缺少的段落。Gemini 重新分析请选择「重新提取原视频」。
 
 参考本机 `youtube-digest/app/ytdigest/gemini.py` 的视频与提示词共同作为模型输入的做法。知识库当前导入入口支持本地文件和B站链接。
 

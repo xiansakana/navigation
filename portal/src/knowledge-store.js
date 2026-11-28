@@ -16,11 +16,16 @@ import { connectionStore } from './connection-store.js';
 export const CHUNK_BYTES = 4 * 1024 * 1024;
 export const MAX_VIDEO_BYTES = 1024 * 1024 * 1024;
 export const ACTIVE_STATES = ['processing'];
-export const MODEL_FIELDS = ['codexModel', 'codexEffort', 'apiModel', 'apiEffort', 'geminiModel'];
+export const MODEL_FIELDS = ['codexModel', 'codexEffort', 'apiModel', 'apiEffort', 'geminiModel', 'geminiTranscript'];
 const efforts = ['', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 export function modelSettings(raw, previous = {}) {
   const result = {};
   for (const key of MODEL_FIELDS) {
+    if (key === 'geminiTranscript') {
+      if (raw[key] !== undefined && typeof raw[key] !== 'boolean') throw new Error('Gemini 转写设置无效');
+      result[key] = raw[key] ?? (previous[key] === true);
+      continue;
+    }
     const value = raw[key] === undefined ? previous[key] || '' : String(raw[key]).trim();
     if (key.endsWith('Model') ? value && !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,119}$/.test(value) : !efforts.includes(value)) throw new Error('模型名称或推理强度无效');
     if (key === 'geminiModel' && value && !/^gemini-[a-z0-9][a-z0-9.-]{0,110}$/.test(value)) throw new Error('Gemini 模型名称无效');

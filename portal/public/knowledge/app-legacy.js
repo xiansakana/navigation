@@ -66,6 +66,9 @@ async function settings() {
   const prefix = state.settings.backend === 'codex' ? 'codex' : (state.settings.backend === 'gemini' ? 'gemini' : 'api');
   const usingGemini = state.settings.backend === 'gemini';
   $('summary-effort-label').hidden = usingGemini;
+  $('gemini-transcript-label').hidden = !usingGemini;
+  $('gemini-transcript').disabled = !can('model:edit') || !can('settings:edit');
+  if (!state.modelDirty) $('gemini-transcript').checked = state.settings.geminiTranscript === true;
   modelPicker ||= createKnowledgeModelPicker({ element: $, api, send, onError: error, refresh: settings });
   modelPicker.render(state.settings, state.modelDirty ? $('summary-model').value : state.settings[prefix + 'Model'] || '', can('model:edit') && can('settings:edit'));
   if (!state.modelDirty) $('summary-effort').value = state.settings[prefix + 'Effort'] || '';
@@ -402,7 +405,7 @@ $('batch-save').onclick = async () => {
   finally { state.batchBusy = false; renderList(); }
 };
 $('backend').onchange = async () => { try { await send('/settings', 'PUT', { backend: $('backend').value }); state.modelDirty = false; await settings(); text('message', '已切换默认总结方式。'); } catch (e) { error(e); } };
-$('summary-model').onchange = $('summary-effort').onchange = () => { state.modelDirty = true; };
+$('gemini-transcript').onchange = $('summary-model').onchange = $('summary-effort').onchange = () => { state.modelDirty = true; };
 $('media-concurrency').onchange = $('summary-concurrency').onchange = () => { state.concurrencyDirty = true; };
 $('concurrency-save').onclick = async () => {
   $('concurrency-save').disabled = true;
@@ -428,7 +431,7 @@ $('model-save').onclick = async () => {
   const prefix = state.settings.backend === 'codex' ? 'codex' : (state.settings.backend === 'gemini' ? 'gemini' : 'api');
   try {
     if (!modelPicker.canSave($('summary-model').value)) throw new Error('请选择列表中的可用模型');
-    await send('/settings', 'PUT', { [prefix + 'Model']: $('summary-model').value.trim(), ...(prefix !== 'gemini' ? { [prefix + 'Effort']: $('summary-effort').value } : {}) });
+    await send('/settings', 'PUT', { [prefix + 'Model']: $('summary-model').value.trim(), ...(prefix === 'gemini' ? { geminiTranscript: $('gemini-transcript').checked } : { [prefix + 'Effort']: $('summary-effort').value }) });
     state.modelDirty = false; await settings(); text('message', '模型设置已保存，用于新上传和失败重试；已排队和正在处理的任务保留原配置。');
   } catch (e) { error(e); }
 };
