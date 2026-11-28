@@ -6,6 +6,11 @@
 - For charts, dashboards, or interactive presentations, prefer inline conversation visualizations; otherwise use ordinary workspace files and summarize in chat.
 - Do not link Canvas source files as deliverables.
 
+## Storage and Output Preferences
+
+- Do not store deliverables, reports, screenshots, scratch scripts, or temporary files on the `C:` drive.
+- Because this repository is under `D:\code`, place all session deliverables and archival outputs centrally in `D:\code\chat-outputs\<YYYY-MM-DD>_<topic>_<short-session-id>/` (not inside `d:\code\navigation\chat-outputs\`). Reuse the same session folder across follow-up turns and never pre-create empty folders.
+
 ## Project Structure & Module Organization
 
 This repository contains several independently deployed Node.js services:
