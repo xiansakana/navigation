@@ -68,7 +68,9 @@
 
     function fingerprint() {
       var first = state.points[0], last = state.points[state.points.length - 1];
-      return [mode, state.currency, state.points.length, first && first.date, last && last.date, last && last.balance].join('|');
+      // The candle period is part of the identity: switching 日K/周K must redraw
+      // even though the underlying points are unchanged.
+      return [mode, state.bucket && state.bucket.unit, state.currency, state.points.length, first && first.date, last && last.date, last && last.balance].join('|');
     }
 
     function candleOption(theme) {

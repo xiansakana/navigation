@@ -621,8 +621,8 @@ function buildCandleOption(rangeSlice) {
 function seriesFingerprint(rangeSlice) {
   // vizMode is part of the identity: switching line ↔ kline must redraw even
   // when the underlying series has not changed.
-  if (!rangeSlice.length) return vizMode;
-  return vizMode + '\u0001' + JSON.stringify(rangeSlice.map(p => [p.date, p.cumulativeNet, p.dayNet]));
+  if (!rangeSlice.length) return vizMode + '\u0001' + candleUnit;
+  return vizMode + '\u0001' + candleUnit + '\u0001' + JSON.stringify(rangeSlice.map(p => [p.date, p.cumulativeNet, p.dayNet]));
 }
 
 function mountLineChart(host, rangeSlice, revision) {
