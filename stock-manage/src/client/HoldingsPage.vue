@@ -46,7 +46,7 @@ const pnlAnchor = ref(pnlToday());
 const pnlCaption = ref('');
 const pnlStart = ref('');
 const pnlEnd = ref('');
-const pnlVizMode = ref('line');
+const pnlVizMode = ref('kline');
 const pnlChartEl = ref<HTMLElement | null>(null);
 let prefSaveTimer: any = null;
 let portfolioLoadRevision = 0;
@@ -728,7 +728,7 @@ watch([data, pnlVisible], () => renderPnlChartSoon());
     <div class="sm-panel-head sm-panel-head--pnl">
       <h2>查询盈亏</h2>
     </div>
-    <div class="sm-pnl-period" v-show="pnlVizMode === 'line'">
+    <div class="sm-pnl-period" v-show="pnlVizMode !== 'calendar'">
       <div class="sm-seg" role="group" aria-label="盈亏时间范围">
         <button v-for="item in [['week','周'],['month','月'],['year','年'],['all','全部'],['range','范围']]"
                 :key="item[0]" type="button" class="sm-seg-btn"
@@ -753,7 +753,7 @@ watch([data, pnlVisible], () => renderPnlChartSoon());
         <button type="button" id="btn-pnl-query" class="sm-pnl-control sm-pnl-apply" @click="queryPnlPeriod">查询</button>
       </div>
     </div>
-    <div id="pnl-stats" class="sm-stats sm-stats--inner" v-show="pnlVizMode === 'line'">
+    <div id="pnl-stats" class="sm-stats sm-stats--inner" v-show="pnlVizMode !== 'calendar'">
       <div v-for="stat in pnlStats" :key="stat.label" class="sm-stat">
         <div class="label">{{ stat.label }}</div>
         <div class="value" :class="stat.cls" v-html="stat.value"></div>

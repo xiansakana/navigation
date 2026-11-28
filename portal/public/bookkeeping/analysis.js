@@ -4,6 +4,7 @@
     const fields=['period-kind','period-anchor','range-start','range-end','month','book','currency','type','category','account','search'];
     let focus={}, saved=null;
     let assetChart='balance';
+    let chartMode='candle';
     const assetChartTabs=$('asset-chart-tabs');
     assetChartTabs.addEventListener('click',event=>{
       const button=event.target.closest('[data-asset-chart]');if(!button || button.hidden)return;
@@ -44,7 +45,15 @@
       $('drill-label').textContent=[$('category').value,focus.day||$('month').value, focus.through?'截至 '+focus.through:'',$('currency').value,names[focus.flow],focus.analysisScope&&getState()?.analysisScope?.excludedAccountIds?.length?'已排除社保公积金等账户':''].filter(Boolean).join(' · ');
       $('drill-context').classList.remove('hidden');tab('entries');load();$('drill-context').scrollIntoView({block:'nearest'});
     }
-    document.querySelector('.bk-shell').addEventListener('click',e=>{const target=e.target.closest('[data-drill]');if(target)drill(JSON.parse(target.dataset.drill));});
+    document.querySelector('.bk-shell').addEventListener('click',e=>{
+      const modeButton=e.target.closest('[data-chart-mode]');
+      if(modeButton){
+        const next=modeButton.dataset.chartMode;
+        if(next&&next!==chartMode){chartMode=next;renderBilling();renderAsset();const focusTarget=document.querySelector('[data-chart-mode="'+chartMode+'"]');if(focusTarget)focusTarget.focus({preventScroll:true});}
+        return;
+      }
+      const target=e.target.closest('[data-drill]');if(target)drill(JSON.parse(target.dataset.drill));
+    });
     document.querySelector('.bk-shell').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ') && e.target.matches('circle[data-drill]')){e.preventDefault();drill(JSON.parse(e.target.dataset.drill));}});
     $('return-stats').onclick=()=>{if(saved){for(const [id,v] of Object.entries(saved.values))$(id).value=v;focus=saved.focus;}saved=null;periods.restore();$('drill-context').classList.add('hidden');tab(can('analysis:view')?'stats':'entries');load();};
     $('billing-charts').addEventListener('click',event=>{
@@ -57,11 +66,23 @@
       if(flow==='cumulative')return {currency:$('currency').value,through:granularity==='month'?new Date(Date.UTC(Number(point.date.slice(0,4)),Number(point.date.slice(5,7)),0)).toISOString().slice(0,10):point.date,flow:'net'};
       return {currency:$('currency').value,month:point.date.slice(0,7),...(granularity==='day'?{day:point.date}:{}),flow};
     }
-    function chart(points,lines,label,granularity=null,toggle=false) {
-      if(!points.length)return '<p class="bk-empty">暂无记录</p>';
-      const hiddenSeries=toggle==='trading'?hiddenTradingSeries:hiddenBillingSeries;
-      const seriesAttribute=toggle==='trading'?'data-trading-series':'data-billing-series';
-      const visibleLines=toggle?lines.filter(line=>!hiddenSeries.has(line.key)):lines;
+    const BUCKET_NAMES={week:'周',month:'月',quarter:'季度',half:'半年',year:'年'};
+    // 收入/支出是流量，开高低收没有金融含义，K 线模式只画存量序列。
+    const FLOW_KEYS=new Set(['income','expense']);
+    const candleApi=window.bkCandles;
+    function modeButtons(){
+      if(!candleApi)return '';
+      return '<div class="bk-chart-modes" role="group" aria-label="图表类型">'+[['candle','K线'],['line','折线']].map(([mode,text])=>'<button type="button" data-chart-mode="'+mode+'" aria-pressed="'+(chartMode===mode)+'">'+text+'</button>').join('')+'</div>';
+    }
+    function legend(points,lines,toggle,seriesAttribute,hiddenSeries,staticKeys){
+      const last=points.at(-1),kind=chartMode==='candle'&&candleApi?'K线':'折线';
+      return '<div class="bk-chart-legend"'+(toggle?' role="group" aria-label="'+kind+'显隐，点击图例切换"':'')+'>'+lines.map(l=>{
+        const title=l.label+(FLOW_KEYS.has(l.key)?'合计':''),amount=Number.isFinite(last[l.key])?m(FLOW_KEYS.has(l.key)?Math.round(points.reduce((n,p)=>n+p[l.key],0)*100)/100:last[l.key],last.currency):'待补齐';
+        if(staticKeys&&staticKeys.has(l.key))return '<span class="bk-series-static" style="--line-color:'+l.color+'" title="K 线只展示存量序列；切到折线查看'+esc(title)+'">'+esc(title)+' '+amount+'</span>';
+        return toggle?'<button type="button" class="bk-series-toggle" '+seriesAttribute+'="'+l.key+'" aria-pressed="'+!hiddenSeries.has(l.key)+'" aria-label="'+esc(title+kind)+'" style="--line-color:'+l.color+'"><span class="bk-series-label">'+esc(title)+'</span>'+amount+'</button>':'<span style="--line-color:'+l.color+'">'+esc(title)+' '+amount+'</span>';
+      }).join('')+'</div>';
+    }
+    function lineSvg(points,visibleLines,granularity,toggle,label){
       const width=600,height=230,left=76,right=20,top=18,bottom=36;
       const values=points.flatMap(p=>visibleLines.map(l=>p[l.key])).filter(Number.isFinite), min=Math.min(0,...values), max=Math.max(0,...values), span=max-min||1;
       const time=p=>Date.parse((p.date.length===7?p.date+'-01':p.date)+'T12:00:00Z'),firstTime=time(points[0]),lastTime=time(points.at(-1));
@@ -89,12 +110,85 @@
         svg+='</g>';
       }
       for(const i of [...new Set([0,Math.floor((points.length-1)/2),points.length-1])])svg+='<text x="'+x(i)+'" y="'+(height-10)+'" text-anchor="middle">'+esc((points[i].periodBoundary==='opening'?'期初 ':points[i].source==='current'||points[i].provisional?'暂估 ':'')+points[i].date)+'</text>';
-      svg+='</svg>';
-      const last=points.at(-1);
-      return '<div class="bk-chart-card"><h3>'+esc(label)+'</h3><div class="bk-chart-legend"'+(toggle?' role="group" aria-label="折线显隐，点击图例切换"':'')+'>'+lines.map(l=>{
-        const title=l.label+(['income','expense'].includes(l.key)?'合计':''),amount=Number.isFinite(last[l.key])?m(['income','expense'].includes(l.key)?Math.round(points.reduce((n,p)=>n+p[l.key],0)*100)/100:last[l.key],last.currency):'待补齐';
-        return toggle?'<button type="button" class="bk-series-toggle" '+seriesAttribute+'="'+l.key+'" aria-pressed="'+!hiddenSeries.has(l.key)+'" aria-label="'+esc(title+'折线')+'" style="--line-color:'+l.color+'"><span class="bk-series-label">'+esc(title)+'</span>'+amount+'</button>':'<span style="--line-color:'+l.color+'">'+esc(title)+' '+amount+'</span>';
-      }).join('')+'</div>'+svg+(points.length===1?'<p class="bk-muted">目前仅有一个基准点，后续账单会形成走势。</p>':'')+'</div>';
+      return svg+'</svg>';
+    }
+    function candleSvg(points,visibleLines,granularity,bucket,label){
+      const width=600,height=230,left=76,top=18,bottom=36;
+      const groups=visibleLines.map(line=>({line,candles:candleApi.buildCandles(points,line.key,bucket)}));
+      const starts=[...new Set(groups.flatMap(g=>g.candles.map(c=>c.start)))].sort();
+      const all=groups.flatMap(g=>g.candles);
+      const extremes=groups.map(group=>{
+        const lows=group.candles.map(c=>c.low),highs=group.candles.map(c=>c.high);
+        return {min:Math.min(0,...lows),max:Math.max(0,...highs)};
+      });
+      const magnitude=range=>Math.max(Math.abs(range.min),Math.abs(range.max));
+      const largest=Math.max(0,...extremes.map(magnitude));
+      // 累计结余是百万级、收支是万级：同一根轴会把流量蜡烛压成一条线，
+      // 量级差超过 8 倍时给小量级序列单独一根右轴。
+      const dual=groups.length>1 && extremes.some(range=>magnitude(range)>0 && largest/Math.max(magnitude(range),1e-9)>8);
+      const right=dual?62:20;
+      const side=extremes.map(range=>dual && magnitude(range)>0 && largest/Math.max(magnitude(range),1e-9)>8?'right':'left');
+      const bounds=which=>{
+        const picked=extremes.filter((range,index)=>side[index]===which);
+        const list=picked.length?picked:extremes;
+        return {min:Math.min(...list.map(range=>range.min)),max:Math.max(...list.map(range=>range.max))};
+      };
+      const leftBounds=bounds('left'),rightBounds=bounds('right');
+      const scale=(which,value)=>{
+        const {min,max}=which==='right'?rightBounds:leftBounds,span=max-min||1;
+        return height-bottom-(value-min)/span*(height-top-bottom);
+      };
+      const yOf=(index,value)=>scale(side[index],value);
+      let svg='<svg viewBox="0 0 '+width+' '+height+'" role="group" aria-label="'+esc(label)+'" class="bk-line-chart bk-candle-chart" data-money>';
+      if(!all.length)return {svg:svg+'<text x="'+width/2+'" y="'+height/2+'" text-anchor="middle">所选区间没有可绘制的 K 线</text></svg>',dual:false};
+      const slot=(width-left-right)/Math.max(1,starts.length);
+      const count=Math.max(1,groups.length);
+      const bodyWidth=Math.max(2,Math.min(13,slot*0.62/count));
+      const compact=value=>esc(new Intl.NumberFormat('zh-CN',{notation:'compact',maximumFractionDigits:1}).format(value));
+      for(let i=0;i<=4;i++){
+        const value=leftBounds.min+(leftBounds.max-leftBounds.min||1)*i/4,y=scale('left',value);
+        svg+='<line x1="'+left+'" x2="'+(width-right)+'" y1="'+y+'" y2="'+y+'" class="bk-grid-line"/><text x="'+(left-9)+'" y="'+(y+4)+'" text-anchor="end">'+compact(value)+'</text>';
+      }
+      if(dual)for(let i=0;i<=4;i++){
+        const value=rightBounds.min+(rightBounds.max-rightBounds.min||1)*i/4;
+        svg+='<text x="'+(width-right+9)+'" y="'+(scale('right',value)+4)+'" text-anchor="start" class="bk-axis-right">'+compact(value)+'</text>';
+      }
+      const boundary=points.findIndex(p=>p.valuationBoundary);
+      if(boundary>=0){
+        const at=starts.findIndex(start=>start>=points[boundary].date),lineX=left+(Math.max(0,at)+0.5)*slot;
+        svg+='<g data-valuation-boundary><line x1="'+lineX+'" x2="'+lineX+'" y1="'+top+'" y2="'+(height-bottom)+'" stroke="var(--muted)" stroke-dasharray="5 4"/><text x="'+Math.max(left+65,Math.min(width-right-65,lineX))+'" y="'+(top+12)+'" text-anchor="middle">首份快照基准</text></g>';
+      }
+      const currency=points.at(-1)?.currency;
+      groups.forEach((group,groupIndex)=>{
+        const color=group.line.color,offset=(groupIndex-(count-1)/2)*(bodyWidth+1.5);
+        let inner='';
+        for(const candle of group.candles){
+          const index=starts.indexOf(candle.start),cx=left+(index+0.5)*slot+offset;
+          if(cx<left-bodyWidth||cx>width-right+bodyWidth)continue;
+          const up=candle.close>=candle.open,yOpen=yOf(groupIndex,candle.open),yClose=yOf(groupIndex,candle.close);
+          const bodyTop=Math.min(yOpen,yClose),bodyHeight=Math.max(1.2,Math.abs(yClose-yOpen));
+          const title=candle.label+' · '+group.line.label+' 开 '+money(candle.open,currency)+' 高 '+money(candle.high,currency)+' 低 '+money(candle.low,currency)+' 收 '+money(candle.close,currency)+'（'+candle.count+' 个数据点）'+(up?' · 区间收高':' · 区间收低')+(side[groupIndex]==='right'?' · 右轴':'');
+          const drill=granularity?' tabindex="0" role="button" aria-label="'+esc(title+'，查看账单')+'"'+attr(period({date:candle.start},granularity,group.line.key==='income'?'income':group.line.key==='expense'?'expense':'cumulative')):'';
+          inner+='<g class="bk-candle" data-dir="'+(up?'up':'down')+'"><title>'+esc(title)+'</title><line x1="'+cx+'" x2="'+cx+'" y1="'+yOf(groupIndex,candle.high)+'" y2="'+yOf(groupIndex,candle.low)+'" stroke="'+color+'" stroke-width="1.2"/><rect x="'+(cx-bodyWidth/2)+'" y="'+bodyTop+'" width="'+bodyWidth+'" height="'+bodyHeight+'" fill="'+(up?'transparent':color)+'" stroke="'+color+'" stroke-width="1.2"'+drill+'/></g>';
+        }
+        svg+='<g data-chart-series="'+group.line.key+'">'+inner+'</g>';
+      });
+      const ticks=[0,Math.floor((starts.length-1)/2),starts.length-1].filter((value,index,list)=>list.indexOf(value)===index);
+      for(const tick of ticks)svg+='<text x="'+(left+(tick+0.5)*slot)+'" y="'+(height-10)+'" text-anchor="middle">'+esc(candleApi.bucketLabel(starts[tick],bucket.unit))+'</text>';
+      return {svg:svg+'</svg>',dual};
+    }
+    function chart(points,lines,label,granularity=null,toggle=false) {
+      if(!points.length)return '<p class="bk-empty">暂无记录</p>';
+      const hiddenSeries=toggle==='trading'?hiddenTradingSeries:hiddenBillingSeries;
+      const seriesAttribute=toggle==='trading'?'data-trading-series':'data-billing-series';
+      const visibleLines=toggle?lines.filter(line=>!hiddenSeries.has(line.key)):lines;
+      const candles=chartMode==='candle'&&candleApi;
+      const bucket=candles?candleApi.chooseBucket(points.map(p=>p.date)):null;
+      const candleLines=candles?visibleLines.filter(line=>!FLOW_KEYS.has(line.key)):[];
+      const candleResult=candles?candleSvg(points,candleLines,granularity,bucket,label):null;
+      const body=candleResult?candleResult.svg:lineSvg(points,visibleLines,granularity,toggle,label);
+      const note=candles?'<p class="bk-muted bk-candle-note">'+(candleLines.length?'每根 K 线按「'+BUCKET_NAMES[bucket.unit]+'」聚合：空心为区间收高、实心为区间收低，上下影线是区间最高与最低'+(candleResult?.dual?'；右侧刻度对应量级较小的序列':'')+(granularity?'；点击可查看该区间账单':'')+'。':'K 线只展示存量序列，请切换到折线查看收入与净支出。')+'</p>':'';
+      return '<div class="bk-chart-card"><div class="bk-chart-head"><h3>'+esc(label)+'</h3>'+modeButtons()+'</div>'+legend(points,lines,toggle,seriesAttribute,hiddenSeries,candles?FLOW_KEYS:null)+body+note+(points.length===1?'<p class="bk-muted">目前仅有一个基准点，后续账单会形成走势。</p>':'')+'</div>';
     }
     function suggestion(item,currency) {
       if(item.kind==='concentration')return '“'+esc(item.category)+'”占正向分类支出的 '+(item.share*100).toFixed(1)+'%。“固定、一次性和可选支出”应分别核对，优先检查大额项目。'+(item.target!==null?'如有可调整部分，下期可试设比该完整月份低 10% 的参考目标 '+m(item.target,currency)+'。':'选择最近一个完整月份后，再为可调整的消费设置下期预算。');

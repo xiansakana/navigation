@@ -11,11 +11,15 @@ function fixture() {
     {date:'2026-10-02',currency:'CNY',income:0,expense:30,cumulative:950}
   ]},insights:[],comparisonNote:'',asset:{points:[{date:'2026-09-30',currency:'CNY',balance:500},{date:'2026-10-02',currency:'CNY',balance:600}],historyMode:'hybrid',missingCurrencies:[],note:''}}};
   w.HTMLElement.prototype.scrollIntoView=function(){};
+  w.eval(fs.readFileSync(new URL('../public/bookkeeping/candles.js',import.meta.url),'utf8'));
   w.eval(fs.readFileSync(new URL('../public/bookkeeping/analysis.js',import.meta.url),'utf8'));
   const money=(amount,currency)=>currency+' '+amount.toFixed(2);
   const esc=s=>String(s).replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;').replaceAll('>','&gt;');
   const controller=w.createBookkeepingAnalysis({$,esc,money,m:(a,c)=>'<span data-money>'+money(a,c)+'</span>',can:()=>true,load(){},tab:name=>drills.push(name),getState:()=>state,periods:{focusDate:data=>drills.push(data),restore(){}}});
   controller.render();
+  // The page now defaults to candlesticks; these cases cover the line view, so
+  // switch once here and keep every later render in that mode.
+  w.document.querySelector('[data-chart-mode="line"]').click();
   const button=key=>$('billing-charts').querySelector('[data-billing-series="'+key+'"]');
   const toggle=key=>button(key).click();
   return {dom,w,$,state,controller,button,toggle,drills};

@@ -59,7 +59,7 @@ async function fixture(extra={},permissions=['*'],{additionalEntries=[],pageLimi
     } else throw new Error('Unexpected request '+url);
     return {ok:true,json:async()=>JSON.parse(JSON.stringify(data))};
   };
-  for(const name of ['periods','period-dock','scope','analysis','management','details'])w.eval(fs.readFileSync(new URL('../public/bookkeeping/'+name+'.js',import.meta.url),'utf8'));
+  for(const name of ['periods','period-dock','scope','candles','analysis','management','details'])w.eval(fs.readFileSync(new URL('../public/bookkeeping/'+name+'.js',import.meta.url),'utf8'));
   // The page shell always injects the UI facade; without it every delete would
   // throw instead of falling back to the stubbed native confirm.
   w.eval(fs.readFileSync(new URL('../public/portal-ui.js',import.meta.url),'utf8'));

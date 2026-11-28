@@ -1,4 +1,4 @@
-let vizMode = 'line';
+let vizMode = 'kline';
 let calGranularity = 'month';
 let calYM = '';
 let calYearFocus = '';
@@ -57,8 +57,92 @@ function chartColors() {
     muted: cssVar('--muted', '#9aa4b2'),
     accent: cssVar('--accent', '#5b9cff'),
     border: cssVar('--border', '#2a3140'),
-    card: cssVar('--card', '#171b22')
+    card: cssVar('--card', '#171b22'),
+    good: cssVar('--green', '#3ddc84'),
+    bad: cssVar('--red', '#ff7b7b')
   };
+}
+
+const DAY_MS = 86400000;
+const CANDLE_BUCKETS = [
+  { unit: 'week', days: 7 },
+  { unit: 'month', days: 30 },
+  { unit: 'quarter', days: 91 },
+  { unit: 'half', days: 182 },
+  { unit: 'year', days: 365 }
+];
+const MAX_CANDLES = 26;
+
+function dayTime(date) {
+  return Date.parse(`${String(date).slice(0, 10)}T12:00:00Z`);
+}
+
+/**
+ * Pick the candle period from the data density: daily points over a quarter
+ * become weekly candles, multi-year ranges become monthly or quarterly ones.
+ */
+export function chooseCandleBucket(dates) {
+  const times = (dates || []).map(dayTime).filter(Number.isFinite).sort((a, b) => a - b);
+  if (times.length < 2) return CANDLE_BUCKETS[0];
+  const rangeDays = (times.at(-1) - times[0]) / DAY_MS;
+  const spacing = rangeDays / (times.length - 1);
+  const minDays = Math.max(spacing * 1.6, 1);
+  for (const bucket of CANDLE_BUCKETS) {
+    if (bucket.days < minDays) continue;
+    if (rangeDays / bucket.days <= MAX_CANDLES) return bucket;
+  }
+  return CANDLE_BUCKETS.at(-1);
+}
+
+function candleStart(date, unit) {
+  const d = new Date(dayTime(date));
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getUTCFullYear();
+  const mo = d.getUTCMonth() + 1;
+  const pad = (n) => String(n).padStart(2, '0');
+  if (unit === 'week') {
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+    return d.toISOString().slice(0, 10);
+  }
+  if (unit === 'month') return `${y}-${pad(mo)}-01`;
+  if (unit === 'quarter') return `${y}-${pad(Math.floor((mo - 1) / 3) * 3 + 1)}-01`;
+  if (unit === 'half') return `${y}-${mo <= 6 ? '01' : '07'}-01`;
+  return `${y}-01-01`;
+}
+
+function candleLabels(start, unit) {
+  const [y, mo, da] = start.split('-');
+  const short = { week: `${mo}-${da}`, month: `${y}-${mo}`, quarter: `${y.slice(2)}Q${Math.floor((+mo - 1) / 3) + 1}`, half: `${y.slice(2)}${+mo <= 6 ? 'H1' : 'H2'}`, year: y }[unit];
+  const long = { week: `${start} 起一周`, month: `${y}-${mo}`, quarter: `${y} 第 ${Math.floor((+mo - 1) / 3) + 1} 季度`, half: `${y} ${+mo <= 6 ? '上半年' : '下半年'}`, year: `${y} 年` }[unit];
+  return { short, long };
+}
+
+/** Group a dated value series into OHLC candles; gaps stay gaps. */
+export function buildCandles(points, bucket) {
+  const unit = bucket?.unit || 'week';
+  const groups = new Map();
+  for (const point of points || []) {
+    const raw = point?.cumulativeNet;
+    // Number(null) is 0, so an explicit guard keeps gaps as gaps.
+    if (raw === null || raw === undefined || raw === '') continue;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) continue;
+    const start = candleStart(point.date, unit);
+    if (!start) continue;
+    const group = groups.get(start);
+    if (group) {
+      group.close = value;
+      group.high = Math.max(group.high, value);
+      group.low = Math.min(group.low, value);
+      group.to = point.date;
+      group.count++;
+    } else {
+      groups.set(start, { start, from: point.date, to: point.date, open: value, close: value, high: value, low: value, count: 1 });
+    }
+  }
+  return [...groups.values()]
+    .sort((a, b) => (a.start < b.start ? -1 : 1))
+    .map((candle) => ({ ...candle, ...candleLabels(candle.start, unit), unit }));
 }
 
 let chartLoad;
@@ -341,7 +425,7 @@ function resetLineZoom() {
   lineChart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
 }
 
-function buildChartOption(rangeSlice) {
+function buildLineOption(rangeSlice) {
   const colors = chartColors();
   const dates = rangeSlice.map((p) => p.date);
   const values = rangeSlice.map((p) => p.cumulativeNet);
@@ -451,9 +535,88 @@ function buildChartOption(rangeSlice) {
   };
 }
 
+function buildChartOption(rangeSlice) {
+  return vizMode === 'kline' ? buildCandleOption(rangeSlice) : buildLineOption(rangeSlice);
+}
+
+function buildCandleOption(rangeSlice) {
+  const colors = chartColors();
+  const bucket = chooseCandleBucket(rangeSlice.map((p) => p.date));
+  const candles = buildCandles(rangeSlice, bucket);
+  const zoom = zoomRange && Number.isFinite(zoomRange.start) ? zoomRange : defaultZoom();
+  return {
+    animation: false,
+    backgroundColor: 'transparent',
+    grid: { left: 16, right: 18, top: 24, bottom: 62, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross', label: { backgroundColor: colors.card, color: colors.text } },
+      backgroundColor: colors.card,
+      borderColor: colors.border,
+      textStyle: { color: colors.text, fontSize: 13 },
+      formatter: (params) => {
+        const list = Array.isArray(params) ? params : [params];
+        const hit = list.find((item) => item.seriesType === 'candlestick') || list[0];
+        const candle = candles[hit?.dataIndex];
+        if (!candle) return '';
+        const change = candle.close - candle.open;
+        return `<div style="color:${colors.muted};margin-bottom:4px">${candle.long} · ${candle.count} 个交易日</div>
+          <div>开 <b>${fmtUsdSigned(candle.open)}</b>　收 <b>${fmtUsdSigned(candle.close)}</b></div>
+          <div>高 <b>${fmtUsdSigned(candle.high)}</b>　低 <b>${fmtUsdSigned(candle.low)}</b></div>
+          <div style="margin-top:4px;color:${change >= 0 ? colors.good : colors.bad}">区间变动 ${fmtUsdSigned(change)}</div>`;
+      }
+    },
+    xAxis: {
+      type: 'category',
+      data: candles.map((candle) => candle.short),
+      boundaryGap: true,
+      axisLine: { lineStyle: { color: colors.border } },
+      axisLabel: { color: colors.muted, hideOverlap: true },
+      axisTick: { show: false }
+    },
+    yAxis: {
+      type: 'value',
+      scale: true,
+      splitLine: { lineStyle: { color: colors.border, opacity: 0.55 } },
+      axisLabel: { color: colors.muted, formatter: (v) => `$${fmt(v)}` }
+    },
+    dataZoom: [
+      { type: 'inside', xAxisIndex: 0, filterMode: 'none', zoomOnMouseWheel: true, moveOnMouseMove: true, moveOnMouseWheel: false, preventDefaultMouseMove: true, start: zoom.start, end: zoom.end },
+      {
+        type: 'slider', xAxisIndex: 0, filterMode: 'none', height: 22, bottom: 8,
+        borderColor: colors.border, fillerColor: 'rgba(91, 156, 255, 0.22)',
+        handleStyle: { color: colors.accent, borderColor: colors.accent },
+        moveHandleStyle: { color: colors.accent },
+        emphasis: { handleStyle: { color: colors.accent } },
+        textStyle: { color: colors.muted }, start: zoom.start, end: zoom.end
+      }
+    ],
+    series: [{
+      type: 'candlestick',
+      name: '区间净盈亏 K线',
+      data: candles.map((candle) => [candle.open, candle.close, candle.low, candle.high]),
+      itemStyle: {
+        color: colors.good,
+        color0: colors.bad,
+        borderColor: colors.good,
+        borderColor0: colors.bad,
+        borderWidth: 1
+      },
+      markLine: {
+        silent: true,
+        symbol: 'none',
+        lineStyle: { color: '#334155', type: 'dashed', width: 1 },
+        data: [{ yAxis: 0, label: { show: false } }]
+      }
+    }]
+  };
+}
+
 function seriesFingerprint(rangeSlice) {
-  if (!rangeSlice.length) return '';
-  return JSON.stringify(rangeSlice.map(p => [p.date, p.cumulativeNet, p.dayNet]));
+  // vizMode is part of the identity: switching line ↔ kline must redraw even
+  // when the underlying series has not changed.
+  if (!rangeSlice.length) return vizMode;
+  return vizMode + '\u0001' + JSON.stringify(rangeSlice.map(p => [p.date, p.cumulativeNet, p.dayNet]));
 }
 
 function mountLineChart(host, rangeSlice, revision) {
@@ -588,6 +751,7 @@ function ensureShell(container) {
         <div class="sm-pnl-viz-tabs">
           <span class="sm-pnl-viz-label">盈亏走势</span>
           <div class="sm-seg">
+            <button type="button" class="sm-seg-btn" data-pnl-mode="kline">K线</button>
             <button type="button" class="sm-seg-btn" data-pnl-mode="line">折线</button>
             <button type="button" class="sm-seg-btn" data-pnl-mode="calendar">日历</button>
           </div>
@@ -597,6 +761,7 @@ function ensureShell(container) {
       <div class="sm-pnl-line-block">
         <div class="sm-pnl-echarts" id="sm-pnl-echarts"></div>
         <div class="sm-pnl-line-hint">
+          <span class="sm-pnl-candle-hint">K 线按区间聚合：开=区间首日、收=末日，影线为区间最高与最低；阳线绿色、阴线红色。</span>
           <span>拖动平移，滚轮缩放。</span>
           <button type="button" class="btn ghost sm-btn-sm" data-pnl-reset>复位视窗</button>
         </div>
@@ -615,7 +780,7 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
 
   const data = getData();
   const { chartSparse = [], totalAssets, pnlStart = '', pnlEnd = '' } = data;
-  const isLine = vizMode === 'line';
+  const isChart = vizMode !== 'calendar';
   callbacks.onModeChange?.(vizMode);
   const dayNet = new Map(chartSparse.map((p) => [p.date, p.dayNet]));
   const { y: dispY, m: dispM } = ymParts();
@@ -627,9 +792,10 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
   cachedDayNet = dayNet;
 
   ensureShell(container);
+  container.querySelector('.sm-pnl-viz')?.classList.toggle('sm-pnl-viz--kline', vizMode === 'kline');
 
   const badge = container.querySelector('.sm-pnl-cum-badge');
-  badge.classList.toggle('hidden', !isLine);
+  badge.classList.toggle('hidden', !isChart);
   container.querySelectorAll('[data-pnl-mode]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.pnlMode === vizMode);
   });
@@ -638,7 +804,7 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
   const emptyEl = container.querySelector('#sm-pnl-empty');
   const calBlock = container.querySelector('.sm-cal-block');
 
-  if (isLine) {
+  if (isChart) {
     const rangeSlice = sliceSeries(expandDailySeries(chartSparse), pnlStart, pnlEnd);
     const fp = rangeFingerprint(rangeSlice);
     if (fp !== viewFingerprint) {

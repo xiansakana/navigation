@@ -139,3 +139,18 @@
 .bk-import-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; }
 .bk-import-balances { padding-inline-start:20px; overflow-wrap:anywhere; }
 .bk-import-balances li { margin-block:8px; }
+
+/* K 线 / 折线切换与蜡烛图 */
+.bk-chart-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.bk-chart-head h3 { margin:0; }
+.bk-chart-modes { display:inline-flex; gap:2px; padding:3px; border:1px solid var(--border); border-radius:999px; background:var(--hover-bg); }
+.bk-chart-modes button { font:inherit; font-size:12px; line-height:1; padding:7px 12px; border:0; border-radius:999px; background:transparent; color:var(--muted); cursor:pointer; }
+.bk-chart-modes button[aria-pressed="true"] { background:var(--card); color:var(--text); box-shadow:0 1px 4px rgba(0,0,0,.18); }
+.bk-chart-modes button:focus-visible { outline:2px solid var(--bk-gold); outline-offset:2px; }
+.bk-candle-chart .bk-candle rect[role="button"] { cursor:pointer; }
+.bk-candle-chart .bk-candle:hover rect, .bk-candle-chart .bk-candle:focus-visible rect { opacity:.78; }
+.bk-candle-chart .bk-candle:focus-visible { outline:none; }
+.bk-candle-note { font-size:12px; margin:6px 0 0; }
+.bk-candle-chart .bk-axis-right { fill:var(--muted); opacity:.8; }
+.bk-series-static { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; border:1px dashed var(--border); border-radius:999px; color:var(--muted); font-size:12px; }
+.bk-series-static::before { content:''; width:10px; height:10px; flex:0 0 10px; border-radius:50%; background:var(--line-color); opacity:.45; }
