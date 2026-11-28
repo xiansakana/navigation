@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { geminiAccounts, defaultGeminiModel } from './knowledge-gemini.js';
+import { compatibleBaseUrl, providerModels, providerName } from './knowledge-provider-credentials.js';
+import { geminiAccounts, geminiServerConfig, defaultGeminiModel } from './knowledge-gemini.js';
 import { getKnowledgeDatabase } from './knowledge-runtime.js';
 import { createPostgresKnowledgeStore } from './knowledge-postgres-store.js';
 import { storageConfig } from './knowledge-storage.js';
@@ -67,7 +68,8 @@ async function knowledgeApi(req, res, url, session, json) {
   }
   const route = url.pathname.slice('/api/knowledge'.length), method = req.method;
   const document = /^\/documents\/([a-f0-9]{32})(?:\/(parts|complete|local-input|retry|storage-retry|reanalyze|versions|restore|source|export|frames)(?:\/([a-z0-9.-]+))?)?$/.exec(route);
-  const action = route === '/settings' ? method === 'GET' ? 'view' : 'settings:edit'
+  const action = /^\/settings\/(credentials|models)\/(gemini|openai)$/.test(route) ? 'model:edit'
+    : route === '/settings' ? method === 'GET' ? 'view' : 'settings:edit'
     : route === '/documents/retry-failed' && method === 'POST' ? 'process:batch:edit'
     : route === '/reanalysis' && method === 'POST' ? 'reanalysis:batch:edit'
     : route === '/upload-queue' ? method === 'GET' ? 'queue:view' : method === 'POST' ? 'queue:edit' : null
@@ -168,9 +170,28 @@ async function knowledgeApi(req, res, url, session, json) {
       if (!canKnowledge(session, 'process:edit')) return json(res, 403, { ok: false, error: '需要知识库处理权限' });
       const approved = await store.devices.approve(uid, code); return json(res, approved ? 200 : 409, { ok: approved, ...(approved ? {} : { error: '配对码已失效或已使用' }) });
     }
+    const providerRoute = /^\/settings\/(credentials|models)\/(gemini|openai)$/.exec(route);
+    if (providerRoute) {
+      if (!canKnowledge(session, 'settings:edit')) return json(res, 403, { ok: false, error: '无权设置视频处理凭据' });
+      const [, operation, provider] = providerRoute;
+      providerName(provider);
+      res.setHeader('Cache-Control', 'no-store');
+      if (operation === 'credentials' && method === 'PUT') {
+        const input = await body(req, 4096);
+        await store.providerCredentials.save(uid, provider, input.apiKey);
+        return json(res, 200, { ok: true, configured: (await store.providerCredentials.status(uid))[provider] });
+      }
+      if (operation === 'models' && method === 'GET') {
+        const key = await store.providerCredentials.read(uid, provider) || (provider === 'gemini' ? geminiAccounts().get(uid)?.apiKey : '');
+        const proxyUrl = provider === 'gemini' ? geminiServerConfig().proxyUrl
+          : process.env.KNOWLEDGE_OPENAI_PROXY || (new URL(compatibleBaseUrl()).hostname === 'api.openai.com' ? geminiServerConfig().proxyUrl : undefined);
+        return json(res, 200, { ok: true, models: await providerModels(provider, key, { proxyUrl }) });
+      }
+      return json(res, 405, { ok: false, error: '不支持此请求方法' });
+    }
     if (route === '/settings' && method === 'GET') {
-      const account = geminiAccounts().get(uid);
-      return json(res, 200, { ok: true, ...await store.settings(uid), linkDefaults: qualitySettings({}, await bilibiliAccount(db).public(uid)), storage: { provider: storageConfig(uid) ? '115' : 'local' }, worker: await store.worker(uid), chunkBytes: CHUNK_BYTES, maxBytes: MAX_VIDEO_BYTES, gemini: { configured: !!account, model: account?.model || defaultGeminiModel } });
+      const account = geminiAccounts().get(uid), credentials = await store.providerCredentials.status(uid);
+      return json(res, 200, { ok: true, ...await store.settings(uid), linkDefaults: qualitySettings({}, await bilibiliAccount(db).public(uid)), storage: { provider: storageConfig(uid) ? '115' : 'local' }, worker: await store.worker(uid), chunkBytes: CHUNK_BYTES, maxBytes: MAX_VIDEO_BYTES, credentials, openaiBaseUrl: compatibleBaseUrl(), gemini: { configured: credentials.gemini || !!account, model: account?.model || defaultGeminiModel } });
     }
     if (route === '/settings' && method === 'PUT') {
       const input = await body(req, 4096);

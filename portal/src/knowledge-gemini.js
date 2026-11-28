@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { knowledgeProviderCredentials } from './knowledge-provider-credentials.js';
 import { ProxyAgent } from 'undici';
 import fsp from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
@@ -18,16 +19,19 @@ const modelName = /^gemini-[a-z0-9][a-z0-9.-]{0,110}$/;
 const fileName = /^files\/[a-z0-9-]+$/;
 const now = () => new Date().toISOString();
 
-export function geminiAccounts() {
+export function geminiServerConfig() {
   const file = process.env.KNOWLEDGE_GEMINI_CONFIG || fileURLToPath(new URL('../data/knowledge-gemini.json', import.meta.url));
   try {
-    const { users = {}, proxyUrl = '' } = JSON.parse(fs.readFileSync(file, 'utf8'));
-    const configured = Object.entries(users).filter(([, value]) => typeof value?.apiKey === 'string' && value.apiKey.trim() && !/[\r\n]/.test(value.apiKey));
-    return new Map(configured.map(([uid, value]) => [uid, { apiKey: value.apiKey.trim(), model: value.model, proxyUrl }]));
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (error) {
-    if (error.code === 'ENOENT') return new Map();
+    if (error.code === 'ENOENT') return {};
     throw new Error('知识库 Gemini 服务端配置无法读取');
   }
+}
+export function geminiAccounts() {
+    const { users = {}, proxyUrl = '' } = geminiServerConfig();
+    const configured = Object.entries(users).filter(([, value]) => typeof value?.apiKey === 'string' && value.apiKey.trim() && !/[\r\n]/.test(value.apiKey));
+    return new Map(configured.map(([uid, value]) => [uid, { apiKey: value.apiKey.trim(), model: value.model, proxyUrl }]));
 }
 
 export async function generateGeminiVideo({ apiKey, model, file, size, mimeType, title, signal, progress, proxyUrl, fetcher = fetch, wait = delay }) {
@@ -135,10 +139,14 @@ async function videoFile(store, row, directory, signal) {
     target, (range, attemptSignal) => storage.download(source.object_path, range, attemptSignal), signal);
 }
 
-export async function runGeminiJob(db, directoryFor, authorize, { accounts = geminiAccounts(), generate = generateGeminiVideo, probe = runProcess } = {}) {
-  if (!accounts.size) return false;
+export async function runGeminiJob(db, directoryFor, authorize, { accounts, generate = generateGeminiVideo, probe = runProcess } = {}) {
   const store = db.query ? createPostgresKnowledgeStore(db) : createKnowledgeStore(db);
-  const row = await claim(db, [...accounts.keys()]);
+  const credentials = knowledgeProviderCredentials(db);
+  const configured = accounts || geminiAccounts();
+  const owners = accounts ? [...accounts.keys()] : [...new Set([...configured.keys(), ...await credentials.geminiOwners()])];
+  if (!owners.length) return false;
+  // Failed after a concurrent removal instead of uploading with a different account's key.
+  const row = await claim(db, owners);
   if (!row) return false;
   const { id, user_id: uid, lease } = row;
   const controller = new AbortController(), signal = AbortSignal.any([controller.signal, AbortSignal.timeout(45 * 60000)]);
@@ -157,9 +165,15 @@ export async function runGeminiJob(db, directoryFor, authorize, { accounts = gem
     try { await progress(); } catch { controller.abort(new Error('Gemini 任务连接已中断')); }
     finally { beating = false; }
   }, 20000);
-  let directory;
+  let directory, apiKey;
   try {
     await progress();
+    const legacy = configured.get(uid);
+    apiKey = (accounts ? '' : await credentials.read(uid, 'gemini')) || legacy?.apiKey;
+    if (!apiKey) {
+      // A settings row may contain only a compatible API credential.
+      throw new Error('请先在处理设置保存 Gemini API Key');
+    }
     directory = await fsp.mkdtemp(path.join(directoryFor(id), '.gemini-'));
     const file = await videoFile(store, row, directory, signal);
     const size = (await fsp.stat(file)).size;
@@ -170,16 +184,16 @@ export async function runGeminiJob(db, directoryFor, authorize, { accounts = gem
       ['-v', 'error', '-protocol_whitelist', 'file', '-f', format,
         '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', file], { signal, timeout: 20000 })).trim());
     if (!(duration > 0 && duration <= 14400)) throw new Error('视频时长无效或超过4小时');
-    const account = accounts.get(uid);
+    const account = configured.get(uid) || {};
     const model = JSON.parse(row.model_settings_json || '{}').geminiModel || account.model || defaultGeminiModel;
-    const notes = await generate({ apiKey: account.apiKey, model, file, size, mimeType: row.mime_type, title: row.title, signal, progress, proxyUrl: account.proxyUrl });
+    const notes = await generate({ apiKey, model, file, size, mimeType: row.mime_type, title: row.title, signal, progress, proxyUrl: account.proxyUrl || geminiServerConfig().proxyUrl });
     const result = validateKnowledgeResult({ duration, notes, transcript: [], frames: [],
       provenance: { backend: 'gemini', model, vision: true, warnings: ['Gemini 根据原视频音画生成带时间点的笔记。此方式不生成逐句转写或关键画面附件。'] } });
     await progress('保存 Gemini 笔记', 98);
     await store.finish(uid, id, lease, result);
   } catch (error) {
     const message = signal.aborted ? 'Gemini 任务超时、已取消或权限已变化' : error.message;
-    await store.fail(uid, id, lease, String(message).replaceAll(accounts.get(uid).apiKey, '[已隐藏]'));
+    await store.fail(uid, id, lease, apiKey ? String(message).replaceAll(apiKey, '[已隐藏]') : String(message));
   } finally {
     clearInterval(heartbeat);
     if (directory) {

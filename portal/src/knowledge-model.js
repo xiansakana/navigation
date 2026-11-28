@@ -74,7 +74,7 @@ export function modelConfiguration(config, backend) {
   if (!['http:', 'https:'].includes(baseUrl.protocol) || baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash) throw new Error('兼容接口地址无效');
   if (baseUrl.protocol !== 'https:' && !['127.0.0.1', 'localhost', '[::1]'].includes(baseUrl.hostname)) throw new Error('远程兼容接口必须使用 HTTPS');
   if (!o.model) throw new Error('请在工作器私有配置中填写 API 模型名');
-  const apiKey = process.env[o.apiKeyEnv || 'KNOWLEDGE_API_KEY'] || o.apiKey || '';
+  const apiKey = o.preferExplicitKey ? o.apiKey : process.env[o.apiKeyEnv || 'KNOWLEDGE_API_KEY'] || o.apiKey || '';
   return { backend, model: o.model, reasoningEffort: o.reasoningEffort || '', vision: o.vision === true, baseUrl: baseUrl.href.replace(/\/$/, ''), apiKey,
     maxTokensParameter: o.maxTokensParameter === 'max_tokens' ? 'max_tokens' : 'max_completion_tokens' };
 }

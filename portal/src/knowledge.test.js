@@ -697,3 +697,44 @@ test('existing raw transcripts display in simplified Chinese without modifying e
   assert.deepEqual(reused.transcript, original);
   assert.throws(() => validateKnowledgeResult(result({ transcript: [{ ...s, rawText: {} }] })));
 }));
+
+test('web API keys remain private and reach only the bound device holding a compatible job lease', async () => fixture(async ({ call, store, root }) => {
+  const previous = process.env.KNOWLEDGE_PROVIDER_KEY_FILE;
+  process.env.KNOWLEDGE_PROVIDER_KEY_FILE = path.join(root, 'provider.key');
+  try {
+    const key = 'private-compatible-12345';
+    const route = '/settings/credentials/openai', options = { method: 'PUT', data: { apiKey: key } };
+    assert.equal((await call(route, { ...options, session: { userId: 'a', permissions: ['knowledge:view', 'knowledge:settings:edit'] } })).status, 403);
+    assert.equal((await call(route, { ...options, headers: { Origin: 'https://unrelated.test' } })).status, 403);
+    assert.deepEqual((await call(route, options)).payload, { ok: true, configured: true });
+    assert.equal((await call('/settings')).payload.credentials.openai, true);
+    assert.equal((await call('/settings', { session: member('b') })).payload.credentials.openai, false);
+    assert.doesNotMatch(JSON.stringify((await call('/settings')).payload), new RegExp(key));
+    const pair = async () => {
+      const { payload } = await call('/worker/pair/start', { method: 'POST', data: { label: 'Test device' } });
+      await call('/device-pair', { method: 'POST', data: { code: payload.userCode } });
+      return (await call('/worker/pair/poll', { method: 'POST', data: { deviceCode: payload.deviceCode } })).payload.token;
+    };
+    const token = await pair(), other = await pair();
+    const capabilities = { media: { ready: true, detail: 'cuda' }, openai: { ready: false } };
+    const heartbeat = await call('/worker/heartbeat', { method: 'POST', token, data: { capabilities, portalApiCredentials: 1 } });
+    assert.equal(heartbeat.payload.managedOpenAI, true);
+    const doc = store.create('a', upload({ backend: 'openai' }));
+    store.enqueue('a', doc.id);
+    assert.equal((await call('/worker/claim', { method: 'POST', token, data: { backends: ['openai'] } })).payload.job, null);
+    const { payload: { job } } = await call('/worker/claim', { method: 'POST', token, data: { backends: ['openai'], portalApiCredentials: 1 } });
+    assert.equal(job.id, doc.id); assert.equal(job.managedOpenAI, true);
+    assert.doesNotMatch(JSON.stringify(job), new RegExp(key));
+    const secret = '/worker/jobs/' + doc.id + '/openai-credentials';
+    assert.equal((await call(secret, { token: other, lease: job.lease })).status, 403);
+    assert.equal((await call(secret, { token, lease: 'wrong' })).status, 409);
+    const receipt = await call(secret, { token, lease: job.lease });
+    assert.equal(receipt.payload.config.apiKey, key);
+    assert.equal(receipt.headers.get('cache-control'), 'no-store');
+    await call(route, { method: 'PUT', data: { apiKey: null } });
+    assert.equal((await call(secret, { token, lease: job.lease })).payload.config, null);
+  } finally {
+    if (previous === undefined) delete process.env.KNOWLEDGE_PROVIDER_KEY_FILE;
+    else process.env.KNOWLEDGE_PROVIDER_KEY_FILE = previous;
+  }
+}));

@@ -316,3 +316,9 @@ OpenCC在读取私有时间线时转换为简体，旧笔记立即生效，无�
 切换「处理设置 → 默认总结方式 → Gemini API」后，新视频和按当前设置重试的任务由 Portal 处理。B站链接仍由现有导入流程获取原片，本地上传走服务器。Portal 读取临时原片或已验证的115归档，上传至 Gemini Files API，等待文件可用后根据画面和音轨生成带时间点的 Markdown 笔记。任务结束会尝试删除 Google 临时文件。服务器同时处理一条 Gemini 任务，原视频会发给 Google，并消耗 Gemini API 配额。该方式不生成独立逐句转写和截图附件。Gemini 重新分析请选择「重新提取原视频」。
 
 参考本机 `youtube-digest/app/ytdigest/gemini.py` 的视频与提示词共同作为模型输入的做法。知识库当前导入入口支持本地文件和B站链接。
+
+### 网页模型凭据和模型列表
+
+在「知识库 → 处理设置」切换 Gemini API 或兼容 OpenAI API，填写并保存该后端的 API Key，再从服务返回的模型列表选择总结模型。网页 Key 按 Portal 账号及服务分别加密保存，密钥主文件默认为 `portal/data/knowledge-provider.key`，备份数据库时需要一并妥善保存此文件。旧有 Gemini 私有文件可继续提供服务器代理和账号备用配置，网页保存的 Key 优先。
+
+网页配置的兼容 API 使用服务器环境变量 `KNOWLEDGE_OPENAI_BASE_URL` 指定的受信任 HTTPS 服务，默认 `https://api.openai.com/v1`。Portal 需要能访问其 `/models`，也可为该查询设置 `KNOWLEDGE_OPENAI_PROXY`。兼容总结仍由已配对的新版工作器执行，仅该设备的有效任务租约可以读取对应 Key。既有工作器私有配置仍可运行。Codex 列表由在线工作器上报 CLI 已缓存的模型。

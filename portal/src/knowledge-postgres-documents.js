@@ -46,9 +46,10 @@ export function createPostgresKnowledgeDocuments(db) {
       return db.transaction(async client => {
         await client.query('INSERT INTO navigation.knowledge_settings(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING', [uid]);
         const previous = await readSettings(client, uid, true), backend = backendName(input.backend || previous.backend);
+        const { rows: [stored] } = await client.query('SELECT model_settings_json FROM navigation.knowledge_settings WHERE user_id=$1', [uid]);
         const models = modelSettings(input, previous), pipeline = pipelineSettings(input, previous);
         await client.query('UPDATE navigation.knowledge_settings SET backend=$2,model_settings_json=$3,pipeline_json=$4 WHERE user_id=$1',
-          [uid, backend, JSON.stringify(models), JSON.stringify(pipeline)]);
+          [uid, backend, JSON.stringify({ ...JSON.parse(stored.model_settings_json || '{}'), ...models }), JSON.stringify(pipeline)]);
         return { backend, ...models, ...pipeline };
       });
     },

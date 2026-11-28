@@ -53,7 +53,14 @@ async function capabilities() {
     await runProcess(binary, ['login', 'status'], { timeout: 15000 });
     const help = await runProcess(binary, ['exec', '--help'], { timeout: 10000 });
     if (!help.includes('--ignore-user-config') || !help.includes('--ignore-rules')) throw new Error('Codex CLI 版本过旧');
-    result.codex = { ready: true, model: config.codex?.model || 'CLI 默认模型' };
+    let models = [];
+    try {
+      const file = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'models_cache.json');
+      const catalog = JSON.parse(await fsp.readFile(file, 'utf8'));
+      models = (catalog.models || []).filter(model => model.visibility === 'list' && model.supported_in_api !== false
+        && typeof model.slug === 'string' && /^[a-zA-Z0-9][\w.-]{0,79}$/.test(model.slug)).slice(0, 25).map(model => model.slug);
+    } catch { /* No catalog has been cached by this CLI yet. */ }
+    result.codex = { ready: true, model: config.codex?.model || 'CLI 默认模型', models };
   } catch { result.codex = { ready: false, detail: '请安装新版 Codex CLI，并在运行工作器的账号下登录' }; }
   try {
     const api = config.openai || {}, url = new URL(api.baseUrl || 'https://api.openai.com/v1');
@@ -74,7 +81,7 @@ async function download(job, directory, signal, update) {
     }
   });
 }
-async function processJob(job) {
+async function processJob(job, useManagedOpenAI = false) {
   if (!/^[a-f0-9]{32}$/.test(job.id) || !Number.isSafeInteger(job.bytes) || job.bytes > 1024 ** 3) { mediaActive--; throw new Error('服务器任务格式无效'); }
   const directory = path.join(workRoot, job.id);
   try { await fsp.mkdir(directory, { recursive: true, mode: 0o700 }); } catch (e) { mediaActive--; throw e; }
@@ -82,6 +89,7 @@ async function processJob(job) {
   const { signal } = controller;
   let mediaHeld = true, releaseSummary;
   const releaseMedia = () => { if (mediaHeld) { mediaHeld = false; mediaActive--; } };
+  let effectiveConfig = config;
   let state = { stage: '下载视频', progress: 2 }, lastProgress = 0;
   const update = async (stage, progress) => {
     state = { stage, progress };
@@ -94,7 +102,7 @@ async function processJob(job) {
     heartbeatBusy = true;
     try {
       await request('/jobs/' + job.id + '/progress', { data: state, lease: job.lease, signal });
-      await request('/heartbeat', { data: { workerId, label: config.label || os.hostname(), capabilities: cachedCapabilities }, signal });
+      await request('/heartbeat', { data: { workerId, label: config.label || os.hostname(), capabilities: cachedCapabilities, portalApiCredentials: 1 }, signal });
     } catch (e) { if ([401, 403, 409].includes(e.status)) controller.abort(); }
     finally { heartbeatBusy = false; }
   }, 20000);
@@ -170,16 +178,21 @@ async function processJob(job) {
       await sleep(1000); signal.throwIfAborted();
     }
     await update('正在总结', 65);
-    const defaults = config[job.backend === 'codex' ? 'codex' : 'openai'] || {};
+    if (job.backend === 'openai' && useManagedOpenAI) {
+      const response = await request('/jobs/' + job.id + '/openai-credentials', { lease: job.lease, signal });
+      if (!response.config) throw new Error('兼容 API Key 已移除，请重新保存后重试');
+      effectiveConfig = { ...config, openai: { ...config.openai, ...response.config, preferExplicitKey: true } };
+    }
+    const defaults = effectiveConfig[job.backend === 'codex' ? 'codex' : 'openai'] || {};
     const selection = JSON.stringify({ id: job.id, runId: job.reanalysis?.runId || '', title: job.title, topic: job.topic, tags: job.tags, sourceUrl: job.sourceUrl, backend: job.backend, modelSettings: job.modelSettings,
-      workerModel: { model: defaults.model || '', reasoningEffort: defaults.reasoningEffort || '', vision: defaults.vision } });
+      workerModel: { baseUrl: defaults.baseUrl, model: defaults.model || '', reasoningEffort: defaults.reasoningEffort || '', vision: defaults.vision } });
     let result;
     try {
       const cached = JSON.parse(await fsp.readFile(path.join(directory, 'result.json'), 'utf8'));
       if (cached.workerSelection === selection) { result = cached; console.log('复用已完成笔记，仅重新提交入库', job.id); }
     } catch { /* A missing or incomplete result must be generated normally. */ }
     if (!result) {
-      const summary = await summarizeVideo({...config,onCodexCall:input=>request('/jobs/'+job.id+'/codex',{data:input,lease:job.lease,signal})}, job, evidence, directory, update, signal);
+      const summary = await summarizeVideo({...effectiveConfig,onCodexCall:input=>request('/jobs/'+job.id+'/codex',{data:input,lease:job.lease,signal})}, job, evidence, directory, update, signal);
       const frames = [];
       for (const f of evidence.frames) frames.push({ name: f.name, time: f.time, data: (await fsp.readFile(path.join(directory, f.name))).toString('base64') });
       result = { ...evidence, ...summary, frames, workerSelection: selection };
@@ -199,7 +212,7 @@ async function processJob(job) {
     try { await request('/jobs/' + job.id + '/fail', { data: { error: e.message, stage: state.stage }, lease: job.lease }); } catch { /* Expired jobs are recovered by the server. */ }
   } finally { clearInterval(heartbeat); releaseMedia(); releaseSummary?.(); activeControllers.delete(controller); }
 }
-let cachedCapabilities = {}, checkedAt = 0;
+let cachedCapabilities = {}, checkedAt = 0, managedOpenAI = false;
 let localServer;
 if (process.platform === 'win32' && config.localUpload !== false) {
   try {
@@ -214,18 +227,19 @@ console.log('知识库工作器已启动：', portal.origin, '配置：', config
 while (!stopped) {
   try {
     if (Date.now() - checkedAt > 60000) { cachedCapabilities = await capabilities(); checkedAt = Date.now(); }
-    const heartbeat = await request('/heartbeat', { data: { workerId, label: config.label || os.hostname(), capabilities: cachedCapabilities } });
+    const heartbeat = await request('/heartbeat', { data: { workerId, label: config.label || os.hostname(), capabilities: cachedCapabilities, portalApiCredentials: 1 } });
     configurePipeline(heartbeat.pipeline);
-    const backends = cachedCapabilities.media?.ready ? ['codex', 'openai'].filter(b => cachedCapabilities[b]?.ready) : [];
+    managedOpenAI = heartbeat.managedOpenAI === true;
+    const backends = cachedCapabilities.media?.ready ? ['codex', 'openai'].filter(b => cachedCapabilities[b]?.ready || b === 'openai' && managedOpenAI) : [];
     const hasCapacity = mediaActive < limits.mediaConcurrency && tasks.size < limits.mediaConcurrency + limits.summaryConcurrency;
-    const { job } = hasCapacity ? await request('/claim', { data: { backends, workerId, localDocuments: localServer ? await localDocuments(workRoot) : [] } }) : { job: null };
+    const { job } = hasCapacity ? await request('/claim', { data: { backends, workerId, portalApiCredentials: 1, localDocuments: localServer ? await localDocuments(workRoot) : [] } }) : { job: null };
     if (stopped && job) {
       await request('/jobs/' + job.id + '/fail', { data: { error: '工作器正在退出，请重试' }, lease: job.lease });
       break;
     }
     if (job) {
       mediaActive++;
-      const task = processJob(job).catch(e => console.error('任务启动失败', job.id, e.message));
+      const task = processJob(job, job.managedOpenAI === true).catch(e => console.error('任务启动失败', job.id, e.message));
       tasks.add(task); task.finally(() => tasks.delete(task));
     }
     else {

@@ -1,3 +1,4 @@
+import { createKnowledgeModelPicker } from './model-picker.js?v=provider-1';
 import { uploadParts } from './upload.js?v=1';
 import { createDevicePanel } from './devices.js?v=datetime-20261110';
 import { createSourcePlayer } from './source.js?v=1';
@@ -19,6 +20,7 @@ const show = (id, yes) => { $(id).hidden = !yes; };
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const tags = value => value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
 const time = value => { const s = Math.floor(value || 0); return (s >= 3600 ? String(Math.floor(s / 3600)).padStart(2, '0') + ':' : '') + String(Math.floor(s / 60) % 60).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); };
+let modelPicker;
 const phaseLabel = d => d.status === 'processing' ? ({ media: '正在转写/提取素材', summary_wait: '等待总结', summary: '正在总结' })[d.processingPhase] || '' : '';
 function error(e) {
   text('error', e.message || String(e));
@@ -64,11 +66,9 @@ async function settings() {
   const prefix = state.settings.backend === 'codex' ? 'codex' : (state.settings.backend === 'gemini' ? 'gemini' : 'api');
   const usingGemini = state.settings.backend === 'gemini';
   $('summary-effort-label').hidden = usingGemini;
-  $('summary-model').placeholder = usingGemini ? (state.settings.gemini?.model || '服务器默认 Gemini 模型') : '留空使用工作器默认模型';
-  if (!state.modelDirty) {
-    $('summary-model').value = state.settings[prefix + 'Model'] || '';
-    $('summary-effort').value = state.settings[prefix + 'Effort'] || '';
-  }
+  modelPicker ||= createKnowledgeModelPicker({ element: $, api, send, onError: error, refresh: settings });
+  modelPicker.render(state.settings, state.modelDirty ? $('summary-model').value : state.settings[prefix + 'Model'] || '', can('model:edit') && can('settings:edit'));
+  if (!state.modelDirty) $('summary-effort').value = state.settings[prefix + 'Effort'] || '';
   $('summary-model').disabled = $('summary-effort').disabled = !can('model:edit') || !can('settings:edit');
   show('model-save', can('model:edit') && can('settings:edit'));
   show('asr-settings', !usingGemini && can('asr:edit') && can('settings:edit'));
@@ -402,7 +402,7 @@ $('batch-save').onclick = async () => {
   finally { state.batchBusy = false; renderList(); }
 };
 $('backend').onchange = async () => { try { await send('/settings', 'PUT', { backend: $('backend').value }); state.modelDirty = false; await settings(); text('message', '已切换默认总结方式。'); } catch (e) { error(e); } };
-$('summary-model').oninput = $('summary-effort').onchange = () => { state.modelDirty = true; };
+$('summary-model').onchange = $('summary-effort').onchange = () => { state.modelDirty = true; };
 $('media-concurrency').onchange = $('summary-concurrency').onchange = () => { state.concurrencyDirty = true; };
 $('concurrency-save').onclick = async () => {
   $('concurrency-save').disabled = true;
@@ -427,6 +427,7 @@ $('asr-save').onclick = async () => {
 $('model-save').onclick = async () => {
   const prefix = state.settings.backend === 'codex' ? 'codex' : (state.settings.backend === 'gemini' ? 'gemini' : 'api');
   try {
+    if (!modelPicker.canSave($('summary-model').value)) throw new Error('请选择列表中的可用模型');
     await send('/settings', 'PUT', { [prefix + 'Model']: $('summary-model').value.trim(), ...(prefix !== 'gemini' ? { [prefix + 'Effort']: $('summary-effort').value } : {}) });
     state.modelDirty = false; await settings(); text('message', '模型设置已保存，用于新上传和失败重试；已排队和正在处理的任务保留原配置。');
   } catch (e) { error(e); }

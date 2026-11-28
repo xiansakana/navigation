@@ -1,3 +1,4 @@
+import { knowledgeProviderCredentials } from './knowledge-provider-credentials.js';
 import { bilibiliAccount, qualitySettings } from './knowledge-bilibili-account.js';
 import { createPostgresKnowledgeBatch } from './knowledge-postgres-batch.js';
 import { createPostgresKnowledgeDocuments } from './knowledge-postgres-documents.js';
@@ -14,6 +15,7 @@ const dependents = ['mingli_knowledge_cases', 'mingli_knowledge_index', 'knowled
 export function createPostgresKnowledgeStore(db) {
   if (stores.has(db)) return stores.get(db);
   const store = {
+    providerCredentials: knowledgeProviderCredentials(db),
     ...createPostgresKnowledgeWorker(db),
     ...createPostgresKnowledgeDocuments(db),
     ...createPostgresKnowledgeUploads(db),

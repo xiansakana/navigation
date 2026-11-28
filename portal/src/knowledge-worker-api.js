@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { getDatabase } from '../../shared/db/index.js';
 import { createKnowledgeStore } from './knowledge-store.js';
 import { knowledgeWorkerPackage, sendWorkerPackage } from './knowledge-worker-package.js';
+import { compatibleBaseUrl } from './knowledge-provider-credentials.js';
 import { failureMessage } from '../public/knowledge/failure.js';
 import { body, lock, serveSource, knowledgeDirectory, knowledgeFailure } from './knowledge-http.js';
 
@@ -66,10 +67,12 @@ async function workerApi(req, res, url, json, authorize, store = createKnowledge
     if (route === '/release' && method === 'GET') { const { version, sha256, bytes } = knowledgeWorkerPackage(); return json(res, 200, { ok: true, version, sha256, bytes }); }
     if (route === '/heartbeat' && method === 'POST') {
       const raw = await body(req, 4096);
+      const managed = !!device && raw.portalApiCredentials === 1 && (await store.providerCredentials?.status(uid))?.openai;
+      if (managed) raw.capabilities = { ...raw.capabilities, openai: { ready: true, detail: '使用处理设置中的 API Key' } };
       const accepted = await store.heartbeatWorker(uid, device ? { ...raw, workerId: device.id, label: device.label } : raw, token, device);
       if (accepted === false) return json(res, 401, { ok: false, error: '工作器凭据已撤销' });
       const { mediaConcurrency, summaryConcurrency } = await store.settings(uid);
-      return json(res, 200, { ok: true, pipeline: { mediaConcurrency, summaryConcurrency } });
+      return json(res, 200, { ok: true, pipeline: { mediaConcurrency, summaryConcurrency }, managedOpenAI: managed });
     }
     if (route === '/local-input' && method === 'POST') {
       const raw = await body(req, 4096), workerId = device?.id || raw.workerId;
@@ -78,14 +81,26 @@ async function workerApi(req, res, url, json, authorize, store = createKnowledge
     }
     if (route === '/claim' && method === 'POST') {
       const raw = await body(req, 4096);
-      const backends = Array.isArray(raw.backends) ? raw.backends.filter(b => ['codex', 'openai'].includes(b)) : [];
-      return json(res, 200, { ok: true, job: await store.claim(uid, backends, device?.id || (typeof raw.workerId === 'string' ? raw.workerId : ''), Array.isArray(raw.localDocuments) ? raw.localDocuments.slice(0, 200).filter(id => /^[a-f0-9]{32}$/.test(id)) : []) });
+      let backends = Array.isArray(raw.backends) ? raw.backends.filter(b => ['codex', 'openai'].includes(b)) : [];
+      const managed = backends.includes('openai') && (await store.providerCredentials?.status(uid))?.openai;
+      if (managed && (!device || raw.portalApiCredentials !== 1)) backends = backends.filter(backend => backend !== 'openai');
+      const job = await store.claim(uid, backends, device?.id || (typeof raw.workerId === 'string' ? raw.workerId : ''),
+        Array.isArray(raw.localDocuments) ? raw.localDocuments.slice(0, 200).filter(id => /^[a-f0-9]{32}$/.test(id)) : []);
+      return json(res, 200, { ok: true, job: job && { ...job, ...(managed && job.backend === 'openai' ? { managedOpenAI: true } : {}) } });
     }
-    const match = /^\/jobs\/([a-f0-9]{32})\/(source|evidence|progress|phase|complete|fail|codex)$/.exec(route);
+    const match = /^\/jobs\/([a-f0-9]{32})\/(source|evidence|progress|phase|complete|fail|codex|openai-credentials)$/.exec(route);
     if (!match) return json(res, 404, { ok: false, error: '工作器接口不存在' });
     const [, id, action] = match, lease = req.headers['x-knowledge-lease'];
     return await lock(id, async () => {
       if (!await store.leased(uid, id, lease)) return json(res, 409, { ok: false, error: '任务已删除、过期或由其他工作器领取' });
+      if (action === 'openai-credentials' && method === 'GET') {
+        const job = await store.getRow(uid, id);
+        if (!device || job?.worker_id !== device.id || job.backend !== 'openai' || !await store.leased(uid, id, lease)) {
+          return json(res, 403, { ok: false, error: '此设备无权读取任务凭据' });
+        }
+        const apiKey = await store.providerCredentials.read(uid, 'openai');
+        return json(res, 200, { ok: true, config: apiKey ? { apiKey, baseUrl: compatibleBaseUrl() } : null });
+      }
       if(action==='codex'&&method==='POST'){
         const input=await body(req,3*1024*1024);
         if(!await store.leased(uid,id,lease))return json(res,409,{ok:false,error:'任务已过期'});

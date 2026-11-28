@@ -1,3 +1,4 @@
+import { knowledgeProviderCredentials } from './knowledge-provider-credentials.js';
 import crypto from 'node:crypto';
 import {createKnowledgeCodexCalls} from './knowledge-codex-calls.js';
 import { createSourceStore } from './knowledge-source-store.js';
@@ -41,6 +42,8 @@ export function knowledgeWorkerHeartbeat(raw, time = new Date().toISOString()) {
     const value = raw.capabilities?.[key] || {};
     capabilities[key] = { ready: value.ready === true, model: String(value.model || '').slice(0, 120), detail: String(value.detail || '').slice(0, 160) };
   }
+  const models = raw.capabilities?.codex?.models;
+  if (Array.isArray(models)) capabilities.codex.models = [...new Set(models.slice(0, 25).filter(id => typeof id === 'string' && /^[a-zA-Z0-9][\w.-]{0,79}$/.test(id)))];
   for (const feature of ['pipeline', 'reanalysis']) {
     if (raw.capabilities?.[feature]?.version === 1) capabilities[feature] = { version: 1 };
   }
@@ -168,13 +171,17 @@ function initializeKnowledgeStore(db) {
         return get(uid, created.id);
       }).immediate();
     },
+    providerCredentials: knowledgeProviderCredentials(db),
     get, getRow, expire, sources, devices, localInputs, imports, reanalysis, codexCalls:createKnowledgeCodexCalls(db),
     settings(uid) { const row = db.prepare('SELECT * FROM knowledge_settings WHERE user_id=?').get(uid); return { backend: row?.backend || 'codex', ...modelSettings({}, JSON.parse(row?.model_settings_json || '{}')), ...pipelineSettings({}, JSON.parse(row?.pipeline_json || '{}')) }; },
     saveSettings(uid, raw) {
       if (typeof raw === 'string') raw = { backend: raw };
-      const previous = this.settings(uid), backend = backendName(raw.backend || previous.backend), selection = modelSettings(raw, previous), pipeline = pipelineSettings(raw, previous);
-      db.prepare('INSERT INTO knowledge_settings(user_id,backend,model_settings_json,pipeline_json) VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET backend=excluded.backend,model_settings_json=excluded.model_settings_json,pipeline_json=excluded.pipeline_json').run(uid, backend, JSON.stringify(selection), JSON.stringify(pipeline));
-      return { backend, ...selection, ...pipeline };
+      return db.transaction(() => {
+        const saved = JSON.parse(db.prepare('SELECT model_settings_json FROM knowledge_settings WHERE user_id=?').get(uid)?.model_settings_json || '{}');
+        const previous = this.settings(uid), backend = backendName(raw.backend || previous.backend), selection = modelSettings(raw, previous), pipeline = pipelineSettings(raw, previous);
+        db.prepare('INSERT INTO knowledge_settings(user_id,backend,model_settings_json,pipeline_json) VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET backend=excluded.backend,model_settings_json=excluded.model_settings_json,pipeline_json=excluded.pipeline_json').run(uid, backend, JSON.stringify({ ...saved, ...selection }), JSON.stringify(pipeline));
+        return { backend, ...selection, ...pipeline };
+      }).immediate();
     },
     worker(uid) {
       const row = db.prepare('SELECT last_seen,label,capabilities_json FROM knowledge_workers WHERE user_id=?').get(uid);
