@@ -597,7 +597,7 @@ async function handleProxyRouteAsync(req, res, presetCtx) {
 
     if (notesCanEdit) {
         if (isSiyuanCheckAuthPath(browserUrl.pathname, ctx.service) && req.method === 'GET') {
-            var authed = await ensureSiyuanAuth(ctx.service, req, res, true);
+            var authed = await ensureSiyuanAuth(ctx.service, req, res, true, { refresh: true });
             if (authed) {
                 var target = resolveSiyuanRedirectTarget(
                     ctx.service,

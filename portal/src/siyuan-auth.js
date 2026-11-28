@@ -84,9 +84,9 @@ export function appendCookieHeader(req, setCookies) {
     }).join('; ');
 }
 
-export async function ensureSiyuanAuth(service, req, res, canEdit) {
+export async function ensureSiyuanAuth(service, req, res, canEdit, { refresh = false } = {}) {
     if (!canEdit || !service?.accessAuthCode) return false;
-    if (hasSiyuanCookie(req)) return true;
+    if (!refresh && hasSiyuanCookie(req)) return true;
     var setCookies = await loginSiyuanSession(service);
     if (!setCookies) return false;
     if (res) mergeSetCookie(res, setCookies);

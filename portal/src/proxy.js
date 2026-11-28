@@ -468,7 +468,7 @@ export async function proxyHttpRequest(service, req, res) {
             || (req.socket && req.socket.encrypted ? 'https' : 'http');
         var fwdFor = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
         var headersOut = pickHeaders(req.headers, {
-            host: target.host,
+            host: service.id === 'notes' ? (req.headers.host || target.host) : target.host,
             'x-forwarded-host': fwdHost,
             'x-forwarded-proto': fwdProto,
             'x-forwarded-for': fwdFor,
@@ -567,7 +567,8 @@ export function proxyWebSocket(service, req, socket, head) {
     var port = Number(target.port) || (target.protocol === 'https:' ? 443 : 80);
     var proxySocket = net.connect(port, target.hostname, function() {
         var lines = [req.method + ' ' + target.pathname + target.search + ' HTTP/' + req.httpVersion];
-        var headers = Object.assign({}, req.headers, { host: target.host });
+        var host = service.id === 'notes' ? (req.headers.host || target.host) : target.host;
+        var headers = Object.assign({}, req.headers, { host: host });
         Object.keys(headers).forEach(function(key) {
             var val = headers[key];
             if (val == null) return;
