@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { knowledgeProviderCredentials } from './knowledge-provider-credentials.js';
 import { ProxyAgent } from 'undici';
+import { uploadGeminiFile } from './knowledge-gemini-upload.js';
 import fsp from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
@@ -87,11 +88,16 @@ async function submitGeminiVideo({ apiKey, model, file, size, mimeType, title, d
   const send = async (url, stage, options = {}) => {
     let response;
     try { response = await fetcher(url, { redirect: 'error', signal, ...options }); }
-    catch { signal.throwIfAborted(); throw new Error('Gemini ' + stage + '连接失败，请检查服务器到 Google API 的网络'); }
+    catch (error) {
+      signal.throwIfAborted();
+      const code = error.cause?.code || error.code || (error.name === 'TimeoutError' ? 'TIMEOUT' : '');
+      const detail = typeof code === 'string' && /^[A-Z0-9_]{2,50}$/.test(code) ? '（' + code + '）' : '';
+      throw Object.assign(new Error('Gemini ' + stage + '连接中断' + detail + '，请稍后重试'), { code: 'GEMINI_TRANSPORT' });
+    }
     if (!response.ok) {
       await response.body?.cancel();
       const hint = { 400: '请检查模型是否支持该视频和时长', 401: '请检查 API Key', 403: '请检查 API Key、服务权限或地区', 404: '请检查所选模型', 429: '请检查配额和频率限制' }[response.status] || '请稍后重试';
-      throw new Error('Gemini ' + stage + '失败（HTTP ' + response.status + '），' + hint);
+      throw Object.assign(new Error('Gemini ' + stage + '失败（HTTP ' + response.status + '），' + hint), { status: response.status });
     }
     return response;
   };
@@ -101,23 +107,10 @@ async function submitGeminiVideo({ apiKey, model, file, size, mimeType, title, d
     ...(body ? { body: JSON.stringify(body) } : {})
   })).json();
 
-  await progress('正在上传视频至 Gemini', 15);
-  const start = await send(origin + '/upload/v1beta/files', '创建上传', {
-    method: 'POST', headers: { ...keyHeaders, 'Content-Type': 'application/json',
-      'X-Goog-Upload-Protocol': 'resumable', 'X-Goog-Upload-Command': 'start',
-      'X-Goog-Upload-Header-Content-Length': String(size), 'X-Goog-Upload-Header-Content-Type': mimeType },
-    body: JSON.stringify({ file: { displayName: 'knowledge-video' } })
-  });
-  const uploadUrl = new URL(start.headers.get('x-goog-upload-url') || '/', origin);
-  await start.body?.cancel();
-  if (uploadUrl.origin !== origin || uploadUrl.username || uploadUrl.password || uploadUrl.pathname !== '/upload/v1beta/files') throw new Error('Gemini 返回的上传地址无效');
+  await progress('正在创建 Gemini 视频上传', 15);
   let remoteName;
   try {
-    const response = await send(uploadUrl, '上传视频', {
-      method: 'POST', duplex: 'half', signal, body: fs.createReadStream(file),
-      headers: { 'Content-Type': mimeType, 'Content-Length': String(size), 'X-Goog-Upload-Offset': '0', 'X-Goog-Upload-Command': 'upload, finalize' }
-    });
-    let { file: remote } = await response.json();
+    let remote = await uploadGeminiFile({ apiKey, file, size, mimeType, signal, send, progress, wait });
     if (!fileName.test(remote?.name || '')) throw new Error('Gemini 未返回有效文件编号');
     remoteName = remote.name;
     await progress('Gemini 正在准备视频音画', 45);

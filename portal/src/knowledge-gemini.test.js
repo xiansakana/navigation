@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { createKnowledgeStore } from './knowledge-store.js';
+import { uploadGeminiFile } from './knowledge-gemini-upload.js';
 import { generateGeminiVideo, runGeminiJob } from './knowledge-gemini.js';
 
 const origin = 'https://generativelanguage.googleapis.com';
@@ -27,9 +28,7 @@ test('Gemini uploads original bytes, waits for ACTIVE, summarizes audio and vide
         if (target.search) {
           assert.equal(options.headers['x-goog-api-key'], undefined);
           assert.equal(options.headers['X-Goog-Upload-Command'], 'upload, finalize');
-          const chunks = [];
-          for await (const bytes of options.body) chunks.push(bytes);
-          assert.equal(Buffer.concat(chunks).toString(), 'video sample data');
+          assert.equal(Buffer.from(options.body).toString(), 'video sample data');
           return Response.json({ file: { name: 'files/video', state: 'PROCESSING' } });
         }
         assert.equal(options.headers['x-goog-api-key'], 'test-key');
@@ -107,4 +106,35 @@ test('Portal completes a Gemini job without a GPU and leaves other accounts and 
     await runGeminiJob(db, directoryFor, () => false, { ...options, generate: () => assert.fail('permission required') });
     assert.equal(store.getRow('owner', denied).status, 'failed');
   } finally { db.close(); await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('Gemini resumes from Google-confirmed bytes after a lost chunk response', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'gemini-resume-'));
+  const file = path.join(directory, 'video');
+  await fs.writeFile(file, 'abcdefghijklmn');
+  const calls = [];
+  try {
+    const result = await uploadGeminiFile({
+      apiKey: 'test-key', file, size: 14, mimeType: 'video/mp4', signal: AbortSignal.timeout(5000),
+      progress: async () => {}, wait: async () => {}, chunkBytes: 8,
+      async send(url, _stage, { headers, body }) {
+        const command = headers['X-Goog-Upload-Command'];
+        const offset = headers['X-Goog-Upload-Offset'];
+        calls.push([command, offset, Buffer.isBuffer(body) ? body.toString() : '']);
+        if (command === 'start') return new Response(null, { headers: {
+          'x-goog-upload-url': origin + '/upload/v1beta/files?upload_id=unit-test', 'x-goog-upload-chunk-granularity': '4'
+        } });
+        assert.equal(headers['x-goog-api-key'], undefined);
+        if (command === 'query') return new Response(null, { headers: { 'x-goog-upload-status': 'active', 'x-goog-upload-size-received': '4' } });
+        if (offset === '0') throw Object.assign(new Error('lost chunk response'), { code: 'GEMINI_TRANSPORT' });
+        if (command === 'upload') return new Response(null, { headers: { 'x-goog-upload-status': 'active' } });
+        return Response.json({ file: { name: 'files/resumed' } });
+      }
+    });
+    assert.deepEqual(result, { name: 'files/resumed' });
+    assert.deepEqual(calls, [
+      ['start', undefined, ''], ['upload', '0', 'abcdefgh'], ['query', undefined, ''],
+      ['upload', '4', 'efghijkl'], ['upload, finalize', '12', 'mn']
+    ]);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
