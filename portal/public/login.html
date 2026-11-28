@@ -19,12 +19,27 @@
             <span class="label navbar-theme-label">日间</span>
         </button>
     </div>
-    <div class="login-card" data-skeleton="form" data-skeleton-key="page">
-        <h1>服务导航</h1>
-        <p class="subtitle">密码登录，或使用 GitHub / Google 注册（默认仍为游客权限，管理员可在后台分配角色）</p>
-        <div id="login-view"></div>
-        <noscript>请启用 JavaScript 后登录。</noscript>
-    </div>
+    <main class="login-shell">
+        <section class="login-brand" aria-hidden="true">
+            <div class="login-brand-mark">⚡</div>
+            <h2>Navigation</h2>
+            <p>一个入口，抵达你的全部服务。</p>
+            <div class="login-brand-lines">
+                <span></span><span></span><span></span>
+            </div>
+            <ul class="login-brand-points">
+                <li>统一身份与权限</li>
+                <li>工具、笔记与投资记录</li>
+                <li>随时随地，自托管</li>
+            </ul>
+        </section>
+        <div class="login-card" data-skeleton="form" data-skeleton-key="page">
+            <h1>欢迎回来</h1>
+            <p class="subtitle">密码登录，或使用 GitHub / Google 注册（默认仍为游客权限，管理员可在后台分配角色）</p>
+            <div id="login-view"></div>
+            <noscript>请启用 JavaScript 后登录。</noscript>
+        </div>
+    </main>
     <script src="/skeleton/skeleton.js?v=1"></script>
     <script src="/theme.js"></script>
     <script src="/toast.js"></script>
