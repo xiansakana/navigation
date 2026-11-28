@@ -193,6 +193,6 @@
       $('billing-charts').innerHTML=(!billing?'':billing.missingCurrencies.length?'<p class="bk-empty">缺少 '+esc(billing.missingCurrencies.join('、'))+' 汇率，暂不能汇总 CNY 走势。</p>':chart(billing.points,billingLines,'CNY 等效总收支走势',billing.granularity,true))+(excluded?'<p class="bk-muted">统计已排除社保公积金等分组中的 '+excluded+' 个账户。</p>':'');
       if(billing&&!billing.missingCurrencies.length&&billing.points.length)mountBilling(billing.points,billing.granularity);
     }
-    return {render,attr,query:()=>({...focus}),clearFocus,drill};
+    return {render,attr,query:()=>({...focus,billingDaily:'1'}),clearFocus,drill};
   };
 })();

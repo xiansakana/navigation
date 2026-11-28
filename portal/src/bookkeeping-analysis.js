@@ -3,7 +3,7 @@ const rounded = n => Math.round((n + Number.EPSILON) * 100) / 100;
 const previousMonth = month => new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7))-2,1)).toISOString().slice(0,7);
 function totals(entries) { return summarize(entries).totals; }
 function series(entries, month, today, filter={}) {
-  const buckets = new Map(), start=filter.start|| (month?month+'-01':''),end=filter.end||'',daily=!!month || (start && end && (Date.parse(end)-Date.parse(start))/86400000<=62), granularity = daily ? 'day' : 'month';
+  const buckets = new Map(), start=filter.start|| (month?month+'-01':''),end=filter.end||'',daily=!!filter.billingDaily || !!month || (start && end && (Date.parse(end)-Date.parse(start))/86400000<=62), granularity = daily ? 'day' : 'month';
   for (const day of summarize(entries).days) {
     const date = daily ? day.date : day.date.slice(0,7), key = day.currency+'|'+date;
     const item=buckets.get(key)||{date,currency:day.currency,income:0,expense:0};
