@@ -52,3 +52,22 @@ test('the Notes proxy preserves the host used for the kernel origin check', asyn
     });
     assert.equal(response.status, 200);
 });
+
+test('only the Notes proxy forwards the app ID on a plugin storage write', async (t) => {
+    const kernel = createServer((req, res) => res.end(req.headers['x-siyuan-app-id'] || '')).listen(0, '127.0.0.1');
+    t.after(() => kernel.close());
+    await once(kernel, 'listening');
+
+    const internalUrl = `http://127.0.0.1:${kernel.address().port}`;
+    const portal = createServer((req, res) => {
+        const id = req.url.startsWith('/notes/') ? 'notes' : 'other';
+        return proxyHttpRequest({ id, path: `/${id}/`, internalUrl }, req, res);
+    }).listen(0, '127.0.0.1');
+    t.after(() => portal.close());
+    await once(portal, 'listening');
+
+    const origin = `http://127.0.0.1:${portal.address().port}`;
+    const request = { method: 'POST', headers: { 'X-SiYuan-App-ID': 'test-frontend' } };
+    assert.equal(await (await fetch(`${origin}/notes/api/file/removeFile`, request)).text(), 'test-frontend');
+    assert.equal(await (await fetch(`${origin}/other/api/file/removeFile`, request)).text(), '');
+});

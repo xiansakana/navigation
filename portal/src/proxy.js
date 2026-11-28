@@ -474,6 +474,9 @@ export async function proxyHttpRequest(service, req, res) {
             'x-forwarded-for': fwdFor,
             'x-real-ip': req.socket.remoteAddress || ''
         }, { allowEncoding: pipeJson });
+        if (service.id === 'notes' && req.headers['x-siyuan-app-id']) {
+            headersOut['x-siyuan-app-id'] = req.headers['x-siyuan-app-id'];
+        }
         // AList 用 Host/site_url 拼分享链接；有公网 Host 时优先传给上游
         if (service.id === 'alist' && fwdHost && !String(fwdHost).includes('127.0.0.1')) {
             headersOut.host = fwdHost;
