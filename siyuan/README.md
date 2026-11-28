@@ -95,3 +95,15 @@ PICLIST_SERVER_KEY=siyuan-web python3 scripts/sync-siyuan-picgo-external.py
 **勿填** `http://127.0.0.1:36677` 或 `http://123.56.235.12:36677`。前者是浏览器所在电脑，后者会被 HTTPS 页面按 Mixed Content 拦截；浏览器端统一使用 `/piclist/upload`。
 
 参考源码：`d:\code\SiYuan`（siyuan-note/siyuan）
+
+## Gemini 接入
+
+`navigation-siyuan-gemini.service` 在思源 Docker 网桥上接收该容器的 Gemini 请求，并复用知识库模块配置的代理访问 Google。思源的对话模型使用 `http://<网桥网关>:17891/v1beta`，协议选 Gemini Interactions。Embedding 配置使用 `http://<网桥网关>:17891/v1beta/openai`，模型可选 `gemini-embedding-001`。API Key 在思源设置中保存。
+
+首次部署从仓库安装并启用服务。后续 `ecs-update.sh --only siyuan` 会随思源更新已启用的服务。
+
+```bash
+install -m 0644 siyuan/navigation-siyuan-gemini.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now navigation-siyuan-gemini.service
+```

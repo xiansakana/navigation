@@ -1,0 +1,13 @@
+[Unit]
+Description=Navigation SiYuan Gemini gateway
+Requires=docker.service
+After=docker.service cordcloud-proxy.service
+
+[Service]
+ExecStart=/usr/bin/bash /opt/navigation/siyuan/start-gemini-gateway.sh
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

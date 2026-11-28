@@ -208,6 +208,11 @@ if should_run siyuan; then
     echo "==> siyuan"
     cd "$ROOT/siyuan"
     docker compose up -d
+    if systemctl is-enabled --quiet navigation-siyuan-gemini.service; then
+        install -m 0644 "$ROOT/siyuan/navigation-siyuan-gemini.service" /etc/systemd/system/
+        systemctl daemon-reload
+        systemctl restart navigation-siyuan-gemini.service
+    fi
     if [ -f "$ROOT/scripts/patch-siyuan-share-clipboard.py" ]; then
         python3 "$ROOT/scripts/patch-siyuan-share-clipboard.py" || true
     fi
