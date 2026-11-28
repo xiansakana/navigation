@@ -147,6 +147,7 @@ function serveStatic(filePath, res) {
     };
     if (res.req && res.req.headers['if-none-match'] === etag) {
         res.writeHead(304, headers);
+        res.end();
         return true;
     }
     res.writeHead(200, headers);
