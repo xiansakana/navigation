@@ -4,9 +4,10 @@
     const fields=['period-kind','period-anchor','range-start','range-end','month','book','currency','type','category','account','search'];
     let focus={}, saved=null;
     let chartMode='candle';
+    let assetMode='candle';
     let assetChartInstance=null, assetChartHost=null, assetBucket=null;
     const hiddenBillingSeries=new Set(), billingLines=[{key:'income',label:'收入',color:'var(--green)'},{key:'expense',label:'净支出',color:'var(--red)'},{key:'cumulative',label:'累计账单结余',color:'#d89812'}];
-    function assetModeName(){return assetChartInstance&&assetChartInstance.mode?assetChartInstance.mode():chartMode;}
+    function assetModeName(){return assetChartInstance&&assetChartInstance.mode?assetChartInstance.mode():assetMode;}
     function refreshAssetNote(){
       const note=$('asset-overview-charts').querySelector('.bk-candle-note');
       if(!note)return;
@@ -18,7 +19,8 @@
     $('asset-overview-charts').addEventListener('click',event=>{
       const button=event.target.closest('[data-asset-mode]');
       if(!button||!assetChartInstance)return;
-      assetChartInstance.setMode(button.dataset.assetMode);
+      assetMode=button.dataset.assetMode;
+      assetChartInstance.setMode(assetMode);
       refreshAssetNote();
       button.focus({preventScroll:true});
     });
@@ -226,8 +228,8 @@
       if(!host.querySelector('.bk-chart-card')){
         host.innerHTML='<div class="bk-chart-card"><div class="bk-chart-head"><h3>CNY 等效总资产走势</h3>'
           +'<div class="bk-chart-modes" role="group" aria-label="图表类型">'
-          +'<button type="button" data-asset-mode="candle" aria-pressed="'+(chartMode==='candle')+'">K线</button>'
-          +'<button type="button" data-asset-mode="line" aria-pressed="'+(chartMode==='line')+'">折线</button>'
+          +'<button type="button" data-asset-mode="candle" aria-pressed="'+(assetMode==='candle')+'">K线</button>'
+          +'<button type="button" data-asset-mode="line" aria-pressed="'+(assetMode==='line')+'">折线</button>'
           +'</div></div><div class="bk-asset-chart" data-asset-chart-host></div>'
           +'<p class="bk-muted bk-candle-note"></p>'
           +'<p class="bk-muted"></p></div>';
@@ -237,7 +239,7 @@
         host.querySelector('[data-asset-chart-host]').innerHTML='<p class="bk-empty">图表组件未加载</p>';
         return;
       }
-      if(instance.mode && chartMode!==instance.mode())instance.setMode(chartMode);
+      if(instance.mode && assetMode!==instance.mode())instance.setMode(assetMode);
       const bucket=window.bkCandles?window.bkCandles.chooseBucket(assets.points.map(point=>point.date),60):null;
       assetBucket=bucket;
       instance.render(assets.points,assets.points.at(-1)?.currency,bucket);

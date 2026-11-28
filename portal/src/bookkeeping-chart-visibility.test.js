@@ -97,5 +97,10 @@ test('the accounts tab renders one balance chart with the portfolio style switch
     assert.equal(host.querySelector('[data-asset-mode="line"]').getAttribute('aria-pressed'),'true');
     assert.equal(f.w.__assetMode,'line');
     assert.match(host.textContent,/折线为逐日观测值/);
+    // A later reload must not drag the asset chart back to the candle mode that
+    // the billing chart happens to be in.
+    f.controller.render();
+    assert.equal(f.w.__assetMode,'line');
+    assert.equal(host.querySelector('[data-asset-mode="line"]').getAttribute('aria-pressed'),'true');
   }finally{f.dom.window.close();}
 });
