@@ -219,6 +219,7 @@ if should_run siyuan; then
     if [ -f "$ROOT/scripts/patch-siyuan-share-sha256.py" ]; then
         python3 "$ROOT/scripts/patch-siyuan-share-sha256.py" || true
     fi
+    python3 "$ROOT/scripts/patch-siyuan-share-lifecycle.py"
 fi
 
 if should_run siyuan-share; then
