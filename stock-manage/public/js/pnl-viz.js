@@ -669,6 +669,11 @@ function bindShell(container) {
   if (container.dataset.pnlBound === '1') return;
   container.dataset.pnlBound = '1';
   container.addEventListener('click', (e) => {
+    const unitBtn = e.target.closest('[data-candle-unit]');
+    if (unitBtn) {
+      if (unitBtn.dataset.candleUnit !== candleUnit) { candleUnit = unitBtn.dataset.candleUnit; scheduleRender(); }
+      return;
+    }
     const modeBtn = e.target.closest('[data-pnl-mode]');
     if (modeBtn) {
       vizMode = modeBtn.dataset.pnlMode;
@@ -721,11 +726,6 @@ function bindShell(container) {
     if (annualEl) lastCallbacks?.onCalendarYear?.(annualEl.dataset.calAnnualYear);
   });
   container.addEventListener('change', (e) => {
-    if (e.target.id === 'pnl-candle-unit') {
-      candleUnit = e.target.value || 'day';
-      scheduleRender();
-      return;
-    }
     if (e.target.id === 'pnl-cal-year') {
       const y = +e.target.value;
       const mo = ymParts().m;
@@ -766,9 +766,13 @@ function ensureShell(container) {
             <button type="button" class="sm-seg-btn" data-pnl-mode="line">折线</button>
             <button type="button" class="sm-seg-btn" data-pnl-mode="calendar">日历</button>
           </div>
-          <label class="sm-candle-unit">周期<select id="pnl-candle-unit" aria-label="K 线周期">
-            <option value="day">日K</option><option value="week">周K</option><option value="month">月K</option><option value="quarter">季K</option><option value="year">年K</option>
-          </select></label>
+          <div class="sm-seg sm-candle-unit" role="group" aria-label="K 线周期">
+            <button type="button" class="sm-seg-btn" data-candle-unit="day">日K</button>
+            <button type="button" class="sm-seg-btn" data-candle-unit="week">周K</button>
+            <button type="button" class="sm-seg-btn" data-candle-unit="month">月K</button>
+            <button type="button" class="sm-seg-btn" data-candle-unit="quarter">季K</button>
+            <button type="button" class="sm-seg-btn" data-candle-unit="year">年K</button>
+          </div>
         </div>
         <span class="sm-muted sm-pnl-cum-badge"></span>
       </div>
@@ -808,13 +812,14 @@ export function renderPnlVisualization(container, getData, callbacks = {}) {
 
   ensureShell(container);
   container.querySelector('.sm-pnl-viz')?.classList.toggle('sm-pnl-viz--kline', vizMode === 'kline');
-  const unitSelect = container.querySelector('#pnl-candle-unit');
-  if (unitSelect && unitSelect.value !== candleUnit) unitSelect.value = candleUnit;
 
   const badge = container.querySelector('.sm-pnl-cum-badge');
   badge.classList.toggle('hidden', !isChart);
   container.querySelectorAll('[data-pnl-mode]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.pnlMode === vizMode);
+  });
+  container.querySelectorAll('[data-candle-unit]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.candleUnit === candleUnit);
   });
 
   const lineBlock = container.querySelector('.sm-pnl-line-block');

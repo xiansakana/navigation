@@ -1478,4 +1478,4 @@ select:focus {
 }
 .sm-candle-unit { display:none; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
 .sm-pnl-viz--kline .sm-candle-unit { display:inline-flex; }
-.sm-candle-unit select { font:inherit; font-size:12px; padding:6px 8px; border:1px solid var(--border); border-radius:8px; background:var(--input-bg,var(--card)); color:var(--text); }
+.sm-candle-unit .sm-seg-btn { padding:6px 9px; font-size:12px; }

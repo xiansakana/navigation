@@ -93,10 +93,10 @@ test('the accounts tab renders one balance chart with the portfolio style switch
     assert.equal(f.w.__assetCalls[0].points,2);
     assert.equal(f.w.__assetCalls[0].unit,'day');
     assert.match(host.textContent,/每根 K 线对应一个观测日/);
-    const unit=host.querySelector('[data-asset-unit]');
-    assert.equal(unit.value,'day');
-    unit.value='month';unit.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+    assert.equal(host.querySelector('[data-asset-unit="day"]').getAttribute('aria-pressed'),'true');
+    host.querySelector('[data-asset-unit="month"]').click();
     assert.equal(f.w.__assetCalls.at(-1).unit,'month');
+    assert.equal(host.querySelector('[data-asset-unit="month"]').getAttribute('aria-pressed'),'true');
     assert.match(host.textContent,/每根 K 线按「月」聚合/);
     host.querySelector('[data-asset-mode="line"]').click();
     assert.equal(host.querySelector('[data-asset-mode="line"]').getAttribute('aria-pressed'),'true');
