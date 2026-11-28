@@ -57,3 +57,14 @@ test('today returns to the current Shanghai week, month or year, persists the ch
   assert.equal($('period-anchor').value,'2026-11-01');assert.equal(p.query().start,'2026-11-01');assert.equal(p.query().end,'2026-11-30');
   p.choose('range');assert.equal(p.query().start,'2025-07-01');assert.equal(p.query().end,'2026-10-14');
 });
+
+test('the Vue shell binds the period kind instead of hardcoding it',()=>{
+  // Regression: a static `value: 'month'` vnode prop makes every re-render
+  // overwrite the controller's imperative write, so choosing 全部 silently
+  // fell back to 月 while the button still looked selected.
+  const source=fs.readFileSync(new URL('../src/client/bookkeeping-app-view.ts',import.meta.url),'utf8');
+  assert.match(source,/id: 'period-kind', value: periodKind\.value/);
+  assert.doesNotMatch(source,/id: 'period-kind', value: 'month'/);
+  assert.match(source,/id: 'period-anchor'[^\n]*value: periodAnchor\.value/);
+  assert.match(source,/periodKind\.value === kind \? 'active' : ''/);
+});

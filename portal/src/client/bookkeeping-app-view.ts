@@ -1,4 +1,4 @@
-import { createApp, h, reactive, watch, Teleport } from 'vue';
+import { createApp, h, reactive, ref, watch, Teleport } from 'vue';
 
 export { mountBookkeepingEntries } from './bookkeeping-entries-view';
 
@@ -82,12 +82,19 @@ interface PeriodController extends BookkeepingPeriods {
   apply(): void;
 }
 
-function createPeriods(): PeriodController {
+type PeriodSync = (kind: string, anchor: string) => void;
+
+function createPeriods(sync: PeriodSync = () => {}): PeriodController {
   let rangeStart = today, rangeEnd = today;
   let hooks: PeriodHooks = { reload() {}, clearFocus() {}, save() {} };
   function update(reload = true) {
     const kind = valueOf('period-kind');
-    const anchor = new Date((valueOf('period-anchor') || today) + 'T12:00:00');
+    const anchorValue = valueOf('period-anchor') || today;
+    const anchor = new Date(anchorValue + 'T12:00:00');
+    // Vue re-renders reset any input whose value is a static vnode prop, so the
+    // hidden kind/anchor inputs must be bound to state that mirrors what the
+    // controller just read; otherwise choosing 全部 silently falls back to 月.
+    sync(kind, anchorValue);
     let start = '', end = '';
     if (kind === 'range') {
       start = valueOf('range-start'); end = valueOf('range-end');
@@ -173,7 +180,12 @@ export function mountBookkeepingShell(host: HTMLElement): BookkeepingShell {
     editor: { open: false, title: '记一笔', error: '', fieldEditor: false, deletable: false, saveHidden: false }
   });
 
-  const periods = createPeriods();
+  const periodKind = ref('month');
+  const periodAnchor = ref(today);
+  const periods = createPeriods((kind, anchor) => {
+    periodKind.value = kind;
+    periodAnchor.value = anchor;
+  });
 
   const miniList = () => {
     const items = state.miniCategories || [];
@@ -194,18 +206,18 @@ export function mountBookkeepingShell(host: HTMLElement): BookkeepingShell {
     ]));
   };
 
-  const periodButton = (kind: string, label: string, active = false) => h('button', {
+  const periodButton = (kind: string, label: string) => h('button', {
     type: 'button',
     'data-period': kind,
-    class: active ? 'active' : '',
+    class: periodKind.value === kind ? 'active' : '',
     onClick: () => periods.choose(kind)
   }, label);
 
   const periodSection = () => h('section', { id: 'period-selector', class: 'bk-period-selector' }, [
     h('input', { type: 'hidden', id: 'month' }),
-    h('input', { type: 'hidden', id: 'period-kind', value: 'month' }),
+    h('input', { type: 'hidden', id: 'period-kind', value: periodKind.value }),
     h('div', { id: 'period-buttons', class: 'bk-period-buttons', role: 'group', 'aria-label': '日期范围模式' }, [
-      periodButton('week', '周'), periodButton('month', '月', true), periodButton('year', '年'), periodButton('all', '全部'), periodButton('range', '范围')
+      periodButton('week', '周'), periodButton('month', '月'), periodButton('year', '年'), periodButton('all', '全部'), periodButton('range', '范围')
     ]),
     h('div', { class: 'bk-period-navigation' }, [
       h('button', { id: 'period-prev', class: 'btn ghost', 'aria-label': '上一时间段', onClick: () => periods.step(-1) }, '←'),
@@ -216,7 +228,7 @@ export function mountBookkeepingShell(host: HTMLElement): BookkeepingShell {
       h('div', { id: 'period-anchor-label', class: 'bk-anchor-field' }, [
         h('label', { for: 'period-anchor' }, '定位日期'),
         h('div', { class: 'bk-anchor-row' }, [
-          h('input', { type: 'date', id: 'period-anchor', 'aria-label': '定位日期', value: today, onChange: () => periods.apply() }),
+          h('input', { type: 'date', id: 'period-anchor', 'aria-label': '定位日期', value: periodAnchor.value, onChange: () => periods.apply() }),
           h('button', { type: 'button', id: 'period-today', class: 'btn ghost', 'aria-label': '定位到今天', onClick: () => { if (field('period-anchor')) field('period-anchor')!.value = currentDate(); periods.apply(); } }, '今天')
         ])
       ]),

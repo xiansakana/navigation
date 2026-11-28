@@ -45,7 +45,7 @@ import { createBookkeepingEntryList } from './entry-list.js?v=vue-shell-3';
     return list.map(x => '<button class="bk-category bk-category-drill"'+analysis.attr({category:x.category,currency:equivalent?$('currency').value:x.currency,flow})+'><div class="bk-category-title"><span>' + esc(x.category) + ' <small class="bk-muted">' + esc(x.currency) + '</small>'+(flow==='income'?'<small> · '+x.count+' 笔 · '+(x.amount>0?(x.amount/(totals[x.currency]||1)*100).toFixed(1)+'%':'冲减')+'</small>':'')+'</span>' + m(x.amount,x.currency) + '</div><div class="bk-bar"><span style="width:' + Math.max(0,Math.min(100,x.amount/(totals[x.currency] || 1)*100)) + '%"></span></div></button>').join('') || '<p class="bk-empty">'+(flow==='income'?'暂无非零分类收入':'暂时没有支出记录')+'</p>';
   }
 
-  const epoch = window.__bookkeepingViewEpoch || 'vue-shell-3';
+  const epoch = window.__bookkeepingViewEpoch || 'vue-shell-4';
   let viewModule;
   try {
     viewModule = await import('../generated/bookkeeping-app-view.js?epoch=' + encodeURIComponent(epoch));
