@@ -113,3 +113,19 @@ PORTAL_CONFIG_PATH=/d/code/navigation/portal/config.preview.json node src/server
 - 同一个输入只要有一处命令式写 `value`，vnode 里就不能再给静态 `value`，否则每次 patch 都会覆盖。
 - 排查这类“点了没反应”优先看**隐藏字段的实际值**而不是按钮样式：样式是控制器写的，值可能已经被框架改回去了。用 `Object.defineProperty` 拦截 `value` 的 setter 打印调用栈，一眼能看出是谁改的。
 
+## 2026-11-28 · 静态资源没有协商缓存，部署后浏览器还在跑旧包
+
+**现象**：记账资产页的新图表本地上好，线上“资产余额走势不展示了”——卡片标题和 K线/折线按钮都在，就是没有图。
+
+**根因**：`serveStatic` 只写 `Content-Type`，没有 `ETag`/`Last-Modified`/`Cache-Control`，浏览器对 `/bookkeeping/style.css?v=import-history-20261121` 走启发式缓存；而我新增的 `.bk-asset-chart{height:320px}` 没改版本号，样式没更新 → 容器高度 0 → echarts 初始化出 0×0 canvas，看起来就是“图没了”。
+
+**修复**：
+1. 样式表版本号提到 `asset-1`。
+2. `asset-chart.js` 挂载时若容器 `clientHeight < 40` 就写内联 `height:320px`，并在渲染后补一次 `requestAnimationFrame` + 260ms 的 `resize()`（标签页初始 `display:none` 时 canvas 是 0×0）。
+3. `serveStatic` 增加 `ETag`（size-mtime）+ `Last-Modified` + `Cache-Control: no-cache`，命中 `If-None-Match` 返回 304。**注意 304 分支必须 `res.end()`**，否则请求挂到超时（我第一次就漏了，`curl` 表现为 HTTP 000）。
+
+**教训**：
+- 改 CSS/JS 一定要同步改 `?v=`；只改文件不改 query，等于没发布。
+- 图表类组件要假设容器可能没高度：挂载时给兜底高度，并在可见性变化后 resize。
+- 静态服务缺少校验头时浏览器会“猜”缓存时长，这类问题只在真实用户机上复现；给 `no-cache` + `ETag` 比每次手动提醒用户强刷可靠。
+
