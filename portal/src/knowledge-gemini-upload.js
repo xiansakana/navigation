@@ -47,7 +47,7 @@ export async function uploadGeminiFile({ apiKey, file, size, mimeType, signal, s
       try {
         if (query) {
           const response = await request(uploadUrl, '查询上传断点', {
-            method: 'POST', headers: { 'X-Goog-Upload-Command': 'query', 'Content-Length': '0' }
+            method: 'POST', body: Buffer.alloc(0), headers: { 'X-Goog-Upload-Command': 'query' }
           });
           const confirmed = unsigned(response.headers.get('x-goog-upload-size-received'));
           const status = response.headers.get('x-goog-upload-status');
@@ -74,7 +74,9 @@ export async function uploadGeminiFile({ apiKey, file, size, mimeType, signal, s
         await progress(stage(offset), percent(offset));
         const response = await request(uploadUrl, '上传视频', {
           method: 'POST', body: buffer, headers: {
-            'Content-Type': mimeType, 'Content-Length': String(bytes), 'X-Goog-Upload-Offset': String(offset),
+            // Fetch sets Content-Length from the byte buffer. Sending it twice
+            // is rejected by Node 20 when the request uses a ProxyAgent.
+            'Content-Type': mimeType, 'X-Goog-Upload-Offset': String(offset),
             'X-Goog-Upload-Command': final ? (bytes ? 'upload, finalize' : 'finalize') : 'upload'
           }
         });

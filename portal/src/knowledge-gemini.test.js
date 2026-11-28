@@ -125,6 +125,7 @@ test('Gemini resumes from Google-confirmed bytes after a lost chunk response', a
           'x-goog-upload-url': origin + '/upload/v1beta/files?upload_id=unit-test', 'x-goog-upload-chunk-granularity': '4'
         } });
         assert.equal(headers['x-goog-api-key'], undefined);
+        assert.equal(headers['Content-Length'], undefined);
         if (command === 'query') return new Response(null, { headers: { 'x-goog-upload-status': 'active', 'x-goog-upload-size-received': '4' } });
         if (offset === '0') throw Object.assign(new Error('lost chunk response'), { code: 'GEMINI_TRANSPORT' });
         if (command === 'upload') return new Response(null, { headers: { 'x-goog-upload-status': 'active' } });
