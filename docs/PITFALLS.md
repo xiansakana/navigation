@@ -101,3 +101,15 @@ PORTAL_CONFIG_PATH=/d/code/navigation/portal/config.preview.json node src/server
 
 **教训**：判断「改动是否会被用户看到」要顺着入口 HTML 的 script 引用走一遍，看每个 `?v=` 是否会变；`curl` 到 200 不代表浏览器会重新下载。
 
+## 2026-11-28 · Vue 写死的 value 会把用户选的「全部」改回「月」
+
+**现象**：记账资产页顶部期间选择器点「全部」，按钮高亮和「全部日期」文案都变了，但再操作时又按「月」查询；刷新后也回到月。
+
+**根因**：`bookkeeping-app-view.ts` 的隐藏输入是 `h('input',{id:'period-kind',value:'month'})`——`value` 是**静态 vnode 属性**。期间控制器是用 `el.value = kind` 命令式写入的，Vue 在任一次重渲染时 `patchDOMProp` 发现 `el.value !== 'month'`，就把值写回 `'month'`。于是 DOM 里出现“按钮 active=all、caption=全部日期、隐藏字段=month”的错位状态；`query()` 读的是隐藏字段，所以查询按 month 走。
+
+**修复**：把 kind 和 anchor 提成 `ref`，输入框改成 `value: periodKind.value` / `value: periodAnchor.value`，并在控制器 `update()` 里同步回 ref；按钮 active 也改成读 ref。另补一条源码级回归测试，禁止再出现 `id:'period-kind', value:'month'`。
+
+**教训**：
+- 同一个输入只要有一处命令式写 `value`，vnode 里就不能再给静态 `value`，否则每次 patch 都会覆盖。
+- 排查这类“点了没反应”优先看**隐藏字段的实际值**而不是按钮样式：样式是控制器写的，值可能已经被框架改回去了。用 `Object.defineProperty` 拦截 `value` 的 setter 打印调用栈，一眼能看出是谁改的。
+
