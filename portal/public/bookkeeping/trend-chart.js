@@ -56,6 +56,12 @@
     return (currency || 'CNY') + ' ' + Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  // canvas 不认 CSS 变量，必须换成真实色值，否则会退回默认灰。
+  function resolveColor(value) {
+    var match = /^var\((--[\w-]+)\)$/.exec(String(value || '').trim());
+    return match ? cssVar(match[1], '#8b97ab') : (value || '#8b97ab');
+  }
+
   function compact(value) {
     return new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
   }
@@ -119,8 +125,8 @@
             showSymbol: state.points.length <= 2,
             sampling: 'lttb',
             connectNulls: false,
-            lineStyle: { color: item.color, width: 2.25 },
-            itemStyle: { color: item.color }
+            lineStyle: { color: resolveColor(item.color), width: 2.25 },
+            itemStyle: { color: resolveColor(item.color) }
           });
         });
         var rightAxis = series.some(function (item) { return item.yAxisIndex === 1; });

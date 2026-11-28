@@ -66,9 +66,10 @@
     // 收入/支出是流量，开高低收没有金融含义，K 线模式只画存量序列。
     const FLOW_KEYS=new Set(['income','expense']);
     const candleApi=window.bkCandles;
-    function unitButtons(attribute){
+    function unitButtons(attribute,finest){
       const active=attribute==='data-asset-unit'?assetUnit:candleUnit;
-      return '<div class="bk-chart-modes" role="group" aria-label="K 线周期">'+CANDLE_UNITS.map(([unit,text])=>'<button type="button" '+attribute+'="'+unit+'" aria-pressed="'+(active===unit)+'">'+text+'</button>').join('')+'</div>';
+      const order=CANDLE_UNITS.map(item=>item[0]),floor=order.indexOf(finest||'day');
+      return '<div class="bk-chart-modes" role="group" aria-label="K 线周期">'+CANDLE_UNITS.map(([unit,text],index)=>'<button type="button" '+attribute+'="'+unit+'" aria-pressed="'+(active===unit)+'"'+(index<floor?' disabled title="数据只有月度粒度"':'')+'>'+text+'</button>').join('')+'</div>';
     }
     function modeButtons(){
       return '<div class="bk-chart-modes" role="group" aria-label="图表类型">'+[['candle','K线'],['line','折线']].map(([mode,text])=>'<button type="button" data-chart-mode="'+mode+'" aria-pressed="'+(chartMode===mode)+'">'+text+'</button>').join('')+'</div>';
@@ -88,7 +89,8 @@
       if(!points.length)return '<p class="bk-empty">暂无记录</p>';
       const hiddenSeries=hiddenBillingSeries, seriesAttribute='data-billing-series';
       const candle=chartMode==='candle';
-      return '<div class="bk-chart-card"><div class="bk-chart-head"><h3>'+esc(label)+'</h3>'+modeButtons()+'<span class="bk-chart-modes-slot'+(candle?'':' is-hidden')+'">'+unitButtons('data-candle-unit')+'</span></div>'
+      if(granularity==='month'&&['day','week'].includes(candleUnit))candleUnit='month';
+      return '<div class="bk-chart-card"><div class="bk-chart-head"><h3>'+esc(label)+'</h3>'+modeButtons()+'<span class="bk-chart-modes-slot'+(candle?'':' is-hidden')+'">'+unitButtons('data-candle-unit',granularity==='month'?'month':'day')+'</span></div>'
         +legend(points,lines,toggle,seriesAttribute,hiddenSeries,candle?FLOW_KEYS:null)
         +'<div class="bk-asset-chart" data-billing-chart-host></div>'
         +'<p class="bk-muted bk-candle-note">'+(candle?candleNoteText()+'：开=上一根收盘（首根取观测值），阳线绿色、阴线红色，拖动下方滑块可缩放。'+'':'折线为逐日观测值，拖动下方滑块可缩放。')+(candle?'':'')+'</p></div>';
