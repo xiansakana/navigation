@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   siyuan:
-    image: b3log/siyuan:latest
+    image: b3log/siyuan:v3.8.12
     container_name: siyuan
     restart: unless-stopped
     ports:
