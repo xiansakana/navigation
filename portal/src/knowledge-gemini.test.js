@@ -61,7 +61,11 @@ test('Portal completes a Gemini job without a GPU and leaves other accounts and 
   try {
     const other = await add('other', 'gemini'), codex = await add('owner', 'codex'), gemini = await add('owner', 'gemini');
     const options = { accounts: new Map([['owner', { apiKey: 'test-key', model: 'gemini-test' }]]),
-      probe: async () => '60',
+      probe: async (_, args) => {
+        assert.equal(args[args.indexOf('-protocol_whitelist') + 1], 'file');
+        assert.equal(args[args.indexOf('-f') + 1], 'mov');
+        return '60';
+      },
       async generate({ file, progress }) {
         assert.equal((await fs.stat(file)).size, 32);
         assert.equal(store.getRow('owner', gemini).status, 'processing');

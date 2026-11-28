@@ -164,8 +164,11 @@ export async function runGeminiJob(db, directoryFor, authorize, { accounts = gem
     const file = await videoFile(store, row, directory, signal);
     const size = (await fsp.stat(file)).size;
     if (size !== Number(row.byte_size)) throw new Error('原视频大小校验失败');
+    const format = { 'video/mp4': 'mov', 'video/quicktime': 'mov', 'video/webm': 'matroska' }[row.mime_type];
+    if (!format) throw new Error('Gemini 视频格式不受支持');
     const duration = Number((await probe(process.env.KNOWLEDGE_IMPORT_FFPROBE || 'ffprobe',
-      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', file], { signal, timeout: 20000 })).trim());
+      ['-v', 'error', '-protocol_whitelist', 'file', '-f', format,
+        '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', file], { signal, timeout: 20000 })).trim());
     if (!(duration > 0 && duration <= 14400)) throw new Error('视频时长无效或超过4小时');
     const account = accounts.get(uid);
     const model = JSON.parse(row.model_settings_json || '{}').geminiModel || account.model || defaultGeminiModel;
