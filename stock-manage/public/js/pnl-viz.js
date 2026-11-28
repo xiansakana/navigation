@@ -120,10 +120,10 @@ function candleLabels(start, unit) {
 }
 
 /** Group a dated value series into OHLC candles; gaps stay gaps. */
-export function buildCandles(points, bucket) {
+export function buildCandles(points, bucket, baseline = null) {
   const unit = bucket?.unit || 'day';
   const groups = new Map();
-  let previous = null;
+  let previous = baseline;
   for (const point of points || []) {
     const raw = point?.cumulativeNet;
     // Number(null) is 0, so an explicit guard keeps gaps as gaps.
@@ -547,7 +547,8 @@ function buildChartOption(rangeSlice) {
 
 function buildCandleOption(rangeSlice) {
   const colors = chartColors();
-  const candles = buildCandles(rangeSlice, { unit: candleUnit });
+  // 区间净盈亏是从 0 起算的，首根也要以 0 为开盘，否则第一天恒为“变动 0”。
+  const candles = buildCandles(rangeSlice, { unit: candleUnit }, 0);
   const zoom = zoomRange && Number.isFinite(zoomRange.start) ? zoomRange : defaultZoom();
   return {
     animation: false,
@@ -774,7 +775,7 @@ function ensureShell(container) {
       <div class="sm-pnl-line-block">
         <div class="sm-pnl-echarts" id="sm-pnl-echarts"></div>
         <div class="sm-pnl-line-hint">
-          <span class="sm-pnl-candle-hint">K 线按区间聚合：开=区间首日、收=末日，影线为区间最高与最低；阳线绿色、阴线红色。</span>
+          <span class="sm-pnl-candle-hint">K 线按区间聚合：开=上一根收盘（首根从 0 起算），收=末日，影线为区间最高与最低；阳线绿色、阴线红色。</span>
           <span>曲线只含已实现盈亏（已扣手续费与其他），未实现浮盈见上方「总盈亏」卡片。</span>
           <span>拖动平移，滚轮缩放。</span>
           <button type="button" class="btn ghost sm-btn-sm" data-pnl-reset>复位视窗</button>

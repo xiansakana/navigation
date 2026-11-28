@@ -44,6 +44,17 @@ test('a gap in the series does not create a flat candle', () => {
   assert.equal(candles[0].open, candles[0].close);
 });
 
+test('the first candle opens at the range baseline instead of its own value', () => {
+  const candles = buildCandles([
+    { date: '2026-11-23', cumulativeNet: -2835 },
+    { date: '2026-11-24', cumulativeNet: -2821 }
+  ], { unit: 'day' }, 0);
+  assert.deepEqual(
+    candles.map((candle) => [candle.start, candle.open, candle.close].join('|')),
+    ['2026-11-23|0|-2835', '2026-11-24|-2835|-2821']
+  );
+});
+
 test('daily candles open at the previous close so each day has a body', () => {
   const candles = buildCandles([
     { date: '2026-10-05', cumulativeNet: 100 },
